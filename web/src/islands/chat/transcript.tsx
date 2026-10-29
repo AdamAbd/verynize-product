@@ -35,6 +35,7 @@ import { MentionIcon } from "./mention-popover";
 import { QuestionCard } from "./question-card";
 import { usageSummary } from "./usage-ring";
 import { useAdopt } from "./adopt";
+import { useChatBehavior } from "./behavior";
 import { hook, stateHook } from "./hooks";
 import { useNow, workspace, type ChatMessage, type ChatPart, type ChatState } from "./store";
 
@@ -72,6 +73,7 @@ function DotGrid({ live, className }: { live?: boolean; className?: string }) {
 
 /** "Wondered for 18s ›" — the turn header: collapsible, with a divider under it (29, 37, 51). */
 function TurnHeader({ label, live, children }: { label: string; live?: boolean; children?: ReactNode }) {
+  const { expandWork } = useChatBehavior();
   const body = (
     <>
       {live && <DotGrid live className="text-muted-foreground" />}
@@ -87,6 +89,7 @@ function TurnHeader({ label, live, children }: { label: string; live?: boolean; 
     );
   return (
     <details
+      open={expandWork || undefined}
       className={cn(hook.thinking, "group/think m-0 mb-0.5 rounded-none border-0 bg-transparent p-0 text-base leading-5.25")}
     >
       <summary className={cn(row, "hover:text-foreground-3")}>
@@ -168,8 +171,9 @@ function nestTools(parts: ChatPart[]): Nesting {
 /** Collapsible list of a tool call's subagent steps, indented under it. */
 function SubSteps({ items, nesting, onToggle }: { items: Indexed[]; nesting: Nesting; onToggle: (index: number, open: boolean) => void }) {
   const live = items.some(({ part }) => part.kind === "tool" && (part.state ?? "running") === "running");
+  const { expandWork } = useChatBehavior();
   return (
-    <details open={live || undefined} className="group/sub m-0 ml-1.5 border-l border-border pl-3.5">
+    <details open={live || expandWork || undefined} className="group/sub m-0 ml-1.5 border-l border-border pl-3.5">
       <summary className="flex h-6 list-none items-center gap-2 p-0 text-sm text-subtle-foreground hover:text-foreground-3">
         {items.length} {items.length === 1 ? "step" : "steps"}
         <ChevronRightIcon className="size-3 transition-transform group-open/sub:rotate-90 motion-reduce:transition-none" />
@@ -199,6 +203,7 @@ function ToolRow({
   onToggleChild?: (index: number, open: boolean) => void;
 }) {
   const kids = (part.id && nesting?.children.get(part.id)) || [];
+  const { expandWork } = useChatBehavior();
   const state = part.state || "running";
   const { Icon, label, mono } = describeTool(part);
   const args = input(part);
@@ -208,7 +213,7 @@ function ToolRow({
   const row = (
     <details
       className={cn(hook.tool, "group/tool m-0 rounded-none border-0 bg-transparent p-0", stateHook(state))}
-      open={!!part.open}
+      open={part.open ?? expandWork}
       onToggle={(event) => onToggle(event.currentTarget.open)}
     >
       <summary
@@ -257,8 +262,9 @@ function ToolRow({
 
 /** Completed tool calls of a running turn, collapsed to "Ran N commands ›" (39). */
 function ToolGroup({ tools, nesting, onToggle }: { tools: Indexed[]; nesting: Nesting; onToggle: (index: number, open: boolean) => void }) {
+  const { expandWork } = useChatBehavior();
   return (
-    <details className="group/tools m-0 rounded-none border-0 bg-transparent p-0">
+    <details open={expandWork || undefined} className="group/tools m-0 rounded-none border-0 bg-transparent p-0">
       <summary className="flex list-none items-center gap-2 p-0 text-base leading-5.25 text-muted-foreground hover:text-foreground-3">
         {toolCount(tools.length)}
         <ChevronRightIcon className="size-3 transition-transform group-open/tools:rotate-90" />

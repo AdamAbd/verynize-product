@@ -33,7 +33,12 @@
   const loadDrafts=()=>{try{const saved=JSON.parse(localStorage.getItem('better-agent-drafts:'+projectKey)||'{}');drafts=saved&&typeof saved==='object'?saved:{};}catch{drafts={}}};
   const setDraft=(text,chat=conversation)=>{if(!chat)return;text=String(text||'');if(text.trim())drafts[chat.id]=text.slice(0,20000);else delete drafts[chat.id];try{localStorage.setItem('better-agent-drafts:'+projectKey,JSON.stringify(drafts))}catch{}};
   const currentDefaults=()=>({agent:$('project-agent').value,model:$('agent-model').value.trim(),access:$('agent-access').value,effort:$('agent-effort').value,instructions:defaults.instructions||''});
-  const setDefaults=value=>{defaults={...defaults,...value};defaults.access=normalizeAccess(defaults.access);$('project-agent').value=defaults.agent;$('agent-model').value=defaults.model;$('agent-access').value=defaults.access;$('agent-effort').value=defaults.effort;$('agent-config-label').textContent=(defaults.model||defaults.agent+' default')+' · '+ACCESS_LABEL[defaults.access];try{localStorage.setItem('better-agent-defaults',JSON.stringify(defaults))}catch{}notify();};
+  // Mode for new chats (Settings › Agents): a chat started in a repository with its own mode keeps it in chat.access;
+  // the composer's mode picker then changes that chat, while Settings (Default row / Default Models) change the default.
+  const behavior=()=>window.agentBehavior?.get?.()||{};
+  const effectiveAccess=()=>conversation?.access&&ACCESS.includes(conversation.access)?conversation.access:defaults.access;
+  const showAccess=()=>{$('agent-access').value=effectiveAccess();$('agent-config-label').textContent=(defaults.model||defaults.agent+' default')+' · '+ACCESS_LABEL[effectiveAccess()];};
+  const setDefaults=value=>{if(conversation?.access&&value&&value.access&&!document.body.classList.contains('settings-open')){conversation.access=normalizeAccess(value.access);persist();value={...value,access:defaults.access};}defaults={...defaults,...value};defaults.access=normalizeAccess(defaults.access);$('project-agent').value=defaults.agent;$('agent-model').value=defaults.model;$('agent-access').value=effectiveAccess();$('agent-effort').value=defaults.effort;$('agent-config-label').textContent=(defaults.model||defaults.agent+' default')+' · '+ACCESS_LABEL[effectiveAccess()];try{localStorage.setItem('better-agent-defaults',JSON.stringify(defaults))}catch{}notify();};
   const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
   const pretty=value=>{if(typeof value==='string')return value;try{return JSON.stringify(value,null,2)}catch{return String(value)}};
   const clip=(text,n)=>{text=String(text??'');return text.length>n?text.slice(0,n)+'…':text;};
@@ -170,7 +175,7 @@
   };
   // Streaming updates re-render at most once per frame.
   const scheduleReply=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;if(subscribers.size)notify();else renderHistory();});};
-  const switchTo=chat=>{const prompt=$('project-prompt');if(conversation&&conversation!==chat)setDraft(prompt.value,conversation);const changed=conversation!==chat;conversation=chat;if(changed){prompt.value=drafts[chat?.id]||'';prompt.dispatchEvent(new Event('input',{bubbles:true}));}renderHistory();activate();try{localStorage.setItem('verynize-code-last',JSON.stringify({key:projectKey,name:projectName,chatId:chat?.id||null}))}catch{}};
+  const switchTo=chat=>{const prompt=$('project-prompt');if(conversation&&conversation!==chat)setDraft(prompt.value,conversation);const changed=conversation!==chat;conversation=chat;showAccess();if(changed){prompt.value=drafts[chat?.id]||'';prompt.dispatchEvent(new Event('input',{bubbles:true}));}renderHistory();activate();try{localStorage.setItem('verynize-code-last',JSON.stringify({key:projectKey,name:projectName,chatId:chat?.id||null}))}catch{}};
   // Folder a chat works in: its own worktree, else the repository root; quick chats (null) use a scratch folder.
   const rootOf=(chat,key=projectKey)=>chat?.worktree?.path||(key==='unattached'?null:key);
   // The main process's active project (files, git changes, dev server, agent default cwd) follows the active chat.
@@ -178,7 +183,7 @@
   let activeRoot,activation=Promise.resolve();
   const activate=()=>{if(!api?.repositories)return;const root=rootOf(conversation);if(root===activeRoot)return;activeRoot=undefined;notify();activation=activation.then(()=>api.repositories.activate(root)).then(()=>{if(rootOf(conversation)===root){activeRoot=root;notify();window.dispatchEvent(new CustomEvent('code-root-changed',{detail:{root}}));}else activate();},e=>{status(e.message);if(rootOf(conversation)===root){activeRoot=null;notify();}});};
   let projectName='';
-  const newChat=(extra={})=>{const chat={id:typeof extra.id==='string'?extra.id:crypto.randomUUID(),title:projectKey==='unattached'?'New quick chat':'New chat',messages:[],created:Date.now(),...(extra.repoId?{repoId:extra.repoId}:{}),...(extra.worktree?.path?{worktree:{path:extra.worktree.path,branch:extra.worktree.branch||null}}:{})};conversations.push(chat);persist();switchTo(chat);return chat;};
+  const newChat=(extra={})=>{const repoMode=extra.repoId?behavior().repoModes?.[extra.repoId]:null;const chat={id:typeof extra.id==='string'?extra.id:crypto.randomUUID(),title:projectKey==='unattached'?'New quick chat':'New chat',messages:[],created:Date.now(),...(extra.repoId?{repoId:extra.repoId}:{}),...(ACCESS.includes(repoMode)?{access:repoMode}:{}),...(extra.worktree?.path?{worktree:{path:extra.worktree.path,branch:extra.worktree.branch||null}}:{})};conversations.push(chat);persist();switchTo(chat);return chat;};
   const forkAt=index=>{if(!conversation||isRunning(conversation))return;const copied=conversation.messages.slice(0,index+1).map(cloneMessage);const chat={id:crypto.randomUUID(),title:conversation.title+' · branch',messages:copied,created:Date.now(),...(conversation.repoId?{repoId:conversation.repoId}:{}),...(conversation.worktree?{worktree:{...conversation.worktree}}:{})};conversations.push(chat);persist();switchTo(chat);status('Transcript branch created. It starts a new agent session; project files were not reverted.');};
   const restoreMessage=m=>{const copy={...m,state:m.state==='running'?'interrupted':m.state};if(Array.isArray(m.parts))copy.parts=m.parts.filter(p=>p&&typeof p==='object').map(p=>p.kind==='tool'&&p.state==='running'?{...p,state:'interrupted'}:(p.kind==='permission'||p.kind==='question')&&p.state==='pending'?{...p,state:'expired'}:p);return copy;};
   const loadChats=(root,options={})=>{
@@ -449,8 +454,12 @@
   };
   const copyMessage=index=>{const message=conversation?.messages[index];if(!message)return;const text=message.text||(message.parts||[]).filter(p=>p.kind==='text').map(p=>p.text).join('\n\n');const fallback=()=>{const area=document.createElement('textarea');area.value=text;document.body.append(area);area.select();document.execCommand('copy');area.remove();};(navigator.clipboard?.writeText?navigator.clipboard.writeText(text):Promise.reject()).catch(fallback).then(()=>status('Copied'));};
   const answerQuestion=(messageIndex,partIndex,answers)=>{const part=conversation?.messages[messageIndex]?.parts?.[partIndex];if(part?.kind!=='question'||part.state!=='pending')return;const clean={};for(const [key,value] of Object.entries(answers||{}))clean[key]=Array.isArray(value)?value.join(', '):String(value);part.answers=clean;part.state='answered';const runId=part.runId||entryOf(conversation)?.runId;if(api.respondAgentQuestion)Promise.resolve().then(()=>api.respondAgentQuestion({runId,requestId:part.requestId,answers:clean})).catch(e=>status(e.message));else status('This agent runtime cannot receive answers');persist();renderHistory();};
-  $('project-run').onclick=action(async()=>{const text=$('project-prompt').value.trim();if(!text)throw Error('Enter a task.');const chat=conversation||newChat();const task=composeTask(text);$('project-prompt').value='';setDraft('',chat);if(isRunning(chat)){enqueue(chat,task);return;}await runTask(task,chat);});
-  $('project-prompt').addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();$('project-run').click();}});
+  // Follow-ups while a turn runs (Settings › Agents › Follow-up messages): Send goes the default way (Queue or Steer);
+  // ⌘↵ sends the other way. A steer the runtime cannot take falls back to the queue.
+  let sendOtherWay=false;
+  const followUpSteers=other=>(behavior().followUp==='steer')!==other;
+  $('project-run').onclick=action(async()=>{const other=sendOtherWay;sendOtherWay=false;const text=$('project-prompt').value.trim();if(!text)throw Error('Enter a task.');const chat=conversation||newChat();const task=composeTask(text);$('project-prompt').value='';setDraft('',chat);if(isRunning(chat)){const entry=entryOf(chat);if(followUpSteers(other)&&entry&&await trySteer(entry,task))return;enqueue(chat,task);return;}await runTask(task,chat);});
+  $('project-prompt').addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();sendOtherWay=isRunning(conversation);$('project-run').click();sendOtherWay=false;}});
   $('project-cancel').onclick=action(async()=>{const entry=entryOf(conversation);if(!entry)return;entry.userStopped=true;entry.nextTaskId=null;if(entry.runId)await api.cancelAgent(entry.runId);else entry.cancelOnStart=true;const kept=queueOf(conversation).length;renderHistory();status('Stopping agent'+(kept?` · ${kept} queued kept`:''));});
   $('project-review').onclick=()=>{$('project-prompt').value='Review the current uncommitted Git changes. Inspect the diff and relevant source. Report correctness, security, and regression findings with file references. Do not edit files.';setDefaults({...currentDefaults(),access:'ask'});status('Review prompt ready. Choose an agent and run it.');};
   $('project-apply-design').onclick=()=>{$('project-prompt').value='Implement the attached canvas design in this project using its existing stack. Inspect source, preserve working behavior, apply the design and run checks.';$('chat-attach-canvas').click();status('Canvas attached to task. Choose an agent and run it.');};
@@ -463,7 +472,7 @@
   Object.assign(window.agentWorkspace,{
     attachImages:files=>action(async()=>{for(const file of files)await attachImage(file);})(),
     listModels:async agent=>{if(!modelLists.has(agent))modelLists.set(agent,await api.listAgentModels({agent}));return modelLists.get(agent);},
-    answerQuestion,steer:run(steer),editQueued,moveQueued,removeQueued,sendQueuedNow:run(sendQueuedNow),
+    answerQuestion,steer:run(steer),queueMessage:run(async text=>{text=String(text||'').trim();if(!text)return;const chat=conversation||newChat(),task=composeTask(text);if(isRunning(chat))enqueue(chat,task);else await runTask(task,chat);}),editQueued,moveQueued,removeQueued,sendQueuedNow:run(sendQueuedNow),
     rewindTo:run(index=>{rewindCore(index);}),
     secondOpinion:run(secondOpinion),
     retry:run(async index=>{const r=rewindCore(index);if(r)await resend(r.message);}),

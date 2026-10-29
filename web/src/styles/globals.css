@@ -271,6 +271,9 @@ html[data-ui-theme="light"] {
   --color-brand-claude: #d97757; /* agent marks */
   --color-brand-codex: #7c83f7;
   --color-success: #3fb950;
+  --color-warning: #e3b341; /* Agents › Commit author: email not linked on GitHub (Wonder 71 warning glyph) */
+  --color-avatar: #c4612b; /* Agents › Commit author initials tile */
+  --color-avatar-foreground: #ffffff;
   /* </settings-tokens> */
   /* <code-tokens> */
   /* Code workspace, measured from /tmp/wonder-code-mode.png and design/wonder 80/81 (1440×870). */

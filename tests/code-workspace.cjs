@@ -24,7 +24,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
   git(repo, 'init', '--initial-branch=main'); git(repo, 'add', '.'); git(repo, 'commit', '-m', 'Initial');
   await fs.copyFile(path.join(__dirname, 'fixtures/fake-codex.cjs'), path.join(bin, 'codex'));
   await fs.chmod(path.join(bin, 'codex'), 0o755);
-  const env = { ...process.env, ...identity, PATH: bin + path.delimiter + process.env.PATH, FAKE_CODEX_LOG: log, VERYNIZE_WORKSPACES_DIR: workspaces };
+  const env = { ...process.env, ...identity, PATH: bin + path.delimiter + process.env.PATH, FAKE_CODEX_LOG: log, VERYNIZE_WORKSPACES_DIR: workspaces, VERYNIZE_BRANCH_PREFIX: 'verynize' };
   delete env.ELECTRON_RUN_AS_NODE;
   const rpc = async method => (await fs.readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(c => c.rpc === method && !/agent-workdirs[\/\\]titles|word title for a design chat/.test(JSON.stringify(c.params || {})));
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
@@ -116,10 +116,14 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     assert.equal((await rpc('thread/start')).at(-1).params.cwd, first.chatRoot, 'the agent cwd is the chat worktree');
 
     // 6. A second chat: its own worktree and branch; the tree follows the active chat.
+    await page.evaluate(id => window.agentBehavior.set({ repoModes: { [id]: 'full' } }), first.repoId);
     await page.locator('#code-new-chat').click();
     await page.waitForFunction(id => { const s = window.agentWorkspace.getState(); return s.conversationId !== id && s.branch && s.activeRoot === s.chatRoot; }, first.conversationId);
     const second = await state();
     assert.notEqual(second.chatRoot, first.chatRoot);
+    // Mode for new chats (Settings › Agents): this repository's own pick applies to its new chat, the Default stays.
+    assert.equal(second.defaults.access, 'full', 'a new chat in a repository with its own mode starts in it');
+    assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('better-agent-defaults'))).access, 'edit', 'the Default mode is unchanged');
     assert.notEqual(second.branch, first.branch);
     await page.locator(`#code-file-tree[data-root="${second.chatRoot}"] [data-path="index.html"]`).waitFor();
     await page.locator(`#code-file-tree[data-root="${second.chatRoot}"] [data-path="index.html"]`).click();
@@ -130,6 +134,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     await page.locator(`#code-file-tree[data-root="${first.chatRoot}"]`).waitFor();
     assert.equal((await state()).conversationId, first.conversationId);
     assert.equal(await page.locator(`[data-chat-id="${first.conversationId}"]`).getAttribute('aria-current'), 'true');
+    assert.equal((await state()).defaults.access, 'edit', 'chats started before the pick keep following the Default');
 
     // 7. Quick chats have no repository and no files.
     await page.locator('#code-new-quick-chat').click();

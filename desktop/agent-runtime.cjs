@@ -19,6 +19,7 @@ const { randomUUID, createHash } = require('node:crypto');
 const agents = require('./agents.cjs');
 const settings = require('./agent-settings.cjs');
 const agentAccess = require('./agent-access.cjs'); // Settings › Agents › Access switches
+const agentBehavior = require('./agent-behavior.cjs');
 const { createClaudeMapper, createCodexMapper, toolTitle } = require('./agent-runtime-events.cjs');
 
 const VERSION = '0.6.0';
@@ -414,7 +415,7 @@ const HELPER_BLOCKED_DESIGN_TOOLS = [...MUTATING_DESIGN_TOOLS, 'finish_artboard'
 const HELPER_PERSONA = 'You are a read-only helper agent consulted by the designer agent inside Verynize (a local desktop design editor). Answer the task you are given precisely and concisely. You may read project files and inspect the open design with the read-only `verynize` MCP tools (get_design_context, get_element_code, take_screenshot and similar), but you must not edit files, run commands, or change the canvas. Reply with your findings only.';
 
 // Pure option builder for the Claude Agent SDK, kept separate for unit tests.
-function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, persona, bridge, executable, additionalDirectories, agentSettings }) {
+function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, persona, bridge, executable, additionalDirectories, agentSettings, claudeSettings }) {
   const mode = settings.claudePermissionMode(access);
   const options = {
     cwd,
@@ -434,6 +435,8 @@ function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, perso
   } else if (sessionId) options.resume = sessionId;
   if (executable) options.pathToClaudeCodeExecutable = executable;
   if (additionalDirectories?.length) options.additionalDirectories = additionalDirectories;
+  // Settings › Agents: response style and commit credit (desktop/agent-behavior.cjs claudeSettingsFor), flag-layer settings.
+  if (claudeSettings && typeof claudeSettings === 'object') options.settings = { ...claudeSettings };
   if (bridge?.url) {
     options.mcpServers = { [settings.MCP_SERVER_NAME]: settings.claudeMcpServer(bridge, access) };
     options.allowedTools = [`mcp__${settings.MCP_SERVER_NAME}__*`];
@@ -531,9 +534,10 @@ class AgentRuntime {
     loadPreferences = defaultLoadPreferences,
     loadAccess = dir => agentAccess.loadAccessSettings(dir),
     home = undefined,
+    getBehavior = null,
   } = {}) {
     if (!userData) throw Error('userData directory required');
-    Object.assign(this, { userData, getProject, resolveProject, emitRaw: emit, discover, loadClaudeSdk, spawnProcess, getBridge, startFallback, loadPreferences, loadAccess, home });
+    Object.assign(this, { userData, getProject, resolveProject, emitRaw: emit, discover, loadClaudeSdk, spawnProcess, getBridge, startFallback, loadPreferences, loadAccess, home, getBehavior });
     this.runs = new Map(); this.pendingStarts = 0; this.permissions = new Map(); this.questions = new Map(); this.codex = null; this.codexSupport = new Map(); this.modelCache = new Map(); this.seq = 0;
     this.helpers = new Set(); this.allowRules = new AllowRules(path.join(userData, 'agent-allow-rules.json'));
   }
@@ -601,6 +605,9 @@ class AgentRuntime {
       const sessionId = seed || fork ? '' : normalized.sessionId;
       const run = { id: randomUUID(), chatId, agent: options.agent, cwd, projectKey: project?.root || 'unattached', stopped: false, done: false, sessionId: sessionId || null, cancel: () => {}, computerUse: options.agent === 'codex' && agentSettings.codexComputerUse };
       const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt: options.prompt, executable: found?.path || null, quickChat, agentSettings };
+      // Settings › Agents (desktop/agent-behavior.cjs): Claude response style + commit credit, Codex personality.
+      const behavior = this.getBehavior ? await Promise.resolve().then(() => this.getBehavior()).catch(() => null) : null;
+      if (behavior) { params.claudeSettings = agentBehavior.claudeSettingsFor(behavior); params.codexPersonality = agentBehavior.codexPersonalityFor(behavior); }
       this.runs.set(run.id, run);
       let runtime;
       try {
@@ -755,7 +762,7 @@ class AgentRuntime {
     };
     let stderr = '';
     const options = {
-      ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, fork: params.fork, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: params.context?.images?.length ? [path.dirname(params.context.images[0])] : [], agentSettings: params.agentSettings }),
+      ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, fork: params.fork, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: params.context?.images?.length ? [path.dirname(params.context.images[0])] : [], agentSettings: params.agentSettings, claudeSettings: params.claudeSettings }),
       abortController: abort,
       ...this.claudeHooks(run, params),
       env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `verynize/${VERSION}`, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.agentSettings ? agentAccess.claudeAccessOptions(params.agentSettings).env : {}) }),
@@ -830,7 +837,7 @@ class AgentRuntime {
     const handle = this.startFallback(params.executable, 'claude', composePrompt(params.prompt, params.context, params.seed), params.cwd, event => {
       if (event.type === 'done') { run.stopped = run.stopped || event.stopped; this.finish(run, { code: event.code }); return; }
       const { id: _id, ...rest } = event; this.forward(run, rest);
-    }, { model: params.model, access: params.access, effort: params.effort, sessionId: params.sessionId, structured: true, appendSystemPrompt: params.persona, bridge: params.bridge, id: run.id, ...(params.agentSettings ? (({ env, cliArgs }) => ({ env, extraArgs: cliArgs }))(agentAccess.claudeAccessOptions(params.agentSettings)) : {}) });
+    }, { model: params.model, access: params.access, effort: params.effort, sessionId: params.sessionId, structured: true, appendSystemPrompt: params.persona, bridge: params.bridge, id: run.id, claudeSettings: params.claudeSettings, ...(params.agentSettings ? (({ env, cliArgs }) => ({ env, extraArgs: cliArgs }))(agentAccess.claudeAccessOptions(params.agentSettings)) : {}) });
     run.cancel = () => { run.stopped = true; handle.cancel(); };
     return 'claude-cli';
   }
@@ -935,7 +942,7 @@ class AgentRuntime {
       try { thread = (await server.rpc.request('thread/resume', { threadId: params.sessionId, ...threadParams })).thread; }
       catch { this.emit(run, { type: 'status', text: 'Could not resume the previous Codex thread; starting a new one.' }); }
     }
-    if (!thread) thread = (await server.rpc.request('thread/start', threadParams)).thread;
+    if (!thread) thread = (await server.rpc.request('thread/start', params.codexPersonality ? { ...threadParams, personality: params.codexPersonality } : threadParams)).thread;
     run.threadId = thread.id; run.map = createCodexMapper();
     server.threads.set(thread.id, run);
     this.forward(run, { type: 'session', sessionId: thread.id });
@@ -967,7 +974,7 @@ class AgentRuntime {
     const handle = this.startFallback(params.executable, 'codex', prompt, params.cwd, event => {
       if (event.type === 'done') { run.stopped = run.stopped || event.stopped; this.finish(run, { code: event.code }); return; }
       const { id: _id, ...rest } = event; this.forward(run, rest);
-    }, { model: params.model, access: params.access, effort: params.effort, structured: true, bridge: params.bridge, id: run.id, ...(params.agentSettings ? { extraArgs: agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) } : {}) });
+    }, { model: params.model, access: params.access, effort: params.effort, structured: true, bridge: params.bridge, id: run.id, codexPersonality: params.codexPersonality, ...(params.agentSettings ? { extraArgs: agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) } : {}) });
     run.cancel = () => { run.stopped = true; handle.cancel(); };
     return 'codex-exec';
   }
@@ -1187,8 +1194,8 @@ class AgentRuntime {
 }
 
 // IPC surface (all `desktop:<name>`, exposed by desktop/preload.cjs).
-function registerAgentRuntime(handle, win, { userData, getProject, resolveProject }) {
-  const runtime = new AgentRuntime({ userData, getProject, resolveProject, emit: event => { if (!win.isDestroyed()) win.webContents.send('desktop:agent-event', event); } });
+function registerAgentRuntime(handle, win, { userData, getProject, resolveProject, getBehavior = null }) {
+  const runtime = new AgentRuntime({ userData, getProject, resolveProject, getBehavior, emit: event => { if (!win.isDestroyed()) win.webContents.send('desktop:agent-event', event); } });
   handle('runAgent', options => runtime.run(options));
   handle('cancelAgent', id => runtime.cancel(id));
   handle('listAgentRuns', () => runtime.list());

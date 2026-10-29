@@ -119,6 +119,8 @@ type Workspace = {
   // --- chat parity contract (implemented in web/desktop-panel.js) ---
   answerQuestion?(messageIndex: number, partIndex: number, answers: Record<string, string>): void;
   steer?(text: string): void;
+  /** Queue a follow-up behind the running turn (runs it right away when idle). */
+  queueMessage?(text: string): void;
   editQueued?(id: string, text: string): void;
   moveQueued?(id: string, delta: -1 | 1): void;
   removeQueued?(id: string): void;

@@ -87,9 +87,11 @@ function argumentsFor(agent, options = {}) {
     const policy = CODEX_POLICIES[o.access];
     args = ['exec', '--skip-git-repo-check', '--sandbox', policy.sandbox];
     args.push(...codexMcpArgs(options.bridge));
+    if (options.codexPersonality === 'none') args.push('-c', 'personality="none"'); // Settings › Agents › Codex personality
   } else {
     args = ['--print', '--permission-mode', CLAUDE_CLI_MODES[o.access]];
     if (o.sessionId) args.push('--resume', o.sessionId);
+    if (options.claudeSettings && typeof options.claudeSettings === 'object') args.push('--settings', JSON.stringify(options.claudeSettings)); // response style, commit credit
     if (typeof options.appendSystemPrompt === 'string' && options.appendSystemPrompt) args.push('--append-system-prompt', options.appendSystemPrompt);
     if (options.bridge?.url) args.push('--mcp-config', JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: claudeMcpServer(options.bridge, o.access) } }), '--allowedTools', `mcp__${MCP_SERVER_NAME}__*`);
   }

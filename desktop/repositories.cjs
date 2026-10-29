@@ -2,11 +2,13 @@
  * Repositories and per-chat worktrees (desktop main process)
  * ===========================================================
  * The Code workspace keeps several repositories open at once. Each repository chat works in its own
- * git worktree under `<workspaces>/<repo>/<slug>` on branch `verynize/<slug>` (cut from the repository
+ * git worktree under `<workspaces>/<repo>/<slug>` on branch `<prefix>/<slug>` (cut from the repository
  * HEAD), so parallel chats never edit the same checkout. A folder that is not a committed git
  * repository (or is a subfolder of one) has no worktrees: its chats work in the folder itself.
  *
- *   new RepositoryRegistry({file, workspacesRoot})
+ *   new RepositoryRegistry({file, workspacesRoot, branchPrefix})
+ *     workspacesRoot: a path or a function returning one (Settings › Agents "Verynize folder"/workspaces);
+ *     branchPrefix: async function returning the branch prefix (default "verynize"); both are read per new worktree
  *     list()                          -> [{id,name,root,addedAt,git}]   (archived ones hidden)
  *     add(root)                       -> repository (re-adding an archived root restores it)
  *     archive(id)                     -> true            (files and worktrees stay on disk)
@@ -14,7 +16,8 @@
  *     removeChatWorktree(repoId, chatId, {force}) -> true
  *     resolveRoot(candidate)          -> {root, repository, worktree|null}   only registered roots and
  *                                        worktrees recorded here are accepted (compared after realpath)
- *   registerRepositories(handle, win, {registry, getProject, setProject, Project})
+ *   registerRepositories(handle, win, {registry, getProject, setProject, Project, projectsRoot})
+ *     projectsRoot: async function returning the folder new projects are created in (no parent folder dialog)
  *
  * The registry is a JSON file in userData. Git runs as `execFile` argument arrays (no shell) with a timeout
  * and GIT_TERMINAL_PROMPT=0, like projects.cjs and git-changes.cjs.
@@ -50,9 +53,14 @@ async function committedRepository(root) {
 }
 
 class RepositoryRegistry {
-  constructor({ file, workspacesRoot = defaultWorkspaces() } = {}) {
+  constructor({ file, workspacesRoot = defaultWorkspaces(), branchPrefix = null } = {}) {
     if (!file) throw Error('Registry file required');
-    this.file = file; this.workspacesRoot = workspacesRoot; this.data = null; this.queue = Promise.resolve();
+    this.file = file; this.workspacesRoot = workspacesRoot; this.branchPrefix = branchPrefix; this.data = null; this.queue = Promise.resolve();
+  }
+  async workspacesDir() { return typeof this.workspacesRoot === 'function' ? await this.workspacesRoot() : this.workspacesRoot; }
+  async prefix() {
+    const value = this.branchPrefix ? await Promise.resolve().then(() => this.branchPrefix()).catch(() => '') : '';
+    return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(value) && !value.includes('..') ? value.replace(/\/+$/, '') : 'verynize';
   }
   async load() {
     if (this.data) return this.data;
@@ -104,7 +112,7 @@ class RepositoryRegistry {
   async workspaceDir(repo) {
     const data = await this.load(), base = slugify(repo.name);
     const clash = data.repositories.some(r => r.id !== repo.id && slugify(r.name) === base);
-    return path.join(this.workspacesRoot, clash ? `${base}-${repo.id.slice(0, 6)}` : base);
+    return path.join(await this.workspacesDir(), clash ? `${base}-${repo.id.slice(0, 6)}` : base);
   }
   createChatWorktree(repoId, chatId) {
     return this.serial(async () => {
@@ -115,15 +123,16 @@ class RepositoryRegistry {
       if (!(await committedRepository(repo.root))) return { path: repo.root, branch: null, shared: true };
       const parent = await this.workspaceDir(repo);
       await fs.mkdir(parent, { recursive: true });
+      const prefix = await this.prefix();
       let slug = null;
       for (let attempt = 0; attempt < 40 && !slug; attempt++) {
         const word = WORDS[crypto.randomInt(WORDS.length)], candidate = attempt < 10 ? word : `${word}-${crypto.randomBytes(2).toString('hex')}`;
         if (await exists(path.join(parent, candidate))) continue;
-        try { await git(repo.root, ['rev-parse', '--verify', '--quiet', `refs/heads/verynize/${candidate}`]); continue; } catch {}
+        try { await git(repo.root, ['rev-parse', '--verify', '--quiet', `refs/heads/${prefix}/${candidate}`]); continue; } catch {}
         slug = candidate;
       }
       if (!slug) throw Error('Could not find a free worktree name');
-      const target = path.join(parent, slug), branch = `verynize/${slug}`;
+      const target = path.join(parent, slug), branch = `${prefix}/${slug}`;
       await git(repo.root, ['worktree', 'add', '-b', branch, '--', target, 'HEAD'], 120000);
       const real = await fs.realpath(target);
       data.worktrees = data.worktrees.filter(w => !(w.repoId === repo.id && w.chatId === chatId));
@@ -176,7 +185,7 @@ async function createProjectFolder(parent, { name, repository } = {}) {
   return destination;
 }
 
-function registerRepositories(handle, win, { registry, dialog, getProject, setProject, Project }) {
+function registerRepositories(handle, win, { registry, dialog, getProject, setProject, Project, projectsRoot = null }) {
   const active = async () => { const project = getProject(); if (!project) return null; try { return await registry.resolveRoot(project.root); } catch { return { root: project.root, repository: null, worktree: null }; } };
   handle('repositoriesList', async () => ({ repositories: await registry.list(), active: await active() }));
   handle('repositoriesAddLocal', async () => {
@@ -187,9 +196,14 @@ function registerRepositories(handle, win, { registry, dialog, getProject, setPr
   handle('repositoriesCreate', async options => {
     if (!options || typeof options.name !== 'string' || !NAME.test(options.name)) throw Error('Use a project name with letters, numbers, dashes, or underscores');
     if (options.repository && !GITHUB.test(String(options.repository))) throw Error('Use an HTTPS GitHub repository URL');
-    const chosen = await dialog.showOpenDialog(win, { title: 'Choose parent folder', properties: ['openDirectory', 'createDirectory'] });
-    if (chosen.canceled || !chosen.filePaths[0]) return null;
-    return registry.add(await createProjectFolder(chosen.filePaths[0], options));
+    let parent;
+    if (projectsRoot) { parent = await projectsRoot(); await fs.mkdir(parent, { recursive: true }); }
+    else {
+      const chosen = await dialog.showOpenDialog(win, { title: 'Choose parent folder', properties: ['openDirectory', 'createDirectory'] });
+      if (chosen.canceled || !chosen.filePaths[0]) return null;
+      parent = chosen.filePaths[0];
+    }
+    return registry.add(await createProjectFolder(parent, options));
   });
   handle('repositoriesArchive', id => registry.archive(id));
   handle('repositoriesCreateChatWorktree', options => registry.createChatWorktree(options?.repoId, options?.chatId));
