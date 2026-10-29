@@ -38,9 +38,11 @@ import {
 } from "./menu";
 import { MentionIcon, MentionPopover } from "./mention-popover";
 import { agentAvailable, useModels, workspace, type AgentModel, type ChatState } from "./store";
+import { ToolsPopover } from "./tools-popover";
 import { UsageRing } from "./usage-ring";
 import { AttachMenu, WorkingDirectories } from "./attach-menu";
 import { SlashCommands } from "./slash-commands";
+import { WorksWith } from "./works-with";
 
 const PROMPT_CLASS =
   "m-0 block max-h-55 min-h-17 w-full resize-none rounded-none border-0 bg-transparent pt-2 pr-2.5 pb-1 pl-2.5 font-sans text-base leading-5.25 text-foreground shadow-none outline-hidden field-sizing-content placeholder:text-transparent focus:outline-hidden focus-visible:outline-hidden";
@@ -370,7 +372,6 @@ export function Composer({ state }: { state: ChatState }) {
     prompt.focus();
   };
   const canSendOther = state.busy && !empty && !!sendOther;
-  const showUsage = state.usage !== undefined || state.messages.some((m) => m.usage);
   return (
     <div
       className={cn(
@@ -484,7 +485,9 @@ export function Composer({ state }: { state: ChatState }) {
             <RulerIcon className="size-3.5" />
           </button>
         )}
-        {showUsage && <UsageRing usage={state.usage ?? state.messages.findLast((m) => m.usage)?.usage} />}
+        <WorksWith state={state} />
+        <ToolsPopover state={state} />
+        <UsageRing state={state} />
         {canSendOther && (
           <button
             type="button"
