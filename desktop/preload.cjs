@@ -4,6 +4,11 @@ contextBridge.exposeInMainWorld('desktop',{
  agentAccountStatus:options=>call('agentAccountStatus',options),startAgentLogin:options=>call('startAgentLogin',options),cancelAgentLogin:options=>call('cancelAgentLogin',options),agentLogout:options=>call('agentLogout',options),openExternal:url=>call('openExternal',url),
  onAuthEvent:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:auth-event',listener);return()=>ipcRenderer.removeListener('desktop:auth-event',listener)},
  notifyTask:options=>call('notifyTask',options),
+ // integrated terminal hook (desktop/terminal.cjs): PTY shells for the code-mode terminal panel.
+ terminalCreate:options=>call('terminalCreate',options),terminalWrite:options=>call('terminalWrite',options),terminalResize:options=>call('terminalResize',options),terminalKill:options=>call('terminalKill',options),
+ onTerminalData:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:terminal-data',listener);return()=>ipcRenderer.removeListener('desktop:terminal-data',listener)},
+ onTerminalExit:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:terminal-exit',listener);return()=>ipcRenderer.removeListener('desktop:terminal-exit',listener)},
+ // end integrated terminal hook
  // agent-runtime parity hook: second-opinion review of the latest answer (desktop/agent-runtime.cjs review()).
  reviewAgent:options=>call('reviewAgent',options),
  // end agent-runtime parity hook
@@ -22,6 +27,9 @@ contextBridge.exposeInMainWorld('desktop',{
  captureLivePreview:options=>call('captureLivePreview',options),
  previewApp:options=>call('previewApp',options),exportPDF:html=>call('exportPDF',html),
  createProject:options=>call('createProject',options),
+ // Code workspace (desktop/repositories.cjs): repository list, per-chat git worktrees, active root; dev server controls.
+ repositories:{list:()=>call('repositoriesList'),addLocal:()=>call('repositoriesAddLocal'),create:options=>call('repositoriesCreate',options),archive:id=>call('repositoriesArchive',id),createChatWorktree:options=>call('repositoriesCreateChatWorktree',options),removeChatWorktree:options=>call('repositoriesRemoveChatWorktree',options),activate:root=>call('repositoriesActivate',root)},
+ devServer:{status:()=>call('devServerStatus'),start:()=>call('devServerStart'),stop:()=>call('devServerStop')},
  openProject:()=>call('openProject'), listFiles:()=>call('listFiles'),readFile:p=>call('readFile',p),writeFile:(p,c)=>call('writeFile',p,c),gitStatus:()=>call('gitStatus'),createWorktree:b=>call('createWorktree',b),discoverAgents:()=>call('discoverAgents'),runAgent:options=>call('runAgent',options),cancelAgent:id=>call('cancelAgent',id),respondAgentPermission:options=>call('respondAgentPermission',options),respondAgentQuestion:options=>call('respondAgentQuestion',options),steerAgent:options=>call('steerAgent',options),listAgentRuns:()=>call('listAgentRuns'),listAllowRules:options=>call('listAllowRules',options),removeAllowRule:options=>call('removeAllowRule',options),agentToolsVersion:()=>call('agentToolsVersion'),agentTitle:options=>call('agentTitle',options),
  gitChanges:options=>call('gitChanges',options),gitDiff:options=>call('gitDiff',options),gitCommit:options=>call('gitCommit',options),gitDiscard:options=>call('gitDiscard',options),gitPush:options=>call('gitPush',options),gitPullRequest:options=>call('gitPullRequest',options),gitCreatePullRequest:options=>call('gitCreatePullRequest',options),
  designPreferences:{list:()=>call('designPreferencesList'),save:text=>call('designPreferencesSave',text),update:(id,text)=>call('designPreferencesUpdate',id,text),remove:id=>call('designPreferencesRemove',id)},

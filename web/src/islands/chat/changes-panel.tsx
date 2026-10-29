@@ -469,7 +469,8 @@ function ChangesDialog({
 
 /** Header button ("3 files +12 −4") and its dialog, for repo-backed chats only. */
 export function ChangesButton({ state }: { state: ChatState }) {
-  const root = state.projectKey !== "unattached" && gitApi() ? state.projectKey : null;
+  // The chat's own folder (worktree or repository root) once the main process made it the active project.
+  const root = state.activeRoot && gitApi() ? state.activeRoot : null;
   const { summary, error, refresh, setSummary } = useChanges(root);
   const [open, setOpen] = useState(false);
   const running = state.busy || (state.busyChats?.length ?? 0) > 0;

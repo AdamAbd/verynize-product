@@ -861,10 +861,11 @@ export function Transcript({ state }: { state: ChatState }) {
       className={cn(hook.scroll, "flex min-h-0 flex-1 flex-col overflow-y-auto pt-4 pr-4 pb-6 pl-6")}
     >
       <div ref={sessionSlot} className="contents" />
+      {/* `--chat-column` is set by hosts with a centered column (Code workspace, 770px); unset in the dock. */}
       {state.messages.length === 0 ? (
         <EmptyState suggestions={state.suggestions ?? []} />
       ) : (
-        <div className="flex flex-col gap-5">
+        <div className="mx-auto flex w-full max-w-(--chat-column) flex-col gap-5">
           {state.messages.map((message, index) =>
             message.role === "user" ? (
               <UserMessage key={index} message={message} index={index} busy={state.busy} />

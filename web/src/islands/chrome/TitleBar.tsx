@@ -6,7 +6,7 @@ import { PanelLeftIcon, PlusIcon } from "@/components/icons";
 import { activePage, legacy, legacySet, useBodyClass, useDesign } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { run } from "./legacy";
-import { toggleBodyClass, useDialogOpen } from "./hooks";
+import { toggleBodyClass } from "./hooks";
 import { Tip } from "./tip";
 
 const iconButton =
@@ -20,7 +20,9 @@ export function TitleBar() {
   const filesView = useBodyClass("files-view");
   const chatOpen = useBodyClass("agent-chat-open");
   const leftCollapsed = useBodyClass("left-collapsed");
-  const codeMode = useDialogOpen("project-dialog");
+  // Code mode (web/src/islands/code): the bar turns transparent over the code workspace and hosts its breadcrumb.
+  const codeMode = useBodyClass("code-mode");
+  const codeSidebarCollapsed = useBodyClass("code-sidebar-collapsed");
   const nameRef = useRef<HTMLInputElement>(null);
   const page = doc ? activePage(doc) : null;
 
@@ -49,12 +51,31 @@ export function TitleBar() {
       role="banner"
       data-chrome-bar=""
       className={cn(
-        "relative z-40 flex h-chrome shrink-0 items-center border-b border-divider bg-background pr-2 text-xs select-none",
-        chatOpen ? "pl-chat" : "pl-traffic",
+        "relative z-40 flex h-chrome shrink-0 items-center border-b pr-2 text-xs select-none",
+        codeMode ? "border-transparent bg-transparent pl-0" : chatOpen ? "border-divider bg-background pl-chat" : "border-divider bg-background pl-traffic",
       )}
     >
-      {!chatOpen && (
+      {codeMode && (
         <>
+          <div className={cn("flex h-full shrink-0 items-center pl-traffic", !codeSidebarCollapsed && "w-code-sidebar")}>
+            <Tip label={codeSidebarCollapsed ? "Show sidebar" : "Hide sidebar"} shortcut="⌘B" side="bottom">
+              <button
+                type="button"
+                id="code-sidebar-toggle"
+                aria-label="Toggle sidebar"
+                aria-pressed={!codeSidebarCollapsed}
+                className={cn(iconButton, "ml-0.5")}
+                onClick={() => document.body.classList.toggle("code-sidebar-collapsed")}
+              >
+                <PanelLeftIcon />
+              </button>
+            </Tip>
+          </div>
+          <div id="bd-code-titlebar" className="flex h-full min-w-0 flex-1 items-center pl-3" />
+        </>
+      )}
+      {!chatOpen && (
+        <span className={cn("contents", codeMode && "hidden")}>
           <Tip label={leftCollapsed ? "Show sidebar" : "Hide sidebar"} side="bottom">
             <button
               type="button"
@@ -84,10 +105,10 @@ export function TitleBar() {
             </button>
           </Tip>
           <span aria-hidden="true" className="ml-1.5 h-4 w-px shrink-0 bg-divider" />
-        </>
+        </span>
       )}
 
-      <nav aria-label="Open files" className="flex min-w-0 items-center gap-1.5">
+      <nav aria-label="Open files" className={cn("flex min-w-0 items-center gap-1.5", codeMode && "hidden")}>
         <button
           type="button"
           id="files-home"
@@ -134,7 +155,7 @@ export function TitleBar() {
         </Tip>
       </nav>
 
-      <div className="min-w-4 flex-1 self-stretch" />
+      <div className={cn("min-w-4 self-stretch", codeMode ? "shrink-0" : "flex-1")} />
 
       <Tip label="Search" shortcut="⌘K" side="bottom">
         <button type="button" id="shell-search" aria-label="Search files" className={iconButton} onClick={() => run("shell-search")}>
@@ -152,10 +173,7 @@ export function TitleBar() {
               "flex size-6 items-center justify-center rounded-full text-foreground-3 outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3.5",
               !codeMode && "bg-accent text-foreground",
             )}
-            onClick={() => {
-              const dialog = document.getElementById("project-dialog") as HTMLDialogElement | null;
-              if (dialog?.open) dialog.close();
-            }}
+            onClick={() => (window.agentWorkspace as unknown as { setCodeMode?: (on: boolean) => void } | undefined)?.setCodeMode?.(false)}
           >
             <Palette />
           </button>
@@ -170,7 +188,7 @@ export function TitleBar() {
               "flex size-6 items-center justify-center rounded-full text-foreground-3 outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3.5",
               codeMode && "bg-accent text-foreground",
             )}
-            onClick={() => (window.agentWorkspace as { openProject?: () => void } | undefined)?.openProject?.()}
+            onClick={() => (window.agentWorkspace as unknown as { setCodeMode?: (on: boolean) => void } | undefined)?.setCodeMode?.(true)}
           >
             <Braces />
           </button>

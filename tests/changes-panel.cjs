@@ -33,7 +33,7 @@ if (args[1] === 'create') { fs.writeFileSync(${JSON.stringify(ghState)}, '1'); p
 process.exit(2);
 `);
   await fs.chmod(path.join(bin, 'gh'), 0o755);
-  const env = { ...process.env, ...identity, PATH: bin + path.delimiter + process.env.PATH, FAKE_CODEX_LOG: path.join(root, 'codex.log') };
+  const env = { ...process.env, ...identity, PATH: bin + path.delimiter + process.env.PATH, FAKE_CODEX_LOG: path.join(root, 'codex.log'), VERYNIZE_WORKSPACES_DIR: path.join(root, 'workspaces') };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
@@ -41,16 +41,21 @@ process.exit(2);
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await app.evaluate(({ dialog }, dir) => (dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] })), project);
     await page.evaluate(() => window.agentWorkspace.openProject());
+    await page.locator('#code-add-repository').click();
     await page.locator('#project-open').click();
     await page.waitForFunction(() => document.getElementById('project-name').textContent === 'project');
+    // The repository chat works in its own worktree on a verynize/ branch (Code workspace); the panel follows it.
+    await page.waitForFunction(() => { const s = window.agentWorkspace.getState(); return s.branch && s.activeRoot === s.chatRoot; });
+    const { chatRoot: worktree, branch } = await page.evaluate(() => window.agentWorkspace.getState());
+    assert.equal(path.dirname(worktree), path.join(root, 'workspaces', 'project'));
     await page.evaluate(() => window.agentWorkspace.openChat());
     const button = page.locator('#changes-button');
     await button.waitFor({ timeout: 10000 });
     assert.match(await button.textContent(), /No changes/);
 
     // An agent turn finishes after files changed on disk → the summary refreshes.
-    await fs.writeFile(path.join(project, 'index.html'), '<h1>Hello</h1>\n<section class="hero">Hero</section>\n');
-    await fs.writeFile(path.join(project, 'notes.txt'), 'scratch\n');
+    await fs.writeFile(path.join(worktree, 'index.html'), '<h1>Hello</h1>\n<section class="hero">Hero</section>\n');
+    await fs.writeFile(path.join(worktree, 'notes.txt'), 'scratch\n');
     await page.evaluate(() => window.agentWorkspace.setDefaults({ agent: 'codex', access: 'edit' }));
     await page.locator('#project-prompt').fill('Build the hero section');
     await page.locator('#project-run').click();
@@ -61,7 +66,7 @@ process.exit(2);
     await button.click();
     const panel = page.locator('#changes-panel');
     await panel.waitFor();
-    assert.equal(await panel.locator('#changes-branch').textContent(), 'main');
+    assert.equal(await panel.locator('#changes-branch').textContent(), branch);
     assert.equal(await panel.locator('[data-changes=file]').count(), 2);
     await panel.locator('[data-changes=file][data-path="index.html"]').click();
     await panel.locator('#changes-diff [data-kind=add]').first().waitFor();
@@ -76,22 +81,23 @@ process.exit(2);
     await notes.locator('[data-changes=discard]').click();
     await notes.locator('[data-changes=discard-confirm]').click();
     await page.waitForFunction(() => document.querySelectorAll('#changes-panel [data-changes=file]').length === 1);
-    await assert.rejects(fs.access(path.join(project, 'notes.txt')));
+    await assert.rejects(fs.access(path.join(worktree, 'notes.txt')));
 
     // Commit → publish branch → create PR.
     await panel.locator('#changes-commit').click();
-    await page.waitForFunction(() => /Committed [0-9a-f]{7} on main/.test(document.getElementById('changes-status')?.textContent || ''));
-    assert.equal(git(project, 'log', '-1', '--format=%s').trim(), 'Build the hero section');
+    await page.waitForFunction(b => new RegExp(`Committed [0-9a-f]{7} on ${b}`).test(document.getElementById('changes-status')?.textContent || ''), branch);
+    assert.equal(git(worktree, 'log', '-1', '--format=%s').trim(), 'Build the hero section');
+    assert.equal(git(project, 'log', '-1', '--format=%s').trim(), 'Initial', 'the repository checkout is untouched');
     assert.equal(await panel.locator('#changes-push').textContent(), 'Publish branch');
     await panel.locator('#changes-push').click();
-    await page.waitForFunction(() => /Pushed main to origin\/main/.test(document.getElementById('changes-status')?.textContent || ''), null, { timeout: 30000 });
-    assert.equal(git(remote, 'rev-parse', 'main'), git(project, 'rev-parse', 'HEAD'));
+    await page.waitForFunction(b => (document.getElementById('changes-status')?.textContent || '').includes(`Pushed ${b} to origin/${b}`), branch, { timeout: 30000 });
+    assert.equal(git(remote, 'rev-parse', branch), git(worktree, 'rev-parse', 'HEAD'));
     assert.equal(await panel.locator('#changes-push').isDisabled(), true);
     await panel.locator('#changes-create-pr').click();
     await panel.locator('#changes-pr-link').waitFor({ timeout: 15000 });
     assert.match(await panel.locator('#changes-pr-link').textContent(), /#12 Open/);
     const calls = (await fs.readFile(ghLog, 'utf8')).trim().split('\n').map(JSON.parse);
-    assert.deepEqual(calls.find(c => c[1] === 'create'), ['pr', 'create', '--head', 'main', '--fill']);
+    assert.deepEqual(calls.find(c => c[1] === 'create'), ['pr', 'create', '--head', branch, '--fill']);
     await page.keyboard.press('Escape');
     await panel.waitFor({ state: 'detached' });
     assert.match(await button.textContent(), /No changes/);

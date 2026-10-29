@@ -22,7 +22,7 @@ The chat panel (docked transcript, model picker, access levels, attachments and 
   4. `turn/interrupt` for **Stop**
   
   One app-server process per window serves every chat thread. Approval server-requests (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, MCP elicitations) become approval cards. If app-server is unavailable, the one-shot `codex exec --json` runner in `desktop/agents.cjs` is used instead.
-- **Quick chats** are chats with no project open. They run in a per-chat scratch directory, `userData/agent-workdirs/<chatId>`. Project chats run in the project root. Project memory (`VERYNIZE.md`) and the user's personal instructions are appended to the persona: Claude's `append`, or Codex's `developerInstructions`.
+- **Quick chats** are chats with no repository. They run in a per-chat scratch directory, `userData/agent-workdirs/<chatId>`. **Repository chats** (Code workspace) each run in their own git worktree, `~/Verynize/workspaces/<repo>/<name>` on branch `verynize/<name>` (see `desktop/repositories.cjs`); the renderer passes the chat's folder as `runAgent({root})` and main validates it against the repository registry. Folders without a commit, and chats saved before worktrees existed, run in the repository root. Project memory (`VERYNIZE.md`) and the user's personal instructions are appended to the persona: Claude's `append`, or Codex's `developerInstructions`.
 - At most three turns run per window, and only one per chat.
 
 ## Access levels

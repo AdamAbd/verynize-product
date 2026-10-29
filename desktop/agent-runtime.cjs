@@ -515,6 +515,7 @@ class AgentRuntime {
   constructor({
     userData,
     getProject = () => null,
+    resolveProject = null,
     emit = () => {},
     discover = agents.discover,
     loadClaudeSdk = () => import('@anthropic-ai/claude-agent-sdk'),
@@ -524,7 +525,7 @@ class AgentRuntime {
     loadPreferences = defaultLoadPreferences,
   } = {}) {
     if (!userData) throw Error('userData directory required');
-    Object.assign(this, { userData, getProject, emitRaw: emit, discover, loadClaudeSdk, spawnProcess, getBridge, startFallback, loadPreferences });
+    Object.assign(this, { userData, getProject, resolveProject, emitRaw: emit, discover, loadClaudeSdk, spawnProcess, getBridge, startFallback, loadPreferences });
     this.runs = new Map(); this.pendingStarts = 0; this.permissions = new Map(); this.questions = new Map(); this.codex = null; this.codexSupport = new Map(); this.modelCache = new Map(); this.seq = 0;
     this.helpers = new Set(); this.allowRules = new AllowRules(path.join(userData, 'agent-allow-rules.json'));
   }
@@ -538,8 +539,14 @@ class AgentRuntime {
     this.emitRaw({ id: run.id, runId: run.id, chatId: run.chatId, conversationId: run.chatId, seq: ++this.seq, ...event });
   }
 
-  async workdir(chatId) {
-    const project = this.getProject();
+  /** `root`: a chat's own folder (repository root or chat worktree, validated by resolveProject); null = quick chat. */
+  async workdir(chatId, root) {
+    let project = this.getProject();
+    if (root === null) project = null;
+    else if (typeof root === 'string') {
+      if (!this.resolveProject) throw Error('This runtime cannot run chats in a chosen folder');
+      project = await this.resolveProject(root);
+    }
     if (project) return { cwd: project.root, project, quickChat: false };
     const cwd = path.join(this.userData, 'agent-workdirs', chatId);
     await fs.mkdir(cwd, { recursive: true });
@@ -569,7 +576,7 @@ class AgentRuntime {
     this.pendingStarts++;
     try {
       const found = (await this.discover()).find(a => a.id === options.agent && a.available);
-      const { cwd, project, quickChat } = await this.workdir(chatId);
+      const { cwd, project, quickChat } = await this.workdir(chatId, options.root);
       const memory = project?.memory ? String(await project.memory().catch(() => '')).slice(0, 12000) : '';
       const bridge = await this.getBridge().catch(() => null);
       const preferences = await Promise.resolve().then(() => this.loadPreferences()).catch(() => []);
@@ -1143,8 +1150,8 @@ class AgentRuntime {
 }
 
 // IPC surface (all `desktop:<name>`, exposed by desktop/preload.cjs).
-function registerAgentRuntime(handle, win, { userData, getProject }) {
-  const runtime = new AgentRuntime({ userData, getProject, emit: event => { if (!win.isDestroyed()) win.webContents.send('desktop:agent-event', event); } });
+function registerAgentRuntime(handle, win, { userData, getProject, resolveProject }) {
+  const runtime = new AgentRuntime({ userData, getProject, resolveProject, emit: event => { if (!win.isDestroyed()) win.webContents.send('desktop:agent-event', event); } });
   handle('runAgent', options => runtime.run(options));
   handle('cancelAgent', id => runtime.cancel(id));
   handle('listAgentRuns', () => runtime.list());

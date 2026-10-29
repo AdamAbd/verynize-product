@@ -1,7 +1,6 @@
 // Dock header (29, 33, 34): project / chat switcher on the left, "Start preview" split button on the right.
 import { CameraIcon, SparklesIcon, ChevronDownIcon, ChevronsUpDownIcon, FileDownIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, GitForkIcon, LaptopIcon, MessageSquareIcon, ChevronLeftIcon, PlayIcon } from "lucide-react";
 import { PanelLeftIcon, PlusIcon } from "@/components/icons";
-import { legacyClick } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import {
   ChatMenu,
@@ -108,7 +107,7 @@ function Switcher({ state }: { state: ChatState }) {
         ) : (
           <ChatMenuItem onSelect={() => workspace()?.openProject()}>
             <FolderOpenIcon />
-            Project files
+            Open in Code workspace
           </ChatMenuItem>
         )}
         <ChatMenuSeparator />
@@ -125,15 +124,15 @@ function Switcher({ state }: { state: ChatState }) {
           </ChatMenuSub>
         )}
         {attached && <ChatMenuSeparator />}
-        <ChatMenuItem onSelect={() => legacyClick("project-new")}>
+        <ChatMenuItem onSelect={() => void window.codeWorkspace?.addRepository("new")}>
           <PlusIcon />
           Create new repository
         </ChatMenuItem>
-        <ChatMenuItem onSelect={() => legacyClick("project-clone")}>
+        <ChatMenuItem onSelect={() => void window.codeWorkspace?.addRepository("clone")}>
           <GitForkIcon />
           Start from GitHub
         </ChatMenuItem>
-        <ChatMenuItem onSelect={() => legacyClick("project-open")}>
+        <ChatMenuItem onSelect={() => void window.codeWorkspace?.addRepository("local")}>
           <LaptopIcon />
           Start from local folder
         </ChatMenuItem>
@@ -149,7 +148,7 @@ function PreviewButton() {
       <button
         type="button"
         className={cn(segment, "gap-2 rounded-l-md pr-2.5 pl-2")}
-        onClick={() => legacyClick("project-preview")}
+        onClick={() => workspace()?.actions?.livePreview?.()}
       >
         <PlayIcon className="size-3 fill-current text-muted-foreground" />
         Start preview
@@ -160,15 +159,15 @@ function PreviewButton() {
           <ChevronDownIcon className="size-3 text-muted-foreground" />
         </ChatMenuTrigger>
         <ChatMenuContent align="end" className="w-52">
-          <ChatMenuItem onSelect={() => legacyClick("project-preview")}>
+          <ChatMenuItem onSelect={() => workspace()?.actions?.livePreview?.()}>
             <PlayIcon />
             Start preview…
           </ChatMenuItem>
-          <ChatMenuItem onSelect={() => legacyClick("project-capture")}>
+          <ChatMenuItem onSelect={() => workspace()?.actions?.captureApp?.()}>
             <CameraIcon />
             Capture app to canvas
           </ChatMenuItem>
-          <ChatMenuItem onSelect={() => legacyClick("project-pdf")}>
+          <ChatMenuItem onSelect={() => workspace()?.actions?.exportPDF?.()}>
             <FileDownIcon />
             Export PDF
           </ChatMenuItem>
@@ -177,17 +176,17 @@ function PreviewButton() {
             Implement selection in code
           </ChatMenuItem>
           <ChatMenuSeparator />
-          <ChatMenuItem onSelect={() => legacyClick("project-git")}>
+          <ChatMenuItem onSelect={() => workspace()?.actions?.gitStatus?.()}>
             <GitBranchIcon />
             Git status
           </ChatMenuItem>
-          <ChatMenuItem onSelect={() => legacyClick("project-worktree")}>
+          <ChatMenuItem onSelect={() => workspace()?.actions?.createWorktree?.()}>
             <GitForkIcon />
             Create worktree…
           </ChatMenuItem>
           <ChatMenuItem onSelect={() => workspace()?.openProject()}>
             <FolderOpenIcon />
-            Project files
+            Open in Code workspace
           </ChatMenuItem>
         </ChatMenuContent>
       </ChatMenu>
@@ -227,7 +226,8 @@ export function DockHeader({ state }: { state: ChatState }) {
           <ChevronLeftIcon className="size-3" />
         </button>
       </div>
-      {attached && (
+      {/* In Code mode the Changes button lives in the code workspace's files panel (ids must stay unique). */}
+      {attached && !state.codeMode && (
         <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border bg-settings pr-2 pl-1.5">
           <ChangesButton state={state} />
           <span className="flex-1" />

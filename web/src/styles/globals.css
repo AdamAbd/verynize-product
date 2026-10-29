@@ -272,6 +272,26 @@ html[data-ui-theme="light"] {
   --color-brand-codex: #7c83f7;
   --color-success: #3fb950;
   /* </settings-tokens> */
+  /* <code-tokens> */
+  /* Code workspace, measured from /tmp/wonder-code-mode.png and design/wonder 80/81 (1440×870). */
+  --spacing-code-sidebar: 200px; /* repositories / chats column */
+  --spacing-code-panel: 384px; /* file tree + terminal column */
+  --spacing-code-column: 770px; /* transcript + composer column */
+  --spacing-code-tree-min: 96px; /* smallest file tree / terminal pane while resizing */
+  --color-code-sidebar: color-mix(in srgb, var(--settings) 93%, black); /* #181818 sidebar */
+  --color-code-raised: color-mix(in srgb, var(--foreground) 3%, var(--settings)); /* #1f1f1f new-chat button, cards */
+  --color-code-editor: color-mix(in srgb, var(--settings) 96%, black); /* file editor surface */
+  --color-file-html: #e44d26; /* file-type icon tints (fixed brand hues, readable on both themes) */
+  --color-file-css: #4f8fe6;
+  --color-file-js: #d8b43c;
+  --color-file-json: #d8a03c;
+  --color-file-git: #e8643c;
+  --color-file-md: #6aa2d8;
+  --color-file-image: #a875e0;
+  --color-file-added: #3fb950;
+  --color-file-modified: #d8a03c;
+  --color-file-deleted: #f85149;
+  /* </code-tokens> */
 }
 
 /*
@@ -304,3 +324,60 @@ body {
 [data-bd] svg[data-icon-weight="bold"] {
   stroke-width: 1.75px;
 }
+
+/* <terminal-tokens> */
+/*
+ * Integrated terminal (web/src/islands/code/terminal-panel.tsx). Measured from the Wonder code-mode capture: surface
+ * #1c1c1c (= --background), tab strip 40px with a #262626 rule, active tab #2b2b2b (= --input), cwd blue #69a7ff,
+ * user@host #707070, prompt glyph #dc8eff, 12px monospace on 14px rows. The panel reads these with
+ * getComputedStyle, so any CSS color works; the light theme overrides them below.
+ */
+@theme inline {
+  --color-terminal: var(--terminal-background);
+}
+:root {
+  --terminal-font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, monospace;
+  --terminal-font-size: 12px;
+  --terminal-line-height: 1; /* xterm multiplies the glyph cell height: 14px rows at 12px, as measured */
+  --terminal-background: var(--background);
+  --terminal-foreground: var(--foreground);
+  --terminal-cursor: var(--foreground);
+  --terminal-cursor-accent: var(--background);
+  --terminal-selection-background: color-mix(in srgb, var(--foreground) 22%, transparent);
+  --terminal-black: #3a3a3a;
+  --terminal-red: #ff6b6b;
+  --terminal-green: #5fcf7a;
+  --terminal-yellow: #e6c47a;
+  --terminal-blue: #69a7ff;
+  --terminal-magenta: #dc8eff;
+  --terminal-cyan: #5cc8d6;
+  --terminal-white: #d4d4d4;
+  --terminal-bright-black: #707070;
+  --terminal-bright-red: #ff8f8f;
+  --terminal-bright-green: #7fe096;
+  --terminal-bright-yellow: #f2d694;
+  --terminal-bright-blue: #8dbcff;
+  --terminal-bright-magenta: #e8acff;
+  --terminal-bright-cyan: #82dbe6;
+  --terminal-bright-white: #ffffff;
+}
+html[data-ui-theme="light"] {
+  --terminal-selection-background: color-mix(in srgb, var(--foreground) 16%, transparent);
+  --terminal-black: #1c1c1c;
+  --terminal-red: #cf222e;
+  --terminal-green: #1a7f37;
+  --terminal-yellow: #9a6700;
+  --terminal-blue: #0969da;
+  --terminal-magenta: #8f2fc0;
+  --terminal-cyan: #1b7c83;
+  --terminal-white: #6b6b6b;
+  --terminal-bright-black: #8a8a8a;
+  --terminal-bright-red: #a40e26;
+  --terminal-bright-green: #116329;
+  --terminal-bright-yellow: #7d4e00;
+  --terminal-bright-blue: #0550ae;
+  --terminal-bright-magenta: #6e2399;
+  --terminal-bright-cyan: #155e64;
+  --terminal-bright-white: #1c1c1c;
+}
+/* </terminal-tokens> */
