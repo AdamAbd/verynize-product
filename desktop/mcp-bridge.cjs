@@ -51,6 +51,7 @@ const { pathToFileURL } = require('node:url');
 const { BrowserWindow } = require('electron');
 const { renderHTML } = require('./render.cjs');
 const agentShell = require('./agent-shell.cjs'); // running-app / terminal / editor-action tools
+const agentUsage = require('./agent-usage.cjs'); // Settings › Usage: AI-generated layer count
 
 const load = file => import(pathToFileURL(path.join(__dirname, '../integrations', file)).href);
 const SUFFIX = '.verynize.json';
@@ -153,13 +154,19 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
     async transact(ref, fn) {
       for (let attempt = 0; attempt < 4; attempt++) {
         const target = await route(ref);
-        if (!target.live) return storeBackend.transact(ref, fn);
+        if (!target.live) { // Settings › Usage: count layers the agent added (desktop/agent-usage.cjs)
+          let added = 0;
+          const result = await storeBackend.transact(ref, (document, meta) => { const before = structuredClone(document); const out = fn(document, meta); added = agentUsage.countNewNodes(before, out?.document); return out; });
+          agentUsage.recordGeneratedLayers(added);
+          return result;
+        }
         const { state, entry } = target;
         const out = fn(structuredClone(state.document), { revision: tools.revisionOf(state.document) });
         validateDocument(withName(out.document));
         const reply = await request(entry, 'commit', { document: out.document, stamp: state.stamp }, 15000);
         if (reply?.conflict) continue; // the user edited meanwhile; re-read and re-apply
         const committed = looksLikeDocument(reply?.document) ? reply.document : out.document;
+        agentUsage.recordGeneratedLayers(agentUsage.countNewNodes(state.document, committed));
         return { result: out.result, revision: tools.revisionOf(committed), live: true, name: target.name };
       }
       throw new Error('The document kept changing in the editor; try again');

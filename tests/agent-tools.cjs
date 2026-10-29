@@ -270,6 +270,8 @@ async function runtimeSetup(t, settings) {
   const home = path.join(root, 'home');
   await fs.mkdir(path.join(home, '.codex'), { recursive: true });
   await fs.writeFile(path.join(home, '.codex', 'AGENTS.md'), 'SHARED-FROM-CODEX');
+  await fs.mkdir(path.join(home, '.codex', 'memories'), { recursive: true });
+  await fs.writeFile(path.join(home, '.codex', 'memories', 'notes.md'), 'CODEX-MEMORY-MARKER');
   const events = [], record = {};
   const runtime = new AgentRuntime({
     userData, home,
@@ -299,6 +301,7 @@ test('runtime: Claude chats get the Access options; ask_agent is gated; memory i
   assert.ok(options.disallowedTools.includes('mcp__verynize__ask_agent'));
   assert.ok(options.disallowedTools.includes('Artifact'));
   assert.match(options.systemPrompt.append, /SHARED-FROM-CODEX/);
+  assert.match(options.systemPrompt.append, /CODEX-MEMORY-MARKER/);
   assert.match(options.systemPrompt.append, /Ask the user before you create/);
   // The createFiles gate asked (the test denies) before a brand-new file was written.
   assert.ok(events.some(e => e.type === 'permission-request' && e.toolName === 'Write'));
@@ -314,7 +317,9 @@ test('runtime: defaults keep connectors and artifacts, pass --no-chrome; Codex g
   assert.equal(record.options.env.CLAUDE_CODE_DISABLE_ARTIFACT, undefined);
   assert.deepEqual(record.options.extraArgs, { 'no-chrome': null });
   assert.equal(record.options.hooks.PreToolUse, undefined, 'no create gate while createFiles is on');
-  assert.doesNotMatch(record.options.systemPrompt.append, /SHARED-FROM-CODEX/);
+  // Sharing off: Codex's memories stay out, but ~/.codex/AGENTS.md is still given to Claude as personal instructions (Settings › Memory).
+  assert.doesNotMatch(record.options.systemPrompt.append, /CODEX-MEMORY-MARKER/);
+  assert.equal(record.options.systemPrompt.append.match(/SHARED-FROM-CODEX/g)?.length, 1);
 
   const started = await runtime.run({ agent: 'codex', chatId: 'chat-access-3', prompt: 'slow task', access: 'edit' });
   await until(e => e.type === 'assistant-text-delta' && e.chatId === 'chat-access-3', 'codex streaming');

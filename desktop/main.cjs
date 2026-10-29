@@ -44,6 +44,9 @@ app.whenReady().then(() => {
     registerAgentAuth(handle,win);
     // Settings › Preferences (desktop/app-preferences.cjs): soundChoose/soundRead/soundClear, linksReady/linksSetEnabled, worktreeLineStats.
     require('./app-preferences.cjs').registerAppPreferences(handle,win,{app,dialog,registry:repositories,userData:app.getPath('userData')});
+    // Settings › Usage and Memory (desktop/agent-usage.cjs, desktop/agent-memory.cjs): agentUsage, agentLayerUsage, agentMemory*.
+    require('./agent-usage.cjs').registerAgentUsage(handle,{userData:app.getPath('userData')});
+    require('./agent-memory.cjs').registerAgentMemory(handle,{userData:app.getPath('userData'),shell});
     handle('openExternal',value=>{const url=new URL(value);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('Only HTTP and HTTPS links are supported');return shell.openExternal(url.href);});
     let lastNotification=0;
     handle('notifyTask',options=>{if(!options||typeof options.title!=='string'||typeof options.body!=='string')throw Error('Invalid notification');if(Date.now()-lastNotification<3000||!Notification.isSupported())return false;lastNotification=Date.now();new Notification({title:options.title.slice(0,120),body:options.body.slice(0,300)}).show();return true;});
