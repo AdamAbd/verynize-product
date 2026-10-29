@@ -2,7 +2,17 @@
 
 `window.desktop` is exposed by the sandboxed preload. Every main handler checks the window, main-frame identity, and exact local entry URL. No raw IPC or Node objects reach the renderer.
 
-- `openProject()` uses the native folder picker and returns `{root,name}` or null.
+- `openProject()` uses the native folder picker and returns `{root,name,repoId}` or null; the folder is also added to the repository list. `createProject({name,repository?})` makes a new git project or HTTPS GitHub clone in a picked parent folder and opens it the same way.
+- **Repositories and chat worktrees** (`desktop/repositories.cjs`, the Code workspace). `window.desktop.repositories`:
+  - `list()` → `{repositories:[{id,name,root,addedAt,git}], active:{root,repository,worktree}|null}`. The registry is `userData/repositories.json`; `git` is true for the top level of a repository with a commit.
+  - `addLocal()` (folder picker), `create({name,repository?})` (parent-folder picker; new git project or HTTPS GitHub clone) → repository or null. Re-adding a root returns the same id.
+  - `archive(id)` hides a repository from the list; files, worktrees and chats stay (re-adding restores it).
+  - `createChatWorktree({repoId,chatId})` → `{path,branch,shared}`: `git worktree add -b verynize/<name> <workspaces>/<repo>/<name> HEAD`, where `<workspaces>` is `~/Verynize/workspaces` (`VERYNIZE_WORKSPACES_DIR` overrides it, used by tests). Idempotent per chat. A folder that is not the top level of a committed repository returns `{path:root,branch:null,shared:true}`: the chat works in the folder itself.
+  - `removeChatWorktree({repoId,chatId,force?})` runs `git worktree remove` (refuses uncommitted work unless `force`); the branch is kept.
+  - `activate(root|null)` (main-side *setActiveRoot*) makes `root` the window's active project for `listFiles/readFile/writeFile`, memory, `gitStatus`, the Changes panel, the dev server and shell tools. Only registered repository roots and worktrees recorded by `createChatWorktree` are accepted (compared after realpath); `null` clears it (quick chats). It does not refuse while agents run: each run keeps its own cwd.
+  - `runAgent({root})`: the chat's folder (worktree or repository root), validated the same way; `root:null` runs in the quick-chat scratch folder. Without `root` the active project is used, as before.
+  - Git runs as `execFile` argument arrays with timeouts and `GIT_TERMINAL_PROMPT=0`; mutations are serialized.
+- `devServer.status()`, `devServer.start()`, `devServer.stop()` control the active project's dev server (`desktop/dev-server.cjs`, same process manager as the agent shell tools) for the Code workspace "Start preview" button. These are user actions, so no approval dialog; `start` waits up to 20 s for the URL.
 - `listFiles()` returns up to 2,000 `{path,size}` entries, depth at most eight; excludes symlinks, .git, node_modules, and common build output.
 - `readFile(path)`, `writeFile(path,text)` accept relative, existing-parent paths within the chosen project. .git, traversal, absolute paths, symlinks, binary reads, and files over 2 MB are rejected. File writes are explicit user actions; external concurrent filesystem changes are not locked.
 - `gitStatus()` returns git short branch/status output. `createWorktree('design/name')` creates a new branch and sibling directory; requires a committed Git repository, never overwrites an existing directory or branch. Return `{path,branch}`. Select that directory separately to edit it.
@@ -21,7 +31,7 @@
 - `runAgent({agent,prompt,chatId,model?,effort?,access?,sessionId?,instructions?,context?})` starts one chat turn (see `desktop/agent-runtime.cjs` and `docs/agent-workflows.md`). Claude runs through the Claude Agent SDK on the installed Claude Code; Codex through `codex app-server` JSON-RPC, falling back to `codex exec`. `access` is `ask|edit|auto|full`. Without a project the turn runs in `userData/agent-workdirs/<chatId>`. At most three turns run per window. `respondAgentPermission({requestId,allow})`, `listAgentModels({agent})` and `saveAgentImage({chatId,name,data})` support approval cards, the model picker and pasted images.
 - `onAgentEvent(callback)` returns an unsubscribe function. Events carry `{id, chatId, seq, type}` with types `session`, `status`, `assistant-text-delta`, `assistant-text`, `thinking-delta`, `tool-call`, `tool-input-delta`, `tool-result`, `permission-request`, `permission-resolved`, `usage`, `error` and a final `done {code, stopped, sessionId}`. `cancelAgent(id)` interrupts the turn (SDK `interrupt()` / Codex `turn/interrupt`, process kill for the fallback). Closing the window cancels its turns.
 
-Validated with Context7 `/electron/electron` IPC/security documentation and installed `codex exec --help` / `claude --help`. Tests cover real temporary Git operations and file containment, plus Electron preload, discovery and renderer isolation. No authenticated model request was run during implementation.
+Validated with Context7 `/electron/electron` IPC/security documentation and installed `codex exec --help` / `claude --help`. Tests cover real temporary Git operations and file containment, plus Electron preload, discovery and renderer isolation. `node --test tests/repositories.cjs` covers the registry and worktrees against real temp repositories; `node tests/code-workspace.cjs` drives the Code workspace in Electron. No authenticated model request was run during implementation.
 
 ## Figma import adapter
 
@@ -54,3 +64,14 @@ Bridge-only MCP tools (`integrations/shell-tools.mjs`) let agents drive the user
 - `setBridgeOptions({shellExec:false})` or `VERYNIZE_SHELL_EXEC=0` refuses every exec tool. `confirmExec` replaces the dialog (embedders and tests).
 
 Tests: `node --test tests/dev-server.cjs` (real child processes and a Node http fixture project started through `npm run dev`) and `node tests/mcp-shell.cjs` (Electron plus a real MCP client against the bridge).
+
+## Integrated terminal (code mode)
+
+`desktop/terminal.cjs` (registered per window in `main.cjs`) runs interactive PTY shells with `node-pty` for `web/src/islands/code/terminal-panel.tsx`.
+
+- `terminalCreate({cwd,cols?,rows?})` → `{id,shell,cwd}` starts the user's login shell (`$SHELL -l`, else `/bin/zsh`) with `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=Verynize` and no `ELECTRON_*` variables. `terminalWrite({id,data})` (text of at most 64 KB; the panel splits pastes), `terminalResize({id,cols,rows})` (2–1000 × 1–500) and `terminalKill({id})` (SIGHUP to the shell's process group, SIGKILL after 1.5 s).
+- `onTerminalData(cb)` receives `{id,data}` batched every 8 ms in pieces of at most 64 KB; `onTerminalExit(cb)` receives `{id,exitCode,signal}` once, after the last data. Both return an unsubscribe function.
+- `cwd` must be an existing absolute directory (realpath-compared): the open project or a folder inside it, one of its `git worktree list` entries, or a folder under `~/Verynize/workspaces/`. The repository registry can replace that policy with `require('./terminal.cjs').setTerminalCwdValidator((realCwd, {projectRoot, defaultAllowed, win}) => boolean)`; its answer is final (return `defaultAllowed` to fall back), `null` removes it.
+- At most eight terminals per window. Closing the window kills its terminals; `will-quit` and process exit kill all of them (SIGHUP, 300 ms grace, SIGKILL).
+
+`node tests/code-terminal.cjs` covers the API against real PTYs (guard, limits, cap, cleanup on quit, no orphan processes) and renders the panel component from a temporary test bundle.

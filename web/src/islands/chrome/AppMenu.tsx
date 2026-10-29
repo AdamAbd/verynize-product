@@ -46,7 +46,7 @@ const GROUPS: { label?: string; items: Command[] }[] = [
       { id: "export", label: "Export HTML", icon: Download },
       { id: "preview", label: "Preview", icon: Play },
       { id: "show-live-preview", label: "Running app", icon: MonitorPlay },
-      { id: "project-toggle", label: "Project workspace", icon: FolderGit2 },
+      { id: "project-toggle", label: "Code workspace", icon: FolderGit2 },
       { id: "templates-open", label: "Templates", icon: LayoutGrid },
     ],
   },
@@ -72,6 +72,15 @@ const GROUPS: { label?: string; items: Command[] }[] = [
   },
   { items: [{ id: "shell-settings", label: "Settings", icon: Settings, shortcut: "⌘," }] },
 ];
+
+// Former project-dialog actions (web/desktop-panel.js window.agentWorkspace.actions), listed under File.
+type WorkspaceActions = Partial<Record<"saveDesignAs" | "captureApp" | "exportPDF", () => void>>;
+const FILE_ACTIONS: { id: string; action: keyof WorkspaceActions; label: string; icon: ComponentType<{ className?: string }> }[] = [
+  { id: "design-save-as", action: "saveDesignAs", label: "Save design as…", icon: Save },
+  { id: "project-capture", action: "captureApp", label: "Capture app to canvas", icon: MonitorPlay },
+  { id: "project-pdf", action: "exportPDF", label: "Export PDF", icon: Download },
+];
+const workspaceActions = () => (window.agentWorkspace as unknown as { actions?: WorkspaceActions } | undefined)?.actions;
 
 const exists = (id: string) => !!(document.getElementById(`legacy-${id}`) || document.getElementById(id));
 
@@ -210,6 +219,14 @@ export function AppMenu() {
                     </div>
                   );
                 })}
+                {group.label === "File" &&
+                  workspaceActions() &&
+                  FILE_ACTIONS.map(({ id, action, label, icon: Icon }) => (
+                    <MenuItem key={id} id={id} onSelect={() => workspaceActions()?.[action]?.()}>
+                      <Icon />
+                      <span className="truncate">{label}</span>
+                    </MenuItem>
+                  ))}
               </Section>
             );
           })}

@@ -97,6 +97,11 @@ body.bd-chrome.agent-chat-open #agent-chat-dock {
   border-right: 1px solid var(--edge);
 }
 
+/* The Files home (legacy #file-home, fixed, z-index 45) starts right of the open chat dock instead of covering it. */
+body.bd-chrome.agent-chat-open #file-home {
+  left: var(--spacing-chat) !important;
+}
+
 /* ---------- Zoom menu: `#zoom-reset` text is the live percentage (contract); show a label instead ---------- */
 [data-zoom-reset]::before {
   content: "Zoom to 100%";

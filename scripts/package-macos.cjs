@@ -18,9 +18,15 @@ const {execFileSync}=require('node:child_process');
  // node_modules travel with their parent package; optional platform packages missing here are skipped.
  const lock=JSON.parse(await fs.readFile(path.join(root,'package-lock.json'),'utf8'));
  const runtime=Object.entries(lock.packages||{}).filter(([key,meta])=>/^node_modules\/(@[^/]+\/)?[^/]+$/.test(key)&&!meta.dev&&!meta.devOptional&&!meta.link).map(([key])=>key);
- for(const required of ['node_modules/tailwindcss','node_modules/@iconify/utils','node_modules/@iconify-json/lucide','node_modules/@fontsource/inter','node_modules/@modelcontextprotocol/sdk','node_modules/zod'])if(!runtime.includes(required))throw Error(`${required} must be a production dependency`);
+ for(const required of ['node_modules/tailwindcss','node_modules/@iconify/utils','node_modules/@iconify-json/lucide','node_modules/@fontsource/inter','node_modules/@modelcontextprotocol/sdk','node_modules/zod','node_modules/node-pty'])if(!runtime.includes(required))throw Error(`${required} must be a production dependency`);
  let shipped=0;
- for(const key of runtime){const from=path.join(root,key);try{await fs.access(from)}catch{continue}await fs.cp(from,path.join(app,key),{recursive:true,verbatimSymlinks:true,filter:source=>!/\/node_modules\/\.bin(\/|$)/.test(source)});shipped++;}
+ // node-pty (integrated terminal, desktop/terminal.cjs) is a native N-API module loaded from its macOS prebuilds.
+ // The app ships unpacked in Resources/app (no asar), so no asar unpack is needed; other platforms' binaries, the
+ // Windows conpty payload and the C++ sources are left out, and spawn-helper must stay executable.
+ const nodePtyExtra=/\/node_modules\/node-pty\/(prebuilds\/(?!darwin-)[^/]+|third_party|src|deps|scripts|binding\.gyp)(\/|$)/;
+ for(const key of runtime){const from=path.join(root,key);try{await fs.access(from)}catch{continue}await fs.cp(from,path.join(app,key),{recursive:true,verbatimSymlinks:true,filter:source=>!/\/node_modules\/\.bin(\/|$)/.test(source)&&!nodePtyExtra.test(source)});shipped++;}
+ for(const arch of ['arm64','x64']){const helper=path.join(app,'node_modules/node-pty/prebuilds',`darwin-${arch}`,'spawn-helper');try{await fs.chmod(helper,0o755)}catch(e){if(e.code!=='ENOENT')throw e;}}
+ try{await fs.access(path.join(app,'node_modules/node-pty/prebuilds',`darwin-${process.arch}`,'pty.node'))}catch{throw Error(`node-pty has no darwin-${process.arch} prebuild; the integrated terminal would not load`)}
  console.error(`Shipped ${shipped} runtime packages`);
  await fs.writeFile(path.join(app,'package.json'),JSON.stringify({name:'verynize',productName:'Verynize',version,main:'desktop/main.cjs',type:'module'}));
  const plist=path.join(target,'Contents/Info.plist');

@@ -159,4 +159,15 @@ function createShell({ activeEditor, request, options = () => ({}) }) {
   return { call, parseAccess };
 }
 
-module.exports = { registerShellWindow, createShell, parseAccess, processManager };
+/**
+ * Renderer controls for the dev server of the open project (the Code workspace "Start preview" button).
+ * These are explicit user actions, so no approval dialog: devServerStatus(), devServerStart(), devServerStop().
+ */
+function registerDevServerIPC(handle, { getProject }) {
+  const root = () => { const project = getProject(); if (!project?.root) throw new Error('Open a repository first'); return project.root; };
+  handle('devServerStatus', () => { const project = getProject(); return project?.root ? processManager().status(project.root) : { state: 'stopped', root: null }; });
+  handle('devServerStart', () => processManager().start(root(), { waitMs: 20000 }));
+  handle('devServerStop', () => processManager().stop(root()));
+}
+
+module.exports = { registerShellWindow, registerDevServerIPC, createShell, parseAccess, processManager };

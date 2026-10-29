@@ -1,5 +1,5 @@
 // Island entry: chat. Owned by the "chat" workstream (see web/src/islands/README.md).
-// Renders inside `.project-agent` (desktop-panel.js moves that section between #agent-chat-dock and #project-dialog)
+// Renders inside `.project-agent` (desktop-panel.js moves that section between #agent-chat-dock and the Code workspace column)
 // and portals the dock header into #agent-chat-dock. Chat state stays in desktop-panel.js (window.agentWorkspace).
 import { useEffect } from "react";
 import { createPortal } from "react-dom";

@@ -1,0 +1,33 @@
+/* Code island: plain CSS for DOM the island does not render itself (canvas grid, chat dock, the chat island's
+   transcript/composer while hosted in the code column) and drag regions. Tokens only (see ../README.md). */
+
+/* While Code mode is on, the design editor (and the Files home, z-index 45, which would otherwise cover the
+   z-30 workspace) stays mounted but out of sight and out of the tab order. */
+body.code-mode > main,
+body.code-mode #agent-chat-dock,
+body.code-mode #file-home {
+  visibility: hidden !important;
+}
+
+/* Center column: Wonder keeps the transcript and composer in a 770px column, centered. */
+#code-chat-host > .project-agent.bd-chat-section {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--settings);
+}
+#code-chat-host {
+  --chat-column: var(--spacing-code-column);
+}
+#code-chat-host #bd-chat-root > :not(.chat-scroll) {
+  width: min(100%, calc(var(--spacing-code-column) + 2px));
+  align-self: center;
+}
+
+#code-editor {
+  tab-size: 2;
+}

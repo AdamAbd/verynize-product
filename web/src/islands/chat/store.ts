@@ -80,7 +80,24 @@ export type ChatState = {
   draft?: string;
   /** Empty-state suggestions. */
   suggestions?: { title: string; prompt: string }[];
+  /** Folder the current chat works in (its worktree, else the repository root); null for quick chats. */
+  chatRoot?: string | null;
+  /** Root the main process confirmed as active (files, git, dev server); undefined while switching. */
+  activeRoot?: string | null;
+  /** Repository id and worktree branch of the current chat (Code workspace). */
+  repoId?: string | null;
+  branch?: string | null;
+  codeMode?: boolean;
+  /** Latest status line from the workspace and when it was set. */
+  status?: string;
+  statusAt?: number;
+  /** Project keys with a run in progress. */
+  busyKeys?: string[];
 };
+export type ChatSummary = { id: string; title: string; created: number; count: number; branch?: string; busy?: boolean };
+export type WorkspaceActions = Partial<
+  Record<"openDesign" | "saveDesign" | "saveDesignAs" | "gitStatus" | "createWorktree" | "livePreview" | "captureApp" | "exportPDF", () => void>
+>;
 export type AgentModel = { id: string; name: string; description?: string };
 
 type Workspace = {
@@ -126,6 +143,19 @@ type Workspace = {
   getQueue?(): QueuedTask[];
   /** Run id of the current conversation's active run (tests/debugging). */
   activeRunId?(): string | null;
+  // --- Code workspace contract (web/desktop-panel.js; driven by web/src/islands/code) ---
+  setChatFactory?(fn: (() => unknown) | null): void;
+  createChat?(extra: { id?: string; repoId?: string; worktree?: { path: string; branch: string | null } | null }): void;
+  switchProject?(key: string, name: string, options?: { select?: string; create?: boolean }): void;
+  chatSummaries?(key: string): ChatSummary[];
+  removeChat?(id: string): boolean;
+  setOpenFile?(file: { path: string; text: string } | null): void;
+  attachCodeHost?(el: HTMLElement | null): void;
+  setCodeMode?(on: boolean): void;
+  setStatus?(text: string): void;
+  /** Chat selected when the app last closed: {key, chatId}. */
+  initialSelection?(): { key?: string; chatId?: string } | null;
+  actions?: WorkspaceActions;
 };
 
 export const workspace = () => window.agentWorkspace as unknown as Workspace | undefined;

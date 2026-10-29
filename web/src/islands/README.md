@@ -15,8 +15,9 @@ measure with Python/PIL — divide pixel coordinates by 2). `design-qa.md` lists
 | sidebar | `sidebar.tsx` | contents of `aside#layer-panel`: file header (logo/app-menu trigger is rendered by sidebar but must call the chrome menu — see "Cross-island"), Pages list, Layers tree (rows, lock/hide toggles, expand carets, rename, search) | 11, 12, 84–88, extra/86 |
 | inspector | `inspector.tsx` | contents of `aside#properties`: header (panel toggle, presence avatar, Share), Variables (list, search, create menu), Properties/inspector sections (Position, Layout, Appearance, Typography, Fill, Border, Shadow, Mask, Export, layer actions), color picker, font family/weight pickers, shader settings | 22, 23, 25–27, 41–43, 45–46, 55–56 |
 | home | `home.tsx` | `#file-home`: workspace switcher (07), filters, grid/list, file cards + actions (rename 18, duplicate, move, archive/restore), new file/folder | 03–07, 17, 18, extra/87 |
-| chat | `chat.tsx` | `#agent-chat-dock` and the agent section of `#project-dialog`: transcript, composer, model picker (30), access (31), attach menu (32), repository switcher (33), quick chats (34–35), running state (36–37, 51) | 29–37, 51, 80–83 |
+| chat | `chat.tsx` | `#agent-chat-dock` and the Code workspace center column (`#code-chat-host`): transcript, composer, model picker (30), access (31), attach menu (32), repository switcher (33), quick chats (34–35), running state (36–37, 51) | 29–37, 51, 80–83 |
 | settings | `settings.tsx` | `#settings-screen` (all pages) and the remaining dialogs: share/cloud (13), export flow (45–50 save/success), templates, saved views, generate illustration, Figma import, text prompt (`#text-prompt`), preview modal (`#modal`) | 13, 45–50, 61–79 |
+| code | `code.tsx` | `#code-workspace` (body class `code-mode`): repositories/chats sidebar, breadcrumb in the title bar slot `#bd-code-titlebar`, toolbar (Start preview, panel toggle), file tree + editor, terminal panel (`code/terminal-panel.tsx`, terminal workstream), hosting the chat island's `.project-agent` section in the center column | code mode, 80, 81, 33–35, extra/38 |
 
 Shared files are owned by the integrator — **do not edit**: `web/src/lib/*`, `web/src/components/ui/*` (existing files),
 `web/src/styles/globals.css` (except your own `<area>-tokens` block at the bottom), `web/index.html`, `vite*.config.ts`,
@@ -49,6 +50,12 @@ The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; isla
   trigger button must have class `app-menu-trigger` (tests click `.app-menu-trigger:visible` then a command id such as
   `#rectangle`, `#undo`, `#save-project`, `#shell-settings`, `#rename-page`, `#import-tokens`, `#icon-kind`).
   Commands must stay reachable by those ids inside the opened menu.
+- **Code mode**: `body.code-mode` (toggle with `window.agentWorkspace.setCodeMode(on)`; `openProject()` enters it, `#project-toggle`
+  toggles it). Tests use `#code-add-repository` then `#project-open` / `#project-new` / `#project-clone`, `#code-new-chat`,
+  `#code-new-quick-chat`, `[data-repository=<name>]`, `[data-chat-id=<id>]`, `#code-file-tree[data-root=<path>]
+  [data-path=<file>]`, `#code-file-filter`, `#code-editor`, `#code-editor-save`, `#code-start-preview`, `#code-panel-toggle`,
+  and `window.agentWorkspace.getState()` (`chatRoot`, `activeRoot`, `branch`). `#project-name` and `#project-status` stay
+  as hidden text hooks. `window.codeWorkspace` exposes repository/chat actions to other islands.
 - **Zoom menu**: tests click `#zoom-menu-button` then `#zoom-in`, `#zoom-out`, `#zoom-fit`, `#zoom-reset`, `#snap`,
   `#saved-views-open` (chrome island). `#zoom-reset` text must keep the zoom percentage (tests parse it).
 - **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask]`, `[name=layout]`,

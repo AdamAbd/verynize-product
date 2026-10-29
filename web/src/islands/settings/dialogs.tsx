@@ -13,7 +13,6 @@ const DIALOGS: Record<string, { title?: string; label?: string; close?: string }
   "figma-dialog": { label: "Import from Figma", close: "figma-close" },
   "text-prompt": { title: "text-prompt-label" },
   modal: { title: "modal-title", close: "close" },
-  "project-dialog": { label: "Project workspace", close: "project-close" },
 };
 
 function labelDialogs() {
@@ -43,7 +42,7 @@ function focusFirstField(dialog: HTMLDialogElement) {
   const field = dialog.querySelector<HTMLElement>(
     "input:not([type=hidden]):not([type=file]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [data-template]",
   );
-  if (field && dialog.id !== "project-dialog" && dialog.id !== "modal") field.focus();
+  if (field && dialog.id !== "modal") field.focus();
 }
 
 export function DialogEnhancer() {

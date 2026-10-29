@@ -16,7 +16,7 @@
  const actions={
   saveModels:values=>{window.agentWorkspace?.setDefaults(values);status('Default model saved');},
   saveMemory:instructions=>{window.agentWorkspace?.setDefaults({instructions});status('Personal instructions saved');},
-  openMemory:()=>{close();window.agentWorkspace?.openProject();document.getElementById('project-memory')?.click();},
+  openMemory:()=>{close();window.agentWorkspace?.openProject();window.codeWorkspace?.openMemory?.();},
   saveCloud:raw=>{try{const value=String(raw).trim();if(value&&!['http:','https:'].includes(new URL(value).protocol))throw Error('Enter an HTTP or HTTPS origin');window.appPreferences.set({cloudServer:value});const server=document.getElementById('cloud-server');if(server)server.value=value;status('Connection saved');return true;}catch(e){status(e.message);return false;}},
   openFigma:()=>{close();document.getElementById('figma-import')?.click();},
   copyMcp:async()=>{try{await navigator.clipboard.writeText('npm run mcp -- --root /absolute/design-folder');status('Command copied; replace the folder path');}catch(e){status(e.message)}},

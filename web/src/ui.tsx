@@ -6,3 +6,4 @@ import "./islands/inspector";
 import "./islands/home";
 import "./islands/chat";
 import "./islands/settings";
+import "./islands/code";

@@ -1,0 +1,15 @@
+/* Terminal panel: plain CSS for xterm.js DOM the panel cannot style with utilities (see ../../README.md). Tokens only. */
+
+/* The island reset gives [data-bd] text Inter's stylistic sets; terminal cells use the monospace font as designed. */
+[data-slot="terminal-view"] .xterm {
+  height: 100%;
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+}
+[data-slot="terminal-view"] .xterm .xterm-viewport {
+  background-color: var(--terminal-background);
+}
+[data-slot="terminal-view"] .xterm:focus-visible,
+[data-slot="terminal-view"] .xterm .xterm-helper-textarea:focus-visible {
+  outline: none;
+}
