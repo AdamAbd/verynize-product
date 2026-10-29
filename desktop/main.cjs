@@ -75,6 +75,9 @@ app.whenReady().then(() => {
     primaryRuntime=agentRuntime;win.on('closed',()=>{if(primaryRuntime===agentRuntime)primaryRuntime=null;});
     // Settings › Agents (desktop/agent-tools.cjs): agentProviderAccounts, agentMcp{List,Add,Remove,Login}, agentAccess{Get,Set}
     require('./agent-tools.cjs').registerAgentTools(handle,win,{userData:app.getPath('userData'),getRuntime:()=>agentRuntime});
+    // Chat composer "+" menu and slash commands: listAgentCommands (desktop/agent-commands.cjs); designReferences*, worktreeAddFiles, pickWorkingDirectory (desktop/chat-attachments.cjs).
+    require('./agent-commands.cjs').registerAgentCommands(handle,{getRuntime:()=>agentRuntime});
+    require('./chat-attachments.cjs').registerChatAttachments(handle,win,{userData:app.getPath('userData'),dialog,resolveRoot:root=>repositories.resolveRoot(root)});
     // --- agent shell (desktop/agent-shell.cjs): open project for the dev server / terminal MCP tools ---
     require('./agent-shell.cjs').registerShellWindow(win,{getProject:()=>project});
     require('./agent-shell.cjs').registerDevServerIPC(handle,{getProject:()=>project}); // devServerStatus/Start/Stop for the Start preview button
