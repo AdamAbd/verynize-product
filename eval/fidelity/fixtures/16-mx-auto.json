@@ -1,0 +1,7 @@
+{ "title": "max-w + mx-auto centers a container",
+  "covers": ["margin", "max-width"],
+  "expect": [
+    { "rendered": "Container", "relTo": "Viewport", "eq": { "x": 280, "y": 40 }, "tol": 1 },
+    { "rendered": "Container", "prop": "w", "eq": 640, "tol": 1 },
+    { "noWarnAbout": ["mx-auto", "max-w-[640px]"] }
+  ] }

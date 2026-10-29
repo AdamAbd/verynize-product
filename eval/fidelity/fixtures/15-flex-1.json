@@ -1,0 +1,8 @@
+{ "title": "flex-1 fills the remaining row width",
+  "covers": ["sizing", "flex-1"],
+  "expect": [
+    { "node": "Main", "prop": "sizing", "eq": { "w": "fill" } },
+    { "rendered": "Main", "prop": "w", "eq": 936, "tol": 1 },
+    { "rendered": "Main", "prop": "h", "eq": 400, "tol": 1 },
+    { "noWarnAbout": ["flex-1"] }
+  ] }

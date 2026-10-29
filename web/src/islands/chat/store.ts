@@ -1,0 +1,176 @@
+// React view of the chat state owned by web/desktop-panel.js (window.agentWorkspace).
+import { useEffect, useState, useSyncExternalStore } from "react";
+
+export type ChatPart = {
+  kind: "text" | "thinking" | "tool" | "permission" | "error" | string;
+  text?: string;
+  at?: number;
+  end?: number;
+  // tool
+  id?: string;
+  name?: string;
+  title?: string;
+  input?: unknown;
+  partialInput?: string;
+  hasInput?: boolean;
+  result?: string;
+  state?: string;
+  open?: boolean;
+  // permission
+  requestId?: string;
+  toolName?: string;
+  /** Nested subagent tool calls: id of the parent tool call. */
+  parentToolCallId?: string;
+  // question (kind "question"): structured ask_user request from the agent
+  questions?: ChatQuestion[];
+  /** Answers once submitted; absent while pending. */
+  answers?: Record<string, string>;
+};
+export type ChatQuestion = { id: string; question: string; header?: string; options?: { label: string; description?: string }[]; multiSelect?: boolean };
+/** A canvas element referenced from the composer (@mention or selection chip). */
+export type ChatMention = { id: string; label: string; pageId: string; type?: string; /** Agent-facing short id ("bok" or "bok.tem"). */ shortId?: string };
+export type QueuedTask = { id: string; text: string; images?: string[]; mentions?: ChatMention[]; at: number };
+export type ChatUsage = { inputTokens?: number; outputTokens?: number; contextWindow?: number; costUsd?: number; rateLimit?: { label: string; usedPercent: number; resetsAt?: number }[] };
+export type ChatMessage = {
+  role: "user" | "assistant";
+  text: string;
+  agent?: string;
+  model?: string;
+  at?: number;
+  end?: number;
+  state?: string;
+  images?: string[];
+  /** Canvas document sent as context with a user message (shown as a chip, 37). */
+  canvas?: string;
+  parts?: ChatPart[];
+  mentions?: ChatMention[];
+  /** Document revision snapshot id taken before this user turn (for rewind). */
+  checkpoint?: string;
+  usage?: ChatUsage;
+  /** User message injected into a running turn (steer). */
+  steered?: boolean;
+};
+export type ChatDefaults = { agent: string; model: string; access: string; effort: string; instructions: string };
+export type ChatState = {
+  version: number;
+  projectKey: string;
+  projectName: string;
+  busy: boolean;
+  queued: number;
+  session: string;
+  conversationId: string | null;
+  conversations: { id: string; title: string; created: number; count: number; /** A run is in progress in this chat. */ busy?: boolean }[];
+  messages: ChatMessage[];
+  /** kind: image | file | folder | figma | chat | text. */
+  attachments: { kind: string; name: string; url?: string }[];
+  defaults: ChatDefaults;
+  /** Follow-up tasks waiting for the current run (editable/reorderable). */
+  queue?: QueuedTask[];
+  /** Conversation ids with a run in progress (parallel chats). */
+  busyChats?: string[];
+  /** Latest usage of the current conversation. */
+  usage?: ChatUsage;
+  /** Composer mentions pending for the next message (selection chips + @mentions). */
+  mentions?: ChatMention[];
+  /** Saved composer draft per conversation. */
+  draft?: string;
+  /** Empty-state suggestions. */
+  suggestions?: { title: string; prompt: string }[];
+};
+export type AgentModel = { id: string; name: string; description?: string };
+
+type Workspace = {
+  subscribe(fn: () => void): () => void;
+  getState(): ChatState;
+  openChat(): void;
+  openProject(): void;
+  closeChat(): void;
+  getDefaults(): ChatDefaults;
+  setDefaults(value: Partial<ChatDefaults>): void;
+  newChat(): void;
+  selectChat(id: string): boolean;
+  forkAt(index: number): void;
+  answerPermission(messageIndex: number, partIndex: number, allow: boolean, always?: boolean): void;
+  setPartOpen(messageIndex: number, partIndex: number, open: boolean): void;
+  removeAttachment(index: number): void;
+  attachImages?(files: File[]): void;
+  listModels?(agent: string): Promise<AgentModel[]>;
+  // --- chat parity contract (implemented in web/desktop-panel.js) ---
+  answerQuestion?(messageIndex: number, partIndex: number, answers: Record<string, string>): void;
+  steer?(text: string): void;
+  editQueued?(id: string, text: string): void;
+  moveQueued?(id: string, delta: -1 | 1): void;
+  removeQueued?(id: string): void;
+  sendQueuedNow?(id: string): void;
+  /** Opens betterdesign:// links (artboards/elements) on the canvas; returns false if unhandled. */
+  openLink?(url: string): boolean;
+  /** Search canvas elements for the @ popover. */
+  searchElements?(query: string): ChatMention[];
+  addMention?(mention: ChatMention): void;
+  removeMention?(id: string): void;
+  rewindTo?(messageIndex: number): void;
+  retry?(messageIndex: number): void;
+  editMessage?(messageIndex: number, text: string): void;
+  copyMessage?(messageIndex: number): void;
+  /** No argument: open the file picker; `{folder:true}`: attach a folder tree; File[]: attach dropped files (images go to attachImages). */
+  attachFiles?(input?: File[] | FileList | { folder?: boolean }): void;
+  attachFigma?(url: string): void;
+  linkChat?(conversationId: string): void;
+  setDraft?(text: string): void;
+  getQueue?(): QueuedTask[];
+  /** Run id of the current conversation's active run (tests/debugging). */
+  activeRunId?(): string | null;
+};
+
+export const workspace = () => window.agentWorkspace as unknown as Workspace | undefined;
+
+const noop = () => () => {};
+const subscribe = (fn: () => void) => workspace()?.subscribe?.(fn) ?? noop();
+const getSnapshot = () => workspace()?.getState?.() ?? null;
+
+/** Chat state; null when desktop-panel.js is unavailable. */
+export function useChatState(): ChatState | null {
+  return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+/** Current time, ticking every second while `active` (for "Wondering for 3s"). */
+export function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  return active ? now : 0;
+}
+
+const modelCache = new Map<string, Promise<AgentModel[]>>();
+/** Models a provider reports (Claude SDK supportedModels / Codex model/list), loaded when `enabled`. */
+export function useModels(agent: string, enabled: boolean): AgentModel[] {
+  const [models, setModels] = useState<AgentModel[]>([]);
+  useEffect(() => {
+    const list = workspace()?.listModels;
+    if (!enabled || !list) return;
+    let live = true;
+    let request = modelCache.get(agent);
+    if (!request) {
+      request = list(agent).catch(() => {
+        modelCache.delete(agent);
+        return [];
+      });
+      modelCache.set(agent, request);
+    }
+    request.then((value) => live && setModels(value.filter((m) => m.id !== "default")));
+    return () => {
+      live = false;
+    };
+  }, [agent, enabled]);
+  return models;
+}
+
+/** Whether a provider was detected (desktop-panel disables the `<option>` of missing ones). */
+export function agentAvailable(agent: string): boolean {
+  const select = document.getElementById("project-agent") as HTMLSelectElement | null;
+  const option = select ? [...select.options].find((o) => o.value === agent) : null;
+  return option ? !option.disabled : true;
+}

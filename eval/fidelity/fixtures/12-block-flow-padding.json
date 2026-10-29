@@ -1,0 +1,8 @@
+{ "title": "plain block div keeps padding and stacks children in flow",
+  "covers": ["block-flow", "padding", "margin"],
+  "expect": [
+    { "node": "Box", "prop": "padding", "eq": { "top": 32, "right": 32, "bottom": 32, "left": 32 } },
+    { "rendered": "Heading", "relTo": "Box", "eq": { "x": 32, "y": 32 }, "tol": 1 },
+    { "rendered": "Para", "below": "Heading", "gap": 8, "tol": 1.5 },
+    { "rendered": "Para", "inside": "Box", "inset": 32, "tol": 1 }
+  ] }

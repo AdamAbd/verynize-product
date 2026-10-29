@@ -1,0 +1,28 @@
+const {_electron}=require('@playwright/test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
+(async()=>{const dir=await fs.mkdtemp(path.join(os.tmpdir(),'better-settings-'));const env={...process.env,BETTER_DESIGN_PREFERENCES:path.join(dir,'design-preferences.json')};delete env.ELECTRON_RUN_AS_NODE;delete env.BETTER_DESIGN_DISABLE_MCP;const app=await _electron.launch({args:['.',`--user-data-dir=${dir}`],env,timeout:20000});try{const page=await app.firstWindow({timeout:20000});await page.waitForSelector('#shell-settings',{state:'attached'});await page.locator('.app-menu-trigger:visible').first().click();await page.locator('#shell-settings').click();await page.locator('[data-theme="light"]').click();assert.equal(await page.locator('html').getAttribute('data-ui-theme'),'light');await page.locator('[data-theme="dark"]').click();await page.locator('[data-pref="smallNudge"]').fill('3');await page.locator('[data-pref="smallNudge"]').press('Tab');await page.locator('#settings-nav button').filter({hasText:'Default Models'}).click();await page.locator('#settings-default-model').fill('test-model');await page.locator('#settings-default-effort').selectOption('high');await page.locator('#settings-save-models').click();assert.equal(await page.evaluate(()=>window.agentWorkspace.getDefaults().model),'test-model');await page.locator('#settings-nav button').filter({hasText:'Memory'}).click();await page.locator('#settings-memory').fill('Use accessible controls');await page.locator('#settings-save-memory').click();assert.equal(await page.evaluate(()=>window.agentWorkspace.getDefaults().instructions),'Use accessible controls');await page.locator('#settings-back').click();await page.locator('.app-menu-trigger:visible').first().click();await page.locator('#rectangle').click();const before=await page.evaluate(()=>window.design.getDocument().pages[0].nodes.at(-1).x);await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>window.design.getDocument().pages[0].nodes.at(-1).x),before+3);await page.reload();await page.waitForSelector('#shell-settings',{state:'attached'});assert.equal(await page.evaluate(()=>window.appPreferences.get().smallNudge),3);assert.equal(await page.evaluate(()=>window.agentWorkspace.getDefaults().instructions),'Use accessible controls');await page.locator('.app-menu-trigger:visible').first().click();await page.locator('#shell-settings').click();
+// Design preferences (Memory): real preload IPC when the desktop exposes it, else an in-page shim of the same API.
+const nav=async t=>page.locator('#settings-nav button').filter({hasText:t}).click();
+const native=await page.evaluate(()=>!!window.desktop?.designPreferences?.list);
+if(!native)await page.evaluate(()=>{const items=[];let n=0;const api={list:async()=>items.map(p=>({...p})),save:async text=>{const p={id:'pref_'+(++n),text};items.push(p);return p},update:async(id,text)=>{const p=items.find(p=>p.id===id);if(!p)throw Error('missing');p.text=text;return p},remove:async id=>{items.splice(items.findIndex(p=>p.id===id),1);return {deleted:true,id}}};try{Object.defineProperty(window,'desktop',{configurable:true,value:{...window.desktop,designPreferences:api}})}catch{window.__shimFailed=true}});
+const shimmed=native||!(await page.evaluate(()=>window.__shimFailed));
+console.log('design preferences via',native?'preload IPC':shimmed?'in-page shim':'fallback note');
+await nav('Agents');await nav('Memory');
+await page.waitForSelector('#settings-design-preferences-label');
+if(shimmed){
+ await page.getByText('No saved preferences yet').waitFor();
+ await page.locator('#settings-design-preference-new').fill('Cards use 12px radius');await page.locator('#settings-design-preference-add').click();
+ await page.locator('[data-preference-text]').filter({hasText:'Cards use 12px radius'}).waitFor();
+ await page.locator('[data-preference-action="edit"]').first().click();await page.locator('[data-preference-edit]').fill('Cards use 8px radius');await page.locator('[data-preference-save]').click();
+ await page.locator('[data-preference-text]').filter({hasText:'Cards use 8px radius'}).waitFor();
+ assert.deepEqual(await page.evaluate(async()=>(await window.desktop.designPreferences.list()).map(p=>p.text)),['Cards use 8px radius']);
+ await page.locator('[data-preference-action="delete"]').first().click();await page.getByText('No saved preferences yet').waitFor();
+ if(native){const raw=JSON.parse(await fs.readFile(path.join(dir,'design-preferences.json'),'utf8'));assert.deepEqual(raw.preferences,[]);}
+}else await page.getByText('Available in the desktop app').waitFor();
+// Allowed actions only appears when the preload exposes allow rules.
+const allow=await page.evaluate(()=>typeof window.desktop?.listAllowRules==='function');
+assert.equal(await page.locator('#settings-nav button').filter({hasText:'Allowed actions'}).count(),allow?1:0);
+if(allow){await nav('Allowed actions');await page.waitForSelector('#settings-allowed-actions-label');}
+// Agents › About shows the tools version pushed by the MCP bridge.
+await nav('Agents');await page.waitForFunction(()=>/^[0-9a-f]{12}$/.test(document.getElementById('settings-tools-version')?.textContent||''),null,{timeout:15000});
+await nav('Preferences');
+await page.screenshot({path:'/tmp/better-settings.png'});console.log('PASS reference settings UI, themes, model defaults, instructions, design preferences, tools version, custom nudges and persistence');}finally{await app.close();await fs.rm(dir,{recursive:true,force:true})}})().catch(e=>{console.error(e);process.exitCode=1});

@@ -1,0 +1,5 @@
+Eksplorasi Wonder terpasang, 28 Oktober 2026. 56 screenshot utama. Klik gambar untuk resolusi asli. Screenshot tambahan/loading/percobaan klik disimpan di extra/. 
+
+Alur dicoba: Files grid/list dan filter; workspace; Welcome; membuat dan menamai Wonder Exploration; frame, warna, teks 32 px; panel model dan akses AI; quick chat baru dan permintaan edit; variabel warna; ekspor PNG 2x; shader Mesh Flow dan Glass Ribbon; halaman kedua; pengaturan akun, preferensi, tema terang (dikembalikan ke System), agents, usage, model, koneksi, memory, billing, members; dialog membuat repository (dibatalkan).
+
+Hasil AI: dua variabel brand/primary dan brand/on-primary berhasil ditambahkan; tombol tidak dibuat karena batas 3.000 layer Free telah tercapai. Ekspor PNG berhasil; wonder-exploration.png adalah ekspor sebelum shader ditambahkan. Desain terakhir terlihat pada 89-final-design.png. Login awal tidak dicoba ulang karena akun sudah masuk. Publish, pembayaran, mengundang orang, dan menghubungkan akun baru tidak dijalankan. Ini eksplorasi luas fitur yang dapat diakses, bukan klaim semua fitur berhasil diuji.

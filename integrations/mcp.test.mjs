@@ -1,0 +1,297 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { DesignStore } from './design-store.mjs';
+import { TOOLS_VERSION, INSTRUCTIONS, TOOL_NAMES, createDesignServer, createStoreBackend, runTool, sessionFor } from './design-tools.mjs';
+import { createPreferenceStore } from './preferences.mjs';
+import { connectBridge, readBridgeFile, startHttpServer, writeBridgeFile } from './mcp-http.mjs';
+
+const EXPECTED_TOOLS = ['get_design_context', 'get_artboards', 'get_element_tree', 'get_element_code', 'find_elements', 'take_screenshot', 'create_artboard', 'update_elements', 'duplicate_elements', 'delete_elements', 'rename_elements', 'finish_artboard', 'get_design_guidelines', 'get_skills', 'get_icons', 'search_images', 'apply_style_tokens', 'get_design_tokens', 'create_design_tokens', 'update_design_tokens', 'delete_design_tokens', 'list_documents', 'open_document', 'create_document', 'create_page', 'rename_page', 'read_document', 'apply_operations', 'save_design_preference', 'list_design_preferences', 'update_design_preference', 'delete_design_preference', 'ask_agent', 'export_document'];
+const SERVER = path.resolve('integrations/mcp-server.mjs');
+
+async function tempDir(t, prefix) { const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix)); t.after(() => fs.rm(dir, { recursive: true, force: true })); return dir; }
+async function stdioClient(t, args, env = {}) {
+  const client = new Client({ name: 'test', version: '1' });
+  // BETTER_DESIGN_MCP_FILE points at a missing file so a real running app is never contacted.
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [SERVER, ...args], stderr: 'pipe', env: { ...process.env, BETTER_DESIGN_MCP_FILE: path.join(os.tmpdir(), 'better-design-no-bridge.json'), BETTER_DESIGN_PREFERENCES: path.join(os.tmpdir(), `better-design-test-prefs-${process.pid}.json`), ...env } }));
+  t.after(() => client.close());
+  return client;
+}
+const json = result => { assert.ok(!result.isError, result.content?.[0]?.text); return JSON.parse(result.content[0].text); };
+const call = (client, name, args = {}) => client.callTool({ name, arguments: args });
+
+test('real stdio MCP session (store fallback) exposes the full tool set and edits files', async t => {
+  const root = await tempDir(t, 'better-design-mcp-');
+  const client = await stdioClient(t, ['--root', root]);
+  const { tools } = await client.listTools();
+  assert.deepEqual(tools.map(tool => tool.name), EXPECTED_TOOLS);
+  assert.deepEqual(TOOL_NAMES, EXPECTED_TOOLS);
+
+  const created = json(await call(client, 'create_document', { name: 'home', title: 'Home' }));
+  assert.equal(created.live, false);
+  json(await call(client, 'create_design_tokens', { tokens: [{ name: 'color/brand', value: '#FF0066' }] }));
+  const artboard = json(await call(client, 'create_artboard', { code: '<div data-node-label="Hero" className="flex flex-col gap-4 p-8 w-[600px] bg-[var(--color-brand)]"><h1 className="text-white">Hello MCP</h1><p>Sub &lt;script&gt;</p></div>' }));
+  const heroId = artboard.trees[0].id;
+  assert.match(heroId, /^[a-z]{3}$/); assert.match(artboard.trees[0].code, /bg-\[var\(--color-brand\)\]/);
+
+  const context = await call(client, 'get_design_context', {});
+  assert.match(context.content[0].text, /"headless": true/); assert.match(context.content[0].text, /"label": "Hero"/);
+  assert.match(context.content[0].text, /# Design fundamentals/, 'fundamentals replace the old guidelines');
+  const tree = await call(client, 'get_element_tree', { ids: [heroId] });
+  assert.match(tree.content[0].text, new RegExp(`<h1 data-node-id="${heroId}\\.[a-z]{3}" data-node-label="Hello MCP">`));
+  const found = json(await call(client, 'find_elements', { queries: [{ query: 'hello' }] }));
+  assert.equal(found.matches.length, 1); assert.equal(found.matches[0].artboardId, heroId);
+  const headingId = found.matches[0].id;
+
+  const update = await call(client, 'update_elements', { edit: `{/* edit ${headingId} */}\n<h1>Hello live MCP</h1>\n{/* insert as last child of ${heroId} */}\n<button className="bg-[#000000] text-[#ffffff] px-4 py-2">Go</button>\n{/* delete ${heroId}.zzz */}` });
+  assert.ok(!update.isError); assert.match(update.content[0].text, /2 of 3 directives applied\. 1 failed\./);
+  const code = json(await call(client, 'get_element_code', { ids: [heroId] }));
+  assert.match(code.results[0].code, /Hello live MCP/); assert.match(code.results[0].code, /<button/);
+  const nothing = await call(client, 'update_elements', { edit: `{/* delete ${heroId}.zzz */}` });
+  assert.equal(nothing.isError, true); assert.match(nothing.content[0].text, /Nothing was changed/);
+
+  const dup = json(await call(client, 'duplicate_elements', { id: heroId, overrides: { label: 'Hero B' } }));
+  json(await call(client, 'rename_elements', { renames: [{ id: dup.newDuplicateIds[0], label: 'Hero variant' }] }));
+  json(await call(client, 'update_design_tokens', { tokens: [{ name: 'color/brand', newName: 'color/accent', value: '#00aa00' }] }));
+  const shot = await call(client, 'take_screenshot', { id: heroId });
+  assert.equal(shot.isError, true); assert.match(shot.content[0].text, /unavailable in headless mode/);
+  assert.equal((await call(client, 'finish_artboard', { id: heroId })).isError, true, 'reviewNote is required');
+  const finished = json(await call(client, 'finish_artboard', { id: heroId, reviewNote: 'Checked hierarchy, spacing and contrast.' }));
+  assert.equal(finished.headless, true); assert.equal(finished.status, 'unverified'); assert.match(finished.reasons.join(' '), /no verification receipt/); assert.match(finished.designLink.url, new RegExp(`^betterdesign://node/home/[^/]+/${heroId}$`));
+  const page = json(await call(client, 'create_page', { name: 'Mobile' }));
+  json(await call(client, 'rename_page', { pageId: page.pageId, name: 'Phone' }));
+
+  const saved = JSON.parse(await fs.readFile(path.join(root, 'home.better-design.json'), 'utf8'));
+  assert.equal(saved.pages.length, 2); assert.equal(saved.pages[1].name, 'Phone');
+  assert.deepEqual(saved.tokens, { 'color/accent': '#00aa00' });
+  const nodes = saved.pages[0].nodes;
+  assert.ok(nodes.every(n => /^[a-z]{3,4}$/.test(n.shortId)), 'short ids persisted');
+  assert.equal(nodes.find(n => n.shortId === heroId).color, '#00aa00', 'token-bound color follows token updates');
+  assert.ok(nodes.some(n => n.name === 'Hero variant' && !n.parentId));
+
+  // Legacy low-level API still works and is revision checked.
+  const raw = json(await call(client, 'read_document', { name: 'home' }));
+  const applied = json(await call(client, 'apply_operations', { name: 'home', revision: raw.revision, operations: [{ type: 'rename_document', name: 'Renamed' }] }));
+  assert.equal(applied.document.name, 'Renamed');
+  const conflict = await call(client, 'apply_operations', { name: 'home', revision: raw.revision, operations: [{ type: 'rename_document', name: 'Stale' }] });
+  assert.equal(conflict.isError, true); assert.match(conflict.content[0].text, /Revision conflict/);
+  const html = json(await call(client, 'export_document', { name: 'home' })).html;
+  assert.match(html, /Hello live MCP/); assert.match(html, /&lt;script&gt;/);
+
+  // Validation: bad names and paths are rejected by schema; open_document needs the app.
+  assert.equal((await call(client, 'create_document', { name: '../escape', title: 'x' })).isError, true);
+  assert.equal((await call(client, 'get_element_code', { document: 'home', ids: [] })).isError, true);
+  assert.match((await call(client, 'open_document', { name: 'home' })).content[0].text, /needs the Better Design desktop app/);
+  assert.match((await call(client, 'update_elements', { edit: `{/* insert as last child of ${heroId} */}<div>{items.map(x => x)}</div>` })).content[0].text, /no JavaScript|Only string/);
+});
+
+test('loopback HTTP bridge requires the bearer token and refuses browser origins', async t => {
+  const root = await tempDir(t, 'better-design-http-');
+  const store = await DesignStore.open(root);
+  const backend = createStoreBackend(store);
+  const server = await startHttpServer({ makeServer: () => createDesignServer({ backend }) });
+  t.after(() => server.close());
+  assert.match(server.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+  const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+  const headers = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+  assert.equal((await fetch(server.url, { method: 'POST', headers, body })).status, 401);
+  assert.equal((await fetch(server.url, { method: 'POST', headers: { ...headers, authorization: 'Bearer wrong-token-wrong-token' }, body })).status, 401);
+  assert.equal((await fetch(server.url, { method: 'POST', headers: { ...headers, authorization: `Bearer ${server.token}`, origin: 'https://evil.example' }, body })).status, 403);
+  await assert.rejects(connectBridge({ url: server.url, token: 'not-the-token-at-all' }), /401|Unauthorized|invalid bearer/i);
+
+  const client = await connectBridge({ url: server.url, token: server.token });
+  t.after(() => client.close());
+  assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), EXPECTED_TOOLS);
+  json(await client.callTool({ name: 'create_document', arguments: { name: 'web', title: 'Web' } }));
+  const art = json(await client.callTool({ name: 'create_artboard', arguments: { document: 'web', code: '<div className="w-[100px] h-[100px] bg-[#ff0000]" />' } }));
+  assert.equal(art.live, false);
+  assert.equal((await store.read('web')).document.pages[0].nodes[0].type, 'rectangle');
+});
+
+test('stdio server proxies to a running bridge and falls back to files when it is gone', async t => {
+  const bridgeRoot = await tempDir(t, 'better-design-bridge-');
+  const localRoot = await tempDir(t, 'better-design-local-');
+  const configDir = await tempDir(t, 'better-design-config-');
+  const bridgeFile = path.join(configDir, 'mcp.json');
+  const store = await DesignStore.open(bridgeRoot);
+  await store.create('shared', 'Shared');
+  const server = await startHttpServer({ makeServer: () => createDesignServer({ backend: createStoreBackend(store) }) });
+  await writeBridgeFile(bridgeFile, { url: server.url, token: server.token });
+  assert.equal((await fs.stat(bridgeFile)).mode & 0o777, 0o600);
+  assert.equal((await readBridgeFile(bridgeFile)).token, server.token);
+
+  // No --root: only the bridge can serve this session.
+  const proxied = await stdioClient(t, ['--bridge-file', bridgeFile]);
+  assert.deepEqual((await proxied.listTools()).tools.map(tool => tool.name), EXPECTED_TOOLS);
+  json(await call(proxied, 'create_artboard', { document: 'shared', code: '<div data-node-label="Via proxy" className="w-[50px] h-[50px]" />' }));
+  assert.equal((await store.read('shared')).document.pages[0].nodes[0].name, 'Via proxy', 'edit landed in the bridge store');
+  const badArgs = await call(proxied, 'get_element_code', { document: 'shared', ids: 'not-an-array' });
+  assert.equal(badArgs.isError, true);
+
+  // With --root, a session started while the bridge runs falls back to files once it stops.
+  await fs.writeFile(path.join(localRoot, 'local.better-design.json'), JSON.stringify({ version: 2, name: 'Local', pages: [{ id: 'p', name: 'P', nodes: [] }], tokens: {} }));
+  const hybrid = await stdioClient(t, ['--bridge-file', bridgeFile, '--root', localRoot]);
+  assert.ok(json(await call(hybrid, 'list_documents')).documents.some(d => d.name === 'shared'), 'served by the bridge');
+  await server.close();
+  const after = json(await call(hybrid, 'list_documents'));
+  assert.deepEqual(after.documents.map(d => d.name), ['local'], 'fell back to --root store');
+
+  // A stale bridge file (server gone) is ignored at startup.
+  const stale = await stdioClient(t, ['--bridge-file', bridgeFile, '--root', localRoot]);
+  assert.deepEqual(json(await call(stale, 'list_documents')).documents.map(d => d.name), ['local']);
+});
+
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+async function verifiedBackend(t, options = {}) {
+  const root = await tempDir(t, 'better-design-verify-');
+  const store = await DesignStore.open(root);
+  const shots = [];
+  const backend = createStoreBackend(store, {
+    screenshot: async (document, pageId, nodeId) => { shots.push(nodeId); return { data: PNG, mimeType: 'image/png', width: 1, height: 1, source: 'offscreen', fonts: { loaded: 1, missing: [] }, ...(options.bounds ? { bounds: options.bounds(document, nodeId) } : {}) }; },
+    ...options,
+  });
+  await store.create('doc', 'Doc');
+  const GLOBAL = new Set(['get_design_guidelines', 'get_skills', 'get_icons', 'search_images', 'save_design_preference', 'list_design_preferences', 'update_design_preference', 'delete_design_preference', 'ask_agent', 'read_document', 'apply_operations']);
+  return { store, backend, shots, run: (name, args = {}) => runTool(backend, name, GLOBAL.has(name) ? args : { document: 'doc', ...args }) };
+}
+const body = result => result.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+const CARD = '<div data-node-label="Pricing card" className="flex flex-col gap-3 p-8 w-[360px] bg-[#ffffff]"><h2 className="text-[24px] text-[#111827]">Team plan for growing studios</h2><p className="text-[16px] text-[#374151]">Shared libraries, review links and unlimited projects for nine seats.</p></div>';
+
+test('knowledge, icon, image and style-token tools', async t => {
+  const fakePhotos = async query => ({ source: 'unsplash', results: [{ url: 'https://images.unsplash.com/photo-1', width: 4000, height: 3000, alt: `${query} at dusk`, author: 'Ana Lee', source: 'unsplash', pageUrl: 'https://unsplash.com/photos/1' }] });
+  const { run, store } = await verifiedBackend(t, { searchImages: fakePhotos });
+  const guidelines = body(await run('get_design_guidelines', { brief: 'landing page for a boutique coffee roaster', domain: 'landing' }));
+  assert.match(guidelines, /Suggested styles for the brief/); assert.match(guidelines, /# Design fundamentals/);
+  assert.match(body(await run('get_skills')), /new-design: /);
+  assert.match(body(await run('get_skills', { name: 'new-design' })), /# Skill: new-design/);
+  assert.equal((await run('get_skills', { name: 'nope' })).isError, true);
+  const icons = JSON.parse(body(await run('get_icons', { query: 'arrow right', set: 'lucide', limit: 3 })));
+  assert.equal(icons.icons.length, 3); assert.match(icons.icons[0].name, /^lucide:/); assert.match(icons.icons[0].preview, /^<svg/); assert.match(icons.usage, /<Icon name="lucide:/);
+  const photos = JSON.parse(body(await run('search_images', { query: 'coffee roastery', orientation: 'landscape', count: 1 })));
+  assert.equal(photos.images[0].url, 'https://images.unsplash.com/photo-1'); assert.equal(photos.images[0].attribution, 'Photo by Ana Lee on Unsplash');
+  const archetype = (await import('./design-knowledge/index.mjs')).listArchetypes()[0].id;
+  const applied = JSON.parse(body(await run('apply_style_tokens', { archetype })));
+  assert.ok(applied.created.length > 3); assert.ok(applied.classes.fonts.length);
+  const again = JSON.parse(body(await run('apply_style_tokens', { archetype })));
+  assert.equal(again.created.length, 0); assert.equal(again.kept.length, applied.created.length, 'existing tokens are kept without overwrite');
+  assert.ok(Object.keys((await store.read('doc')).document.tokens).length >= applied.created.length);
+  assert.equal((await run('apply_style_tokens', { archetype: 'no-such-style' })).isError, true);
+});
+
+test('take_screenshot records a receipt and lint; finish gate verifies, goes stale on edit and blocks critical lint', async t => {
+  const { run, backend, store } = await verifiedBackend(t);
+  const created = JSON.parse(body(await run('create_artboard', { code: CARD })));
+  const id = created.trees[0].id;
+  assert.deepEqual(created.warnings, []);
+
+  // No receipt yet: allowed, but honestly unverified.
+  let finish = JSON.parse(body(await run('finish_artboard', { id, reviewNote: 'Reviewed spacing and contrast.' })));
+  assert.equal(finish.status, 'unverified'); assert.match(finish.reasons[0], /no verification receipt/);
+
+  const shot = await run('take_screenshot', { id });
+  assert.equal(shot.content[0].type, 'image');
+  const meta = JSON.parse(shot.content[1].text);
+  assert.equal(meta.geometry, 'estimated'); assert.equal(meta.lint.critical, 0); assert.ok(meta.receipt);
+  assert.match(shot.content[2].text, /^Lint /); assert.match(shot.content[2].text, /Receipt .* recorded for artboard/);
+  assert.ok(sessionFor(backend).receipts.latest('doc', id), 'receipt stored');
+  finish = JSON.parse(body(await run('finish_artboard', { id: `${id}`, reviewNote: 'Reviewed hierarchy, spacing rhythm, contrast and copy.' })));
+  assert.equal(finish.status, 'verified'); assert.equal(finish.verified, true); assert.deepEqual(finish.reasons, []);
+
+  // Any edit invalidates the receipt; finishing again is unverified (stale/missing), not verified.
+  const heading = JSON.parse(body(await run('find_elements', { queries: [{ query: 'Team plan' }] }))).matches[0].id;
+  assert.ok(!(await run('update_elements', { edit: `{/* edit ${heading} */}<h2>Team plan for small studios</h2>` })).isError);
+  assert.equal(sessionFor(backend).receipts.latest('doc', id), null, 'edit invalidated the receipt');
+  finish = JSON.parse(body(await run('finish_artboard', { id, reviewNote: 'Re-checked.' })));
+  assert.equal(finish.status, 'unverified');
+
+  // A receipt that no longer matches the document revision (changed outside the tools) is stale.
+  await run('take_screenshot', { id });
+  await store.mutate('doc', async () => { const { document } = await store.read('doc'); document.pages[0].nodes.find(n => n.text === 'Team plan for small studios').text = 'Team plan'; return document; });
+  finish = JSON.parse(body(await run('finish_artboard', { id, reviewNote: 'Re-checked.' })));
+  assert.equal(finish.status, 'unverified'); assert.match(finish.reasons.join(' '), /stale receipt/);
+
+  // Critical lint (white text on white) blocks finishing, without focusing; repairs are capped.
+  const bad = JSON.parse(body(await run('create_artboard', { code: '<div data-node-label="Bad" className="flex flex-col p-8 w-[300px] bg-[#ffffff]"><p className="text-[16px] text-[#ffffff]">Invisible launch announcement copy</p></div>' }))).trees[0].id;
+  const badShot = await run('take_screenshot', { id: bad });
+  assert.ok(JSON.parse(badShot.content[1].text).lint.critical >= 1); assert.match(badShot.content[2].text, /CRITICAL[\s\S]*contrast/);
+  for (let round = 1; round <= 3; round++) {
+    const blocked = await run('finish_artboard', { id: bad, reviewNote: 'Checked.' });
+    assert.equal(blocked.isError, true); assert.match(body(blocked), /Finish blocked/); assert.match(body(blocked), /contrast/); assert.match(body(blocked), new RegExp(`Repair round ${round} of 3`));
+  }
+  const exhausted = JSON.parse(body(await run('finish_artboard', { id: bad, reviewNote: 'Checked.' })));
+  assert.equal(exhausted.status, 'unverified'); assert.match(exhausted.reasons.join(' '), /repair budget exhausted/);
+});
+
+test('measured bounds from the backend drive the lint; pending remote images resolve before screenshots', async t => {
+  const fetched = [];
+  const { run, store } = await verifiedBackend(t, {
+    bounds: (document, nodeId) => Object.fromEntries(document.pages[0].nodes.filter(n => n.id === nodeId || n.parentId === nodeId).map(n => [n.id, { x: 0, y: 0, w: n.w, h: n.h, ...(n.type === 'text' ? { scrollWidth: n.w, scrollHeight: n.h } : {}) }])),
+    fetchImage: async url => { fetched.push(url); await new Promise(resolve => setTimeout(resolve, 50)); return url.includes('missing') ? { ok: false, error: 'HTTP 404' } : { ok: true, dataUrl: `data:image/png;base64,${PNG}` }; },
+  });
+  const id = JSON.parse(body(await run('create_artboard', { code: CARD }))).trees[0].id;
+  // Simulate the codec's remote image nodes (srcRemote + assetStatus:'pending').
+  await store.mutate('doc', async () => {
+    const { document } = await store.read('doc'); const card = document.pages[0].nodes.find(n => !n.parentId);
+    document.pages[0].nodes.push({ id: 'photo-ok', type: 'image', name: 'Hero photo', parentId: card.id, x: 0, y: 0, w: 100, h: 60, src: '', srcRemote: 'https://images.example.com/ok.jpg', assetStatus: 'pending' }, { id: 'photo-bad', type: 'image', name: 'Gone', parentId: card.id, x: 0, y: 0, w: 100, h: 60, src: '', srcRemote: 'https://images.example.com/missing.jpg', assetStatus: 'pending' });
+    return document;
+  });
+  assert.ok(!(await run('rename_elements', { renames: [{ id, label: 'Pricing card v2' }] })).isError, 'any write queues pending images');
+  const shot = await run('take_screenshot', { id });
+  assert.equal(JSON.parse(shot.content[1].text).geometry, 'measured');
+  assert.match(shot.content[2].text, /WARNING images not loaded:[\s\S]*missing: HTTP 404/);
+  assert.deepEqual(fetched.sort(), ['https://images.example.com/missing.jpg', 'https://images.example.com/ok.jpg']);
+  const nodes = (await store.read('doc')).document.pages[0].nodes;
+  assert.equal(nodes.find(n => n.id === 'photo-ok').assetStatus, 'ready'); assert.match(nodes.find(n => n.id === 'photo-ok').src, /^data:image\/png;base64,/);
+  assert.equal(nodes.find(n => n.id === 'photo-bad').assetStatus, 'missing');
+  const blocked = await run('finish_artboard', { id, reviewNote: 'Checked images.' });
+  assert.equal(blocked.isError, true, 'a missing image is critical'); assert.match(body(blocked), /missing-image|missing-asset/);
+});
+
+test('TOOLS_VERSION, instructions, design preferences, ask_agent and per-side apply_operations fields', async t => {
+  assert.match(TOOLS_VERSION, /^[0-9a-f]{12}$/);
+  assert.match(INSTRUCTIONS, /per-side padding/); assert.match(INSTRUCTIONS, /never pin a section height/); assert.match(INSTRUCTIONS, /designLink/);
+  const prefsFile = path.join(await tempDir(t, 'better-design-prefs-'), 'prefs.json');
+  const { run, store } = await verifiedBackend(t, { preferences: createPreferenceStore(prefsFile) });
+
+  const context = body(await run('get_design_context'));
+  assert.match(context, new RegExp(`"toolsVersion": "${TOOLS_VERSION}"`));
+  assert.match(context, /User design preferences — apply unless the brief overrides\n\(none saved yet/);
+  const saved = JSON.parse(body(await run('save_design_preference', { text: 'Use 8px corner radius on cards' })));
+  assert.equal(saved.saved, true); const id = saved.preference.id;
+  assert.equal(JSON.parse(body(await run('save_design_preference', { text: 'use 8px corner radius on cards' }))).duplicate, true);
+  JSON.parse(body(await run('save_design_preference', { text: 'Never use purple gradients' })));
+  assert.match(body(await run('get_design_context')), new RegExp(`- Use 8px corner radius on cards \\(id ${id}\\)`));
+  assert.equal(JSON.parse(body(await run('update_design_preference', { id, text: 'Use 12px corner radius on cards' }))).preference.text, 'Use 12px corner radius on cards');
+  assert.deepEqual(JSON.parse(body(await run('delete_design_preference', { id }))), { deleted: true, id });
+  assert.deepEqual(JSON.parse(body(await run('list_design_preferences'))).preferences.map(p => p.text), ['Never use purple gradients']);
+  assert.equal((await run('delete_design_preference', { id })).isError, true);
+  assert.equal((await run('save_design_preference', { text: 'x'.repeat(501) })).isError, true);
+  assert.equal(JSON.parse(await fs.readFile(prefsFile, 'utf8')).preferences.length, 1);
+
+  // ask_agent: unavailable headless; delegates to backend.askAgent when present.
+  const headless = await run('ask_agent', { task: 'Review the pricing card' });
+  assert.equal(headless.isError, true); assert.match(body(headless), /unavailable in headless mode/);
+  const asked = [];
+  const reviewer = createStoreBackend(store, { askAgent: async request => { asked.push(request); return { text: 'Tighten the heading.', agent: 'codex', model: 'gpt-test' }; } });
+  assert.deepEqual(JSON.parse(body(await runTool(reviewer, 'ask_agent', { agent: 'codex', task: 'Review it' }))), { agent: 'codex', model: 'gpt-test', text: 'Tighten the heading.' });
+  assert.deepEqual(asked, [{ agent: 'codex', task: 'Review it' }]);
+  assert.equal((await runTool(reviewer, 'ask_agent', { agent: 'gemini', task: 'x' })).isError, true);
+
+  // apply_operations: per-side padding, gaps, corners, sizing modes, margin, absolute inset.
+  const raw = JSON.parse(body(await run('read_document', { name: 'doc' })));
+  const pageId = raw.document.pages[0].id;
+  const ok = await run('apply_operations', { name: 'doc', revision: raw.revision, operations: [
+    { type: 'create_node', pageId, node: { id: 'sec', type: 'frame', name: 'Section', w: 800, h: 200, layout: 'block', wMode: 'fixed', hMode: 'hug', paddingTop: 96, paddingBottom: 64, paddingLeft: 32, paddingRight: 32, gapX: 8, gapY: 24, cornerRadii: [16, 16, 0, 0], margin: [0, 'auto', 0, 'auto'], minH: 320, maxW: '100%' } },
+    { type: 'create_node', pageId, node: { id: 'tag', type: 'text', name: 'Badge', parentId: 'sec', text: 'New', w: 40, h: 20, position: 'absolute', inset: [16, 16, null, null], translate: ['-50%', 0], textTransform: 'uppercase', grow: 0 } },
+  ] });
+  assert.ok(!ok.isError, body(ok));
+  const node = (await store.read('doc')).document.pages[0].nodes.find(n => n.id === 'sec');
+  assert.equal(node.paddingTop, 96); assert.deepEqual(node.cornerRadii, [16, 16, 0, 0]); assert.equal(node.hMode, 'hug'); assert.deepEqual(node.margin, [0, 'auto', 0, 'auto']);
+  const rev = JSON.parse(body(await run('read_document', { name: 'doc' }))).revision;
+  const bad = await run('apply_operations', { name: 'doc', revision: rev, operations: [{ type: 'update_node', pageId, nodeId: 'sec', properties: { paddingTop: -4, hMode: 'auto', cornerRadii: [1, 2] } }] });
+  assert.equal(bad.isError, true); assert.match(body(bad), /paddingTop/); assert.match(body(bad), /hMode/); assert.match(body(bad), /cornerRadii/);
+});

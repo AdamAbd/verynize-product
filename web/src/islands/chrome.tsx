@@ -1,0 +1,70 @@
+// Island entry: chrome. Owned by the "chrome" workstream (see web/src/islands/README.md).
+// Window chrome (replaces header.app-chrome), main grid + panel collapse CSS, canvas overlays in #workspace
+// (toolbar, page pill, help, zoom) and the main app menu.
+import { useCallback } from "react";
+import { createPortal } from "react-dom";
+import { mountIsland } from "@/lib/mount";
+import { useWindowEvent } from "@/lib/bridge";
+import { TitleBar } from "./chrome/TitleBar";
+import { AppMenu } from "./chrome/AppMenu";
+import { CanvasOverlays } from "./chrome/CanvasOverlays";
+import { applyLayout, type LayoutName } from "./chrome/hooks";
+import { initLegacy } from "./chrome/legacy";
+import "./chrome/chrome.css";
+
+function useLayoutShortcuts() {
+  const onKey = useCallback((event: Event) => {
+    const e = event as KeyboardEvent;
+    if (!e.altKey || e.metaKey || e.ctrlKey || e.defaultPrevented) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("input, textarea, select, [contenteditable=true]")) return;
+    const name = ({ Digit1: "details", Digit2: "design", Digit0: "canvas" } as Record<string, LayoutName>)[e.code];
+    if (!name) return;
+    e.preventDefault();
+    applyLayout(name);
+  }, []);
+  useWindowEvent("keydown", onKey);
+}
+
+function Island({ overlayHost }: { overlayHost: HTMLElement | null }) {
+  useLayoutShortcuts();
+  return (
+    <>
+      <TitleBar />
+      <AppMenu />
+      {overlayHost ? createPortal(<CanvasOverlays />, overlayHost) : null}
+    </>
+  );
+}
+
+function container() {
+  initLegacy();
+  document.body.classList.add("bd-chrome");
+  let root = document.getElementById("bd-chrome-root");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "bd-chrome-root";
+    // Sits where header.app-chrome was, so the body flow (bar, then main) is unchanged.
+    const header = document.querySelector("header.app-chrome");
+    const main = document.querySelector("body > main");
+    if (header) header.before(root);
+    else if (main) main.before(root);
+    else document.body.prepend(root);
+  }
+  return root;
+}
+
+function overlayHost() {
+  const workspace = document.getElementById("workspace");
+  if (!workspace) return null;
+  let host = document.getElementById("bd-chrome-canvas");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "bd-chrome-canvas";
+    host.setAttribute("data-bd", "");
+    workspace.append(host);
+  }
+  return host;
+}
+
+mountIsland("chrome", container, () => <Island overlayHost={overlayHost()} />);

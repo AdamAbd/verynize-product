@@ -1,0 +1,9 @@
+{ "title": "opacity modifiers on palette and arbitrary colors",
+  "covers": ["color", "alpha"],
+  "expect": [
+    { "node": "Backdrop", "prop": "fill", "color": "rgba(0,0,0,0.5)" },
+    { "node": "Glass", "prop": "fill", "color": "rgba(255,255,255,0.8)" },
+    { "node": "Tint", "prop": "fill", "color": "rgba(37,99,235,0.2)" },
+    { "node": "Faint", "prop": "ink", "color": "rgba(0,0,0,0.6)" },
+    { "noWarnAbout": ["bg-white/80", "bg-black/50", "text-black/60"] }
+  ] }

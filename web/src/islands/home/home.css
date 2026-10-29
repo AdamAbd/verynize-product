@@ -1,0 +1,63 @@
+/*
+ * Home island (#file-home). Plain CSS only for what Tailwind cannot express on tokens:
+ * grid templates, and neutralising legacy wonder-shell.css rules that
+ * target the ids and classes the island keeps for tests (#library-*, .file-card, .file-open, .file-actions).
+ * Doubled ids raise specificity above legacy `#file-home …` rules; Tailwind utilities are !important.
+ */
+#file-home#file-home {
+  padding: 0;
+  background: var(--background);
+  color: var(--foreground-2);
+}
+#file-home#file-home > :not(#bd-home-root, #library-status) {
+  display: none !important;
+}
+#bd-home-root#bd-home-root {
+  --home-grid-cols: repeat(auto-fill, minmax(240px, 1fr));
+  --home-list-cols: minmax(0, 1fr) 157px 175px 257px;
+  display: block;
+  min-height: 100%;
+}
+#bd-home-root#bd-home-root
+  :is(
+    #library-files,
+    #library-search,
+    #library-grid,
+    #library-list,
+    #library-new-file,
+    #library-new-folder,
+    #workspace-profile,
+    #folder-breadcrumb,
+    .file-card,
+    .file-open,
+    .file-actions
+  ) {
+  all: unset;
+  box-sizing: border-box;
+}
+#bd-home-root#bd-home-root #library-files {
+  display: block;
+}
+#bd-home-root#bd-home-root .file-open:hover {
+  background: transparent;
+}
+#bd-home-root#bd-home-root #library-search::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+#file-home#file-home #library-status {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 12px;
+  color: var(--primary-text);
+}
+#file-home#file-home #library-status:empty {
+  display: none;
+}
+@media (max-width: 1100px) {
+  #bd-home-root#bd-home-root {
+    --home-list-cols: minmax(0, 1fr) 120px 110px 140px;
+  }
+}

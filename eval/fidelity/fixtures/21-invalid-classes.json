@@ -1,0 +1,8 @@
+{ "title": "invalid classes produce explicit warnings; valid ones still apply",
+  "covers": ["diagnostics"],
+  "expect": [
+    { "warns": ["p-[oops]", "bg-notacolor-500", "foo-bar"] },
+    { "noWarnAbout": ["gap-4", "w-[300px]", "text-sm"] },
+    { "node": "Odd", "prop": "gap", "eq": { "x": 16, "y": 16 } },
+    { "node": "Odd", "prop": "fill", "color": "#ffffff" }
+  ] }

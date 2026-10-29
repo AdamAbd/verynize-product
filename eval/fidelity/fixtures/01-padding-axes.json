@@ -1,0 +1,7 @@
+{ "title": "px-8 py-3 keeps horizontal and vertical padding distinct",
+  "covers": ["padding"],
+  "expect": [
+    { "node": "Button", "prop": "padding", "eq": { "top": 12, "right": 32, "bottom": 12, "left": 32 } },
+    { "noWarnAbout": ["px-8", "py-3"] },
+    { "rendered": "Button", "prop": "h", "eq": 44, "tol": 3, "why": "12 + 20 (text-sm line height) + 12" }
+  ] }

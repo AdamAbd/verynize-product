@@ -1,0 +1,9 @@
+{ "title": "from/via/to gradients in v3 and v4 syntax",
+  "covers": ["gradient"],
+  "expect": [
+    { "node": "V3 gradient", "prop": "gradient", "colors": ["tw:indigo-500", "tw:purple-500", "tw:pink-500"] },
+    { "node": "V4 gradient", "prop": "gradient", "colors": ["#0ea5e9"] },
+    { "node": "Arbitrary gradient", "prop": "gradient", "colors": ["#f97316", "#facc15"] },
+    { "noWarnAbout": ["from-indigo-500", "via-purple-500", "to-pink-500", "bg-linear-to-b"] },
+    { "rendered": "V3 gradient", "prop": "backgroundImage", "matches": "gradient" }
+  ] }

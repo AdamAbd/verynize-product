@@ -1,0 +1,6 @@
+{ "title": "rounded-t-xl rounded-b-sm keeps per-corner radii",
+  "covers": ["radius"],
+  "expect": [
+    { "node": "Sheet", "prop": "radius", "eq": { "tl": 12, "tr": 12, "br": 4, "bl": 4 } },
+    { "noWarnAbout": ["rounded-t-xl", "rounded-b-sm"] }
+  ] }

@@ -1,0 +1,9 @@
+{ "title": "items-start children hug; w-full fills",
+  "covers": ["sizing"],
+  "expect": [
+    { "node": "Hug button", "prop": "sizing", "eq": { "w": "hug", "h": "hug" } },
+    { "node": "Full input", "prop": "sizing", "eq": { "w": "fill" } },
+    { "node": "Form", "prop": "sizing", "eq": { "h": "hug" } },
+    { "rendered": "Full input", "prop": "w", "eq": 352, "tol": 1 },
+    { "rendered": "Hug button", "prop": "w", "max": 120 }
+  ] }

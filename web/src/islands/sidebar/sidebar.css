@@ -1,0 +1,41 @@
+/* Sidebar island: plain CSS for the legacy container it renders into (aside#layer-panel). */
+#layer-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background: var(--background);
+  border-right: 1px solid var(--edge);
+}
+#bd-sidebar-root {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+#bd-sidebar-root > [hidden] {
+  display: none !important;
+}
+#bd-layer-tree {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+#bd-sidebar-root input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+/* Tree indentation: 16px per level (set as --layer-depth on each row). */
+#bd-layer-tree .layer-row {
+  padding-left: calc(2px + var(--layer-depth, 0) * 16px);
+}
+/* The island input owns the legacy `#layer-search` id; neutralise legacy/parity rules keyed on that id. */
+#bd-sidebar-root #layer-search {
+  display: block !important;
+  width: auto;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}

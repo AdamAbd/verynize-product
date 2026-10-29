@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["items", "scores", "criticalDefects", "summary"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "pass", "evidence"],
+        "properties": { "id": { "type": "string" }, "pass": { "type": "boolean" }, "evidence": { "type": "string" } }
+      }
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hierarchy", "typography", "spacing", "color", "content", "assets", "consistency"],
+      "properties": {
+        "hierarchy": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "typography": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "spacing": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "color": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "content": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "assets": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "consistency": { "type": "integer", "minimum": 1, "maximum": 10 }
+      }
+    },
+    "criticalDefects": { "type": "array", "items": { "type": "string" } },
+    "summary": { "type": "string" }
+  }
+}

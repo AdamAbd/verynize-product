@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "source": "docs/audits/2026-10-29-design-quality.md (Rubrik usulan 100 poin)",
+  "weights": { "hierarchy": 20, "typography": 20, "spacing": 20, "color": 10, "content": 10, "assets": 10, "consistency": 10 },
+  "dimensions": {
+    "hierarchy": "One clear focal point per view; the most important information and the primary action read first; secondary content is visibly subordinate; grouping matches meaning.",
+    "typography": "Deliberate type scale with few sizes; appropriate faces for the brief; comfortable line length and line height; weights used for hierarchy, not noise; no default-looking system typography unless the brief calls for it.",
+    "spacing": "Spacing and alignment: consistent rhythm (a small set of spacing steps), shared edges and gutters, consistent internal padding, nothing cramped or floating, grids that actually align.",
+    "color": "Restrained palette with one accent used for action/state; sufficient contrast; status colors meaningful; no muddy or clashing combinations; no 'AI-default' purple-gradient look unless asked.",
+    "content": "Copy and data match the brief exactly, are realistic (non-round, plausible), complete, free of placeholders and of invented sections the brief did not ask for.",
+    "assets": "Icons from one coherent set, images real and relevant with sensible crops; no broken images, gray boxes, emoji-as-icons or mismatched illustration styles. If the brief disallows photos, judge icon/chart/avatar quality instead.",
+    "consistency": "Components of the same kind look the same (buttons, cards, badges, rows); radii, borders, shadows and states are systematic across the screen."
+  },
+  "anchors": {
+    "1-2": "Broken or unusable: overlapping/clipped text, missing major sections, unreadable.",
+    "3-4": "Generic or clearly flawed: template look, obvious misalignment, inconsistent components.",
+    "5-6": "Competent but unremarkable: works, minor inconsistencies, little intent.",
+    "7-8": "Polished and intentional: a designer would ship it with small tweaks.",
+    "9-10": "Exceptional: distinctive, fully consistent, nothing to fix at this zoom level. Use rarely."
+  },
+  "criticalDefects": [
+    "Text clipped, overlapping other text, or overflowing its container",
+    "Body or label text unreadable (too small, or contrast clearly below 4.5:1)",
+    "Placeholder text left in (Lorem, Title, Button, Label, Heading, Card)",
+    "Broken image icon, empty gray image box, or missing required image",
+    "Required section or required data missing or wrong",
+    "Content cut off by the viewport edge when the brief required it to fit",
+    "Elements stacked at (0,0) or otherwise collapsed layout"
+  ],
+  "gate": {
+    "criticalDefects": 0,
+    "medianWeightedScoreNotBelowEachCompetitor": true,
+    "pairwiseBTLowerCINotBelowEachCompetitorPoint": true
+  }
+}

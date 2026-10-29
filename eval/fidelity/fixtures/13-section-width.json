@@ -1,0 +1,9 @@
+{ "title": "header/section inside a block page fill the page width",
+  "covers": ["block-flow", "sizing"],
+  "expect": [
+    { "node": "Header", "prop": "sizing", "eq": { "w": "fill" } },
+    { "rendered": "Header", "prop": "w", "eq": 1440, "tol": 1 },
+    { "rendered": "Section", "prop": "w", "eq": 1440, "tol": 1 },
+    { "rendered": "Nav CTA", "relTo": "Header", "eq": { "right": 32 }, "tol": 1 },
+    { "rendered": "Section", "below": "Header", "gap": 0, "tol": 1 }
+  ] }

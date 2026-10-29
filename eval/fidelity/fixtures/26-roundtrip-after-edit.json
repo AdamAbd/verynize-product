@@ -1,0 +1,11 @@
+{ "title": "an edit then round-trip keeps per-side padding and gap",
+  "covers": ["round-trip", "edit", "padding"],
+  "edits": [
+    { "target": "Toolbar", "jsx": "<div className=\"flex items-center gap-x-4 px-5 py-1 w-[480px] bg-zinc-50 rounded-lg\" />" }
+  ],
+  "roundTrip": true,
+  "expect": [
+    { "node": "Toolbar", "prop": "padding", "eq": { "top": 4, "right": 20, "bottom": 4, "left": 20 } },
+    { "node": "Toolbar", "prop": "gap", "eq": { "x": 16 } },
+    { "noOverlap": "Toolbar" }
+  ] }

@@ -1,0 +1,8 @@
+{ "title": "child override wins; grandchildren still inherit",
+  "covers": ["inheritance", "typography"],
+  "expect": [
+    { "node": "Kicker", "prop": "ink", "color": "tw:slate-400" },
+    { "node": "Kicker", "prop": "textTransform", "eq": "uppercase" },
+    { "node": "Nested", "prop": "ink", "color": "#ffffff" },
+    { "rendered": "Nested", "prop": "color", "color": "#ffffff" }
+  ] }

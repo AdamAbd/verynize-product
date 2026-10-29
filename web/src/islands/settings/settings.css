@@ -1,0 +1,611 @@
+/*
+ * Settings island — plain CSS for DOM this island does not render itself.
+ * 1. The legacy `#settings-screen` host (React portals into it; settings.js toggles `hidden`).
+ * 2. The legacy <dialog>s it owns: share/cloud, templates, saved views, generate, Figma, text prompt,
+ *    preview/import modal and the project workspace chrome (not its `.project-agent` section — chat island).
+ * Wonder dialog look: #222 surface, #2e2e2e border, radius 12, 12–13px type, 28px controls, purple primary.
+ * `html` + id selectors outrank the legacy `#id el` rules; values come from tokens in globals.css.
+ */
+
+/* ---------- 1. Settings screen host ---------- */
+html #settings-screen[data-bd] {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: block;
+  padding: 0;
+  background: var(--settings);
+  color: var(--foreground-2);
+  font: 13px/18px var(--font-sans);
+}
+html #settings-screen[data-bd][hidden] {
+  display: none !important;
+}
+/* Neutralise legacy settings.css rules that target the old markup by id/element. */
+html #settings-screen[data-bd] :is(#settings-nav button span, #settings-back span) {
+  width: auto;
+  font-size: inherit;
+  text-align: left;
+}
+html #settings-screen[data-bd] input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+/* ---------- 2. Shared dialog chrome ---------- */
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog) {
+  box-sizing: border-box;
+  padding: 16px;
+  background: var(--card);
+  color: var(--foreground-2);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-menu);
+  font: 12px/16px var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog)::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog) * {
+  box-sizing: border-box;
+}
+
+/* Header: 13px title + 24px icon close button. */
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #project-dialog) > header,
+html #modal > .dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: auto;
+  min-height: 24px;
+  margin: 0 0 12px;
+  padding: 0;
+  background: none;
+  border: 0;
+  overflow: visible;
+}
+html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #project-dialog) > header > strong,
+html #modal #modal-title,
+html :is(#templates-dialog, #views-dialog) h2 {
+  flex: 1;
+  margin: 0;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+}
+html #templates-dialog header > div {
+  flex: 1;
+}
+html #templates-dialog header small {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--primary-text);
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+html #templates-dialog h2 {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog) button.bd-dialog-close {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  overflow: hidden;
+  cursor: default;
+}
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog) button.bd-dialog-close::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: var(--foreground-3);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M18 6 6 18M6 6l12 12'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M18 6 6 18M6 6l12 12'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog) button.bd-dialog-close:hover {
+  background: var(--muted);
+}
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog) button.bd-dialog-close:hover::before {
+  background: var(--foreground);
+}
+
+/* Body copy, labels, fields. */
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog) > p,
+html #cloud-conflict p {
+  margin: 0 0 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 18px;
+}
+html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt) label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  color: var(--foreground-3);
+  font-size: 12px;
+  line-height: 16px;
+}
+html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog)
+  :is(input:not([type="checkbox"], [type="file"]), select, textarea):not(.project-agent *) {
+  display: block;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  padding: 0 8px;
+  background: var(--input);
+  color: var(--foreground);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: 12px/16px var(--font-sans);
+  outline: none;
+  box-shadow: none;
+}
+html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog) textarea:not(.project-agent *) {
+  height: auto;
+  padding: 8px;
+  resize: vertical;
+}
+html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog) select:not(.project-agent *) {
+  appearance: none;
+  padding-right: 24px;
+  background: var(--input)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8a8a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    right 6px center / 14px no-repeat;
+}
+html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog)
+  :is(input, select, textarea)::placeholder {
+  color: var(--subtle-foreground);
+}
+html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog)
+  :is(input, select, textarea):not(.project-agent *):focus-visible {
+  border-color: var(--primary);
+  outline: none;
+}
+
+/* Buttons: 28px secondary, purple primary. */
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog)
+  button:not(.bd-dialog-close, .template-card, .view-name, .project-agent *) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  margin: 0;
+  padding: 0 10px;
+  background: var(--input);
+  color: var(--foreground);
+  border: 0;
+  border-radius: 6px;
+  font: 12px/16px var(--font-sans);
+  white-space: nowrap;
+  cursor: default;
+}
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog)
+  button:not(.bd-dialog-close, .template-card, .view-name, .project-agent *):hover {
+  background: var(--accent);
+}
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog)
+  button.bd-primary:not(.project-agent *) {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog)
+  button.bd-primary:not(.project-agent *):hover {
+  background: var(--primary-hover);
+}
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog)
+  button:not(.project-agent *):disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal, #project-dialog)
+  :is(button, a, input, select, textarea):not(.project-agent *):focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 1px;
+}
+html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt) [role="status"],
+html #figma-status,
+html #views-status {
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+html :is(#cloud-status, #generate-status, #figma-status, #views-status, #status):empty {
+  display: none;
+}
+
+/* ---------- Share / cloud (ref 13: 320px share popover under the Share button) ---------- */
+html #cloud-dialog {
+  position: fixed;
+  inset: 48px 8px auto auto;
+  width: 328px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 56px);
+  margin: 0;
+  overflow: auto;
+}
+html #cloud-dialog::backdrop {
+  background: transparent;
+}
+html #cloud-dialog > header {
+  margin-bottom: 10px;
+}
+html #cloud-dialog > header > strong {
+  font-size: 13px;
+}
+html #cloud-dialog .cloud-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+html #cloud-dialog .cloud-actions button {
+  flex: 1 1 auto;
+}
+html #cloud-public {
+  display: block;
+  margin: 0 0 8px;
+  color: var(--primary-text);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+html #cloud-status {
+  padding-top: 10px;
+  border-top: 1px solid var(--divider);
+}
+html #cloud-conflict {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--muted);
+}
+html #cloud-conflict button {
+  margin: 0 6px 6px 0 !important;
+}
+
+/* ---------- Text prompt ---------- */
+html #text-prompt {
+  width: 360px;
+  max-width: calc(100vw - 32px);
+}
+html #text-prompt label {
+  margin-bottom: 10px;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+}
+html #text-prompt form > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ---------- Generate illustration / Figma import ---------- */
+html :is(#generate-dialog, #figma-dialog) {
+  width: 440px;
+  max-width: calc(100vw - 32px);
+}
+html #generate-dialog textarea {
+  min-height: 96px;
+}
+html #generate-dialog > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+html #figma-dialog #figma-run {
+  width: 100%;
+}
+html #figma-status {
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-sans);
+}
+
+/* ---------- Templates ---------- */
+html #templates-dialog {
+  width: min(880px, calc(100vw - 32px));
+  padding: 20px;
+}
+html #templates-dialog .template-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+html #templates-dialog .template-card {
+  display: block;
+  margin: 0;
+  padding: 0 0 12px;
+  text-align: left;
+  background: var(--background);
+  color: var(--foreground-2);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: default;
+  font: 12px/16px var(--font-sans);
+}
+html #templates-dialog .template-card:hover {
+  border-color: var(--primary);
+  background: var(--background);
+}
+html #templates-dialog .template-card:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 1px;
+}
+html #templates-dialog .template-card > strong {
+  margin-top: 12px;
+  padding: 0 12px;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+}
+html #templates-dialog .template-card > p {
+  min-height: 32px;
+  margin: 2px 0 0;
+  padding: 0 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+html #templates-dialog .template-card > small {
+  margin: 10px 0 0;
+  padding: 0 12px;
+  color: var(--primary-text);
+  font-size: 12px;
+}
+html #templates-dialog .template-art {
+  height: 148px;
+  border-bottom: 1px solid var(--card-border);
+}
+html #template-error {
+  margin: 12px 0 0;
+  color: var(--destructive);
+}
+
+/* ---------- Saved views ---------- */
+html #views-dialog {
+  width: 440px;
+  max-width: calc(100vw - 32px);
+}
+html #saved-view-list {
+  margin-top: 12px;
+}
+html #saved-view-list article {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 4px 0;
+  border-top: 1px solid var(--divider);
+}
+html #saved-view-list .view-name {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  margin: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+  font: 13px/18px var(--font-sans);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html #saved-view-list .view-name:hover {
+  background: var(--muted);
+}
+html #saved-view-list small {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+html #saved-view-list button:not(.view-name) {
+  height: 24px !important;
+  padding: 0 8px !important;
+  background: transparent !important;
+  color: var(--foreground-3) !important;
+}
+html #saved-view-list button:not(.view-name):hover {
+  background: var(--muted) !important;
+  color: var(--foreground) !important;
+}
+
+/* ---------- Preview / import modal ---------- */
+html #modal {
+  width: min(1100px, calc(100vw - 48px));
+}
+html #modal > .dialog-head select#preview-width {
+  width: auto;
+  min-width: 160px;
+  margin-left: auto;
+}
+html #modal > .dialog-head #modal-title {
+  flex: none;
+}
+html #modal #source {
+  height: 340px;
+  margin: 0 0 12px;
+  font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+html #modal #frame {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: white;
+}
+html #modal #frame[hidden],
+html #modal #source[hidden],
+html #modal #apply[hidden] {
+  display: none !important;
+}
+html #modal #status {
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+/* ---------- Project workspace chrome (the `.project-agent` column belongs to the chat island) ---------- */
+html #project-dialog {
+  width: min(1400px, 95vw);
+  height: min(850px, 92vh);
+  padding: 0;
+  overflow: hidden;
+}
+html #project-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+html #project-dialog > header {
+  flex: none;
+  height: 44px;
+  margin: 0;
+  padding: 0 10px 0 16px;
+  border-bottom: 1px solid var(--divider);
+}
+html #project-dialog > header > strong {
+  flex: none;
+}
+html #project-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html #project-dialog > nav {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--divider);
+}
+html #project-dialog > nav button {
+  height: 24px !important;
+  padding: 0 8px !important;
+  background: transparent !important;
+  color: var(--foreground-3) !important;
+}
+html #project-dialog > nav button:hover {
+  background: var(--muted) !important;
+  color: var(--foreground) !important;
+}
+html #project-dialog .project-grid {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 360px;
+  gap: 0;
+}
+html #project-dialog .project-grid > section {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+html #project-dialog .project-grid > section:not(.project-agent) {
+  padding: 12px;
+}
+html #project-dialog .project-grid > section:first-child {
+  background: var(--background);
+  border-right: 1px solid var(--divider);
+}
+html #project-dialog .project-grid > section.project-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-right: 1px solid var(--divider);
+}
+html #project-files {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 8px;
+}
+html #project-files button {
+  justify-content: flex-start !important;
+  width: 100%;
+  height: 26px !important;
+  padding: 0 8px !important;
+  background: transparent !important;
+  color: var(--foreground-3) !important;
+  font-size: 12px !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html #project-files button:hover {
+  background: var(--muted) !important;
+  color: var(--foreground) !important;
+}
+html #project-dialog .project-editor > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+html #project-path {
+  min-width: 0;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html #project-dialog #project-source {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  padding: 10px 12px;
+  resize: none;
+  background: var(--background);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+  tab-size: 2;
+}
+
+@media (max-width: 1050px) {
+  html #project-dialog .project-grid {
+    grid-template-columns: 160px minmax(0, 1fr) 280px;
+  }
+  html #templates-dialog .template-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

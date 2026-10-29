@@ -1,0 +1,104 @@
+<!doctype html>
+<!-- Self-authored reference for brief 07-reference-reconstruction (original design, 1280x800).
+     Tailwind v4 classes; render with `node eval/render-references.mjs` to produce 07-reference.png. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Halyard Labs — Deployments</title>
+<!-- TAILWIND -->
+</head>
+<body class="m-0 bg-white font-['Inter',system-ui,sans-serif] text-zinc-900 antialiased">
+<div class="flex w-[1280px] h-[800px] overflow-hidden">
+  <aside class="flex flex-col w-[248px] shrink-0 border-r border-zinc-200 bg-zinc-50 px-3 py-4">
+    <div class="flex items-center gap-2.5 px-2 pb-5">
+      <div class="flex items-center justify-center size-7 rounded-md bg-zinc-900 text-[11px] font-semibold text-white">HL</div>
+      <div class="flex flex-col">
+        <span class="text-sm/5 font-semibold">Halyard Labs</span>
+        <span class="text-xs/4 text-zinc-500">Pro workspace</span>
+      </div>
+    </div>
+    <nav class="flex flex-col gap-0.5 text-sm/5">
+      <a class="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-zinc-600"><span class="size-1.5 rounded-full bg-zinc-300"></span>Overview</a>
+      <a class="flex items-center gap-2.5 rounded-md bg-white px-2 py-1.5 font-medium text-zinc-900 ring-1 ring-zinc-200 shadow-[0_1px_1px_rgba(0,0,0,0.03)]"><span class="size-1.5 rounded-full bg-zinc-900"></span>Deployments</a>
+      <a class="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-zinc-600"><span class="size-1.5 rounded-full bg-zinc-300"></span>Domains</a>
+      <a class="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-zinc-600"><span class="size-1.5 rounded-full bg-zinc-300"></span>Logs</a>
+      <a class="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-zinc-600"><span class="size-1.5 rounded-full bg-zinc-300"></span>Usage</a>
+      <a class="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-zinc-600"><span class="size-1.5 rounded-full bg-zinc-300"></span>Settings</a>
+    </nav>
+    <div class="mt-auto rounded-lg border border-zinc-200 bg-white p-3">
+      <p class="text-xs/4 font-medium">Build minutes</p>
+      <p class="mt-1 text-xs/4 text-zinc-500">2,814 of 6,000 used</p>
+      <div class="mt-2 h-1.5 rounded-full bg-zinc-100"><div class="h-1.5 w-[47%] rounded-full bg-zinc-900"></div></div>
+    </div>
+  </aside>
+
+  <div class="flex flex-1 flex-col min-w-0">
+    <header class="flex h-14 items-center justify-between border-b border-zinc-200 px-8">
+      <div class="flex items-center gap-2 text-sm/5 text-zinc-500">
+        <span>halyard-web</span><span class="text-zinc-300">/</span><span class="font-medium text-zinc-900">production</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex h-8 w-[220px] items-center rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-400">Search deployments…<span class="ml-auto font-mono text-[11px] text-zinc-400">⌘K</span></div>
+        <div class="size-8 rounded-full bg-[#c7d2fe]"></div>
+      </div>
+    </header>
+
+    <main class="flex flex-1 gap-6 px-8 py-7 min-h-0">
+      <section class="flex flex-1 flex-col gap-6 min-w-0">
+        <div class="flex items-end justify-between">
+          <div>
+            <h1 class="text-2xl/8 font-semibold tracking-tight">Deployments</h1>
+            <p class="mt-1 text-sm/5 text-zinc-500">Every push to main ships to production after checks pass.</p>
+          </div>
+          <button class="h-9 rounded-md bg-zinc-900 px-3.5 text-sm/5 font-medium text-white">New deployment</button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4">
+          <div class="rounded-xl border border-zinc-200 p-4">
+            <p class="text-[13px]/5 text-zinc-500">Builds today</p>
+            <p class="mt-2 text-[28px]/8 font-semibold tracking-tight">128</p>
+            <p class="mt-1 text-xs/4 text-emerald-600">+14 vs yesterday</p>
+          </div>
+          <div class="rounded-xl border border-zinc-200 p-4">
+            <p class="text-[13px]/5 text-zinc-500">Median build</p>
+            <p class="mt-2 font-mono text-[28px]/8 font-semibold tracking-tight">1m 42s</p>
+            <p class="mt-1 text-xs/4 text-emerald-600">−9s this week</p>
+          </div>
+          <div class="rounded-xl border border-zinc-200 p-4">
+            <p class="text-[13px]/5 text-zinc-500">Error rate</p>
+            <p class="mt-2 text-[28px]/8 font-semibold tracking-tight">0.8%</p>
+            <p class="mt-1 text-xs/4 text-red-600">+0.3 pts this week</p>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-zinc-200">
+          <div class="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+            <p class="text-sm/5 font-medium">Recent deployments</p>
+            <p class="text-xs/4 text-zinc-500">Last 24 hours</p>
+          </div>
+          <ul class="divide-y divide-zinc-100 text-[13px]/5">
+            <li class="flex items-center gap-4 px-4 py-3"><span class="w-[72px] rounded-full bg-emerald-50 px-2 py-0.5 text-center text-xs/4 font-medium text-emerald-700">Ready</span><div class="min-w-0 flex-1"><p class="truncate font-medium">Fix checkout redirect loop on Safari</p><p class="text-xs/4 text-zinc-500">main · <span class="font-mono">a3f91c2</span></p></div><span class="font-mono text-xs text-zinc-500">1m 38s</span><span class="w-[64px] text-right text-xs text-zinc-500">4m ago</span></li>
+            <li class="flex items-center gap-4 px-4 py-3"><span class="w-[72px] rounded-full bg-amber-50 px-2 py-0.5 text-center text-xs/4 font-medium text-amber-700">Building</span><div class="min-w-0 flex-1"><p class="truncate font-medium">Add retry budget to webhook worker</p><p class="text-xs/4 text-zinc-500">feat/webhook-retries · <span class="font-mono">7be04d9</span></p></div><span class="font-mono text-xs text-zinc-500">0m 51s</span><span class="w-[64px] text-right text-xs text-zinc-500">6m ago</span></li>
+            <li class="flex items-center gap-4 px-4 py-3"><span class="w-[72px] rounded-full bg-red-50 px-2 py-0.5 text-center text-xs/4 font-medium text-red-700">Failed</span><div class="min-w-0 flex-1"><p class="truncate font-medium">Upgrade image pipeline to sharp 0.34</p><p class="text-xs/4 text-zinc-500">chore/sharp · <span class="font-mono">19c6e0a</span></p></div><span class="font-mono text-xs text-zinc-500">2m 07s</span><span class="w-[64px] text-right text-xs text-zinc-500">38m ago</span></li>
+            <li class="flex items-center gap-4 px-4 py-3"><span class="w-[72px] rounded-full bg-emerald-50 px-2 py-0.5 text-center text-xs/4 font-medium text-emerald-700">Ready</span><div class="min-w-0 flex-1"><p class="truncate font-medium">Copy: tighten pricing page headline</p><p class="text-xs/4 text-zinc-500">main · <span class="font-mono">e2d4471</span></p></div><span class="font-mono text-xs text-zinc-500">1m 12s</span><span class="w-[64px] text-right text-xs text-zinc-500">1h ago</span></li>
+            <li class="flex items-center gap-4 px-4 py-3"><span class="w-[72px] rounded-full bg-emerald-50 px-2 py-0.5 text-center text-xs/4 font-medium text-emerald-700">Ready</span><div class="min-w-0 flex-1"><p class="truncate font-medium">Cache edge config for 60 seconds</p><p class="text-xs/4 text-zinc-500">main · <span class="font-mono">5a0b3fe</span></p></div><span class="font-mono text-xs text-zinc-500">1m 45s</span><span class="w-[64px] text-right text-xs text-zinc-500">3h ago</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <aside class="flex w-[280px] shrink-0 flex-col gap-4">
+        <div class="rounded-xl border border-zinc-200 p-4">
+          <p class="text-sm/5 font-medium">Activity</p>
+          <ol class="mt-4 flex flex-col gap-4 text-[13px]/5">
+            <li class="flex gap-3"><span class="mt-1.5 size-2 shrink-0 rounded-full bg-emerald-500"></span><div><p><span class="font-medium">Maya Ortiz</span> promoted <span class="font-mono text-xs">a3f91c2</span></p><p class="text-xs/4 text-zinc-500">4 minutes ago</p></div></li>
+            <li class="flex gap-3"><span class="mt-1.5 size-2 shrink-0 rounded-full bg-amber-500"></span><div><p><span class="font-medium">CI</span> started build for feat/webhook-retries</p><p class="text-xs/4 text-zinc-500">6 minutes ago</p></div></li>
+            <li class="flex gap-3"><span class="mt-1.5 size-2 shrink-0 rounded-full bg-red-500"></span><div><p><span class="font-medium">CI</span> failed on chore/sharp: 3 tests</p><p class="text-xs/4 text-zinc-500">38 minutes ago</p></div></li>
+            <li class="flex gap-3"><span class="mt-1.5 size-2 shrink-0 rounded-full bg-zinc-300"></span><div><p><span class="font-medium">Tomas Lind</span> added domain status.halyard.dev</p><p class="text-xs/4 text-zinc-500">2 hours ago</p></div></li>
+          </ol>
+        </div>
+      </aside>
+    </main>
+  </div>
+</div>
+</body>
+</html>
