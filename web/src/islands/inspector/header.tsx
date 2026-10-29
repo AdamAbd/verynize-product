@@ -13,7 +13,7 @@ import { openShare } from "./legacy";
 
 function initial() {
   const prefs = (window.appPreferences?.get?.() ?? {}) as { displayName?: string; name?: string };
-  const name = String(prefs.displayName || prefs.name || "Better Design").trim();
+  const name = String(prefs.displayName || prefs.name || "Verynize").trim();
   return { letter: name[0]?.toUpperCase() || "B", name };
 }
 

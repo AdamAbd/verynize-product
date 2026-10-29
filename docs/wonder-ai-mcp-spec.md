@@ -1,4 +1,4 @@
-# Wonder AI agent and MCP integration: behavioral spec and Better Design parity plan
+# Wonder AI agent and MCP integration: behavioral spec and Verynize parity plan
 
 Written 2026-10-28 against the installed Wonder desktop app, version 0.2.183 (`so.wonder.desktop`). This document describes behavior and interfaces in our own words. It contains no Wonder source code, and no prompt text is copied at length. Tool names, parameter keys, IPC channel names and short identifiers are recorded because they define the interface. The companion document for the canvas and node model is `docs/wonder-canvas-spec.md`.
 
@@ -291,7 +291,7 @@ Two separate controls sit beside the access level:
 
 ---
 
-## 5. Parity gaps vs Better Design, in priority order
+## 5. Parity gaps vs Verynize, in priority order
 
 Today's state:
 - `integrations/mcp-server.mjs` is a stdio server with 5 tools over JSON files, with no live sync.
@@ -301,13 +301,13 @@ Today's state:
 ### P0: live bridge between MCP and the open editor (the core gap)
 
 1. **Architecture: the desktop main process becomes the MCP host.** Wonder's server-side Yjs is not needed. The renderer stays the source of truth for the open document. A file-backed fallback covers the case where no window is open.
-   - Add `desktop/mcp-bridge.cjs`. It starts a **loopback Streamable-HTTP MCP server** (`@modelcontextprotocol/sdk` `McpServer` + `StreamableHTTPServerTransport`) on `127.0.0.1:<random>`. Require a per-launch bearer token. Write `{url, token}` to `~/Library/Application Support/Better Design/mcp.json` so external Claude Code/Codex can be configured to use it.
+   - Add `desktop/mcp-bridge.cjs`. It starts a **loopback Streamable-HTTP MCP server** (`@modelcontextprotocol/sdk` `McpServer` + `StreamableHTTPServerTransport`) on `127.0.0.1:<random>`. Require a per-launch bearer token. Write `{url, token}` to `~/Library/Application Support/Verynize/mcp.json` so external Claude Code/Codex can be configured to use it.
    - Each tool handler runs a request/reply IPC to the focused editor window: `bd:mcp-call {requestId, tool, args}` → `bd:mcp-reply {requestId, ok, result|error}`. Use a timeout, Wonder's `*-request/*-reply` pattern and an origin check.
    - If no editor window has the target document open, fall back to `integrations/design-store.mjs` (headless mode), and report `headless:true` the way Wonder does.
    - Keep `integrations/mcp-server.mjs` (stdio) as a thin **proxy** to the bridge when `mcp.json` exists. Otherwise it keeps the current file mode. Update its instructions text, which currently says edits are not live.
    - Add to `desktop/preload.cjs`: `onMcpCall(cb)` and `replyMcpCall(id, payload)`.
    - Add `web/agent-bridge.js`: a dispatcher that maps tool names onto `web/app.js` document operations. Every write goes through the existing undo/history path, so agent edits are undoable as one step per tool call.
-2. **In-app agents get the bridge automatically.** In `desktop/agents.cjs` / `agent-settings.cjs`, pass `--mcp-config '{"mcpServers":{"better-design":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}'` to Claude, and `-c mcp_servers.better-design.url=…` to Codex. Auto-allow `mcp__better-design__*` with `--allowedTools`.
+2. **In-app agents get the bridge automatically.** In `desktop/agents.cjs` / `agent-settings.cjs`, pass `--mcp-config '{"mcpServers":{"verynize":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}'` to Claude, and `-c mcp_servers.verynize.url=…` to Codex. Auto-allow `mcp__verynize__*` with `--allowedTools`.
 
 ### P0: canvas tool set (names chosen for Wonder parity; schemas are ours)
 
@@ -328,7 +328,7 @@ All tools take `pageId`. Ids are short ids, unique per page: `<root>.<abc>`. Add
 | `get/create/update/delete_design_tokens` | `tokens[{name:'color/x', type, value}]` | `{id, name, type, cssVar, value}`; replace today's hex-only `set_token` op |
 | `list_documents`, `open_document`, `create_document`, `create_page`, `rename_page` | | |
 | `execute_action` | `{id, params?, paramsList?}` | expose the existing command-palette actions (`web/ui.js`) with param schemas and `isAvailable` |
-| `finish_artboard` | `{pageId, id}` | select and zoom the node in the editor; return a `betterdesign://node/<doc>/<page>/<id>` link |
+| `finish_artboard` | `{pageId, id}` | select and zoom the node in the editor; return a `verynize://node/<doc>/<page>/<id>` link |
 
 Keep `apply_operations` (revision-checked batches) as the low-level escape hatch.
 
@@ -356,7 +356,7 @@ Keep `apply_operations` (revision-checked batches) as the low-level escape hatch
 9. **Skills and guidelines.** Add `get_skills(name)` serving our own markdown playbooks (new-design, edit-design, design-to-code, code-to-design, design-library) from `integrations/skills/`. Add `get_design_guidelines`. These must be written fresh; do not copy Wonder's.
 10. **Design preferences.** A local store plus a `<saved-design-preferences>` block, with save/update/delete tools gated on explicit user intent.
 11. **Assets.** `prepare_image_upload` equivalent (a local `import_image {pageId, path}` is simpler on desktop), plus `generate_image` / `vectorize_image` via `desktop/generate.cjs`.
-12. **Code bridge.** An "Implement this design" action that builds a prompt with `betterdesign://node/…` URIs, plus a Preview "apply inspect edits" prompt (`desktop/preview.cjs` / `web/live-preview.js`).
+12. **Code bridge.** An "Implement this design" action that builds a prompt with `verynize://node/…` URIs, plus a Preview "apply inspect edits" prompt (`desktop/preview.cjs` / `web/live-preview.js`).
 
 ### Unknowns worth probing later (needs Wonder auth, so not done)
 

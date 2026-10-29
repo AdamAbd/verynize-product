@@ -6,7 +6,7 @@
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 const log = process.env.FAKE_CODEX_LOG;
-if (log) fs.appendFileSync(log, JSON.stringify({ args, token: process.env.BETTER_DESIGN_MCP_TOKEN || null }) + '\n');
+if (log) fs.appendFileSync(log, JSON.stringify({ args, token: process.env.VERYNIZE_MCP_TOKEN || null }) + '\n');
 
 if (args[0] === 'app-server' && args.includes('--help')) {
   if (process.env.FAKE_CODEX_NO_APP_SERVER === '1') { console.error('unrecognized subcommand'); process.exit(2); }
@@ -52,8 +52,8 @@ async function runTurn(threadId, turnId, text, images) {
     declined = decision?.decision !== 'accept';
   }
   notify('item/completed', { threadId, turnId, item: { type: 'commandExecution', id: 'cmd-1', command: 'ls', cwd: '/tmp', status: declined ? 'declined' : 'completed', aggregatedOutput: declined ? '' : 'hello.txt\n', exitCode: declined ? null : 0 } });
-  notify('item/started', { threadId, turnId, item: { type: 'mcpToolCall', id: 'mcp-1', server: 'better-design', tool: 'get_design_context', arguments: { pageId: 'page-1' }, status: 'inProgress' } });
-  notify('item/completed', { threadId, turnId, item: { type: 'mcpToolCall', id: 'mcp-1', server: 'better-design', tool: 'get_design_context', arguments: { pageId: 'page-1' }, status: 'completed', result: { content: [{ type: 'text', text: 'page ok' }] }, error: null } });
+  notify('item/started', { threadId, turnId, item: { type: 'mcpToolCall', id: 'mcp-1', server: 'verynize', tool: 'get_design_context', arguments: { pageId: 'page-1' }, status: 'inProgress' } });
+  notify('item/completed', { threadId, turnId, item: { type: 'mcpToolCall', id: 'mcp-1', server: 'verynize', tool: 'get_design_context', arguments: { pageId: 'page-1' }, status: 'completed', result: { content: [{ type: 'text', text: 'page ok' }] }, error: null } });
   const reply = `Reply to ${JSON.stringify(text.slice(-300))} images=${images.length} declined=${declined}`;
   for (const part of [reply.slice(0, 9), reply.slice(9)]) notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg-1', delta: part });
   notify('item/completed', { threadId, turnId, item: { type: 'agentMessage', id: 'msg-1', text: reply } });

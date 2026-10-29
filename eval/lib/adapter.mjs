@@ -1,4 +1,4 @@
-// The ONLY place eval/ touches Better Design internals. The codec and document schema are being
+// The ONLY place eval/ touches Verynize internals. The codec and document schema are being
 // rewritten, so every accessor here tolerates several plausible shapes (old flat fields, per-side
 // fields, arrays, objects). If an API moves, fix it here and nowhere else.
 const repo = new URL('../../', import.meta.url);
@@ -23,7 +23,7 @@ export async function codec() {
     validateDocument: pick('validateDocument', store),
     loadErrors: [edit, codecMod, exportMod, store].filter(m => m.__error).map(m => m.__error.message),
   };
-  if (!modules.createArtboards) throw new Error(`Better Design codec not loadable: ${modules.loadErrors.join('; ') || 'createArtboards missing'}`);
+  if (!modules.createArtboards) throw new Error(`Verynize codec not loadable: ${modules.loadErrors.join('; ') || 'createArtboards missing'}`);
   return modules;
 }
 

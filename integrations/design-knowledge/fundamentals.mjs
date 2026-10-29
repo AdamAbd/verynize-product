@@ -1,4 +1,4 @@
-// Design fundamentals returned with every design-context call. Written for Better Design; keep it
+// Design fundamentals returned with every design-context call. Written for Verynize; keep it
 // short enough to read on every turn (~1,300 words) and concrete enough to act on.
 
 export const fundamentals = `# Design fundamentals

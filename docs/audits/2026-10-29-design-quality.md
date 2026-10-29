@@ -1,10 +1,10 @@
 # Audit kualitas orchestrator → UI canvas
 
-Tanggal: 29 Oktober 2026. Target: kualitas hasil Better Design minimal setara Wonder dan Pen; Figma dan FigCraft sebagai pembanding tambahan.
+Tanggal: 29 Oktober 2026. Target: kualitas hasil Verynize minimal setara Wonder dan Pen; Figma dan FigCraft sebagai pembanding tambahan.
 
 ## Kesimpulan
 
-Better Design sudah punya runtime agent, live MCP, editable scene, dan screenshot. Namun implementasi sekarang belum memaksakan proses desain yang terarah dan verifikasi visual sebelum selesai. Ada kehilangan informasi layout di codec yang terbukti lewat eksekusi langsung. Meningkatkan model atau mengganti renderer saja tidak menyelesaikan dua masalah ini.
+Verynize sudah punya runtime agent, live MCP, editable scene, dan screenshot. Namun implementasi sekarang belum memaksakan proses desain yang terarah dan verifikasi visual sebelum selesai. Ada kehilangan informasi layout di codec yang terbukti lewat eksekusi langsung. Meningkatkan model atau mengganti renderer saja tidak menyelesaikan dua masalah ini.
 
 Belum ada benchmark keluaran dengan brief identik di semua aplikasi. Karena itu audit ini **tidak menyatakan parity 1:1 tercapai**, dan tidak memberikan skor kualitas kompetitor yang dibuat-buat. Audit mencakup kode, probe codec, tes runtime/import, dokumentasi resmi, dan inspeksi aplikasi lokal oleh agent terpisah.
 
@@ -55,11 +55,11 @@ Quality gate utama harus ada di application runtime/MCP agar berlaku untuk Claud
 
 Pisahkan dua track. **Reconstruction** menguji kesetiaan pada referensi yang sama (geometri, font, wrap, warna, aset, screenshot dan export). **Original design** menguji kualitas relatif melalui blind review; kesamaan piksel tidak relevan untuk desain orisinal.
 
-Gunakan delapan brief: dashboard, editorial landing, mobile onboarding, commerce, settings, tabel padat, rekonstruksi referensi, dan refinement layar existing. Tiga run per brief per produk: Better Design/Wonder/Pen menghasilkan 72 output utama. Figma dan FigCraft boleh memakai subset sebagai kontrol tambahan; jangan mencampurnya dalam klaim parity utama.
+Gunakan delapan brief: dashboard, editorial landing, mobile onboarding, commerce, settings, tabel padat, rekonstruksi referensi, dan refinement layar existing. Tiga run per brief per produk: Verynize/Wonder/Pen menghasilkan 72 output utama. Figma dan FigCraft boleh memakai subset sebagai kontrol tambahan; jangan mencampurnya dalam klaim parity utama.
 
 Bekukan prompt, referensi, aset, font, viewport, batas waktu dan jumlah refinement. Catat versi aplikasi, model/provider/effort bila bisa dipilih; jika tidak bisa disamakan, laporkan sebagai keterbatasan. Simpan first pass dan final output serta logs/revision.
 
-Rubrik usulan 100 poin: hierarchy 20, typography 20, spacing/alignment 20, warna 10, relevansi konten 10, aset 10, konsistensi sistem 10. Minimal tiga reviewer menilai output anonim; laporkan win/tie/loss terhadap Wonder dan Pen **masing-masing**, rentang skor dan disagreement. Usulan gate awal: nol cacat kritis, median total Better Design tidak di bawah tiap pembanding, dan tidak ada kategori brief yang gagal konsisten. Ini kriteria penerimaan usulan, bukan hasil pengukuran; 24 pasangan per kompetitor masih pilot, bukan bukti statistik universal.
+Rubrik usulan 100 poin: hierarchy 20, typography 20, spacing/alignment 20, warna 10, relevansi konten 10, aset 10, konsistensi sistem 10. Minimal tiga reviewer menilai output anonim; laporkan win/tie/loss terhadap Wonder dan Pen **masing-masing**, rentang skor dan disagreement. Usulan gate awal: nol cacat kritis, median total Verynize tidak di bawah tiap pembanding, dan tidak ada kategori brief yang gagal konsisten. Ini kriteria penerimaan usulan, bukan hasil pengukuran; 24 pasangan per kompetitor masih pilot, bukan bukti statistik universal.
 
 ## Verifikasi yang dilakukan
 

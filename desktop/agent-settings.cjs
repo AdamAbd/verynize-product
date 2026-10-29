@@ -28,14 +28,14 @@ function normalizeOptions(options = {}) {
 
 // Design defaults used when the user has not chosen a model / effort. Claude defaults to Opus 5.5 at
 // high effort (the recommended design model). Codex keeps the CLI's own default model unless a
-// model id is configured (here or via BETTER_DESIGN_DEFAULT_CODEX_MODEL). Override per run by
-// passing model/effort, globally with BETTER_DESIGN_DEFAULT_<AGENT>_MODEL / _EFFORT (set to an empty
+// model id is configured (here or via VERYNIZE_DEFAULT_CODEX_MODEL). Override per run by
+// passing model/effort, globally with VERYNIZE_DEFAULT_<AGENT>_MODEL / _EFFORT (set to an empty
 // string to disable a default), or skip defaults entirely with options.useDefaults === false.
 const DESIGN_DEFAULTS = Object.freeze({ claude: Object.freeze({ model: 'claude-opus-5-5', effort: 'high' }), codex: Object.freeze({ model: '', effort: '' }) });
 
 function defaultsFor(agent, env = process.env) {
   if (!AGENTS.includes(agent)) throw Error('Unknown local agent');
-  const base = DESIGN_DEFAULTS[agent], prefix = `BETTER_DESIGN_DEFAULT_${agent.toUpperCase()}_`;
+  const base = DESIGN_DEFAULTS[agent], prefix = `VERYNIZE_DEFAULT_${agent.toUpperCase()}_`;
   const pick = (key, fallback) => (Object.hasOwn(env, prefix + key) ? String(env[prefix + key] ?? '') : fallback);
   return { model: pick('MODEL', base.model), effort: pick('EFFORT', base.effort) };
 }
@@ -69,8 +69,8 @@ const codexPolicy = access => ({ ...CODEX_POLICIES[normalizeAccess(access)] });
 
 // Codex `-c key=value` overrides that register the live canvas MCP bridge. The bearer token is
 // passed through an environment variable so it never appears in argv / process listings.
-const MCP_SERVER_NAME = 'better-design';
-const MCP_TOKEN_ENV = 'BETTER_DESIGN_MCP_TOKEN';
+const MCP_SERVER_NAME = 'verynize';
+const MCP_TOKEN_ENV = 'VERYNIZE_MCP_TOKEN';
 function codexMcpArgs(bridge) {
   if (!bridge || typeof bridge.url !== 'string' || !/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\//.test(bridge.url)) return [];
   const args = ['-c', `mcp_servers.${MCP_SERVER_NAME}.url=${JSON.stringify(bridge.url)}`];

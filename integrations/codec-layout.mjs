@@ -1,4 +1,4 @@
-// Headless layout for Better Design documents: a small CSS-like engine (block flow, flex row and
+// Headless layout for Verynize documents: a small CSS-like engine (block flow, flex row and
 // column with wrap/grow/shrink, equal-column grid, absolute children, free frames) that turns the
 // node tree into x/y/w/h. Text is measured with a font-aware character-width estimate, so every
 // node it touches is marked `measured: false` until a real renderer measures it.

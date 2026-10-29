@@ -2,7 +2,7 @@
 
 This file provides guidance to coding agents (Claude Code, Codex, …) working in this repository.
 
-Better Design is a macOS Electron design editor (canvas + inspector + local Claude/Codex agent chat), with a headless CLI/MCP server for agents editing the same document format, and a Cloudflare Worker for room-based collaboration. The visual target is the Wonder app, captured in `design/wonder/*.png` (2880×1740 = 1440×870 CSS px at 2×).
+Verynize is a macOS Electron design editor (canvas + inspector + local Claude/Codex agent chat), with a headless CLI/MCP server for agents editing the same document format, and a Cloudflare Worker for room-based collaboration. The visual target is the Wonder app, captured in `design/wonder/*.png` (2880×1740 = 1440×870 CSS px at 2×).
 
 ## Project structure
 
@@ -31,7 +31,7 @@ npm run dev / build       # Cloudflare web dev server / Worker build (vite.confi
 npm run deploy:check      # build + `cf deploy --prebuilt --dry-run` (never run `deploy` unprompted)
 npm run cli -- --root /abs/dir list   # headless document CLI
 npm run mcp -- --root /abs/dir        # stdio MCP server
-npm run package:mac       # dist/Better Design.app (ad-hoc signed)
+npm run package:mac       # dist/Verynize.app (ad-hoc signed)
 ```
 
 Run a single test directly. Tests are plain scripts, not a vitest suite:
@@ -49,7 +49,7 @@ The app version is `"version"` in `package.json`; that is the source of truth. `
 
 ## Architecture
 
-**Desktop main process** (`desktop/*.cjs`, CommonJS). `main.cjs` creates the sandboxed window (contextIsolation, no nodeIntegration). Its `handle(name, fn)` wraps every IPC handler and rejects any sender that isn't the main frame at the exact `web/index.html` file URL. Each feature module exports `registerX(handle, win, ...)`: projects (file containment, git and worktrees), design-files (native `*.better-design.json` save/watch), agent-runtime, figma, generate, render (offscreen PNG/PDF), preview, agent-auth. `preload.cjs` exposes `window.desktop`; its contract is in `desktop/README.md`. `mcp-bridge.cjs` starts a loopback HTTP MCP bridge with a per-launch bearer token, written to `~/Library/Application Support/Better Design/mcp.json`.
+**Desktop main process** (`desktop/*.cjs`, CommonJS). `main.cjs` creates the sandboxed window (contextIsolation, no nodeIntegration). Its `handle(name, fn)` wraps every IPC handler and rejects any sender that isn't the main frame at the exact `web/index.html` file URL. Each feature module exports `registerX(handle, win, ...)`: projects (file containment, git and worktrees), design-files (native `*.verynize.json` save/watch), agent-runtime, figma, generate, render (offscreen PNG/PDF), preview, agent-auth. `preload.cjs` exposes `window.desktop`; its contract is in `desktop/README.md`. `mcp-bridge.cjs` starts a loopback HTTP MCP bridge with a per-launch bearer token, written to `~/Library/Application Support/Verynize/mcp.json`.
 
 **Agent runtime** (`desktop/agent-runtime.cjs`, documented in `docs/agent-workflows.md`). Claude runs through `@anthropic-ai/claude-agent-sdk` `query()` against the user's installed `claude` binary, with a CLI fallback. Codex runs through `codex app-server` JSON-RPC, with a `codex exec` fallback. Events stream to the renderer as `{id, chatId, seq, type}`. Access levels (ask/edit/auto/full) map to permission modes and sandboxes. Limits are three turns per window and one per chat.
 
@@ -62,7 +62,7 @@ The app version is `"version"` in `package.json`; that is the source of truth. `
    - Keep Portals inside `portalContainer()`. Icon-only buttons need `aria-label`.
    - Edit source files, never the generated `web/dist/` bundles.
 
-**Headless document engine** (`integrations/*.mjs`, ESM). `design-store.mjs` reads and writes `NAME.better-design.json` with revision checks. It has its own `validateDocument`, which mirrors `validate()` in `web/app.js`; keep the two consistent when changing the schema. `design-tools.mjs` is the single MCP tool definition shared by the stdio server (`mcp-server.mjs`) and the desktop bridge. Tools talk to a backend interface (`list/read/transact/create/open/focus/screenshot`). The stdio server proxies to the live bridge when the app runs and edits files under `--root` otherwise. `jsx-codec.mjs`, `codec-*.mjs` and `tailwind-*.mjs` convert between nodes and a safe, non-evaluated Tailwind JSX subset (classes resolved by the real Tailwind v4 engine). `design-edit.mjs` holds the pure transforms (short ids, `update_elements` directives, flow layout). `export-html.mjs` handles export, and `design-knowledge/` holds the agent design persona and playbooks.
+**Headless document engine** (`integrations/*.mjs`, ESM). `design-store.mjs` reads and writes `NAME.verynize.json` with revision checks. It has its own `validateDocument`, which mirrors `validate()` in `web/app.js`; keep the two consistent when changing the schema. `design-tools.mjs` is the single MCP tool definition shared by the stdio server (`mcp-server.mjs`) and the desktop bridge. Tools talk to a backend interface (`list/read/transact/create/open/focus/screenshot`). The stdio server proxies to the live bridge when the app runs and edits files under `--root` otherwise. `jsx-codec.mjs`, `codec-*.mjs` and `tailwind-*.mjs` convert between nodes and a safe, non-evaluated Tailwind JSX subset (classes resolved by the real Tailwind v4 engine). `design-edit.mjs` holds the pure transforms (short ids, `update_elements` directives, flow layout). `export-html.mjs` handles export, and `design-knowledge/` holds the agent design persona and playbooks.
 
 **Cloud** (`cloud/worker.js`). One SQLite Durable Object per room. It does revision-checked whole-document snapshots (stale write → 409 + current snapshot; no CRDT), WebSocket presence and frozen public snapshots. Capability tokens are stored hashed. The API is in `cloud/README.md`, and the renderer side is `web/cloud-panel.js`.
 

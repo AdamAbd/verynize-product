@@ -632,7 +632,7 @@ export function duplicateElements(document, pageId, ref, { count = 1, newArtboar
 }
 
 // ---------------------------------------------------------------------------------------------
-// Design tokens. Better Design stores color variables as `tokens: {name: '#rrggbb'}`; tools expose
+// Design tokens. Verynize stores color variables as `tokens: {name: '#rrggbb'}`; tools expose
 // them Wonder-style with slash-separated names and a CSS variable.
 
 export function describeTokens(document) {

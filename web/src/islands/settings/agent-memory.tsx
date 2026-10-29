@@ -85,7 +85,7 @@ export function DesignPreferencesSection() {
     >
       {!ipc ? (
         <Card>
-          <Row title="Available in the desktop app" description="Design preferences are stored on this computer by Better Design." />
+          <Row title="Available in the desktop app" description="Design preferences are stored on this computer by Verynize." />
         </Card>
       ) : (
         <Card id="settings-design-preference-list">
@@ -230,15 +230,15 @@ export function AllowedActionsSection() {
 
 /* ---------- Tools version (pushed by desktop/mcp-bridge.cjs through web/agent-bridge.js) ---------- */
 type ToolsInfo = { toolsVersion: string | null; serverVersion: string | null };
-const toolsInfo = () => (window as unknown as { betterDesignTools?: ToolsInfo }).betterDesignTools ?? null;
+const toolsInfo = () => (window as unknown as { verynizeTools?: ToolsInfo }).verynizeTools ?? null;
 
 export function useToolsInfo() {
   const [info, setInfo] = useState<ToolsInfo | null>(toolsInfo);
   useEffect(() => {
     const update = () => setInfo(toolsInfo());
-    window.addEventListener("better-design-tools", update);
+    window.addEventListener("verynize-tools", update);
     update();
-    return () => window.removeEventListener("better-design-tools", update);
+    return () => window.removeEventListener("verynize-tools", update);
   }, []);
   return info;
 }

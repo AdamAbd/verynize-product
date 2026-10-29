@@ -15,7 +15,7 @@ const MAX_EMBED_BYTES = 12 * 1024 * 1024; // render.cjs caps HTML at 20 MB
 const TIMEOUT_MS = 15000;
 
 export function defaultFontCacheDir() {
-  return process.env.BETTER_DESIGN_FONT_CACHE || path.join(os.homedir(), 'Library', 'Application Support', 'Better Design', 'font-cache');
+  return process.env.VERYNIZE_FONT_CACHE || path.join(os.homedir(), 'Library', 'Application Support', 'Verynize', 'font-cache');
 }
 
 export const GENERIC_FAMILIES = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif', 'ui-sans-serif',

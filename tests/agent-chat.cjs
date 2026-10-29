@@ -39,7 +39,7 @@ const path = require('node:path');
     const firstStart = (await rpc('thread/start'))[0].params;
     assert.match(firstStart.cwd, /agent-workdirs[\/\\][0-9a-f-]{36}$/);
     const firstTurn = (await rpc('turn/start'))[0].params.input[0].text;
-    assert.match(firstTurn, /^<better-design-context>[\s\S]*pageId [^\s)]+[\s\S]*<\/better-design-context>\n\nQuick question$/);
+    assert.match(firstTurn, /^<verynize-context>[\s\S]*pageId [^\s)]+[\s\S]*<\/verynize-context>\n\nQuick question$/);
 
     // 2. Project chat: model default, new session, then a resumed follow-up.
     await app.evaluate(({ dialog }, project) => (dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] })), project);
@@ -115,7 +115,7 @@ const path = require('node:path');
     assert.equal(await page.locator('#project-prompt').inputValue(), 'draft for the new chat', 'drafts are restored per conversation');
     await page.locator('#project-prompt').fill('');
 
-    // Mentions follow the canvas selection; @ search and betterdesign:// links resolve elements.
+    // Mentions follow the canvas selection; @ search and verynize:// links resolve elements.
     const target = await ws(() => { const doc = window.design.getDocument(); const page = doc.pages.find(p => p.id === doc.activePage); const node = page.nodes.find(n => !n.parentId) || page.nodes[0]; return node ? { id: node.id, pageId: page.id } : null; });
     assert.ok(target, 'the open document has an element to mention');
     await page.evaluate(id => window.design.setSelection([id]), target.id);
@@ -128,9 +128,9 @@ const path = require('node:path');
     assert.ok(found.some(m => m.id === target.id), 'searchElements finds the element by short id');
     await page.evaluate(m => window.agentWorkspace.addMention(m), found.find(m => m.id === target.id));
     await page.evaluate(() => window.design.setSelection([]));
-    assert.equal(await page.evaluate(url => window.agentWorkspace.openLink(url), `betterdesign://node/editor/${target.pageId}/${mention.shortId}`), true);
+    assert.equal(await page.evaluate(url => window.agentWorkspace.openLink(url), `verynize://node/editor/${target.pageId}/${mention.shortId}`), true);
     assert.deepEqual(await ws(() => window.design.getSelection()), [target.id], 'openLink selects the linked element');
-    assert.equal(await ws(() => window.agentWorkspace.openLink('betterdesign://node/editor/no-page/zzzz')), false);
+    assert.equal(await ws(() => window.agentWorkspace.openLink('verynize://node/editor/no-page/zzzz')), false);
 
     // Run a slow turn, queue three follow-ups and edit / reorder / remove them.
     await sendText('slow parity task');
@@ -204,6 +204,6 @@ const path = require('node:path');
     assert.equal((await rpc('thread/start')).length, startsBefore + 1);
     const seeded = (await rpc('turn/start')).at(-1).params.input[0].text;
     assert.match(seeded, /Summary of the earlier conversation[\s\S]*seed source turn[\s\S]*after a tools update$/, 'the new session is seeded with the transcript summary');
-    console.log('PASS chat parity: drafts, suggestions, selection mentions, search, betterdesign links, queue CRUD, questions, usage, stop keeps queue, send now, rewind branch, tools-version seeding');
+    console.log('PASS chat parity: drafts, suggestions, selection mentions, search, verynize links, queue CRUD, questions, usage, stop keeps queue, send now, rewind branch, tools-version seeding');
   } finally { await app.close(); await fs.rm(root, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

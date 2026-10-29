@@ -41,8 +41,8 @@ const IMAGE_TYPES = [
 // ---------------------------------------------------------------------------------------------
 // Persona and per-turn context. The designer persona comes from the design knowledge layer
 // (integrations/design-knowledge/persona.mjs, loaded with require(esm)); runtime facts, the user's
-// personal instructions and BETTER_DESIGN.md are appended.
-const FALLBACK_PERSONA = 'You are the designer inside Better Design, a local desktop design editor with a live canvas. Decide a short brief before you draw, build in small verifiable steps, screenshot your work and review it before you finish.';
+// personal instructions and VERYNIZE.md are appended.
+const FALLBACK_PERSONA = 'You are the designer inside Verynize, a local desktop design editor with a live canvas. Decide a short brief before you draw, build in small verifiable steps, screenshot your work and review it before you finish.';
 let designPersona;
 function loadDesignPersona() {
   if (designPersona === undefined) {
@@ -56,15 +56,15 @@ function buildPersona({ bridge = false, quickChat = false, instructions = '', me
   const lines = [
     loadDesignPersona(),
     bridge
-      ? 'Canvas work goes through the `better-design` MCP tools: they read and edit the document that is open in the editor right now, and every change shows up live and can be undone by the user. Start with get_design_context and follow the workflow in the tool instructions. Use them whenever the request is about the design, a page, a frame, a component, tokens, or the current selection. Do not try to edit design files on disk directly while the editor has them open. A turn that changes an artboard ends with finish_artboard (with a reviewNote) after a screenshot and design review.'
-      : 'The live canvas tools (`better-design` MCP server) are not connected in this session. If the request needs canvas edits, say so briefly and offer to work on project files instead.',
-    'Each user turn may begin with a <better-design-context> block. It names the open document, the active page id and the ids of the selected elements. Ids are references only: fetch the content you need with the tools, and pass the given page id to every canvas tool call. Image paths listed there are files on disk that you may read or copy.',
+      ? 'Canvas work goes through the `verynize` MCP tools: they read and edit the document that is open in the editor right now, and every change shows up live and can be undone by the user. Start with get_design_context and follow the workflow in the tool instructions. Use them whenever the request is about the design, a page, a frame, a component, tokens, or the current selection. Do not try to edit design files on disk directly while the editor has them open. A turn that changes an artboard ends with finish_artboard (with a reviewNote) after a screenshot and design review.'
+      : 'The live canvas tools (`verynize` MCP server) are not connected in this session. If the request needs canvas edits, say so briefly and offer to work on project files instead.',
+    'Each user turn may begin with a <verynize-context> block. It names the open document, the active page id and the ids of the selected elements. Ids are references only: fetch the content you need with the tools, and pass the given page id to every canvas tool call. Image paths listed there are files on disk that you may read or copy.',
     quickChat
       ? 'This is a quick chat with no project attached. The working directory is a private scratch folder; files you create there are temporary.'
       : 'The working directory is the user\'s project. Respect its conventions and do not make unrelated changes.',
   ];
   if (instructions) lines.push('Personal instructions from the user:\n' + String(instructions).slice(0, 4000));
-  if (memory) lines.push('Project memory (BETTER_DESIGN.md):\n' + String(memory).slice(0, 12000));
+  if (memory) lines.push('Project memory (VERYNIZE.md):\n' + String(memory).slice(0, 12000));
   const prefs = preferenceLines(preferences);
   if (prefs) lines.push('User design preferences (apply unless the brief overrides):\n' + prefs);
   return lines.join('\n\n');
@@ -83,11 +83,11 @@ function preferenceLines(preferences) {
 }
 
 // Design preferences live in integrations/preferences.mjs (optional; owned by the MCP layer). The
-// desktop app sets BETTER_DESIGN_PREFERENCES so this runtime and the MCP tools share one file.
+// desktop app sets VERYNIZE_PREFERENCES so this runtime and the MCP tools share one file.
 async function preferenceStore() {
   const mod = await import('../integrations/preferences.mjs');
   if (typeof mod.createPreferenceStore !== 'function') throw Error('Design preferences are unavailable');
-  return mod.createPreferenceStore(process.env.BETTER_DESIGN_PREFERENCES || mod.defaultPreferencesPath());
+  return mod.createPreferenceStore(process.env.VERYNIZE_PREFERENCES || mod.defaultPreferencesPath());
 }
 async function defaultLoadPreferences() {
   try { const list = await (await preferenceStore()).list(); return Array.isArray(list) ? list : []; } catch { return []; }
@@ -131,7 +131,7 @@ function createDesignTurnGuard({ maxBlocks = 2 } = {}) {
   const state = { mutated: false, dirty: false, blocks: 0, progressSinceBlock: true };
   return {
     state,
-    /** Record one better-design tool result. */
+    /** Record one verynize tool result. */
     toolResult(toolName, { ok = true, text = '' } = {}) {
       const name = DESIGN_TOOL.exec(String(toolName || ''))?.[1];
       if (!name) return;
@@ -192,7 +192,7 @@ function normalizeContext(context, imageRoot) {
 
 function buildTurnContext(context) {
   if (!context) return '';
-  const lines = ['<better-design-context>'];
+  const lines = ['<verynize-context>'];
   if (context.documentName || context.documentPath || context.documentId) {
     lines.push(`Open document: "${context.documentName || 'Untitled'}"${context.documentId ? ` (documentId ${context.documentId})` : ''}${context.documentPath ? ` saved at ${context.documentPath}` : ''}.`);
   }
@@ -204,7 +204,7 @@ function buildTurnContext(context) {
   }
   if (context.images.length) lines.push('Attached images (files on disk):', ...context.images.map(p => '- ' + p));
   if (lines.length === 1) return '';
-  lines.push('</better-design-context>');
+  lines.push('</verynize-context>');
   return lines.join('\n');
 }
 
@@ -217,7 +217,7 @@ function buildSeedBlock(seed) {
     '<previous-conversation>',
     'This chat continues an earlier conversation that ran in a different agent session, which is not resumed. Summary of that transcript:',
     text.length > SEED_LIMIT ? '…' + text.slice(-SEED_LIMIT) : text,
-    'Note: the Better Design tools and their capabilities may have changed since then. Do not rely on earlier tool results or element ids without checking them again with the current tools.',
+    'Note: the Verynize tools and their capabilities may have changed since then. Do not rely on earlier tool results or element ids without checking them again with the current tools.',
     '</previous-conversation>',
   ].join('\n');
 }
@@ -370,7 +370,7 @@ function cleanTitle(text) {
 
 // Tools a read-only helper must never call.
 const HELPER_BLOCKED_DESIGN_TOOLS = [...MUTATING_DESIGN_TOOLS, 'finish_artboard', 'ask_agent'];
-const HELPER_PERSONA = 'You are a read-only helper agent consulted by the designer agent inside Better Design (a local desktop design editor). Answer the task you are given precisely and concisely. You may read project files and inspect the open design with the read-only `better-design` MCP tools (get_design_context, get_element_code, take_screenshot and similar), but you must not edit files, run commands, or change the canvas. Reply with your findings only.';
+const HELPER_PERSONA = 'You are a read-only helper agent consulted by the designer agent inside Verynize (a local desktop design editor). Answer the task you are given precisely and concisely. You may read project files and inspect the open design with the read-only `verynize` MCP tools (get_design_context, get_element_code, take_screenshot and similar), but you must not edit files, run commands, or change the canvas. Reply with your findings only.';
 
 // Pure option builder for the Claude Agent SDK, kept separate for unit tests.
 function claudeQueryOptions({ cwd, access, model, effort, sessionId, persona, bridge, executable, additionalDirectories }) {
@@ -690,7 +690,7 @@ class AgentRuntime {
       ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: params.context?.images?.length ? [path.dirname(params.context.images[0])] : [] }),
       abortController: abort,
       ...(params.bridge?.url ? { hooks: designHooks(createDesignTurnGuard()) } : {}),
-      env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `better-design/${VERSION}`, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' }),
+      env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `verynize/${VERSION}`, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' }),
       stderr: data => { stderr = (stderr + data).slice(-8000); },
       canUseTool: (toolName, toolInput, opts = {}) => this.claudeCanUseTool(run, toolName, toolInput, opts),
     };
@@ -739,7 +739,7 @@ class AgentRuntime {
       return { behavior: 'allow', updatedInput: claudeAnswerInput(toolInput, questions, answers) };
     }
     const allow = await this.askPermission(run, toolName, toolInput, opts.signal, { toolCallId: opts.toolUseID, canAlwaysAllow: !opts.suppressAlwaysAllowRule });
-    return allow ? { behavior: 'allow', updatedInput: toolInput } : { behavior: 'deny', message: 'The user declined this action in Better Design.' };
+    return allow ? { behavior: 'allow', updatedInput: toolInput } : { behavior: 'deny', message: 'The user declined this action in Verynize.' };
   }
 
   startClaudeCli(params) {
@@ -805,7 +805,7 @@ class AgentRuntime {
       }
     });
     this.codex = server;
-    await rpc.request('initialize', { clientInfo: { name: 'better_design', title: 'Better Design', version: VERSION }, capabilities: { experimentalApi: true } }, 20000);
+    await rpc.request('initialize', { clientInfo: { name: 'verynize', title: 'Verynize', version: VERSION }, capabilities: { experimentalApi: true } }, 20000);
     rpc.notify('initialized');
     return server;
   }
@@ -830,7 +830,7 @@ class AgentRuntime {
       const answers = await this.askQuestion(run, questions, { toolCallId: params.itemId });
       return codexAnswers(questions, answers);
     }
-    throw Error('Better Design does not handle ' + method);
+    throw Error('Verynize does not handle ' + method);
   }
 
   async startCodex(params) {
@@ -940,7 +940,7 @@ class AgentRuntime {
     const options = {
       cwd, abortController: abort, permissionMode: 'default', persistSession: false,
       maxTurns: review ? 40 : 1,
-      env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `better-design/${VERSION}` }),
+      env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `verynize/${VERSION}` }),
       canUseTool: async () => ({ behavior: 'deny', message: 'This read-only helper cannot use that tool.' }),
       ...(found?.path ? { pathToClaudeCodeExecutable: found.path } : {}),
       ...(model ? { model } : {}), ...(effort ? { effort } : {}),

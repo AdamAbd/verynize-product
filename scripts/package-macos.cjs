@@ -3,8 +3,8 @@ const path=require('node:path');
 const {execFileSync}=require('node:child_process');
 (async()=>{
  if(process.platform!=='darwin')throw Error('This packaging script targets macOS');
- const root=path.resolve(__dirname,'..'),target=path.join(root,'dist','Better Design.app');
- try{await fs.access(target);if(!process.argv.includes('--replace'))throw Error('dist/Better Design.app already exists. Use --replace to rebuild this generated application.');const id=execFileSync('/usr/bin/plutil',['-extract','CFBundleIdentifier','raw',path.join(target,'Contents/Info.plist')],{encoding:'utf8'}).trim();if(id!=='local.better-design.desktop')throw Error('Refusing to replace an unrelated application');await fs.rm(target,{recursive:true});}catch(e){if(e.code!=='ENOENT')throw e;}
+ const root=path.resolve(__dirname,'..'),target=path.join(root,'dist','Verynize.app');
+ try{await fs.access(target);if(!process.argv.includes('--replace'))throw Error('dist/Verynize.app already exists. Use --replace to rebuild this generated application.');const id=execFileSync('/usr/bin/plutil',['-extract','CFBundleIdentifier','raw',path.join(target,'Contents/Info.plist')],{encoding:'utf8'}).trim();if(id!=='local.verynize.desktop')throw Error('Refusing to replace an unrelated application');await fs.rm(target,{recursive:true});}catch(e){if(e.code!=='ENOENT')throw e;}
  await fs.mkdir(path.dirname(target),{recursive:true});
  await fs.cp(path.join(root,'node_modules/electron/dist/Electron.app'),target,{recursive:true,verbatimSymlinks:true});
  const version=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8')).version;
@@ -22,9 +22,9 @@ const {execFileSync}=require('node:child_process');
  let shipped=0;
  for(const key of runtime){const from=path.join(root,key);try{await fs.access(from)}catch{continue}await fs.cp(from,path.join(app,key),{recursive:true,verbatimSymlinks:true,filter:source=>!/\/node_modules\/\.bin(\/|$)/.test(source)});shipped++;}
  console.error(`Shipped ${shipped} runtime packages`);
- await fs.writeFile(path.join(app,'package.json'),JSON.stringify({name:'better-design',productName:'Better Design',version,main:'desktop/main.cjs',type:'module'}));
+ await fs.writeFile(path.join(app,'package.json'),JSON.stringify({name:'verynize',productName:'Verynize',version,main:'desktop/main.cjs',type:'module'}));
  const plist=path.join(target,'Contents/Info.plist');
- for(const [key,value]of Object.entries({CFBundleName:'Better Design',CFBundleDisplayName:'Better Design',CFBundleIdentifier:'local.better-design.desktop',CFBundleShortVersionString:version,CFBundleVersion:version}))execFileSync('/usr/bin/plutil',['-replace',key,'-string',value,plist]);
+ for(const [key,value]of Object.entries({CFBundleName:'Verynize',CFBundleDisplayName:'Verynize',CFBundleIdentifier:'local.verynize.desktop',CFBundleShortVersionString:version,CFBundleVersion:version}))execFileSync('/usr/bin/plutil',['-replace',key,'-string',value,plist]);
  execFileSync('/usr/bin/codesign',['--force','--deep','--sign','-',target],{stdio:'pipe'});
  console.log(target);
 })().catch(error=>{console.error(error.message);process.exitCode=1});

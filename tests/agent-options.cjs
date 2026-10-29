@@ -27,12 +27,12 @@ test('fallback CLI argv carries model, effort, permissions, resume and MCP witho
   const bridge = { url: 'http://127.0.0.1:4555/mcp', token: 'tok-secret' };
   const codex = argumentsFor('codex', { access: 'full', bridge });
   assert.ok(codex.includes('danger-full-access'));
-  assert.ok(codex.includes('mcp_servers.better-design.url="http://127.0.0.1:4555/mcp"'));
-  assert.ok(codex.includes('mcp_servers.better-design.bearer_token_env_var="BETTER_DESIGN_MCP_TOKEN"'));
+  assert.ok(codex.includes('mcp_servers.verynize.url="http://127.0.0.1:4555/mcp"'));
+  assert.ok(codex.includes('mcp_servers.verynize.bearer_token_env_var="VERYNIZE_MCP_TOKEN"'));
   assert.doesNotMatch(codex.join(' '), /tok-secret/, 'Codex token travels via env, not argv');
   const claude = argumentsFor('claude', { bridge });
   const config = JSON.parse(claude[claude.indexOf('--mcp-config') + 1]);
-  assert.deepEqual(config.mcpServers['better-design'], { type: 'http', url: bridge.url, headers: { Authorization: 'Bearer tok-secret' } });
+  assert.deepEqual(config.mcpServers['verynize'], { type: 'http', url: bridge.url, headers: { Authorization: 'Bearer tok-secret' } });
   assert.deepEqual(settings.codexMcpArgs({ url: 'https://evil.example/mcp', token: 'x' }), [], 'only loopback bridges are wired');
   assert.throws(() => argumentsFor('codex', { access: 'danger-full-access' }));
   assert.throws(() => argumentsFor('codex', { model: '--inject arg' }));
@@ -44,12 +44,12 @@ test('design defaults: Opus 5.5 at high effort for Claude, Codex keeps its CLI d
   assert.deepEqual(settings.withDefaults('claude', { effort: 'max' }, {}), { model: 'claude-opus-5-5', effort: 'max' });
   assert.deepEqual(settings.withDefaults('claude', { useDefaults: false }, {}), { useDefaults: false });
   assert.deepEqual(settings.withDefaults('codex', {}, {}), {}, 'Codex: no model unless configured');
-  assert.deepEqual(settings.withDefaults('codex', {}, { BETTER_DESIGN_DEFAULT_CODEX_MODEL: 'gpt-5.5-codex' }), { model: 'gpt-5.5-codex' });
-  assert.deepEqual(settings.withDefaults('claude', {}, { BETTER_DESIGN_DEFAULT_CLAUDE_MODEL: '', BETTER_DESIGN_DEFAULT_CLAUDE_EFFORT: '' }), {}, 'env can disable defaults');
-  assert.deepEqual(settings.withDefaults('claude', {}, { BETTER_DESIGN_DEFAULT_CLAUDE_MODEL: 'claude-sonnet-5' }), { model: 'claude-sonnet-5', effort: 'high' });
-  const saved = process.env.BETTER_DESIGN_DEFAULT_CLAUDE_MODEL; delete process.env.BETTER_DESIGN_DEFAULT_CLAUDE_MODEL;
+  assert.deepEqual(settings.withDefaults('codex', {}, { VERYNIZE_DEFAULT_CODEX_MODEL: 'gpt-5.5-codex' }), { model: 'gpt-5.5-codex' });
+  assert.deepEqual(settings.withDefaults('claude', {}, { VERYNIZE_DEFAULT_CLAUDE_MODEL: '', VERYNIZE_DEFAULT_CLAUDE_EFFORT: '' }), {}, 'env can disable defaults');
+  assert.deepEqual(settings.withDefaults('claude', {}, { VERYNIZE_DEFAULT_CLAUDE_MODEL: 'claude-sonnet-5' }), { model: 'claude-sonnet-5', effort: 'high' });
+  const saved = process.env.VERYNIZE_DEFAULT_CLAUDE_MODEL; delete process.env.VERYNIZE_DEFAULT_CLAUDE_MODEL;
   try { assert.deepEqual(argumentsFor('claude', { access: 'edit' }).slice(3), ['--model', 'claude-opus-5-5', '--effort', 'high']); }
-  finally { if (saved !== undefined) process.env.BETTER_DESIGN_DEFAULT_CLAUDE_MODEL = saved; }
+  finally { if (saved !== undefined) process.env.VERYNIZE_DEFAULT_CLAUDE_MODEL = saved; }
   assert.ok(!argumentsFor('codex', { access: 'edit' }).includes('--model'));
 });
 

@@ -26,7 +26,7 @@
   if(layout&&fill)inspector.insertBefore(layout,fill);if($('appearance-controls')&&fill)inspector.insertBefore($('appearance-controls'),fill);
 
   const projectToggle=$('project-toggle');if(projectToggle){setIcon('project-toggle','folder-open','Project workspace');document.querySelector('.chrome-divider').after(projectToggle);}
-  const stateKey='better-design-library-v1';let library={files:[],folders:[],active:null};try{const data=JSON.parse(localStorage.getItem(stateKey));if(data&&Array.isArray(data.files)&&Array.isArray(data.folders))library=data;}catch{}
+  const stateKey='verynize-library-v1';let library={files:[],folders:[],active:null};try{const data=JSON.parse(localStorage.getItem(stateKey));if(data&&Array.isArray(data.files)&&Array.isArray(data.folders))library=data;}catch{}
   const lastSerialized=new Map();library.files.forEach(file=>delete file.serialized);
   let filter='all',folder=null,list=false,saving=false,homeOpen=false;
   // Change listeners for the React home island (web/src/islands/home). When it attaches, the legacy grid below stops rendering.

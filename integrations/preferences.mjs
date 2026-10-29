@@ -2,8 +2,8 @@
 // ("use 8px corner radius", "never use purple gradients"). Stored as one small JSON file shared by
 // the desktop app (Settings › Memory, agent persona) and the MCP tools (save/list/update/delete).
 //
-//   defaultPreferencesPath() -> $BETTER_DESIGN_PREFERENCES, else
-//                               ~/Library/Application Support/Better Design/design-preferences.json
+//   defaultPreferencesPath() -> $VERYNIZE_PREFERENCES, else
+//                               ~/Library/Application Support/Verynize/design-preferences.json
 //   createPreferenceStore(file) -> {list, save, update, remove}
 //     list()            -> Promise<[{id, text, created, updated}]>   oldest first
 //     save(text)        -> Promise<{...pref, duplicate}>            dedupes case/whitespace-insensitively
@@ -21,12 +21,12 @@ export const MAX_PREFERENCES = 100;
 export const MAX_PREFERENCE_LENGTH = 500;
 
 export function defaultPreferencesPath(env = process.env) {
-  if (env.BETTER_DESIGN_PREFERENCES) return path.resolve(env.BETTER_DESIGN_PREFERENCES);
+  if (env.VERYNIZE_PREFERENCES) return path.resolve(env.VERYNIZE_PREFERENCES);
   const home = os.homedir();
   const base = process.platform === 'darwin' ? path.join(home, 'Library', 'Application Support')
     : process.platform === 'win32' ? (env.APPDATA || path.join(home, 'AppData', 'Roaming'))
     : (env.XDG_CONFIG_HOME || path.join(home, '.config'));
-  return path.join(base, 'Better Design', 'design-preferences.json');
+  return path.join(base, 'Verynize', 'design-preferences.json');
 }
 
 const normalize = text => String(text).trim().replace(/\s+/g, ' ');

@@ -85,7 +85,7 @@ export function AccountPage({ preferences, setPreference }: PageProps) {
         <Section
           id="settings-storage"
           title="Storage"
-          description="Better Design does not need a hosted account."
+          description="Verynize does not need a hosted account."
         >
           <Card>
             <Row
@@ -395,7 +395,7 @@ export function AgentsPage({ api, accounts }: PageProps) {
             )}
             {agents === null && (
               <Card>
-                <Row title="Desktop app required" description="Open Better Design as a desktop app to use local agents." />
+                <Row title="Desktop app required" description="Open Verynize as a desktop app to use local agents." />
               </Card>
             )}
             {agents?.length === 0 && (
@@ -416,7 +416,7 @@ export function AgentsPage({ api, accounts }: PageProps) {
           <Card>
             <Row
               title="Agent workspace"
-              description="Both agents get the live canvas tools while the Better Design MCP bridge is running."
+              description="Both agents get the live canvas tools while the Verynize MCP bridge is running."
             >
               <SettingsButton id="settings-open-agent" onClick={api.actions.openAgent}>
                 Open agent workspace
@@ -431,7 +431,7 @@ export function AgentsPage({ api, accounts }: PageProps) {
               title="Design tools version"
               description={
                 tools?.toolsVersion
-                  ? `Better Design MCP ${tools.serverVersion ?? ""} · changes whenever the tools, codec or design knowledge change.`
+                  ? `Verynize MCP ${tools.serverVersion ?? ""} · changes whenever the tools, codec or design knowledge change.`
                   : "Shown once the live MCP bridge is running."
               }
             >
@@ -684,7 +684,7 @@ export function MemoryPage({ api }: PageProps) {
                   <BookOpenIcon className="size-4" />
                 </IconTile>
               }
-              title="BETTER_DESIGN.md"
+              title="VERYNIZE.md"
               description="Project-specific guidance for agents working in this repository."
             >
               <SettingsButton id="settings-open-memory" onClick={api.actions.openMemory}>

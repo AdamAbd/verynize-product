@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 const persistence=await fs.mkdtemp(path.join(os.tmpdir(),'better-cloud-'));
 const source=await fs.readFile(new URL('../cloud/worker.js',import.meta.url),'utf8');
-const options={resourcePersistencePath:persistence,workers:[{config:{name:'better-design',compatibilityDate:'2026-10-28',manifest:{mainModule:'worker.js',modules:{'worker.js':{type:'esm',contents:source}}},env:{ROOM_CREATION:{type:'rate-limit',namespace:'1001',simple:{limit:10,period:60}},ROOMS:{type:'durable-object',worker:'better-design',exportName:'DesignRoom'}},exports:{DesignRoom:{type:'durable-object',storage:'sqlite'}}}}]};
+const options={resourcePersistencePath:persistence,workers:[{config:{name:'verynize',compatibilityDate:'2026-10-28',manifest:{mainModule:'worker.js',modules:{'worker.js':{type:'esm',contents:source}}},env:{ROOM_CREATION:{type:'rate-limit',namespace:'1001',simple:{limit:10,period:60}},ROOMS:{type:'durable-object',worker:'verynize',exportName:'DesignRoom'}},exports:{DesignRoom:{type:'durable-object',storage:'sqlite'}}}}]};
 let mf=new Miniflare(options);
 const request=(route,method='GET',data,token)=>mf.dispatchFetch('http://local'+route,{method,headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},...(data?{body:JSON.stringify(data)}:{})});
 try{

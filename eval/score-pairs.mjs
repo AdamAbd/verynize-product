@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Tier 3b: score blind pairwise votes.
 //
-//   node eval/score-pairs.mjs [votes.json ...] [--key eval/pairwise/key.json] [--focus better-design]
+//   node eval/score-pairs.mjs [votes.json ...] [--key eval/pairwise/key.json] [--focus verynize]
 //        [--samples 2000] [--margin 50] [--json out.json]
 //
 // Default vote files: eval/pairwise/votes/*.json (exports from review.html). Reports win/tie/loss
@@ -18,7 +18,7 @@ const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const optionNames = ['--key', '--focus', '--samples', '--margin', '--json', '--seed'];
 const files = args.filter((a, i) => !a.startsWith('--') && !optionNames.includes(args[i - 1]));
 const keyFile = resolve(opt('--key', join(EVAL_DIR, 'pairwise/key.json')));
-const focus = opt('--focus', 'better-design');
+const focus = opt('--focus', 'verynize');
 const samples = Number(opt('--samples', 2000));
 const margin = Number(opt('--margin', 50));
 const votesDir = join(EVAL_DIR, 'pairwise/votes');

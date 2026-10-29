@@ -55,7 +55,7 @@ Implemented in `web/canvas-interactions.js` (installed by `web/app.js` through `
   - ⌘⇧V pastes in place.
   - ⌘D duplicates.
   - ⌥⌘C and ⌥⌘V copy and paste style (fill, token, gradient, radius, border, shadow, opacity, typography, mask).
-  - The system clipboard carries JSON text (`format: "better-design/nodes"`), so layers can be pasted between documents and windows. Pasting plain text creates a text layer, and pasting an image creates an image layer.
+  - The system clipboard carries JSON text (`format: "verynize/nodes"`), so layers can be pasted between documents and windows. Pasting plain text creates a text layer, and pasting an image creates an image layer.
   - Pasted content is validated before insertion.
 - **Structure.**
   - ⌘G or ⌥⌘G frames the selection: a transparent frame at the union bounds, with children re-based. ⇧⌘G unframes, keeping page positions. This works from flex parents too.

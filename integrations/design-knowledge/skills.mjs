@@ -141,7 +141,7 @@ Use when the user gives code (a component, page, repo path, or pasted JSX/HTML) 
 - Note the real copy, data shape and states the code renders.
 
 ## 2. Translate, do not re-imagine
-- Rebuild the structure in Better Design JSX with flex/grid flow, hug/fill sizing and the same class values. Convert runtime logic to static content: write out mapped items explicitly with realistic data.
+- Rebuild the structure in Verynize JSX with flex/grid flow, hug/fill sizing and the same class values. Convert runtime logic to static content: write out mapped items explicitly with realistic data.
 - Keep component boundaries as labelled frames (\`data-node-label\` = component name).
 - Fonts by real family name with font-['Family_Name']; icons via get_icons using the closest match in one set.
 - Replace remote images with art-directed imagery or an intentional fallback.

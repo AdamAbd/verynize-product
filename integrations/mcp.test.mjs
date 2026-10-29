@@ -16,8 +16,8 @@ const SERVER = path.resolve('integrations/mcp-server.mjs');
 async function tempDir(t, prefix) { const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix)); t.after(() => fs.rm(dir, { recursive: true, force: true })); return dir; }
 async function stdioClient(t, args, env = {}) {
   const client = new Client({ name: 'test', version: '1' });
-  // BETTER_DESIGN_MCP_FILE points at a missing file so a real running app is never contacted.
-  await client.connect(new StdioClientTransport({ command: process.execPath, args: [SERVER, ...args], stderr: 'pipe', env: { ...process.env, BETTER_DESIGN_MCP_FILE: path.join(os.tmpdir(), 'better-design-no-bridge.json'), BETTER_DESIGN_PREFERENCES: path.join(os.tmpdir(), `better-design-test-prefs-${process.pid}.json`), ...env } }));
+  // VERYNIZE_MCP_FILE points at a missing file so a real running app is never contacted.
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [SERVER, ...args], stderr: 'pipe', env: { ...process.env, VERYNIZE_MCP_FILE: path.join(os.tmpdir(), 'verynize-no-bridge.json'), VERYNIZE_PREFERENCES: path.join(os.tmpdir(), `verynize-test-prefs-${process.pid}.json`), ...env } }));
   t.after(() => client.close());
   return client;
 }
@@ -25,7 +25,7 @@ const json = result => { assert.ok(!result.isError, result.content?.[0]?.text); 
 const call = (client, name, args = {}) => client.callTool({ name, arguments: args });
 
 test('real stdio MCP session (store fallback) exposes the full tool set and edits files', async t => {
-  const root = await tempDir(t, 'better-design-mcp-');
+  const root = await tempDir(t, 'verynize-mcp-');
   const client = await stdioClient(t, ['--root', root]);
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map(tool => tool.name), EXPECTED_TOOLS);
@@ -61,11 +61,11 @@ test('real stdio MCP session (store fallback) exposes the full tool set and edit
   assert.equal(shot.isError, true); assert.match(shot.content[0].text, /unavailable in headless mode/);
   assert.equal((await call(client, 'finish_artboard', { id: heroId })).isError, true, 'reviewNote is required');
   const finished = json(await call(client, 'finish_artboard', { id: heroId, reviewNote: 'Checked hierarchy, spacing and contrast.' }));
-  assert.equal(finished.headless, true); assert.equal(finished.status, 'unverified'); assert.match(finished.reasons.join(' '), /no verification receipt/); assert.match(finished.designLink.url, new RegExp(`^betterdesign://node/home/[^/]+/${heroId}$`));
+  assert.equal(finished.headless, true); assert.equal(finished.status, 'unverified'); assert.match(finished.reasons.join(' '), /no verification receipt/); assert.match(finished.designLink.url, new RegExp(`^verynize://node/home/[^/]+/${heroId}$`));
   const page = json(await call(client, 'create_page', { name: 'Mobile' }));
   json(await call(client, 'rename_page', { pageId: page.pageId, name: 'Phone' }));
 
-  const saved = JSON.parse(await fs.readFile(path.join(root, 'home.better-design.json'), 'utf8'));
+  const saved = JSON.parse(await fs.readFile(path.join(root, 'home.verynize.json'), 'utf8'));
   assert.equal(saved.pages.length, 2); assert.equal(saved.pages[1].name, 'Phone');
   assert.deepEqual(saved.tokens, { 'color/accent': '#00aa00' });
   const nodes = saved.pages[0].nodes;
@@ -85,12 +85,12 @@ test('real stdio MCP session (store fallback) exposes the full tool set and edit
   // Validation: bad names and paths are rejected by schema; open_document needs the app.
   assert.equal((await call(client, 'create_document', { name: '../escape', title: 'x' })).isError, true);
   assert.equal((await call(client, 'get_element_code', { document: 'home', ids: [] })).isError, true);
-  assert.match((await call(client, 'open_document', { name: 'home' })).content[0].text, /needs the Better Design desktop app/);
+  assert.match((await call(client, 'open_document', { name: 'home' })).content[0].text, /needs the Verynize desktop app/);
   assert.match((await call(client, 'update_elements', { edit: `{/* insert as last child of ${heroId} */}<div>{items.map(x => x)}</div>` })).content[0].text, /no JavaScript|Only string/);
 });
 
 test('loopback HTTP bridge requires the bearer token and refuses browser origins', async t => {
-  const root = await tempDir(t, 'better-design-http-');
+  const root = await tempDir(t, 'verynize-http-');
   const store = await DesignStore.open(root);
   const backend = createStoreBackend(store);
   const server = await startHttpServer({ makeServer: () => createDesignServer({ backend }) });
@@ -113,9 +113,9 @@ test('loopback HTTP bridge requires the bearer token and refuses browser origins
 });
 
 test('stdio server proxies to a running bridge and falls back to files when it is gone', async t => {
-  const bridgeRoot = await tempDir(t, 'better-design-bridge-');
-  const localRoot = await tempDir(t, 'better-design-local-');
-  const configDir = await tempDir(t, 'better-design-config-');
+  const bridgeRoot = await tempDir(t, 'verynize-bridge-');
+  const localRoot = await tempDir(t, 'verynize-local-');
+  const configDir = await tempDir(t, 'verynize-config-');
   const bridgeFile = path.join(configDir, 'mcp.json');
   const store = await DesignStore.open(bridgeRoot);
   await store.create('shared', 'Shared');
@@ -133,7 +133,7 @@ test('stdio server proxies to a running bridge and falls back to files when it i
   assert.equal(badArgs.isError, true);
 
   // With --root, a session started while the bridge runs falls back to files once it stops.
-  await fs.writeFile(path.join(localRoot, 'local.better-design.json'), JSON.stringify({ version: 2, name: 'Local', pages: [{ id: 'p', name: 'P', nodes: [] }], tokens: {} }));
+  await fs.writeFile(path.join(localRoot, 'local.verynize.json'), JSON.stringify({ version: 2, name: 'Local', pages: [{ id: 'p', name: 'P', nodes: [] }], tokens: {} }));
   const hybrid = await stdioClient(t, ['--bridge-file', bridgeFile, '--root', localRoot]);
   assert.ok(json(await call(hybrid, 'list_documents')).documents.some(d => d.name === 'shared'), 'served by the bridge');
   await server.close();
@@ -147,7 +147,7 @@ test('stdio server proxies to a running bridge and falls back to files when it i
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 async function verifiedBackend(t, options = {}) {
-  const root = await tempDir(t, 'better-design-verify-');
+  const root = await tempDir(t, 'verynize-verify-');
   const store = await DesignStore.open(root);
   const shots = [];
   const backend = createStoreBackend(store, {
@@ -254,7 +254,7 @@ test('measured bounds from the backend drive the lint; pending remote images res
 test('TOOLS_VERSION, instructions, design preferences, ask_agent and per-side apply_operations fields', async t => {
   assert.match(TOOLS_VERSION, /^[0-9a-f]{12}$/);
   assert.match(INSTRUCTIONS, /per-side padding/); assert.match(INSTRUCTIONS, /never pin a section height/); assert.match(INSTRUCTIONS, /designLink/);
-  const prefsFile = path.join(await tempDir(t, 'better-design-prefs-'), 'prefs.json');
+  const prefsFile = path.join(await tempDir(t, 'verynize-prefs-'), 'prefs.json');
   const { run, store } = await verifiedBackend(t, { preferences: createPreferenceStore(prefsFile) });
 
   const context = body(await run('get_design_context'));

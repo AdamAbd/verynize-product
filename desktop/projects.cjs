@@ -24,6 +24,6 @@ class Project {
   async git(args) { const {stdout}=await exec('git',['-C',this.root,...args],{maxBuffer:2*1024*1024,timeout:30000});return stdout; }
   async status(){return this.git(['status','--short','--branch']);}
   async worktree(branch){if(typeof branch!=='string'||!/^design\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,70}$/.test(branch))throw Error('Use a branch such as design/my-idea');await this.git(['rev-parse','--verify','HEAD']);const target=path.join(path.dirname(this.root),path.basename(this.root)+'-'+branch.replace('/','-'));await this.git(['worktree','add','-b',branch,target]);return {path:target,branch};}
-  async memory(){try{return await this.read('BETTER_DESIGN.md')}catch(e){if(e.code==='ENOENT')return '';throw e;}}
+  async memory(){try{return await this.read('VERYNIZE.md')}catch(e){if(e.code==='ENOENT')return '';throw e;}}
 }
 module.exports={Project};

@@ -1,13 +1,13 @@
 # Review kritis atas audit Astra — orchestrator → UI canvas
 
-Tanggal: 29 Oktober 2026. Mereview [audit Astra](2026-10-29-design-quality.md) beserta lampirannya. Metode: 4 agent paralel (pipeline Better Design, bundle Wonder 0.2.185, bundle Pen 1.2.20, riset Figma/FigCraft + Context7), lalu probe ulang temuan P0 secara langsung. Tidak ada kode produksi yang diubah. Probe ada di `/tmp/bd-probe/`.
+Tanggal: 29 Oktober 2026. Mereview [audit Astra](2026-10-29-design-quality.md) beserta lampirannya. Metode: 4 agent paralel (pipeline Verynize, bundle Wonder 0.2.185, bundle Pen 1.2.20, riset Figma/FigCraft + Context7), lalu probe ulang temuan P0 secara langsung. Tidak ada kode produksi yang diubah. Probe ada di `/tmp/bd-probe/`.
 
 ## Ringkasan
 
 Klaim kode Astra sebagian besar benar, tetapi **diagnosis dan prioritasnya meleset**:
 
 1. Astra menganggap masalah codec = "padding/radius per sisi hilang". Itu kosmetik. Akar masalah yang jauh lebih besar: **codec memproduksi layout absolut fixed-pixel**, bukan auto-layout. Ini yang membuat hasil terlihat "halusinasi" dan rusak saat diedit.
-2. Astra menyimpulkan orchestrator Wonder "hosted, tidak bisa diketahui". **Salah.** Plumbing Wonder hampir identik dengan Better Design (Claude Agent SDK lokal, preset `claude_code` + persona, Tailwind JSX, tool `create_artboard`/`update_elements`/`take_screenshot`/`finish_artboard`). Pembedanya adalah **lapisan pengetahuan desain** (fundamentals + skills + style guides) yang dilayani `mcp.wonder.so` — dan sebagian besar teksnya sudah tercache lokal.
+2. Astra menyimpulkan orchestrator Wonder "hosted, tidak bisa diketahui". **Salah.** Plumbing Wonder hampir identik dengan Verynize (Claude Agent SDK lokal, preset `claude_code` + persona, Tailwind JSX, tool `create_artboard`/`update_elements`/`take_screenshot`/`finish_artboard`). Pembedanya adalah **lapisan pengetahuan desain** (fundamentals + skills + style guides) yang dilayani `mcp.wonder.so` — dan sebagian besar teksnya sudah tercache lokal.
 3. Karena itu prioritas Astra (codec → verifikasi → *baru* grounding) kurang tepat. Lapisan taste (fundamentals/archetype/skill) adalah **P0 setara codec**, bukan P1. Kedua pembanding utama menaruh taste di sana, bukan di orchestrator.
 
 ## Klaim Astra: hasil verifikasi
@@ -28,7 +28,7 @@ Klaim kode Astra sebagian besar benar, tetapi **diagnosis dan prioritasnya meles
 | Pen `ctx.problems` sebagai pemeriksa layout | **Overstated** | Di kode bundle, `ctx.problems` hanya mendeteksi *clipping*. Kontras, overlap, overflow teks diserahkan ke agent/screenshot. |
 | Riset hooks: PostToolUse untuk enforcement | Kurang tepat | Yang bisa menolak agent selesai adalah **`Stop` hook** (`decision:"block"` + `reason`). PostToolUse tidak bisa memaksa. |
 
-## Temuan baru yang terlewat (Better Design)
+## Temuan baru yang terlewat (Verynize)
 
 **P0-1 — `div` tanpa `flex`/`grid` menjadi frame absolut dan padding hilang.** Default `layout:'free'` (`jsx-codec.mjs:8`), anak ditumpuk dengan y yang dipanggang (`design-edit.mjs:230-237`), renderer memaksa `padding:0` untuk frame free (`web/app.js`). Probe: `<div className="w-[400px] p-8">` → anak di x=0,y=0; padding 32 lenyap tanpa warning. `<header>`/`<section>` di dalam div 1440px keluar dengan **w=100**.
 
@@ -58,7 +58,7 @@ Klaim kode Astra sebagian besar benar, tetapi **diagnosis dan prioritasnya meles
 - **Bukti loop**: satu sesi transcript: 45 `take_screenshot`, 44 `update_elements`, 30 `finish_artboard`.
 - **Belum didapat**: skill design-review, references, arrange, design-library, generate-assets, dan named style guides. Bisa diambil read-only setelah Wonder MCP login (saat ini tidak memuat tool di sesi ini).
 
-Kesimpulan: Better Design sudah meniru *plumbing* Wonder, tapi tidak meniru *isi* yang membuat Wonder bagus — dan codec-nya jauh lebih lemah daripada yang Wonder pakai di server.
+Kesimpulan: Verynize sudah meniru *plumbing* Wonder, tapi tidak meniru *isi* yang membuat Wonder bagus — dan codec-nya jauh lebih lemah daripada yang Wonder pakai di server.
 
 ## Pen 1.2.20: apa yang Astra lewatkan
 
@@ -66,12 +66,12 @@ Kesimpulan: Better Design sudah meniru *plumbing* Wonder, tapi tidak meniru *isi
 - **Blok "Design quality" bersama**: pass reduksi ("apa yang jadi lebih sulit kalau elemen ini hilang?"), hero sebagai satu stage foto+statement (bukan kolom copy di samping kartu foto), larangan data/metrik karangan, art direction per gambar (role, subject, viewpoint, light, crop, quiet area untuk teks), larangan latar beige/cream/ivory dan shadow keras.
 - **Katalog konkret**: 26 palette dengan key semantik (surface×4, foreground×4, border×2, accent×3, status×4), skala radius 0–9999, 4 set elevation dua lapis alpha sangat rendah, ~70 Google Fonts terkurasi.
 - **Playbook domain bernumerik**: landing (satu CTA, accent hanya untuk aksi, body ≥14px, 50–75 karakter/baris, promise → proof → action), mobile (status bar, padding samping 16–20, gap 24–32 / 12–16, tab bar kapsul), web-app (density mode eksplisit, semua state wajib), slides (20 kontrak layout, split jangan shrink), table (Table→Row→Cell).
-- **Scene model**: flex satu sumbu yang dihitung engine, `fit_content`/`fill_container`, `textGrowth`, absolute hanya via `layoutPosition`. Inilah yang Better Design tidak punya di jalur agent.
+- **Scene model**: flex satu sumbu yang dihitung engine, `fit_content`/`fill_container`, `textGrowth`, absolute hanya via `layoutPosition`. Inilah yang Verynize tidak punya di jalur agent.
 - Runtime `read_skill`/`get_style` tidak terverifikasi hari ini (Pen tidak berjalan → MCP gagal connect).
 
 ## Figma dan FigCraft: koreksi riset eksternal
 
-- Figma punya **`html_to_figma`**: HTML self-contained → layer polos, *tanpa* komponen/variables. Skill resmi Figma memakainya untuk desain baru ([tools](https://developers.figma.com/docs/figma-mcp-server/tools-and-prompts/), [skill](https://github.com/figma/mcp-server-guide)). Artinya pendekatan JSX/HTML → canvas Better Design **valid**; yang salah adalah eksekusinya (regex codec) dan output yang tidak ter-bind.
+- Figma punya **`html_to_figma`**: HTML self-contained → layer polos, *tanpa* komponen/variables. Skill resmi Figma memakainya untuk desain baru ([tools](https://developers.figma.com/docs/figma-mcp-server/tools-and-prompts/), [skill](https://github.com/figma/mcp-server-guide)). Artinya pendekatan JSX/HTML → canvas Verynize **valid**; yang salah adalah eksekusinya (regex codec) dan output yang tidak ter-bind.
 - Penyebab "halusinasi" Figma yang terdokumentasi: First Draft tidak bisa memakai design system user ([help](https://help.figma.com/hc/en-us/articles/23955143044247)), `use_figma` beta dan font harus diupload ([write-to-canvas](https://developers.figma.com/docs/figma-mcp-server/write-to-canvas/)), dan insiden Make Designs berasal dari korpus contoh yang tidak dikurasi ([retrospektif](https://www.figma.com/blog/inside-figma-a-retrospective-on-make-designs/)). Pelajaran: kurasi referensi, bukan "model lebih pintar".
 - Gate Figma yang patut ditiru: **dilarang mutasi canvas sebelum tabel komponen/variables/styles terisi**; wrapper + placeholder section dulu, lalu satu section per call; screenshot **per section** (full-page downscale menyembunyikan clipping dan sisa teks "Title"/"Button").
 - **FigCraft** ([repo](https://github.com/storytold/figcraft)): agent tidak menulis JSX, tapi memanggil ~455 command bertipe; layout engine Rust sendiri (hug/fill/fixed, wrap, grid, baseline); text shaping harfrust; satu renderer untuk canvas, export, dan screenshot MCP; `batch` atomik dengan `$ref` antar langkah; prompt MCP (`landing_page`, `mobile_screen`) yang diakhiri "screenshot, lihat, perbaiki"; `text.fit`, `text.missingFonts`. Riset Astra hanya membaca deskripsi repo.
@@ -83,7 +83,7 @@ Kesimpulan: Better Design sudah meniru *plumbing* Wonder, tapi tidak meniru *isi
 3. **Kontrak 9 langkah tidak menyebut lapisan pengetahuan desain sama sekali** (fundamentals, archetype, playbook domain, larangan anti-slop). Ini justru inti Wonder dan Pen.
 4. **Enforcement salah alat.** Untuk Claude, `Stop` hook bisa memblok selesai tanpa receipt screenshot ber-revision; untuk Codex/CLI, gate di MCP (`finish_artboard` menolak tanpa receipt valid). Astra hanya menyebut PostToolUse.
 5. **Benchmark terlalu mahal sebagai langkah pertama.** 72 output + 3 reviewer manusia sebelum fondasi diperbaiki akan hanya mengonfirmasi hal yang sudah jelas. Urutan lebih efisien: (a) fixture rekonstruksi deterministik (codec fidelity, murah, CI); (b) checklist judge multimodal per task gaya [ArtifactsBench](https://arxiv.org/abs/2507.04952); (c) baru blind pairwise kecil (Bradley-Terry seperti [Design Arena](https://www.designarena.ai/about)) melawan Wonder dan Pen.
-6. **Tidak menyentuh model/effort default.** Wonder merekomendasikan Opus 5.5; Better Design tidak punya default. Variabel ini bisa menelan semua perbaikan lain dalam benchmark.
+6. **Tidak menyentuh model/effort default.** Wonder merekomendasikan Opus 5.5; Verynize tidak punya default. Variabel ini bisa menelan semua perbaikan lain dalam benchmark.
 
 ## Rencana perbaikan yang direkomendasikan
 

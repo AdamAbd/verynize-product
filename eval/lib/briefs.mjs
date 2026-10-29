@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 export const EVAL_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const REPO_DIR = join(EVAL_DIR, '..');
-export const APPS = ['better-design', 'wonder', 'pen', 'figma', 'figcraft'];
-export const PRIMARY_APPS = ['better-design', 'wonder', 'pen'];
+export const APPS = ['verynize', 'wonder', 'pen', 'figma', 'figcraft'];
+export const PRIMARY_APPS = ['verynize', 'wonder', 'pen'];
 
 export function listBriefs() {
   return readdirSync(join(EVAL_DIR, 'briefs')).filter(f => f.endsWith('.json')).sort().map(f => JSON.parse(readFileSync(join(EVAL_DIR, 'briefs', f), 'utf8')));

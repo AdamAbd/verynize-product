@@ -7,7 +7,7 @@ The chat panel (docked transcript, model picker, access levels, attachments and 
 `desktop/agent-runtime.cjs` owns chat turns. `desktop/main.cjs` registers it with `registerAgentRuntime(handle, win, {userData, getProject})`.
 
 - **Claude** uses `@anthropic-ai/claude-agent-sdk` `query()`. `pathToClaudeCodeExecutable` points at the discovered `claude`, so the user's Claude Code install and login are used; if Claude Code is missing, the SDK's bundled runtime is used. Options:
-  - `systemPrompt: {type:'preset', preset:'claude_code', append: <Better Design persona>}`
+  - `systemPrompt: {type:'preset', preset:'claude_code', append: <Verynize persona>}`
   - `includePartialMessages: true`, which streams text, thinking and tool-argument deltas
   - `resume: <sessionId>` to continue a conversation
   - `permissionMode` from the access level
@@ -22,7 +22,7 @@ The chat panel (docked transcript, model picker, access levels, attachments and 
   4. `turn/interrupt` for **Stop**
   
   One app-server process per window serves every chat thread. Approval server-requests (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, MCP elicitations) become approval cards. If app-server is unavailable, the one-shot `codex exec --json` runner in `desktop/agents.cjs` is used instead.
-- **Quick chats** are chats with no project open. They run in a per-chat scratch directory, `userData/agent-workdirs/<chatId>`. Project chats run in the project root. Project memory (`BETTER_DESIGN.md`) and the user's personal instructions are appended to the persona: Claude's `append`, or Codex's `developerInstructions`.
+- **Quick chats** are chats with no project open. They run in a per-chat scratch directory, `userData/agent-workdirs/<chatId>`. Project chats run in the project root. Project memory (`VERYNIZE.md`) and the user's personal instructions are appended to the persona: Claude's `append`, or Codex's `developerInstructions`.
 - At most three turns run per window, and only one per chat.
 
 ## Access levels
@@ -38,19 +38,19 @@ Older saved defaults map forward: `read-only` becomes Ask and `workspace-write` 
 
 ## Per-turn context
 
-Each prompt is prefixed with a `<better-design-context>` block. When **Send canvas context** is on, it holds:
+Each prompt is prefixed with a `<verynize-context>` block. When **Send canvas context** is on, it holds:
 - the open document's name, its library id and its saved path
 - the active page name and `pageId`
 - the selected element **ids only**
 - the paths of attached images
 
-Image paths are accepted only under `userData/agent-attachments/<chatId>/`. Pasted or picked images are saved there by `saveAgentImage`, after their magic bytes are checked against PNG, JPEG, GIF and WebP. The persona tells the agent to fetch content through the `better-design` MCP tools and to pass the given `pageId`.
+Image paths are accepted only under `userData/agent-attachments/<chatId>/`. Pasted or picked images are saved there by `saveAgentImage`, after their magic bytes are checked against PNG, JPEG, GIF and WebP. The persona tells the agent to fetch content through the `verynize` MCP tools and to pass the given `pageId`.
 
 ## MCP bridge
 
 `desktop/mcp-bridge.cjs` exposes `getBridgeInfo() -> {url, token}` for the loopback Streamable HTTP server. The runtime loads it lazily with `require` inside `try`, so chat keeps working without it.
-- **Claude** gets `mcpServers['better-design'] = {type:'http', url, headers:{Authorization:'Bearer …'}}` and `allowedTools: ['mcp__better-design__*']`.
-- **Codex** gets `-c mcp_servers.better-design.url="…"` and `-c mcp_servers.better-design.bearer_token_env_var="BETTER_DESIGN_MCP_TOKEN"`. The token goes in the child environment, never in argv.
+- **Claude** gets `mcpServers['verynize'] = {type:'http', url, headers:{Authorization:'Bearer …'}}` and `allowedTools: ['mcp__verynize__*']`.
+- **Codex** gets `-c mcp_servers.verynize.url="…"` and `-c mcp_servers.verynize.bearer_token_env_var="VERYNIZE_MCP_TOKEN"`. The token goes in the child environment, never in argv.
 
 Only loopback URLs are wired.
 
@@ -88,7 +88,7 @@ Usage counters are local task counts, not subscription limits or billing.
   - the Codex runtime against `tests/fixtures/fake-codex.cjs`: app-server JSON-RPC, approvals, MCP `-c` flags and env token, resume, a missing thread, interrupt and `model/list`
   - the exec fallback
   
-  It also has a real Claude smoke test, which runs only with `BETTER_DESIGN_REAL_AGENT_SMOKE=1`.
+  It also has a real Claude smoke test, which runs only with `VERYNIZE_REAL_AGENT_SMOKE=1`.
 - `node tests/agent-chat.cjs` drives Electron against the fake Codex app-server. It covers:
   - a quick chat in a scratch folder
   - streaming and tool cards

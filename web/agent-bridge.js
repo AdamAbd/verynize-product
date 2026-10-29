@@ -1,12 +1,12 @@
 // Renderer half of the live MCP bridge (see desktop/mcp-bridge.cjs). Main sends narrow requests
 // over window.desktop.agentBridge; this file answers them using only the public editor API
-// (window.betterDesign) so agent edits go through the same setDocument path as user edits:
+// (window.verynize) so agent edits go through the same setDocument path as user edits:
 // rendered at once, persisted, and undoable as one step per tool call. All document logic (JSX,
 // directives, short ids) runs in the main process; nothing here evaluates agent-supplied code.
 (() => {
   'use strict';
   const api = window.desktop?.agentBridge;
-  const editor = () => window.betterDesign;
+  const editor = () => window.verynize;
   if (!api || !editor()) return;
   // Every editor render bumps the stamp; commits carry the stamp they were computed from, so a
   // user edit made while the agent was working is never silently overwritten.
@@ -92,8 +92,8 @@
     // Main announces the serving tool generation (desktop/mcp-bridge.cjs); Settings › Agents shows it.
     info({ toolsVersion, serverVersion }) {
       const clean = v => (typeof v === 'string' && /^[\w.-]{1,40}$/.test(v) ? v : null);
-      window.betterDesignTools = Object.freeze({ toolsVersion: clean(toolsVersion), serverVersion: clean(serverVersion) });
-      window.dispatchEvent(new CustomEvent('better-design-tools', { detail: window.betterDesignTools }));
+      window.verynizeTools = Object.freeze({ toolsVersion: clean(toolsVersion), serverVersion: clean(serverVersion) });
+      window.dispatchEvent(new CustomEvent('verynize-tools', { detail: window.verynizeTools }));
       return { ok: true };
     },
     state() {

@@ -1,6 +1,6 @@
 // Session runtime tests. Providers are deterministic fakes: a scripted Claude Agent SDK `query()`
 // and tests/fixtures/fake-codex.cjs speaking the app-server JSON-RPC protocol. No models are called.
-// Set BETTER_DESIGN_REAL_AGENT_SMOKE=1 to additionally run a tiny real Claude SDK turn.
+// Set VERYNIZE_REAL_AGENT_SMOKE=1 to additionally run a tiny real Claude SDK turn.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -25,7 +25,7 @@ function fakeClaudeSdk(record) {
         const sid = options.resume || 'sess-new';
         if (/Write a 3 to 6 word title/.test(text)) { record.titleOptions = options; yield { type: 'system', subtype: 'init', session_id: 't', model: options.model }; yield { type: 'result', subtype: 'success', result: '"Blue Header Refresh."', session_id: 't' }; return; }
         if (/^REVIEW/.test(text)) { record.reviewOptions = options; yield { type: 'system', subtype: 'init', session_id: 'r', model: 'fake-opus' }; yield { type: 'result', subtype: 'success', result: 'The header contrast is fine.', session_id: 'r' }; return; }
-        yield { type: 'system', subtype: 'init', session_id: sid, model: 'fake-sonnet', mcp_servers: options.mcpServers ? [{ name: 'better-design', status: 'connected' }] : [] };
+        yield { type: 'system', subtype: 'init', session_id: sid, model: 'fake-sonnet', mcp_servers: options.mcpServers ? [{ name: 'verynize', status: 'connected' }] : [] };
         if (/slow/.test(text)) {
           yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Starting…' } } };
           await interruptedPromise;
@@ -36,10 +36,10 @@ function fakeClaudeSdk(record) {
         yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Considering' } } };
         yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Hel' } } };
         yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'lo' } } };
-        yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'tu-1', name: 'mcp__better-design__update_elements' } } };
+        yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'tu-1', name: 'mcp__verynize__update_elements' } } };
         yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"pageId":"p' } } };
         const input = { pageId: 'page-1', edit: 'x' };
-        yield { type: 'assistant', session_id: sid, message: { content: [{ type: 'text', text: 'Hello' }, { type: 'tool_use', id: 'tu-1', name: 'mcp__better-design__update_elements', input }] } };
+        yield { type: 'assistant', session_id: sid, message: { content: [{ type: 'text', text: 'Hello' }, { type: 'tool_use', id: 'tu-1', name: 'mcp__verynize__update_elements', input }] } };
         if (/question/.test(text)) record.question = await options.canUseTool('AskUserQuestion', { questions: [{ question: 'Which accent color?', header: 'Accent', multiSelect: false, options: [{ label: 'Teal', description: 'Calm' }, { label: 'Orange', description: 'Loud' }] }] }, { signal: new AbortController().signal, toolUseID: 'tu-q' });
         if (/steer/.test(text)) { record.steer = (await iterator.next()).value; yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '!' } } }; }
         let allowed = true;
@@ -91,14 +91,14 @@ async function setup(t, extra = {}) {
 test('turn context block lists document, page, selection ids and validated image paths only', () => {
   const ctx = normalizeContext({ documentName: 'Landing <v2>', documentPath: '/tmp/a.design.json', pageId: 'page-1', pageName: 'Home', selection: ['n1', 'bad id with spaces', 'frame.abc'], images: ['/data/agent-attachments/c/x.png', '/etc/passwd'] }, '/data/agent-attachments');
   const block = buildTurnContext(ctx);
-  assert.match(block, /^<better-design-context>/);
+  assert.match(block, /^<verynize-context>/);
   assert.match(block, /Open document: "Landing  v2" saved at \/tmp\/a.design.json/);
   assert.match(block, /pageId page-1/);
   assert.match(block, /Selected element ids: n1, frame.abc\./);
   assert.match(block, /- \/data\/agent-attachments\/c\/x.png/);
   assert.doesNotMatch(block, /passwd|bad id/);
   assert.match(buildTurnContext(normalizeContext({ pageId: 'p' }, '/x')), /nothing is selected/);
-  assert.match(buildPersona({ bridge: true }), /better-design/);
+  assert.match(buildPersona({ bridge: true }), /verynize/);
   assert.match(buildPersona({ bridge: false }), /not connected/);
 });
 
@@ -111,8 +111,8 @@ test('Claude SDK options: preset prompt + persona, partial messages, resume, per
   assert.equal(options.allowDangerouslySkipPermissions, true);
   assert.equal(options.resume, 's-1');
   assert.equal(options.pathToClaudeCodeExecutable, '/bin/claude');
-  assert.deepEqual(options.mcpServers, { 'better-design': { type: 'http', url: bridge.url, headers: { Authorization: 'Bearer abc' } } });
-  assert.deepEqual(options.allowedTools, ['mcp__better-design__*']);
+  assert.deepEqual(options.mcpServers, { 'verynize': { type: 'http', url: bridge.url, headers: { Authorization: 'Bearer abc' } } });
+  assert.deepEqual(options.allowedTools, ['mcp__verynize__*']);
   const ask = claudeQueryOptions({ cwd: '/p', access: 'ask', persona: 'P' });
   assert.equal(ask.permissionMode, 'default');
   assert.equal(ask.allowDangerouslySkipPermissions, undefined);
@@ -151,11 +151,11 @@ test('Claude session streams typed events, wires MCP, asks permission in Ask mod
   assert.ok(events.every(e => e.id === started.id && e.chatId === CHAT && Number.isInteger(e.seq)));
   assert.equal(record.allowed, false, 'declined permission is passed back to the SDK');
   assert.equal(record.options.permissionMode, 'default');
-  assert.equal(record.options.mcpServers['better-design'].headers.Authorization, 'Bearer secret-token');
+  assert.equal(record.options.mcpServers['verynize'].headers.Authorization, 'Bearer secret-token');
   assert.equal(record.options.pathToClaudeCodeExecutable, '/usr/bin/true');
-  assert.match(record.options.systemPrompt.append, /Better Design/);
+  assert.match(record.options.systemPrompt.append, /Verynize/);
   const content = record.message.message.content;
-  assert.match(content[0].text, /<better-design-context>[\s\S]*pageId page-1[\s\S]*node-1[\s\S]*<\/better-design-context>\n\nMake the header blue$/);
+  assert.match(content[0].text, /<verynize-context>[\s\S]*pageId page-1[\s\S]*node-1[\s\S]*<\/verynize-context>\n\nMake the header blue$/);
   assert.equal(content[1].type, 'image');
   const toolCall = events.find(e => e.type === 'tool-call' && !e.partial);
   assert.equal(toolCall.title.startsWith('Canvas · update_elements'), true);
@@ -170,24 +170,24 @@ test('Claude session streams typed events, wires MCP, asks permission in Ask mod
   assert.equal(record.options.effort, 'high', 'design default effort comes with the default model');
   // The Stop hook is wired when the canvas bridge is connected and enforces finish_artboard.
   for (const event of ['PostToolUse', 'PostToolUseFailure', 'Stop']) assert.equal(typeof record.options.hooks[event][0].hooks[0], 'function', event);
-  assert.equal(record.options.hooks.PostToolUse[0].matcher, 'mcp__better-design__.*');
+  assert.equal(record.options.hooks.PostToolUse[0].matcher, 'mcp__verynize__.*');
   const post = record.options.hooks.PostToolUse[0].hooks[0], stop = record.options.hooks.Stop[0].hooks[0];
   assert.deepEqual(await stop({ hook_event_name: 'Stop', stop_hook_active: false }), {}, 'a turn without canvas edits may stop');
-  await post({ hook_event_name: 'PostToolUse', tool_name: 'mcp__better-design__update_elements', tool_response: [{ type: 'text', text: '1 of 1 directives applied.' }] });
+  await post({ hook_event_name: 'PostToolUse', tool_name: 'mcp__verynize__update_elements', tool_response: [{ type: 'text', text: '1 of 1 directives applied.' }] });
   assert.equal((await stop({ hook_event_name: 'Stop', stop_hook_active: false })).decision, 'block');
 });
 
 test('persona comes from the design knowledge layer and keeps user instructions and memory', () => {
   const persona = buildPersona({ bridge: true, instructions: 'Use British spelling', memory: '# Brand: teal' });
-  assert.match(persona, /^You are the designer inside Better Design/);
+  assert.match(persona, /^You are the designer inside Verynize/);
   assert.match(persona, /get_skills/);
   assert.match(persona, /finish_artboard/);
   assert.match(persona, /Personal instructions from the user:\nUse British spelling/);
-  assert.match(persona, /Project memory \(BETTER_DESIGN\.md\):\n# Brand: teal$/);
+  assert.match(persona, /Project memory \(VERYNIZE\.md\):\n# Brand: teal$/);
 });
 
 test('Stop hook guard: blocks once per unfinished canvas edit, never loops', () => {
-  const tool = name => `mcp__better-design__${name}`;
+  const tool = name => `mcp__verynize__${name}`;
   const guard = createDesignTurnGuard();
   assert.deepEqual(guard.stop({ stop_hook_active: false }), {}, 'no edits: stop allowed');
   guard.toolResult(tool('get_design_context'));
@@ -242,12 +242,12 @@ test('Codex app-server: thread/start, streaming, tool cards, approval, MCP flags
   assert.equal(events.filter(e => e.type === 'assistant-text').length, 0);
   assert.ok(events.some(e => e.type === 'thinking-delta' && e.text === 'Plan the change.'));
   assert.ok(events.some(e => e.type === 'tool-call' && e.toolName === 'shell'));
-  assert.ok(events.some(e => e.type === 'tool-call' && e.toolName === 'mcp__better-design__get_design_context' && e.input.pageId === 'page-1'));
+  assert.ok(events.some(e => e.type === 'tool-call' && e.toolName === 'mcp__verynize__get_design_context' && e.input.pageId === 'page-1'));
   assert.ok(events.some(e => e.type === 'tool-result' && e.toolCallId === 'mcp-1' && e.content === 'page ok'));
   assert.ok(events.some(e => e.type === 'permission-request' && e.toolName === 'shell'));
   const calls = (await fs.readFile(log, 'utf8')).trim().split('\n').map(JSON.parse);
   const launch = calls.find(c => c.args && c.args[0] === 'app-server' && !c.args.includes('--help'));
-  assert.ok(launch.args.includes('mcp_servers.better-design.url="http://127.0.0.1:7777/mcp"'));
+  assert.ok(launch.args.includes('mcp_servers.verynize.url="http://127.0.0.1:7777/mcp"'));
   assert.equal(launch.token, 'codex-token');
   assert.doesNotMatch(JSON.stringify(launch.args), /codex-token/);
   const threadStart = calls.find(c => c.rpc === 'thread/start').params;
@@ -291,7 +291,7 @@ test('Codex without app-server falls back to the exec runner with the same event
   assert.match(reply.text, /quick chat with no project attached/, "persona is prepended for exec");
 });
 
-test('optional real Claude SDK smoke (BETTER_DESIGN_REAL_AGENT_SMOKE=1)', { skip: process.env.BETTER_DESIGN_REAL_AGENT_SMOKE !== '1' }, async t => {
+test('optional real Claude SDK smoke (VERYNIZE_REAL_AGENT_SMOKE=1)', { skip: process.env.VERYNIZE_REAL_AGENT_SMOKE !== '1' }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-smoke-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const events = [];
@@ -442,7 +442,7 @@ test('always allow: rules derive per tool, match patterns, persist per project a
   assert.ok(!ruleMatches('Bash(npm run build)', 'Bash', { command: 'npm run build && rm -rf /' }));
   assert.ok(ruleMatches('Bash(git status*)', 'Bash', { command: 'git status --short' }));
   assert.ok(ruleMatches('shell(ls (a))', 'shell', { command: ['ls', '(a)'] }));
-  assert.ok(ruleMatches('mcp__better-design__update_elements', 'mcp__better-design__update_elements', {}));
+  assert.ok(ruleMatches('mcp__verynize__update_elements', 'mcp__verynize__update_elements', {}));
   assert.ok(!ruleMatches('Edit', 'Write', {}));
   assert.ok(!ruleMatches('Bash(a.c)', 'Bash', { command: 'abc' }), 'pattern characters are literal');
 
@@ -476,7 +476,7 @@ test('seed: a transcript summary replaces resume and is prepended as <previous-c
   assert.equal(buildSeedBlock('  '), '');
   assert.equal(buildSeedBlock('<previous-conversation>x</previous-conversation>').match(/<previous-conversation>/g).length, 1, 'seed cannot close the block early');
   const ctx = normalizeContext({ pageId: 'p1', selection: [] }, '/x');
-  assert.match(composePrompt('Next step', ctx, 'summary'), /^<previous-conversation>[\s\S]*<\/previous-conversation>\n\n<better-design-context>[\s\S]*<\/better-design-context>\n\nNext step$/);
+  assert.match(composePrompt('Next step', ctx, 'summary'), /^<previous-conversation>[\s\S]*<\/previous-conversation>\n\n<verynize-context>[\s\S]*<\/verynize-context>\n\nNext step$/);
   const { runtime, record, until } = await setup(t);
   const started = await runtime.run({ agent: 'claude', chatId: CHAT, prompt: 'Continue', access: 'full', sessionId: 'old-session', seed: 'user: earlier ask' });
   assert.equal(started.seeded, true);
@@ -498,7 +498,7 @@ test('mentions become referenced elements in the turn context; preferences join 
   const { runtime, record, until } = await setup(t, { preferences: [{ id: 'p', text: 'Use rounded corners' }] });
   await runtime.run({ agent: 'claude', chatId: CHAT, prompt: 'Tweak it', access: 'full', mentions: [{ id: 'hero-1', label: 'Hero', pageId: 'page-1' }] });
   await until(e => e.type === 'done');
-  assert.match(record.message.message.content[0].text, /^<better-design-context>[\s\S]*"Hero" \(id hero-1, pageId page-1\)[\s\S]*Tweak it$/);
+  assert.match(record.message.message.content[0].text, /^<verynize-context>[\s\S]*"Hero" \(id hero-1, pageId page-1\)[\s\S]*Tweak it$/);
   assert.match(record.options.systemPrompt.append, /- Use rounded corners/);
 });
 
@@ -520,7 +520,7 @@ test('helpers: ask_agent runs read-only, titles fall back to a heuristic, tools 
   const options = record.reviewOptions;
   assert.equal(options.permissionMode, 'default');
   assert.deepEqual(options.tools, ['Read', 'Glob', 'Grep']);
-  for (const tool of ['Write', 'Edit', 'Bash', 'mcp__better-design__update_elements', 'mcp__better-design__ask_agent']) assert.ok(options.disallowedTools.includes(tool), tool);
+  for (const tool of ['Write', 'Edit', 'Bash', 'mcp__verynize__update_elements', 'mcp__verynize__ask_agent']) assert.ok(options.disallowedTools.includes(tool), tool);
   assert.equal((await options.canUseTool('Write', {}, {})).behavior, 'deny');
   assert.equal(options.persistSession, false);
   await assert.rejects(() => runtime.ask({ agent: 'gemini', task: 'x' }), /agent must be/);
