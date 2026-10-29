@@ -21,7 +21,7 @@ app.whenReady().then(() => {
   // Design preferences: one file shared by the agent persona (agent-runtime.cjs) and the MCP tools.
   if(!process.env.VERYNIZE_PREFERENCES)process.env.VERYNIZE_PREFERENCES=path.join(app.getPath('userData'),'design-preferences.json');
   // ask_agent MCP tool: nested read-only helper run on the most recent window's agent runtime.
-  const askAgent=options=>{if(!primaryRuntime)return Promise.reject(Error('The agent runtime is not ready'));return primaryRuntime.ask(options||{});};
+  const askAgent=options=>{if(!primaryRuntime)return Promise.reject(Error('The agent runtime is not ready'));return primaryRuntime.askTool(options||{});}; // gated by Settings › Agents › Access
   repositories=new RepositoryRegistry({file:path.join(app.getPath('userData'),'repositories.json')});
   mcpBridge.startBridge(app,{askAgent}).catch(error=>console.error('MCP bridge failed to start:',error)); // agent-bridge hook
   const createWindow = () => {
@@ -63,6 +63,8 @@ app.whenReady().then(() => {
     // --- also: respondAgentQuestion, steerAgent, listAgentRuns, listAllowRules, removeAllowRule, agentToolsVersion, agentTitle, designPreferences* ---
     agentRuntime=registerAgentRuntime(handle,win,{userData:app.getPath('userData'),getProject:()=>project,resolveProject:async root=>Project.open((await repositories.resolveRoot(root)).root)});
     primaryRuntime=agentRuntime;win.on('closed',()=>{if(primaryRuntime===agentRuntime)primaryRuntime=null;});
+    // Settings › Agents (desktop/agent-tools.cjs): agentProviderAccounts, agentMcp{List,Add,Remove,Login}, agentAccess{Get,Set}
+    require('./agent-tools.cjs').registerAgentTools(handle,win,{userData:app.getPath('userData'),getRuntime:()=>agentRuntime});
     // --- agent shell (desktop/agent-shell.cjs): open project for the dev server / terminal MCP tools ---
     require('./agent-shell.cjs').registerShellWindow(win,{getProject:()=>project});
     require('./agent-shell.cjs').registerDevServerIPC(handle,{getProject:()=>project}); // devServerStatus/Start/Stop for the Start preview button

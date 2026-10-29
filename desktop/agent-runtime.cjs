@@ -18,6 +18,7 @@ const { spawn } = require('node:child_process');
 const { randomUUID, createHash } = require('node:crypto');
 const agents = require('./agents.cjs');
 const settings = require('./agent-settings.cjs');
+const agentAccess = require('./agent-access.cjs'); // Settings › Agents › Access switches
 const { createClaudeMapper, createCodexMapper, toolTitle } = require('./agent-runtime-events.cjs');
 
 const VERSION = '0.6.0';
@@ -413,7 +414,7 @@ const HELPER_BLOCKED_DESIGN_TOOLS = [...MUTATING_DESIGN_TOOLS, 'finish_artboard'
 const HELPER_PERSONA = 'You are a read-only helper agent consulted by the designer agent inside Verynize (a local desktop design editor). Answer the task you are given precisely and concisely. You may read project files and inspect the open design with the read-only `verynize` MCP tools (get_design_context, get_element_code, take_screenshot and similar), but you must not edit files, run commands, or change the canvas. Reply with your findings only.';
 
 // Pure option builder for the Claude Agent SDK, kept separate for unit tests.
-function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, persona, bridge, executable, additionalDirectories }) {
+function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, persona, bridge, executable, additionalDirectories, agentSettings }) {
   const mode = settings.claudePermissionMode(access);
   const options = {
     cwd,
@@ -436,6 +437,11 @@ function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, perso
   if (bridge?.url) {
     options.mcpServers = { [settings.MCP_SERVER_NAME]: settings.claudeMcpServer(bridge, access) };
     options.allowedTools = [`mcp__${settings.MCP_SERVER_NAME}__*`];
+  }
+  if (agentSettings) {
+    const extra = agentAccess.claudeAccessOptions(agentSettings, { mcpServerName: settings.MCP_SERVER_NAME });
+    if (extra.disallowedTools.length) options.disallowedTools = extra.disallowedTools;
+    options.extraArgs = extra.extraArgs;
   }
   return options;
 }
@@ -523,9 +529,11 @@ class AgentRuntime {
     getBridge = defaultBridge,
     startFallback = agents.start,
     loadPreferences = defaultLoadPreferences,
+    loadAccess = dir => agentAccess.loadAccessSettings(dir),
+    home = undefined,
   } = {}) {
     if (!userData) throw Error('userData directory required');
-    Object.assign(this, { userData, getProject, resolveProject, emitRaw: emit, discover, loadClaudeSdk, spawnProcess, getBridge, startFallback, loadPreferences });
+    Object.assign(this, { userData, getProject, resolveProject, emitRaw: emit, discover, loadClaudeSdk, spawnProcess, getBridge, startFallback, loadPreferences, loadAccess, home });
     this.runs = new Map(); this.pendingStarts = 0; this.permissions = new Map(); this.questions = new Map(); this.codex = null; this.codexSupport = new Map(); this.modelCache = new Map(); this.seq = 0;
     this.helpers = new Set(); this.allowRules = new AllowRules(path.join(userData, 'agent-allow-rules.json'));
   }
@@ -580,7 +588,9 @@ class AgentRuntime {
       const memory = project?.memory ? String(await project.memory().catch(() => '')).slice(0, 12000) : '';
       const bridge = await this.getBridge().catch(() => null);
       const preferences = await Promise.resolve().then(() => this.loadPreferences()).catch(() => []);
-      const persona = buildPersona({ bridge: !!bridge, quickChat, instructions: typeof options.instructions === 'string' ? options.instructions : '', memory, preferences });
+      const agentSettings = await Promise.resolve().then(() => this.loadAccess(this.userData)).then(agentAccess.normalizeAccessSettings).catch(() => ({ ...agentAccess.ACCESS_DEFAULTS }));
+      const shared = agentSettings.shareMemory ? await agentAccess.sharedMemoryBlock(options.agent, { cwd, ...(this.home ? { home: this.home } : {}) }).catch(() => '') : '';
+      const persona = [buildPersona({ bridge: !!bridge, quickChat, instructions: typeof options.instructions === 'string' ? options.instructions : '', memory, preferences }), agentAccess.accessPersonaLines(agentSettings), shared].filter(Boolean).join('\n\n');
       const rawContext = options.context && typeof options.context === 'object' ? { ...options.context } : Array.isArray(options.mentions) ? {} : null;
       if (rawContext && Array.isArray(options.mentions)) rawContext.mentions = options.mentions;
       const context = normalizeContext(rawContext, this.attachmentRoot);
@@ -589,8 +599,8 @@ class AgentRuntime {
       // A fork (rewind) replaces resume too; the seed then only serves as its fallback.
       const fork = normalizeFork(options.fork);
       const sessionId = seed || fork ? '' : normalized.sessionId;
-      const run = { id: randomUUID(), chatId, agent: options.agent, cwd, projectKey: project?.root || 'unattached', stopped: false, done: false, sessionId: sessionId || null, cancel: () => {} };
-      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt: options.prompt, executable: found?.path || null, quickChat };
+      const run = { id: randomUUID(), chatId, agent: options.agent, cwd, projectKey: project?.root || 'unattached', stopped: false, done: false, sessionId: sessionId || null, cancel: () => {}, computerUse: options.agent === 'codex' && agentSettings.codexComputerUse };
+      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt: options.prompt, executable: found?.path || null, quickChat, agentSettings };
       this.runs.set(run.id, run);
       let runtime;
       try {
@@ -745,10 +755,10 @@ class AgentRuntime {
     };
     let stderr = '';
     const options = {
-      ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, fork: params.fork, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: params.context?.images?.length ? [path.dirname(params.context.images[0])] : [] }),
+      ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, fork: params.fork, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: params.context?.images?.length ? [path.dirname(params.context.images[0])] : [], agentSettings: params.agentSettings }),
       abortController: abort,
-      ...(params.bridge?.url ? { hooks: designHooks(createDesignTurnGuard()) } : {}),
-      env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `verynize/${VERSION}`, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' }),
+      ...this.claudeHooks(run, params),
+      env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `verynize/${VERSION}`, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.agentSettings ? agentAccess.claudeAccessOptions(params.agentSettings).env : {}) }),
       stderr: data => { stderr = (stderr + data).slice(-8000); },
       canUseTool: (toolName, toolInput, opts = {}) => this.claudeCanUseTool(run, toolName, toolInput, opts),
     };
@@ -791,6 +801,19 @@ class AgentRuntime {
     return 'claude-sdk';
   }
 
+  /** SDK hooks for a chat: the canvas turn guard, plus the "create files and pages" approval gate when that switch is off. */
+  claudeHooks(run, params) {
+    const hooks = params.bridge?.url ? designHooks(createDesignTurnGuard()) : {};
+    if (params.agentSettings && !params.agentSettings.createFiles && params.access !== 'full') {
+      hooks.PreToolUse = [...(hooks.PreToolUse || []), { hooks: [async (input = {}, toolUseID, opts = {}) => {
+        if (!(await agentAccess.claudeCreatesSomething(input.tool_name, input.tool_input || {}, { mcpServerName: settings.MCP_SERVER_NAME, cwd: params.cwd }))) return {};
+        const allow = await this.askPermission(run, input.tool_name, input.tool_input || {}, opts.signal, { toolCallId: toolUseID, canAlwaysAllow: false });
+        return allow ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } } : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'The user did not allow creating this in Verynize. Ask before creating new files, folders or pages.' } };
+      }] }];
+    }
+    return Object.keys(hooks).length ? { hooks } : {};
+  }
+
   async claudeCanUseTool(run, toolName, toolInput, opts = {}) {
     if (toolName === 'AskUserQuestion') {
       const questions = claudeQuestions(toolInput);
@@ -807,7 +830,7 @@ class AgentRuntime {
     const handle = this.startFallback(params.executable, 'claude', composePrompt(params.prompt, params.context, params.seed), params.cwd, event => {
       if (event.type === 'done') { run.stopped = run.stopped || event.stopped; this.finish(run, { code: event.code }); return; }
       const { id: _id, ...rest } = event; this.forward(run, rest);
-    }, { model: params.model, access: params.access, effort: params.effort, sessionId: params.sessionId, structured: true, appendSystemPrompt: params.persona, bridge: params.bridge, id: run.id });
+    }, { model: params.model, access: params.access, effort: params.effort, sessionId: params.sessionId, structured: true, appendSystemPrompt: params.persona, bridge: params.bridge, id: run.id, ...(params.agentSettings ? (({ env, cliArgs }) => ({ env, extraArgs: cliArgs }))(agentAccess.claudeAccessOptions(params.agentSettings)) : {}) });
     run.cancel = () => { run.stopped = true; handle.cancel(); };
     return 'claude-cli';
   }
@@ -828,13 +851,13 @@ class AgentRuntime {
     return this.codexSupport.get(executable);
   }
 
-  async codexServer(executable, bridge) {
-    const key = executable + '|' + (bridge?.url || '');
+  async codexServer(executable, bridge, extraArgs = []) {
+    const key = executable + '|' + (bridge?.url || '') + '|' + extraArgs.join(' ');
     if (this.codex && !this.codex.rpc.closed && this.codex.key === key) return this.codex;
     if (this.codex && !this.codex.rpc.closed && ([...this.runs.values()].some(r => r.runtime === 'codex-app-server' && !r.done) || [...this.helpers].some(h => h.agent === 'codex'))) return this.codex;
     this.codex?.rpc.close();
     const env = agents.childEnv(bridge?.token ? { [settings.MCP_TOKEN_ENV]: bridge.token } : {});
-    const child = this.spawnProcess(executable, ['app-server', ...settings.codexMcpArgs(bridge)], { env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    const child = this.spawnProcess(executable, ['app-server', ...settings.codexMcpArgs(bridge), ...extraArgs], { env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     const rpc = new JsonRpcChild(child);
     // threads: main thread id -> run. children: subagent thread id -> {run, map} (collabAgentToolCall).
     const server = { key, rpc, threads: new Map(), children: new Map() };
@@ -899,7 +922,7 @@ class AgentRuntime {
 
   async startCodex(params) {
     const { run } = params;
-    const server = await this.codexServer(params.executable, params.bridge);
+    const server = await this.codexServer(params.executable, params.bridge, params.agentSettings ? agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) : []);
     const threadParams = codexThreadParams(params);
     let thread;
     if (params.fork) {
@@ -944,7 +967,7 @@ class AgentRuntime {
     const handle = this.startFallback(params.executable, 'codex', prompt, params.cwd, event => {
       if (event.type === 'done') { run.stopped = run.stopped || event.stopped; this.finish(run, { code: event.code }); return; }
       const { id: _id, ...rest } = event; this.forward(run, rest);
-    }, { model: params.model, access: params.access, effort: params.effort, structured: true, bridge: params.bridge, id: run.id });
+    }, { model: params.model, access: params.access, effort: params.effort, structured: true, bridge: params.bridge, id: run.id, ...(params.agentSettings ? { extraArgs: agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) } : {}) });
     run.cancel = () => { run.stopped = true; handle.cancel(); };
     return 'codex-exec';
   }
@@ -956,7 +979,21 @@ class AgentRuntime {
     return true;
   }
 
+  /** Stop running Codex chats that were started with Computer Use (the switch was turned off). */
+  stopComputerUse() {
+    const stopped = [];
+    for (const run of this.runs.values()) if (run.computerUse && !run.done) { stopped.push(run.id); this.emit(run, { type: 'status', text: 'Computer Use was turned off in Settings; stopping this chat.' }); this.cancel(run.id); }
+    return stopped;
+  }
+
   // --- one-shot helper runs (ask_agent reviewer, chat titles) ---------------------------------------
+  /** `ask_agent` from a chat's agent: allowed only while "Let agents ask other agents" is on. */
+  async askTool(options = {}) {
+    const agentSettings = agentAccess.normalizeAccessSettings(await Promise.resolve().then(() => this.loadAccess(this.userData)).catch(() => null));
+    if (!agentSettings.askAgents) throw Error('Asking other agents is turned off in Verynize (Settings › Agents › Access › Let agents ask other agents). Continue on your own.');
+    return this.ask(options);
+  }
+
   /** Nested read-only run for the `ask_agent` MCP tool. Resolves {text, agent, model}. */
   async ask({ agent, task, cwd } = {}) {
     if (!['claude', 'codex'].includes(agent)) throw Error('agent must be "claude" or "codex"');

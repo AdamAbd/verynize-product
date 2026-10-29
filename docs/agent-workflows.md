@@ -36,6 +36,23 @@ The chat panel (docked transcript, model picker, access levels, attachments and 
 
 Older saved defaults map forward: `read-only` becomes Ask and `workspace-write` becomes Edit. An unanswered approval card is denied after 10 minutes, and when the turn ends.
 
+## Access switches (Settings › Agents › Access)
+
+`desktop/agent-access.cjs` stores eight switches in `userData/agent-access.json`. The runtime reads them at the start of every turn, so changes apply when a chat's agent next starts.
+
+| Switch (default) | Effect |
+|---|---|
+| Create files, folders and pages (on) | Persona tells the agent to create what it needs. Off: the persona says to ask first, and Claude gets a `PreToolUse` hook that raises an approval card for `Write`/`NotebookEdit` on a new path, `mkdir`/`touch`, and `create_page`/`create_document` (except at Full access). Codex gets the persona instruction only. |
+| Share memory (on) | The other agent's files are appended to the persona: for Claude, `~/.codex/AGENTS.md`, the project `AGENTS.md` and `~/.codex/memories/*.md`; for Codex, `~/.claude/CLAUDE.md`, the project `CLAUDE.md` and Claude's auto memory `~/.claude/projects/<slug>/memory/MEMORY.md`. Bounded to 12,000 characters. |
+| Ask other agents (off) | Gates the `ask_agent` canvas tool: `primaryRuntime.askTool()` refuses while off, Claude gets `disallowedTools: mcp__verynize__ask_agent`, Codex gets `-c mcp_servers.verynize.disabled_tools=["ask_agent"]`. The user's own **Second opinion** action is not affected. |
+| Claude connectors (on) | Off: `ENABLE_CLAUDEAI_MCP_SERVERS=false` in the Claude child environment. |
+| Claude artifacts (on) | Off: `CLAUDE_CODE_DISABLE_ARTIFACT=1` and `disallowedTools` `Artifact`, `ArtifactComments`, `ArtifactData`, `ArtifactCheck`. |
+| Chrome in Claude chats (off) | SDK `extraArgs` `--chrome` / `--no-chrome` (CLI fallback gets the same flag). |
+| ChatGPT apps in Codex (on) | `codex app-server --enable apps` / `--disable apps`. |
+| Computer Use in Codex (off) | `--enable computer_use` / `--disable computer_use`. Turning it off cancels running Codex chats that started with it. |
+
+The Codex app-server is keyed by its launch flags, so a changed switch starts a fresh server once no Codex chat is running on the old one. Flag names were checked against Claude Code 2.1.308 (`claude --help`, binary strings) and codex-cli 0.165 (`codex features list`, `codex app-server --print-startup-config`).
+
 ## Per-turn context
 
 Each prompt is prefixed with a `<verynize-context>` block. When **Send canvas context** is on, it holds:

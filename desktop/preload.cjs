@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('desktop',{
  // agent-runtime parity hook: second-opinion review of the latest answer (desktop/agent-runtime.cjs review()).
  reviewAgent:options=>call('reviewAgent',options),
  // end agent-runtime parity hook
+ // Settings › Agents (desktop/agent-tools.cjs): provider accounts, the agents' own MCP servers, Access switches.
+ agentTools:{accounts:()=>call('agentProviderAccounts'),listServers:options=>call('agentMcpList',options),addServer:options=>call('agentMcpAdd',options),removeServer:options=>call('agentMcpRemove',options),loginServer:options=>call('agentMcpLogin',options),getAccess:()=>call('agentAccessGet'),setAccess:changes=>call('agentAccessSet',changes)},
  // agent-bridge hook: MCP tool requests from main (bd:mcp-call) and replies (bd:mcp-reply) only.
  agentBridge:{onCall:callback=>{const listener=(_event,request)=>callback(request);ipcRenderer.on('bd:mcp-call',listener);return()=>ipcRenderer.removeListener('bd:mcp-call',listener)},reply:(requestId,payload)=>ipcRenderer.send('bd:mcp-reply',String(requestId),payload)},
  // end agent-bridge hook
