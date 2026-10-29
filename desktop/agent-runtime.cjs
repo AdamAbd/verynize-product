@@ -21,6 +21,7 @@ const settings = require('./agent-settings.cjs');
 const agentAccess = require('./agent-access.cjs'); // Settings › Agents › Access switches
 const agentBehavior = require('./agent-behavior.cjs');
 const { createClaudeMapper, createCodexMapper, toolTitle } = require('./agent-runtime-events.cjs');
+const agentMemory = require('./agent-memory.cjs'); // Settings › Memory: repo-less memory folder, ~/.codex/AGENTS.md for Claude
 
 const VERSION = '0.6.0';
 const MAX_RUNS = 3;
@@ -56,7 +57,7 @@ function loadDesignPersona() {
   return designPersona;
 }
 
-function buildPersona({ bridge = false, quickChat = false, instructions = '', memory = '', preferences = [] } = {}) {
+function buildPersona({ bridge = false, quickChat = false, instructions = '', memory = '', preferences = [], homeInstructions = '' } = {}) {
   const lines = [
     loadDesignPersona(),
     bridge
@@ -68,6 +69,8 @@ function buildPersona({ bridge = false, quickChat = false, instructions = '', me
       : 'The working directory is the user\'s project. Respect its conventions and do not make unrelated changes.',
   ];
   if (instructions) lines.push('Personal instructions from the user:\n' + String(instructions).slice(0, 4000));
+  // Settings › Memory: ~/.codex/AGENTS.md for Claude Code chats (desktop/agent-memory.cjs homeInstructions).
+  if (homeInstructions) lines.push('The user\'s personal agent instructions (~/.codex/AGENTS.md):\n' + String(homeInstructions).slice(0, 12000));
   if (memory) lines.push('Project memory (VERYNIZE.md):\n' + String(memory).slice(0, 12000));
   const prefs = preferenceLines(preferences);
   if (prefs) lines.push('User design preferences (apply unless the brief overrides):\n' + prefs);
@@ -415,7 +418,7 @@ const HELPER_BLOCKED_DESIGN_TOOLS = [...MUTATING_DESIGN_TOOLS, 'finish_artboard'
 const HELPER_PERSONA = 'You are a read-only helper agent consulted by the designer agent inside Verynize (a local desktop design editor). Answer the task you are given precisely and concisely. You may read project files and inspect the open design with the read-only `verynize` MCP tools (get_design_context, get_element_code, take_screenshot and similar), but you must not edit files, run commands, or change the canvas. Reply with your findings only.';
 
 // Pure option builder for the Claude Agent SDK, kept separate for unit tests.
-function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, persona, bridge, executable, additionalDirectories, agentSettings, claudeSettings }) {
+function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, persona, bridge, executable, additionalDirectories, agentSettings, claudeSettings, memoryDir }) {
   const mode = settings.claudePermissionMode(access);
   const options = {
     cwd,
@@ -436,7 +439,8 @@ function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, perso
   if (executable) options.pathToClaudeCodeExecutable = executable;
   if (additionalDirectories?.length) options.additionalDirectories = additionalDirectories;
   // Settings › Agents: response style and commit credit (desktop/agent-behavior.cjs claudeSettingsFor), flag-layer settings.
-  if (claudeSettings && typeof claudeSettings === 'object') options.settings = { ...claudeSettings };
+  // Chats without a repository share one memory folder (desktop/agent-memory.cjs).
+  if (memoryDir || (claudeSettings && typeof claudeSettings === 'object')) options.settings = { ...(memoryDir ? { autoMemoryDirectory: memoryDir } : {}), ...(claudeSettings || {}) };
   if (bridge?.url) {
     options.mcpServers = { [settings.MCP_SERVER_NAME]: settings.claudeMcpServer(bridge, access) };
     options.allowedTools = [`mcp__${settings.MCP_SERVER_NAME}__*`];
@@ -533,7 +537,7 @@ class AgentRuntime {
     startFallback = agents.start,
     loadPreferences = defaultLoadPreferences,
     loadAccess = dir => agentAccess.loadAccessSettings(dir),
-    home = undefined,
+    home = agentMemory.resolveHome(),
     getBehavior = null,
   } = {}) {
     if (!userData) throw Error('userData directory required');
@@ -594,7 +598,9 @@ class AgentRuntime {
       const preferences = await Promise.resolve().then(() => this.loadPreferences()).catch(() => []);
       const agentSettings = await Promise.resolve().then(() => this.loadAccess(this.userData)).then(agentAccess.normalizeAccessSettings).catch(() => ({ ...agentAccess.ACCESS_DEFAULTS }));
       const shared = agentSettings.shareMemory ? await agentAccess.sharedMemoryBlock(options.agent, { cwd, ...(this.home ? { home: this.home } : {}) }).catch(() => '') : '';
-      const persona = [buildPersona({ bridge: !!bridge, quickChat, instructions: typeof options.instructions === 'string' ? options.instructions : '', memory, preferences }), agentAccess.accessPersonaLines(agentSettings), shared].filter(Boolean).join('\n\n');
+      const homeText = agentSettings.shareMemory ? '' : await agentMemory.homeInstructions(options.agent, { home: this.home }).catch(() => '');
+      const memoryDir = quickChat && options.agent === 'claude' ? await agentMemory.repoLessMemoryDir(this.userData).catch(() => null) : null;
+      const persona = [buildPersona({ bridge: !!bridge, quickChat, instructions: typeof options.instructions === 'string' ? options.instructions : '', memory, preferences, homeInstructions: homeText }), agentAccess.accessPersonaLines(agentSettings), shared].filter(Boolean).join('\n\n');
       const rawContext = options.context && typeof options.context === 'object' ? { ...options.context } : Array.isArray(options.mentions) ? {} : null;
       if (rawContext && Array.isArray(options.mentions)) rawContext.mentions = options.mentions;
       const context = normalizeContext(rawContext, this.attachmentRoot);
@@ -604,7 +610,7 @@ class AgentRuntime {
       const fork = normalizeFork(options.fork);
       const sessionId = seed || fork ? '' : normalized.sessionId;
       const run = { id: randomUUID(), chatId, agent: options.agent, cwd, projectKey: project?.root || 'unattached', stopped: false, done: false, sessionId: sessionId || null, cancel: () => {}, computerUse: options.agent === 'codex' && agentSettings.codexComputerUse };
-      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt: options.prompt, executable: found?.path || null, quickChat, agentSettings };
+      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt: options.prompt, executable: found?.path || null, quickChat, agentSettings, memoryDir };
       // Settings › Agents (desktop/agent-behavior.cjs): Claude response style + commit credit, Codex personality.
       const behavior = this.getBehavior ? await Promise.resolve().then(() => this.getBehavior()).catch(() => null) : null;
       if (behavior) { params.claudeSettings = agentBehavior.claudeSettingsFor(behavior); params.codexPersonality = agentBehavior.codexPersonalityFor(behavior); }
@@ -762,7 +768,7 @@ class AgentRuntime {
     };
     let stderr = '';
     const options = {
-      ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, fork: params.fork, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: params.context?.images?.length ? [path.dirname(params.context.images[0])] : [], agentSettings: params.agentSettings, claudeSettings: params.claudeSettings }),
+      ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, fork: params.fork, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: params.context?.images?.length ? [path.dirname(params.context.images[0])] : [], agentSettings: params.agentSettings, claudeSettings: params.claudeSettings, memoryDir: params.memoryDir }),
       abortController: abort,
       ...this.claudeHooks(run, params),
       env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `verynize/${VERSION}`, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.agentSettings ? agentAccess.claudeAccessOptions(params.agentSettings).env : {}) }),

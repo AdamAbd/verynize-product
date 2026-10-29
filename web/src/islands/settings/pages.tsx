@@ -1,7 +1,6 @@
 // One component per settings section. Element ids and data attributes are test contracts (tests/settings.cjs).
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  BookOpenIcon,
   CopyIcon,
   ExternalLinkIcon,
   GaugeIcon,
@@ -11,10 +10,12 @@ import {
 import { cn } from "@/lib/utils";
 import { FigmaIcon } from "@/components/icons";
 import { AdvancedSection, ChatSoundRow } from "./preferences-extra";
-import { DesignPreferencesSection, useToolsInfo } from "./agent-memory";
+import { useToolsInfo } from "./agent-memory";
 import { AgentAccessSection, AgentToolsSection, ProviderAccountList } from "./agents-tools";
-import { agentWorkspace, type AgentInfo, type Preferences, type SettingsApi } from "./api";
 import { AgentBehaviorSections } from "./agents-behavior";
+import { MemoryView } from "./memory";
+import { UsageView } from "./usage";
+import { agentWorkspace, type AgentInfo, type Preferences, type SettingsApi } from "./api";
 import {
   Card,
   ChoiceTile,
@@ -339,35 +340,9 @@ export function AgentsPage({ api, accounts }: PageProps) {
   );
 }
 
-/* ---------- Usage (72) ---------- */
+/* ---------- Usage (72): settings/usage.tsx ---------- */
 export function UsagePage() {
-  const stats = agentWorkspace()?.getUsage?.() ?? {};
-  const items = [
-    ["runs", "Tasks"],
-    ["completed", "Completed"],
-    ["failed", "Failed"],
-    ["queued", "Queued"],
-  ] as const;
-  return (
-    <>
-      <PageHeader
-        title="Usage"
-        description="Activity recorded on this device. Provider billing and quotas remain in your agent account."
-      />
-      <Pages>
-        <Section id="settings-usage" title="Agent tasks">
-          <Card className="grid grid-cols-4 px-0 [&>*+*]:border-t-0 [&>*+*]:border-l">
-            {items.map(([key, label]) => (
-              <div key={key} className="flex flex-col gap-1 px-4 py-4">
-                <span className="text-2xl font-medium text-foreground tabular-nums">{Number(stats[key]) || 0}</span>
-                <span className="text-sm text-muted-foreground">{label}</span>
-              </div>
-            ))}
-          </Card>
-        </Section>
-      </Pages>
-    </>
-  );
+  return <UsageView />;
 }
 
 /* ---------- Default Models (73) ---------- */
@@ -538,56 +513,7 @@ export function ConnectionsPage({ api, preferences }: PageProps) {
   );
 }
 
-/* ---------- Memory (75) ---------- */
+/* ---------- Memory (75): settings/memory.tsx ---------- */
 export function MemoryPage({ api }: PageProps) {
-  const [text, setText] = useState(agentWorkspace()?.getDefaults?.().instructions ?? "");
-  return (
-    <>
-      <PageHeader
-        title="Memory"
-        description="Instructions and design preferences stay on this computer and are added to new agent tasks. Project memory can override them."
-      />
-      <Pages>
-        <DesignPreferencesSection />
-        <Section
-          id="settings-instructions"
-          title="Personal instructions"
-          description="Added to new agent tasks."
-        >
-          <textarea
-            id="settings-memory"
-            aria-labelledby="settings-instructions-label"
-            maxLength={12000}
-            placeholder="Your preferred stack, design principles, and coding conventions…"
-            className="min-h-45 resize-y rounded-2xl border border-card-border bg-card px-4 py-3.5 font-mono text-xs leading-5 text-foreground outline-none placeholder:text-subtle-foreground focus:border-primary"
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-          />
-          <div className="mt-4 flex justify-end">
-            <SettingsButton id="settings-save-memory" variant="primary" onClick={() => api.actions.saveMemory(text)}>
-              Save instructions
-            </SettingsButton>
-          </div>
-        </Section>
-        <Section id="settings-project-memory" title="Project memory" description="Stored in the selected project.">
-          <Card>
-            <Row
-              icon={
-                <IconTile>
-                  <BookOpenIcon className="size-4" />
-                </IconTile>
-              }
-              title="VERYNIZE.md"
-              description="Project-specific guidance for agents working in this repository."
-            >
-              <SettingsButton id="settings-open-memory" onClick={api.actions.openMemory}>
-                Edit project memory
-                <ExternalLinkIcon />
-              </SettingsButton>
-            </Row>
-          </Card>
-        </Section>
-      </Pages>
-    </>
-  );
+  return <MemoryView api={api} />;
 }

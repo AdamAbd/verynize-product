@@ -187,7 +187,10 @@ test('runtime: behaviour reaches the Claude SDK settings and Codex thread/start 
   const done = chatId => new Promise((resolve, reject) => { const end = Date.now() + 8000; const poll = () => { const hit = events.find(e => e.type === 'done' && e.chatId === chatId); if (hit) return resolve(hit); if (Date.now() > end) return reject(Error('timeout')); setTimeout(poll, 5); }; poll(); });
   await runtime.run({ agent: 'claude', chatId: CHAT, prompt: 'hello', access: 'edit' });
   await done(CHAT);
-  assert.deepEqual(record.options.settings, { outputStyle: 'Explanatory', attribution: { commit: '', pr: '' }, includeCoAuthoredBy: false });
+  // A quick chat also carries its shared memory folder (Settings › Memory); the behaviour keys sit beside it.
+  const { autoMemoryDirectory, ...behaviour } = record.options.settings;
+  assert.match(autoMemoryDirectory, /agent-memory/);
+  assert.deepEqual(behaviour, { outputStyle: 'Explanatory', attribution: { commit: '', pr: '' }, includeCoAuthoredBy: false });
   const codexChat = '22222222-2222-3333-4444-555555555555';
   await runtime.run({ agent: 'codex', chatId: codexChat, prompt: 'hello', access: 'edit' });
   await done(codexChat);
@@ -197,7 +200,7 @@ test('runtime: behaviour reaches the Claude SDK settings and Codex thread/start 
   const third = '33333333-2222-3333-4444-555555555555';
   await runtime.run({ agent: 'claude', chatId: third, prompt: 'hello again', access: 'edit' });
   await done(third);
-  assert.equal(record.options.settings, undefined, '"Use my Claude Code setting" sends no settings');
+  assert.deepEqual(Object.keys(record.options.settings ?? {}).filter(k => k !== 'autoMemoryDirectory'), [], '"Use my Claude Code setting" sends no behaviour settings');
 });
 
 test('output styles: built-ins plus custom ~/.claude/output-styles, and the current Claude Code setting', async t => {

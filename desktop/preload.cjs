@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('desktop',{
  // Settings › Preferences hook (desktop/app-preferences.cjs): custom chat sound, verynize:// links, worktree line counts.
  appPreferences:{chooseSound:()=>call('soundChoose'),readSound:()=>call('soundRead'),clearSound:()=>call('soundClear'),linksReady:options=>call('linksReady',options),setLinksEnabled:enabled=>call('linksSetEnabled',enabled),worktreeLineStats:roots=>call('worktreeLineStats',roots),onOpenLink:callback=>{const listener=(_event,url)=>callback(url);ipcRenderer.on('desktop:open-link',listener);return()=>ipcRenderer.removeListener('desktop:open-link',listener)}},
  // end Settings › Preferences hook
+ // Settings › Usage and Memory (desktop/agent-usage.cjs, desktop/agent-memory.cjs).
+ agentUsage:{read:options=>call('agentUsage',options),layers:()=>call('agentLayerUsage')},
+ agentMemory:{overview:()=>call('agentMemoryOverview'),reveal:options=>call('agentMemoryReveal',options),open:options=>call('agentMemoryOpen',options)},
  // integrated terminal hook (desktop/terminal.cjs): PTY shells for the code-mode terminal panel.
  terminalCreate:options=>call('terminalCreate',options),terminalWrite:options=>call('terminalWrite',options),terminalResize:options=>call('terminalResize',options),terminalKill:options=>call('terminalKill',options),
  onTerminalData:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:terminal-data',listener);return()=>ipcRenderer.removeListener('desktop:terminal-data',listener)},
