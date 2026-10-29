@@ -3,7 +3,10 @@
 // Once answered the card collapses to a compact "question → answer" summary.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { CheckIcon, MessageCircleQuestionIcon } from "lucide-react";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@/components/ui/card";
+import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
+import { ChatActionButton, ChatOptionButton } from "./controls";
 import { hook, stateHook } from "./hooks";
 import type { ChatPart, ChatQuestion } from "./store";
 
@@ -19,16 +22,22 @@ function answerOf(question: ChatQuestion, draft: Draft): string {
 function Answered({ part }: { part: ChatPart }) {
   const questions = part.questions ?? [];
   return (
-    <div className={cn(hook.question, stateHook("answered"), "flex flex-col gap-1.5 rounded-xl border border-card-border bg-card px-3 py-2.5 text-sm leading-5")}>
-      {questions.map((q) => (
-        <div key={q.id} className="flex min-w-0 flex-col">
-          <span className="truncate text-muted-foreground">{q.header || q.question}</span>
-          <span className="flex min-w-0 items-start gap-1.5 text-foreground-2">
-            <CheckIcon className="mt-0.75 size-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 break-words">{part.answers?.[q.id] || "No answer"}</span>
-          </span>
-        </div>
-      ))}
+    <div className={cn(hook.question, stateHook("answered"))}>
+      <Card>
+        <CardContent>
+          <div className="flex flex-col gap-1.5 text-sm leading-5">
+            {questions.map((q) => (
+              <div key={q.id} className="flex min-w-0 flex-col">
+                <span className="truncate text-muted-foreground">{q.header || q.question}</span>
+                <span className="flex min-w-0 items-start gap-1.5 text-foreground-2">
+                  <CheckIcon className="mt-0.75 size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 break-words">{part.answers?.[q.id] || "No answer"}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -98,6 +107,7 @@ export function QuestionCard({
   };
 
   return (
+    // The hook classes, focus target and keyboard handler live on a wrapper; the Card draws the surface.
     <div
       ref={card}
       tabIndex={-1}
@@ -107,105 +117,114 @@ export function QuestionCard({
       className={cn(
         hook.question,
         stateHook(closed ? "closed" : "pending"),
-        "m-0 flex flex-col gap-3 rounded-xl border border-card-border bg-card p-3 text-base leading-5.25 outline-hidden focus-visible:border-ring",
+        "m-0 rounded-xl outline-hidden focus-visible:ring-1 focus-visible:ring-ring",
       )}
     >
-      <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <MessageCircleQuestionIcon className="size-3.5 text-primary-text" />
-        {questions.length > 1 ? `${questions.length} questions` : "Question"}
-      </p>
-      {questions.map((q, qi) => {
-        const d = draftOf(q);
-        const options = q.options ?? [];
-        const role = q.multiSelect ? "checkbox" : "radio";
-        return (
-          <fieldset
-            key={q.id}
-            disabled={closed}
-            onFocus={() => setActive(qi)}
-            className={cn("m-0 flex min-w-0 flex-col gap-1.5 border-0 p-0", qi > 0 && "border-t border-card-border pt-3")}
-          >
-            {q.header && (
-              <span className="flex">
-                <span className="flex h-5 items-center rounded-md border border-chat-chip-border bg-chat-chip-bg px-1.5 text-xs text-foreground-3">
-                  {q.header}
-                </span>
-              </span>
-            )}
-            <legend className="float-left w-full p-0 break-words text-foreground">{q.question}</legend>
-            {q.multiSelect && <span className="text-xs text-subtle-foreground">Select all that apply</span>}
-            <div role={q.multiSelect ? "group" : "radiogroup"} aria-label={q.question} className="flex flex-col gap-1">
-              {options.map((option, oi) => {
-                const on = d.picked.includes(option.label);
-                return (
-                  <button
-                    key={option.label}
-                    type="button"
-                    role={role}
-                    aria-checked={on}
-                    onClick={() => toggle(q, option.label, qi)}
-                    className={cn(
-                      "flex min-h-8 w-full items-start gap-2.5 rounded-lg border px-2.5 py-1.5 text-left text-sm leading-5 disabled:opacity-60",
-                      on ? "border-ring bg-primary-tint text-foreground" : "border-card-border bg-settings text-foreground-2 hover:bg-muted",
-                    )}
-                  >
-                    <span
-                      aria-hidden="true"
+      <Card>
+        <CardHeader>
+          <CardDescription>
+            <span className="flex items-center gap-2">
+              <MessageCircleQuestionIcon className="size-3.5 text-primary-text" />
+              {questions.length > 1 ? `${questions.length} questions` : "Question"}
+            </span>
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-3 text-base leading-5.25">
+            {questions.map((q, qi) => {
+              const d = draftOf(q);
+              const options = q.options ?? [];
+              const role = q.multiSelect ? "checkbox" : "radio";
+              return (
+                <fieldset
+                  key={q.id}
+                  disabled={closed}
+                  onFocus={() => setActive(qi)}
+                  className={cn("m-0 flex min-w-0 flex-col gap-1.5 border-0 p-0", qi > 0 && "border-t border-card-border pt-3")}
+                >
+                  {q.header && (
+                    <span className="flex">
+                      <span className="flex h-5 items-center rounded-md border border-chat-chip-border bg-chat-chip-bg px-1.5 text-xs text-foreground-3">
+                        {q.header}
+                      </span>
+                    </span>
+                  )}
+                  <legend className="float-left w-full p-0 break-words text-foreground">{q.question}</legend>
+                  {q.multiSelect && <span className="text-xs text-subtle-foreground">Select all that apply</span>}
+                  <div role={q.multiSelect ? "group" : "radiogroup"} aria-label={q.question} className="flex flex-col gap-1">
+                    {options.map((option, oi) => {
+                      const on = d.picked.includes(option.label);
+                      return (
+                        <ChatOptionButton
+                          key={option.label}
+                          role={role}
+                          aria-checked={on}
+                          selected={on}
+                          onClick={() => toggle(q, option.label, qi)}
+                          className="w-full"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              "mt-px flex size-4.5 shrink-0 items-center justify-center rounded-sm border text-xs tabular-nums",
+                              on ? "border-ring bg-primary text-primary-foreground" : "border-edge text-muted-foreground",
+                            )}
+                          >
+                            {on ? <CheckIcon className="size-3" /> : oi < 9 ? oi + 1 : ""}
+                          </span>
+                          <span className="flex min-w-0 flex-col">
+                            <span className="break-words">{option.label}</span>
+                            {option.description && <span className="break-words text-muted-foreground">{option.description}</span>}
+                          </span>
+                        </ChatOptionButton>
+                      );
+                    })}
+                    <div
+                      onClick={() => document.getElementById(`${uid}-other-${qi}`)?.focus()}
                       className={cn(
-                        "mt-px flex size-4.5 shrink-0 items-center justify-center rounded-sm border text-xs tabular-nums",
-                        on ? "border-ring bg-primary text-primary-foreground" : "border-edge text-muted-foreground",
+                        "flex h-8 items-center gap-2.5 rounded-lg border px-2.5 text-sm",
+                        d.otherOn ? "border-ring bg-settings" : "border-card-border bg-settings",
                       )}
                     >
-                      {on ? <CheckIcon className="size-3" /> : oi < 9 ? oi + 1 : ""}
-                    </span>
-                    <span className="flex min-w-0 flex-col">
-                      <span className="break-words">{option.label}</span>
-                      {option.description && <span className="break-words text-muted-foreground">{option.description}</span>}
-                    </span>
-                  </button>
-                );
-              })}
-              <div
-                onClick={() => document.getElementById(`${uid}-other-${qi}`)?.focus()}
-                className={cn(
-                  "flex h-8 items-center gap-2.5 rounded-lg border px-2.5 text-sm",
-                  d.otherOn ? "border-ring bg-settings" : "border-card-border bg-settings",
-                )}
-              >
-                <span aria-hidden="true" className="flex size-4.5 shrink-0 items-center justify-center rounded-sm border border-edge text-xs text-muted-foreground tabular-nums">
-                  {options.length < 9 ? options.length + 1 : ""}
+                      <span aria-hidden="true" className="flex size-4.5 shrink-0 items-center justify-center rounded-sm border border-edge text-xs text-muted-foreground tabular-nums">
+                        {options.length < 9 ? options.length + 1 : ""}
+                      </span>
+                      {/* Inline field inside the option row (the row draws the border and focus state). */}
+                      <input
+                        id={`${uid}-other-${qi}`}
+                        value={d.other}
+                        placeholder={options.length ? "Other…" : "Your answer…"}
+                        aria-label={`Other answer: ${q.question}`}
+                        onFocus={() => update(q, { otherOn: true, picked: q.multiSelect ? d.picked : [] })}
+                        onChange={(event) => update(q, { other: event.target.value, otherOn: true })}
+                        className="h-full min-w-0 flex-1 bg-transparent text-foreground outline-hidden placeholder:text-subtle-foreground"
+                      />
+                    </div>
+                  </div>
+                </fieldset>
+              );
+            })}
+          </div>
+        </CardContent>
+        <CardFooter>
+          <div className="flex w-full items-center justify-end gap-2">
+            {!closed && (
+              <>
+                <span className="mr-auto flex flex-wrap items-center gap-1 text-xs text-subtle-foreground">
+                  Press <Kbd>1</Kbd>–<Kbd>9</Kbd> to choose, <Kbd>↵</Kbd> to submit
                 </span>
-                <input
-                  id={`${uid}-other-${qi}`}
-                  value={d.other}
-                  placeholder={options.length ? "Other…" : "Your answer…"}
-                  aria-label={`Other answer: ${q.question}`}
-                  onFocus={() => update(q, { otherOn: true, picked: q.multiSelect ? d.picked : [] })}
-                  onChange={(event) => update(q, { other: event.target.value, otherOn: true })}
-                  className="h-full min-w-0 flex-1 bg-transparent text-foreground outline-hidden placeholder:text-subtle-foreground"
-                />
-              </div>
-            </div>
-          </fieldset>
-        );
-      })}
-      {!closed && (
-        <div className="flex items-center justify-end gap-2">
-          <span className="mr-auto text-xs text-subtle-foreground">Press 1–9 to choose, Enter to submit</span>
-          <button
-            type="button"
-            disabled={!complete}
-            onClick={submit}
-            className="flex h-6 items-center rounded-md bg-primary px-2.5 text-sm text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
-          >
-            Submit
-          </button>
-        </div>
-      )}
-      {closed && !sent && (
-        <span className="text-xs text-subtle-foreground">{onSubmit ? "No longer waiting for an answer" : "Answer from the chat window"}</span>
-      )}
-      {sent && <span className="text-xs text-subtle-foreground">Sending answer…</span>}
+                <ChatActionButton disabled={!complete} onClick={submit}>
+                  Submit
+                </ChatActionButton>
+              </>
+            )}
+            {closed && !sent && (
+              <span className="mr-auto text-xs text-subtle-foreground">{onSubmit ? "No longer waiting for an answer" : "Answer from the chat window"}</span>
+            )}
+            {sent && <span className="mr-auto text-xs text-subtle-foreground">Sending answer…</span>}
+          </div>
+        </CardFooter>
+      </Card>
     </div>
   );
 }

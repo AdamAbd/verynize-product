@@ -2,7 +2,6 @@
 // row — attach menu (+), model picker (.agent-config summary), access menu, review / apply icons, Stop and Send.
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import {
-  CheckIcon,
   CircleDotIcon,
   FileIcon,
   FileTextIcon,
@@ -24,13 +23,16 @@ import { legacyClick, legacySet } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { useAdopt } from "./adopt";
 import { useChatBehavior } from "./behavior";
+import { ChatChipButton, ChatIconButton } from "./controls";
 import { hook } from "./hooks";
 import {
   ChatMenu,
   ChatMenuCheckboxItem,
   ChatMenuContent,
+  ChatMenuGroup,
   ChatMenuItem,
   ChatMenuLabel,
+  ChatMenuOptionItem,
   ChatMenuRadioGroup,
   ChatMenuRadioItem,
   ChatMenuSeparator,
@@ -42,14 +44,11 @@ import {
 import { MentionIcon, MentionPopover } from "./mention-popover";
 import { agentAvailable, useModels, workspace, type AgentModel, type ChatState } from "./store";
 import { UsageRing } from "./usage-ring";
-import { DropdownMenu as Menu } from "radix-ui";
 
 const PROMPT_CLASS =
   "m-0 block max-h-55 min-h-17 w-full resize-none rounded-none border-0 bg-transparent pt-2 pr-2.5 pb-1 pl-2.5 font-sans text-base leading-5.25 text-foreground shadow-none outline-hidden field-sizing-content placeholder:text-transparent focus:outline-hidden focus-visible:outline-hidden";
 const ICON_BUTTON =
   "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground-2 data-[state=open]:bg-muted data-[state=open]:text-foreground-2";
-const CHIP =
-  "flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-base leading-5.25 text-chat-chip hover:bg-muted data-[state=open]:bg-muted";
 
 const Mark = ({ agent }: { agent: string }) => (agent === "claude" ? <ClaudeMark /> : <CodexMark />);
 
@@ -99,13 +98,15 @@ function ModelMenu({ state, open, onOpenChange }: { state: ChatState; open: bool
     <ChatMenu open={open} onOpenChange={onOpenChange} modal={false}>
       <div className={cn(hook.agentConfig, "contents")}>
         <ChatMenuTrigger asChild>
-          <summary tabIndex={0} role="button" aria-label="Model and effort" className={cn(CHIP, "list-none")}>
-            <Mark agent={agent} />
-            <span id="bd-agent-model-label" className="max-w-40 truncate">
-              {name}
-            </span>
-            {effort && <span className="text-subtle-foreground">{effortLabel(effort)}</span>}
-          </summary>
+          <ChatChipButton asChild>
+            <summary tabIndex={0} role="button" aria-label="Model and effort" className="list-none">
+              <Mark agent={agent} />
+              <span id="bd-agent-model-label" className="max-w-40 truncate">
+                {name}
+              </span>
+              {effort && <span className="text-subtle-foreground">{effortLabel(effort)}</span>}
+            </summary>
+          </ChatChipButton>
         </ChatMenuTrigger>
       </div>
       <ChatMenuContent align="start" side="top" className="w-60">
@@ -113,7 +114,7 @@ function ModelMenu({ state, open, onOpenChange }: { state: ChatState; open: bool
           const available = agentAvailable(provider.id);
           const list = lists[provider.id];
           return (
-            <Menu.Group key={provider.id}>
+            <ChatMenuGroup key={provider.id}>
               {i > 0 && <ChatMenuSeparator />}
               <ChatMenuLabel className="justify-between">
                 {i === 0 ? "Agent model" : provider.label}
@@ -139,7 +140,7 @@ function ModelMenu({ state, open, onOpenChange }: { state: ChatState; open: bool
                   <span className="truncate">{m.name}</span>
                 </ChatMenuItem>
               ))}
-            </Menu.Group>
+            </ChatMenuGroup>
           );
         })}
         <ChatMenuSeparator />
@@ -179,9 +180,11 @@ function AccessMenu({ access }: { access: string }) {
   const current = ACCESS.find((a) => a.value === access) ?? ACCESS[1];
   return (
     <ChatMenu modal={false}>
-      <ChatMenuTrigger id="agent-access-trigger" aria-label={`Access: ${current.title}`} className={CHIP}>
-        <current.Icon className="size-3.5 text-muted-foreground" />
-        {current.label}
+      <ChatMenuTrigger asChild>
+        <ChatChipButton id="agent-access-trigger" aria-label={`Access: ${current.title}`}>
+          <current.Icon className="size-3.5 text-muted-foreground" />
+          {current.label}
+        </ChatChipButton>
       </ChatMenuTrigger>
       <ChatMenuContent align="start" side="top" className="w-72">
         <ChatMenuLabel>Mode</ChatMenuLabel>
@@ -193,20 +196,13 @@ function AccessMenu({ access }: { access: string }) {
           }}
         >
           {ACCESS.map(({ value, title, hint, Icon }) => (
-            <Menu.RadioItem
-              key={value}
-              value={value}
-              className="relative flex cursor-default items-start gap-2 rounded-md px-2 py-1.5 outline-hidden select-none data-[highlighted]:bg-muted"
-            >
+            <ChatMenuOptionItem key={value} value={value}>
               <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground-3" />
               <span className="flex min-w-0 flex-col">
                 <span className="text-foreground">{title}</span>
-                <span className="text-muted-foreground">{hint}</span>
+                <span className="text-xs leading-4 text-muted-foreground">{hint}</span>
               </span>
-              <Menu.ItemIndicator className="ml-auto flex self-center pl-2">
-                <CheckIcon className="size-3.5 text-foreground-2" />
-              </Menu.ItemIndicator>
-            </Menu.RadioItem>
+            </ChatMenuOptionItem>
           ))}
         </ChatMenuRadioGroup>
       </ChatMenuContent>
@@ -339,14 +335,13 @@ function Chip({
     <span className={cn(hook.mention, "group/chip flex h-6 max-w-full items-center gap-1.5 rounded-md border border-chat-chip-border bg-chat-chip-bg px-2 text-base leading-5.25 text-foreground-2")}>
       <span className="relative flex size-3.5 shrink-0 items-center justify-center">
         <span className={cn("flex transition-opacity", removable && "group-hover/chip:opacity-0 group-has-focus-visible/chip:opacity-0")}>{icon}</span>
-        {removable && <button
-          type="button"
-          aria-label={`Remove ${label}`}
-          onClick={onRemove}
-          className="absolute inset-0 flex items-center justify-center rounded-sm text-muted-foreground opacity-0 group-hover/chip:opacity-100 hover:text-foreground focus-visible:opacity-100"
-        >
-          <XIcon className="size-3.5" />
-        </button>}
+        {removable && (
+          <span className="absolute inset-0 flex opacity-0 group-hover/chip:opacity-100 has-focus-visible:opacity-100">
+            <ChatIconButton size="xs" aria-label={`Remove ${label}`} onClick={onRemove} className="size-full">
+              <XIcon className="size-3.5" />
+            </ChatIconButton>
+          </span>
+        )}
       </span>
       <span className="truncate">{children}</span>
     </span>

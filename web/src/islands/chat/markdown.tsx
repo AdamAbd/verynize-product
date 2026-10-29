@@ -1,6 +1,7 @@
 // Minimal, safe Markdown → React renderer for agent replies (no HTML injection): paragraphs, headings,
 // lists (one nesting level per indent), blockquotes, fenced code, rules, inline code/bold/italic/links.
 import { Fragment, memo, type ReactNode } from "react";
+import { Separator } from "@/components/ui/separator";
 import { workspace } from "./store";
 
 /** Classifies a link target: only http(s) and verynize:// are ever clickable (no javascript:, data:, file: …). */
@@ -227,7 +228,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
               </pre>
             );
           case "hr":
-            return <hr key={index} className="border-t border-border" />;
+            return <Separator key={index} decorative={false} />;
           case "list":
             return <List key={index} items={block.items} ordered={block.ordered} start={block.start} />;
           default:

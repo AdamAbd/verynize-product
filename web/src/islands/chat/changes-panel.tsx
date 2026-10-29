@@ -1,7 +1,6 @@
 // Changes panel (design → code loop): what the project's agent changed, reviewed as unified diffs, then committed,
 // pushed and opened as a GitHub pull request with the user's own git and gh. Lives in the dock header's second row.
 import { useEffect, useMemo, useState } from "react";
-import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -18,10 +17,13 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { portalContainer } from "@/lib/bridge";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { errorText, gitApi, presetImplementPrompt, suggestMessage, useChanges, type ChangedFile, type ChangesSummary, type FileDiff, type PullRequestStatus } from "./changes";
 import { usePreference } from "../settings/preference-store";
+import { ChatHeaderButton, ChatRowButton } from "./controls";
 import type { ChatState } from "./store";
 
 const MAX_RENDERED_LINES = 5000;
@@ -100,11 +102,11 @@ function FileRow({
   const dir = slash >= 0 ? file.path.slice(0, slash) : "";
   return (
     <li className={cn("group flex h-7 items-center gap-1.5 rounded-md pr-1 pl-2", active ? "bg-row" : "hover:bg-muted")}>
-      <button type="button" data-changes="file" data-path={file.path} className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={onSelect}>
+      <ChatRowButton density="file" data-changes="file" data-path={file.path} className="min-w-0 flex-1" onClick={onSelect}>
         <StatusCode file={file} />
         <span className="min-w-0 truncate text-foreground-2">{name}</span>
         {dir && <span className="min-w-0 shrink truncate text-subtle-foreground">{dir}</span>}
-      </button>
+      </ChatRowButton>
       {confirming ? (
         <span className="flex shrink-0 items-center gap-1">
           <Button size="xs" variant="destructive" data-changes="discard-confirm" onClick={onConfirm}>
@@ -173,10 +175,11 @@ function PullRequestLink({ status }: { status: PullRequestStatus | null }) {
   if (status.pr) {
     const pr = status.pr;
     return (
-      <button
-        type="button"
+      <Button
+        variant="link"
+        size="xs"
         id="changes-pr-link"
-        className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-primary-text hover:bg-muted"
+        className="min-w-0"
         title={pr.url}
         onClick={() => void gitApi()?.openExternal(pr.url)}
       >
@@ -185,7 +188,7 @@ function PullRequestLink({ status }: { status: PullRequestStatus | null }) {
           #{pr.number} {pr.isDraft ? "Draft" : pr.state.charAt(0) + pr.state.slice(1).toLowerCase()}
         </span>
         <ExternalLinkIcon className="size-3 shrink-0" />
-      </button>
+      </Button>
     );
   }
   if (status.gh !== "ready" && status.message) return <span className="truncate text-subtle-foreground">{status.message}</span>;
@@ -316,155 +319,149 @@ function ChangesDialog({
     });
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal container={portalContainer()}>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-8">
-          <DialogPrimitive.Content
-            id="changes-panel"
-            aria-describedby={undefined}
-            className="pointer-events-auto flex h-full max-h-changes-height w-full max-w-changes flex-col overflow-hidden rounded-xl border border-card-border bg-background text-xs text-foreground-2 shadow-menu outline-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
-          >
-            <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
-              <DialogPrimitive.Title className="text-sm font-medium text-foreground">Changes</DialogPrimitive.Title>
-              {summary && (
-                <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                  <GitBranchIcon className="size-3.5 shrink-0" />
-                  <span id="changes-branch" className="truncate text-foreground-3">
-                    {summary.branch ?? `detached at ${summary.head ?? "?"}`}
-                  </span>
-                  {summary.upstream ? (
-                    <span className="flex shrink-0 items-center gap-1 tabular-nums" title={`Tracking ${summary.upstream}`}>
-                      <ArrowUpIcon className="size-3" aria-label="ahead" />
-                      {summary.ahead}
-                      <ArrowDownIcon className="size-3" aria-label="behind" />
-                      {summary.behind}
-                    </span>
-                  ) : (
-                    summary.remote && <span className="shrink-0 text-subtle-foreground">not published</span>
-                  )}
-                  {remoteLabel(summary) && <span className="min-w-0 truncate text-subtle-foreground">· {remoteLabel(summary)}</span>}
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* Standard shadcn dialog: header, a bordered file list + diff body, and a commit footer. */}
+      <DialogContent
+        id="changes-panel"
+        aria-describedby={undefined}
+        // Var syntax so tailwind-merge replaces DialogContent's max-w-lg (it does not know the theme's `changes` size).
+        className="flex h-(--spacing-changes-height) max-h-full max-w-(--spacing-changes) flex-col sm:max-w-(--spacing-changes)"
+      >
+        <DialogHeader>
+          <div className="flex min-w-0 items-center gap-3 pr-8 text-xs">
+            <DialogTitle>Changes</DialogTitle>
+            {summary && (
+              <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                <GitBranchIcon className="size-3.5 shrink-0" />
+                <span id="changes-branch" className="truncate text-foreground-3">
+                  {summary.branch ?? `detached at ${summary.head ?? "?"}`}
                 </span>
-              )}
-              <PullRequestLink status={pr} />
-              <span className="flex-1" />
-              <Button size="icon-sm" variant="ghost" aria-label="Refresh changes" title="Refresh" onClick={() => void refresh()}>
-                <RefreshCwIcon className="size-3.5" />
-              </Button>
-              <DialogPrimitive.Close asChild>
-                <Button size="icon-sm" variant="ghost" aria-label="Close changes">
-                  <XIcon className="size-3.5" />
-                </Button>
-              </DialogPrimitive.Close>
-            </div>
-
-            <div className="flex min-h-0 flex-1">
-              <div className="flex w-changes-list shrink-0 flex-col border-r border-border">
-                <div className="flex h-8 shrink-0 items-center justify-between px-3 text-muted-foreground">
-                  <span>
-                    {summary?.totals.files ?? 0} {summary?.totals.files === 1 ? "file" : "files"} changed
+                {summary.upstream ? (
+                  <span className="flex shrink-0 items-center gap-1 tabular-nums" title={`Tracking ${summary.upstream}`}>
+                    <ArrowUpIcon className="size-3" aria-label="ahead" />
+                    {summary.ahead}
+                    <ArrowDownIcon className="size-3" aria-label="behind" />
+                    {summary.behind}
                   </span>
-                  {summary && <Counts added={summary.totals.added} removed={summary.totals.removed} />}
-                </div>
-                <ul id="changes-files" className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
-                  {files.map((file) => (
-                    <FileRow
-                      key={file.path}
-                      file={file}
-                      active={file.path === selected}
-                      canDiscard={!running && !working && file.status !== "conflicted"}
-                      confirming={confirming === file.path}
-                      onSelect={() => setSelected(file.path)}
-                      onDiscard={() => setConfirming(file.path)}
-                      onConfirm={() => void discard(file.path)}
-                      onCancel={() => setConfirming(null)}
-                    />
-                  ))}
-                  {summary?.truncated && <li className="px-2 py-1 text-subtle-foreground">Only the first {files.length} files are listed.</li>}
-                </ul>
-                {!hasFiles && (
-                  <div className="flex flex-col items-start gap-2 px-3 pb-3 text-muted-foreground">
-                    <p>Working tree clean.</p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        onOpenChange(false);
-                        presetImplementPrompt();
-                      }}
-                    >
-                      <SparklesIcon className="size-3.5" />
-                      Implement selection in code
-                    </Button>
-                  </div>
+                ) : (
+                  summary.remote && <span className="shrink-0 text-subtle-foreground">not published</span>
                 )}
-              </div>
-              <div className="min-w-0 flex-1 overflow-auto bg-settings">
-                <DiffView diff={selected ? diff : null} loading={diffLoading} error={diffError} />
-              </div>
-            </div>
+                {remoteLabel(summary) && <span className="min-w-0 truncate text-subtle-foreground">· {remoteLabel(summary)}</span>}
+              </span>
+            )}
+            <PullRequestLink status={pr} />
+            <span className="flex-1" />
+            <Button size="icon-sm" variant="ghost" aria-label="Refresh changes" title="Refresh" onClick={() => void refresh()}>
+              <RefreshCwIcon className="size-3.5" />
+            </Button>
+          </div>
+        </DialogHeader>
 
-            <div className="flex shrink-0 flex-col gap-2 border-t border-border p-3">
-              {(error || notice || running) && (
-                <p
-                  id="changes-status"
-                  role={error ? "alert" : "status"}
-                  className={cn("flex items-center gap-1.5", error ? "text-destructive" : "text-muted-foreground")}
-                >
-                  {!error && notice && <CheckIcon className="size-3.5 shrink-0 text-diff-add" />}
-                  {error ?? notice ?? "The agent is still working; commit when the turn finishes."}
-                </p>
-              )}
-              <div className="flex items-end gap-2">
-                <textarea
-                  id="changes-message"
-                  aria-label="Commit message"
-                  placeholder="Describe the change (commit message)"
-                  rows={2}
-                  value={message}
-                  onChange={(event) => setMessage(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && hasFiles && message.trim() && !working && !running) {
-                      event.preventDefault();
-                      void commit();
-                    }
-                  }}
-                  className="min-h-12 min-w-0 flex-1 resize-none rounded-md border border-card-border bg-input px-2 py-1.5 text-xs text-foreground-2 focus-visible:border-ring"
-                />
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <Button id="changes-commit" size="sm" disabled={!hasFiles || !message.trim() || !!working || running} onClick={() => void commit()}>
-                    <GitCommitHorizontalIcon className="size-3.5" />
-                    {working === "commit" ? "Committing…" : "Commit"}
-                  </Button>
-                  <Button id="changes-push" size="sm" variant="outline" disabled={!canPush || !!working} onClick={() => void push()}>
-                    <UploadIcon className="size-3.5" />
-                    {working === "push" ? "Pushing…" : unpublished ? "Publish branch" : "Push"}
-                  </Button>
-                  {pr?.pr ? (
-                    <Button id="changes-open-pr" size="sm" variant="outline" onClick={() => void api.openExternal(pr.pr!.url)}>
-                      <GitPullRequestIcon className="size-3.5" />
-                      View PR
-                    </Button>
-                  ) : (
-                    <Button
-                      id="changes-create-pr"
-                      size="sm"
-                      variant="outline"
-                      disabled={!canCreatePr || !!working}
-                      title={hasFiles ? "Commit your changes first" : pr?.message}
-                      onClick={() => void createPr()}
-                    >
-                      <GitPullRequestIcon className="size-3.5" />
-                      {working === "pr" ? "Opening…" : "Create PR"}
-                    </Button>
-                  )}
-                </div>
-              </div>
+        <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-card-border text-xs text-foreground-2">
+          <div className="flex w-changes-list shrink-0 flex-col border-r border-border">
+            <div className="flex h-8 shrink-0 items-center justify-between px-3 text-muted-foreground">
+              <span>
+                {summary?.totals.files ?? 0} {summary?.totals.files === 1 ? "file" : "files"} changed
+              </span>
+              {summary && <Counts added={summary.totals.added} removed={summary.totals.removed} />}
             </div>
-          </DialogPrimitive.Content>
+            <ScrollArea className="min-h-0 flex-1">
+              <ul id="changes-files" className="px-1.5 pb-2">
+                {files.map((file) => (
+                  <FileRow
+                    key={file.path}
+                    file={file}
+                    active={file.path === selected}
+                    canDiscard={!running && !working && file.status !== "conflicted"}
+                    confirming={confirming === file.path}
+                    onSelect={() => setSelected(file.path)}
+                    onDiscard={() => setConfirming(file.path)}
+                    onConfirm={() => void discard(file.path)}
+                    onCancel={() => setConfirming(null)}
+                  />
+                ))}
+                {summary?.truncated && <li className="px-2 py-1 text-subtle-foreground">Only the first {files.length} files are listed.</li>}
+              </ul>
+            </ScrollArea>
+            {!hasFiles && (
+              <div className="flex flex-col items-start gap-2 px-3 pb-3 text-muted-foreground">
+                <p>Working tree clean.</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onOpenChange(false);
+                    presetImplementPrompt();
+                  }}
+                >
+                  <SparklesIcon className="size-3.5" />
+                  Implement selection in code
+                </Button>
+              </div>
+            )}
+          </div>
+          <div className="min-w-0 flex-1 overflow-auto bg-settings">
+            <DiffView diff={selected ? diff : null} loading={diffLoading} error={diffError} />
+          </div>
         </div>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+
+        {(error || notice || running) && (
+          <p
+            id="changes-status"
+            role={error ? "alert" : "status"}
+            className={cn("-mt-1 flex items-center gap-1.5 text-xs", error ? "text-destructive" : "text-muted-foreground")}
+          >
+            {!error && notice && <CheckIcon className="size-3.5 shrink-0 text-diff-add" />}
+            {error ?? notice ?? "The agent is still working; commit when the turn finishes."}
+          </p>
+        )}
+        <DialogFooter className="items-end">
+          <Textarea
+            id="changes-message"
+            aria-label="Commit message"
+            placeholder="Describe the change (commit message)"
+            rows={2}
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && hasFiles && message.trim() && !working && !running) {
+                event.preventDefault();
+                void commit();
+              }
+            }}
+            className="max-h-24 min-w-0 flex-1 resize-none"
+          />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button id="changes-commit" size="sm" disabled={!hasFiles || !message.trim() || !!working || running} onClick={() => void commit()}>
+              <GitCommitHorizontalIcon className="size-3.5" />
+              {working === "commit" ? "Committing…" : "Commit"}
+            </Button>
+            <Button id="changes-push" size="sm" variant="outline" disabled={!canPush || !!working} onClick={() => void push()}>
+              <UploadIcon className="size-3.5" />
+              {working === "push" ? "Pushing…" : unpublished ? "Publish branch" : "Push"}
+            </Button>
+            {pr?.pr ? (
+              <Button id="changes-open-pr" size="sm" variant="outline" onClick={() => void api.openExternal(pr.pr!.url)}>
+                <GitPullRequestIcon className="size-3.5" />
+                View PR
+              </Button>
+            ) : (
+              <Button
+                id="changes-create-pr"
+                size="sm"
+                variant="outline"
+                disabled={!canCreatePr || !!working}
+                title={hasFiles ? "Commit your changes first" : pr?.message}
+                onClick={() => void createPr()}
+              >
+                <GitPullRequestIcon className="size-3.5" />
+                {working === "pr" ? "Opening…" : "Create PR"}
+              </Button>
+            )}
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -512,11 +509,10 @@ export function ChangesButton({ state }: { state: ChatState }) {
     const label = pr.isDraft ? "Draft" : pr.state.charAt(0) + pr.state.slice(1).toLowerCase();
     return (
       <>
-        <button
-          type="button"
+        <ChatHeaderButton
           id="changes-pr-button"
           title={`${pr.title} · ${pr.url}`}
-          className="flex h-6.5 min-w-0 items-center gap-2 rounded-md px-2 text-base leading-5.25 text-foreground-2 hover:bg-muted"
+          className="min-w-0 shrink justify-start"
           onClick={() => void gitApi()?.openExternal(pr.url)}
         >
           <GitPullRequestIcon className="size-3.5 shrink-0 text-primary-text" />
@@ -525,7 +521,7 @@ export function ChangesButton({ state }: { state: ChatState }) {
           </span>
           <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
           <ExternalLinkIcon className="size-3 shrink-0 text-muted-foreground" />
-        </button>
+        </ChatHeaderButton>
         <Button
           id="changes-button"
           size="icon-sm"
@@ -542,11 +538,10 @@ export function ChangesButton({ state }: { state: ChatState }) {
   }
   return (
     <>
-      <button
-        type="button"
+      <ChatHeaderButton
         id="changes-button"
         title={summary ? `${count} changed ${count === 1 ? "file" : "files"} on ${summary.branch ?? "detached HEAD"}` : "Changes"}
-        className="flex h-6.5 min-w-0 items-center gap-2 rounded-md px-2 text-base leading-5.25 text-foreground-2 hover:bg-muted"
+        className="min-w-0 shrink justify-start"
         onClick={() => setOpen(true)}
       >
         <FileDiffIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -555,14 +550,16 @@ export function ChangesButton({ state }: { state: ChatState }) {
             <span className="truncate">
               {count} {count === 1 ? "file" : "files"} changed
             </span>
-            <Counts added={summary!.totals.added} removed={summary!.totals.removed} className="text-sm" />
+            <span className="text-sm">
+              <Counts added={summary!.totals.added} removed={summary!.totals.removed} />
+            </span>
           </>
         ) : (
           <span className="truncate text-muted-foreground">
             {summary && summary.ahead > 0 ? `${summary.ahead} unpushed ${summary.ahead === 1 ? "commit" : "commits"}` : "No changes"}
           </span>
         )}
-      </button>
+      </ChatHeaderButton>
       {dialog}
     </>
   );
