@@ -22,7 +22,7 @@ The chat panel (docked transcript, model picker, access levels, attachments and 
   4. `turn/interrupt` for **Stop**
   
   One app-server process per window serves every chat thread. Approval server-requests (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, MCP elicitations) become approval cards. If app-server is unavailable, the one-shot `codex exec --json` runner in `desktop/agents.cjs` is used instead.
-- **Quick chats** are chats with no repository. They run in a per-chat scratch directory, `userData/agent-workdirs/<chatId>`. **Repository chats** (Code workspace) each run in their own git worktree, `~/Verynize/workspaces/<repo>/<name>` on branch `verynize/<name>` (see `desktop/repositories.cjs`); the renderer passes the chat's folder as `runAgent({root})` and main validates it against the repository registry. Folders without a commit, and chats saved before worktrees existed, run in the repository root. Project memory (`VERYNIZE.md`) and the user's personal instructions are appended to the persona: Claude's `append`, or Codex's `developerInstructions`.
+- **Quick chats** are chats with no repository. They run in a per-chat scratch directory, `userData/agent-workdirs/<chatId>`. **Repository chats** (Code workspace) each run in their own git worktree, `~/Verynize/workspaces/<repo>/<name>` on branch `verynize/<name>` (see `desktop/repositories.cjs`); the renderer passes the chat's folder as `runAgent({root})` and main validates it against the repository registry. Folders without a commit, and chats saved before worktrees existed, run in the repository root. Project memory (`VERYNIZE.md`) and the user's personal instructions are appended to the persona: Claude's `append`, or Codex's `developerInstructions`. Claude chats also get `~/.codex/AGENTS.md` (Codex reads it itself; skipped when `~/.claude/CLAUDE.md` has the same text or imports it). Claude quick chats share one auto-memory folder, `userData/agent-memory/<id>`, passed as the `autoMemoryDirectory` flag setting (`desktop/agent-memory.cjs`); repository chats keep Claude Code's per-repository memory. The CLI fallback does not pass it.
 - At most three turns run per window, and only one per chat.
 
 ## Access levels
@@ -90,7 +90,7 @@ Translators live in `desktop/agent-runtime-events.cjs`, one each for SDK message
 
 Transcripts, including tool and permission parts, persist per project in `localStorage`. Runs that were in progress when the app closed are shown as interrupted when reloaded.
 
-Usage counters are local task counts, not subscription limits or billing.
+Chat usage counters are local task counts. Settings › Usage reads the accounts' real plan limits (`desktop/agent-usage.cjs`): Claude through the SDK's structured `/usage` data, Codex through `account/rateLimits/read`; `node --test tests/agent-usage-memory.cjs` covers parsing, the app-server exchange (fake), layer counting and memory discovery against temp folders.
 
 ## Verification
 

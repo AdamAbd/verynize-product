@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld('desktop',{
  agentAccountStatus:options=>call('agentAccountStatus',options),startAgentLogin:options=>call('startAgentLogin',options),cancelAgentLogin:options=>call('cancelAgentLogin',options),agentLogout:options=>call('agentLogout',options),openExternal:url=>call('openExternal',url),
  onAuthEvent:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:auth-event',listener);return()=>ipcRenderer.removeListener('desktop:auth-event',listener)},
  notifyTask:options=>call('notifyTask',options),
+ // Settings › Usage and Memory (desktop/agent-usage.cjs, desktop/agent-memory.cjs).
+ agentUsage:{read:options=>call('agentUsage',options),layers:()=>call('agentLayerUsage')},
+ agentMemory:{overview:()=>call('agentMemoryOverview'),reveal:options=>call('agentMemoryReveal',options),open:options=>call('agentMemoryOpen',options)},
  // integrated terminal hook (desktop/terminal.cjs): PTY shells for the code-mode terminal panel.
  terminalCreate:options=>call('terminalCreate',options),terminalWrite:options=>call('terminalWrite',options),terminalResize:options=>call('terminalResize',options),terminalKill:options=>call('terminalKill',options),
  onTerminalData:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:terminal-data',listener);return()=>ipcRenderer.removeListener('desktop:terminal-data',listener)},
