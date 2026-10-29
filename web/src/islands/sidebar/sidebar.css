@@ -39,3 +39,17 @@
   background: transparent;
   box-shadow: none;
 }
+/* Layer drag & drop indicator (geometry set as custom properties by LayersSection's DropIndicator). */
+#bd-layer-drop-indicator {
+  top: var(--drop-top, 0);
+}
+#bd-layer-drop-indicator[data-position="inside"] {
+  height: var(--drop-height, 0);
+}
+#bd-layer-drop-indicator:not([data-position="inside"]) {
+  left: calc(22px + var(--drop-depth, 0) * 16px);
+}
+body[data-layer-drag] #bd-layer-tree,
+body[data-layer-drag] #bd-layer-tree * {
+  cursor: grabbing;
+}

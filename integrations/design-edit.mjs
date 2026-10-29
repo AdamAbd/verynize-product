@@ -7,6 +7,8 @@ import { NODE_DEFAULTS, parseJsx, parseClasses, collectText, isTextOnly, isSafeT
 import { layoutPage, measureText } from './codec-layout.mjs';
 import { cascadeText, styleFromSpec, mergeStyle, TEXT_DEFAULTS, baselineTextStyle } from './codec-text.mjs';
 import { resolveIcon, iconToNodeImage, isSafeColor } from './assets.mjs';
+import { cssColorToHex } from './codec-css.mjs';
+import { BINDABLE, checkVariableValue } from './design-store.mjs';
 
 export { measureText };
 
@@ -81,6 +83,7 @@ export function elementCode(document, page, node, depth = Infinity) {
 //   paddingTop/Right/Bottom/Left                    when not uniform (uniform -> `padding`)
 //   gapX/gapY                                       when they differ (equal -> `gap`)
 //   cornerRadii [tl,tr,br,bl], strokeWidths [t,r,b,l], strokeStyle, ringWidth/ringColor/ringInset
+//   ellipse (rounded-[50%]), flipX/flipY (-scale-x-100 / -scale-y-100)
 //   flexWrap, grow, shrink, basis, alignSelf, colSpan, margin [t,r,b,l] (number|'auto')
 //   minW/maxW/minH/maxH (px number or 'N%'), aspectRatio
 //   position 'absolute' + inset [t,r,b,l] (px|'N%'|null) + translate [x,y] (px|'N%')
@@ -92,7 +95,7 @@ export function elementCode(document, page, node, depth = Infinity) {
 //   srcRemote 'https://…' + assetStatus 'pending'|'missing'|'ready'   remote <img> not yet embedded
 
 const BOX_KEYS = ['fill', 'gradient', 'strokeWidth', 'padding', 'radius', 'shadow', 'ringWidth', 'cornerRadii'];
-const COMMON_KEYS = ['opacity', 'rotation', 'zIndex', 'clipContent', 'mask', 'animated', 'shadow', 'strokeColor', 'strokeStyle', 'ringWidth', 'ringColor', 'ringInset', 'hidden', 'aspectRatio', 'grow', 'shrink', 'basis', 'alignSelf', 'colSpan'];
+const COMMON_KEYS = ['opacity', 'rotation', 'flipX', 'flipY', 'zIndex', 'clipContent', 'mask', 'animated', 'shadow', 'strokeColor', 'strokeStyle', 'ringWidth', 'ringColor', 'ringInset', 'hidden', 'aspectRatio', 'grow', 'shrink', 'basis', 'alignSelf', 'colSpan'];
 const FRAME_KEYS = ['layout', 'direction', 'columns', 'alignItems', 'justifyContent', 'flexWrap'];
 const TEXT_ONLY_KEYS = ['truncate', 'noWrap', 'lineClamp', 'textWrap'];
 const TEXT_SPEC_KEYS = ['ink', 'inkToken', 'fontSize', 'fontWeight', 'fontFamily', 'textAlign', 'lineHeight', 'lineHeightPx', 'letterSpacing', 'letterSpacingEm', 'textTransform', 'textDecoration', 'fontStyle', 'textWrap'];
@@ -128,6 +131,8 @@ export function applySpec(node, spec, tokens) {
     const merged = mergeFour(Array.isArray(node.cornerRadii) ? node.cornerRadii : Array(4).fill(Number(node.radius) || 0), p.cornerRadii);
     if (merged.every(v => v === merged[0])) { node.radius = merged[0]; delete node.cornerRadii; } else { node.cornerRadii = merged; node.radius = Math.max(...merged); }
   } else if ('radius' in p) { node.radius = p.radius; delete node.cornerRadii; }
+  // rounded-[50%] makes the box an ellipse; any other radius class turns it back into a rounded box.
+  if (p.ellipse === true && node.type !== 'text') node.ellipse = true; else if ('radius' in p || 'cornerRadii' in p) delete node.ellipse;
   if ('strokeWidths' in p) {
     const merged = mergeFour(Array.isArray(node.strokeWidths) ? node.strokeWidths : Array(4).fill(Number(node.strokeWidth) || 0), p.strokeWidths);
     if (merged.every(v => v === merged[0])) { node.strokeWidth = merged[0]; delete node.strokeWidths; } else { node.strokeWidths = merged; node.strokeWidth = Math.max(...merged); }
@@ -639,7 +644,9 @@ export function describeTokens(document) {
   return Object.entries(document.tokens || {}).map(([name, value]) => ({ id: name, name, type: 'color', value, cssVar: `var(${cssVarForToken(name)})` }));
 }
 export function tokenColor(value) {
-  const color = normalizeColor(value);
+  // Opaque colors become #rrggbb; translucent ones keep their alpha as #rrggbbaa.
+  const exact = typeof value === 'string' ? cssColorToHex(value.trim().toLowerCase()) : null;
+  const color = exact && exact !== 'transparent' && exact.length === 9 ? exact : normalizeColor(value);
   if (!color || color === 'transparent') throw new Error(`Token value ${JSON.stringify(value)} must be a hex or rgb() color`);
   return color;
 }
@@ -650,4 +657,53 @@ export function checkTokenName(name) {
 }
 export function renameTokenRefs(document, from, to) { for (const page of document.pages) for (const node of page.nodes) if (node.token === from) node.token = to; }
 export function unbindToken(document, name) { const value = document.tokens[name]; for (const page of document.pages) for (const node of page.nodes) if (node.token === name) { node.color = value; node.token = ''; } }
-export function syncTokenColors(document) { for (const page of document.pages) for (const node of page.nodes) if (node.token && document.tokens[node.token]) node.color = document.tokens[node.token]; }
+export function syncTokenColors(document) { for (const page of document.pages) for (const node of page.nodes) if (node.token && document.tokens[node.token]) node.color = document.tokens[node.token]; syncVariables(document); }
+
+// ---------------------------------------------------------------------------------------------
+// Typed variables (dimension / number / fontFamily / fontWeight; see design-store.mjs). Bound layer
+// properties hold the resolved value; syncVariables re-applies variable values after every write.
+
+const FIELD_LIMITS = { opacity: [0, 100], fontSize: [1, 1000], lineHeight: [0.1, 100], radius: [0, 1e6], gap: [0, 1e6], padding: [0, 1e6], strokeWidth: [0, 1e6] };
+/** Value a variable gives to a layer property, or undefined when the binding cannot apply. */
+export function variableValueFor(document, key, name) {
+  const variable = document.variables?.[name];
+  if (!variable || !BINDABLE[key]?.includes(variable.type) || !checkVariableValue(variable.type, variable.value)) return undefined;
+  if (variable.type === 'fontWeight') return String(variable.value);
+  if (variable.type === 'fontFamily') return variable.value.trim();
+  const [min, max] = FIELD_LIMITS[key] || [-1e6, 1e6];
+  return Math.min(max, Math.max(min, variable.value));
+}
+export function syncVariables(document) {
+  if (!document.variables) return document;
+  for (const page of document.pages) for (const node of page.nodes) for (const [key, name] of Object.entries(node.bindings || {})) {
+    const value = variableValueFor(document, key, name);
+    if (value !== undefined) node[key] = value;
+  }
+  return document;
+}
+/** Remove every binding to `name`; layers keep the current resolved value. */
+export function unbindVariable(document, name) {
+  for (const page of document.pages) for (const node of page.nodes) if (node.bindings) {
+    for (const [key, bound] of Object.entries(node.bindings)) if (bound === name) delete node.bindings[key];
+    if (!Object.keys(node.bindings).length) delete node.bindings;
+  }
+  return document;
+}
+export function renameVariableRefs(document, from, to) {
+  for (const page of document.pages) for (const node of page.nodes) for (const key of Object.keys(node.bindings || {})) if (node.bindings[key] === from) node.bindings[key] = to;
+  return document;
+}
+export function describeVariables(document) {
+  return Object.entries(document.variables || {}).map(([name, v]) => ({ id: name, name, type: v.type, value: v.value, cssVar: `var(${cssVarForToken(name)})` }));
+}
+/** CSS custom properties for color tokens and typed variables (`:root { --name: value; }`). */
+export function variablesCss(document) {
+  const lines = [];
+  for (const [name, value] of Object.entries(document.tokens || {})) lines.push(`  ${cssVarForToken(name)}: ${value};`);
+  for (const [name, v] of Object.entries(document.variables || {})) {
+    if (!checkVariableValue(v.type, v.value)) continue;
+    const value = v.type === 'dimension' ? `${v.value}px` : v.type === 'fontFamily' ? (/^[a-zA-Z-]+$/.test(v.value.trim()) ? v.value.trim() : `'${v.value.trim().replace(/['\\]/g, '')}'`) : String(v.value);
+    lines.push(`  ${cssVarForToken(name)}: ${value};`);
+  }
+  return lines.length ? `:root {\n${lines.join('\n')}\n}\n` : '';
+}

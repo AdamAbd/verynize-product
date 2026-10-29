@@ -17,6 +17,8 @@
 //   fetchImage?(url) -> fetchImageAsDataUrl-shaped result (tests inject this)
 //   preferences? -> createPreferenceStore()-shaped store (default: the shared preferences file)
 //   askAgent?({agent?, task}) -> {text, agent, model}   live desktop only; ask_agent errors without it
+//   shell?.call(op, args, context) -> result   live desktop only (desktop/agent-shell.cjs); the shell tools of
+//     shell-tools.mjs report "needs the desktop app" without it. context = {access?} per bridge request.
 // `createStoreBackend` implements it over DesignStore files; the desktop bridge implements a live
 // variant that edits the open editor and falls back to the store.
 //
@@ -40,6 +42,7 @@ import { searchIcons, resolveIcon, ICON_SETS } from './assets.mjs';
 import { searchStockPhotos, fetchImageAsDataUrl, attribution, trackUnsplashDownload } from './images.mjs';
 import { missingFonts } from './fonts.mjs';
 import { createPreferenceStore, defaultPreferencesPath, MAX_PREFERENCE_LENGTH } from './preferences.mjs';
+import { shellToolTable, SHELL_INSTRUCTIONS } from './shell-tools.mjs'; // bridge-only running-app/terminal/editor-action tools
 
 export const SERVER_NAME = 'verynize';
 export const SERVER_VERSION = '0.6.0';
@@ -51,7 +54,7 @@ export const SERVER_VERSION = '0.6.0';
  */
 export const TOOLS_VERSION = (() => {
   const hash = createHash('sha256');
-  for (const file of ['design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', 'design-knowledge/index.mjs', 'design-knowledge/skills.mjs', 'design-knowledge/persona.mjs']) {
+  for (const file of ['design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', 'design-knowledge/index.mjs', 'design-knowledge/skills.mjs', 'design-knowledge/persona.mjs', 'shell-tools.mjs']) {
     hash.update(file + '\0');
     try { hash.update(readFileSync(new URL(file, import.meta.url))); } catch { hash.update('missing'); }
     hash.update('\0');
@@ -98,7 +101,9 @@ Every element has a short page-unique id. A top-level artboard looks like "bok";
 take_screenshot returns the PNG (after pending images and fonts load), records a verification receipt bound to the current document revision, and appends a lint report: clipping, overflow, overlap, contrast against the real backdrop, leftover placeholders, missing assets and taste rules. Any edit invalidates receipts. Fix critical problems before finishing; repairs are capped at ${MAX_REPAIRS} blocked finish attempts per artboard, after which finish_artboard reports "unverified".
 
 ## Live editing
-While the Verynize desktop app runs, edits to the open document appear immediately and each tool call is one undo step. Otherwise documents are edited on disk ("headless") and screenshots are unavailable. apply_operations remains as a low-level, revision-checked batch API. No arbitrary filesystem paths or commands are accepted.`;
+While the Verynize desktop app runs, edits to the open document appear immediately and each tool call is one undo step. Otherwise documents are edited on disk ("headless") and screenshots are unavailable. apply_operations remains as a low-level, revision-checked batch API. The design tools accept no filesystem paths or commands; only the shell tools below run commands, inside the open project.
+
+${SHELL_INSTRUCTIONS}`;
 
 // ---------------------------------------------------------------------------------------------
 // Schemas
@@ -289,7 +294,7 @@ const WARNING_NOTE = 'These classes or elements were not applied. Rewrite the af
 // ---------------------------------------------------------------------------------------------
 // Tool table
 
-function toolTable(backend) {
+function toolTable(backend, context = {}) {
   const t = {};
   t.get_design_context = {
     description: 'Start here. Summarizes the document: pages, active page, current selection (live editor only), open/saved documents, design tokens, artboards on the page, and the design fundamentals that apply to every design.',
@@ -677,6 +682,7 @@ function toolTable(backend) {
     inputSchema: { name: documentArg, pageId: pageArg }, annotations: { readOnlyHint: true },
     run: async ({ name, pageId }) => { const state = await backend.read(name); return { html: exportHTML(state.document, pageId), revision: state.revision }; },
   };
+  Object.assign(t, shellToolTable(backend, context, { readPrepared, write, getPage, indexPage, invalidate: name => sessionFor(backend).receipts.invalidate(docKey(name)) }));
   return t;
 }
 
@@ -686,8 +692,8 @@ export const TOOL_NAMES = Object.keys(toolTable({}));
  * Register every tool on an McpServer. Pass {backend} to execute locally, or {forward} to relay
  * each validated call to another server (the stdio proxy uses this).
  */
-export function registerDesignTools(server, { backend, forward }) {
-  const table = toolTable(backend || {});
+export function registerDesignTools(server, { backend, forward, context }) {
+  const table = toolTable(backend || {}, context);
   for (const [name, tool] of Object.entries(table)) {
     server.registerTool(name, { description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations }, async args => {
       try { return forward ? await forward(name, args || {}) : await execute(tool, args || {}); } catch (error) { return failure(error); }

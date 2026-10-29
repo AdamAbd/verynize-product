@@ -1,6 +1,7 @@
 const path=require('node:path');
 const {pathToFileURL}=require('node:url');
-const {BrowserWindow}=require('electron');
+const fs=require('node:fs/promises');
+const {BrowserWindow,dialog,app}=require('electron');
 function renderOptions(options){
  if(!options||typeof options.html!=='string'||Buffer.byteLength(options.html)>20*1024*1024)throw Error('Export HTML must be under 20 MB');
  const width=Number(options.width),height=Number(options.height),scale=Number(options.scale??1);
@@ -73,7 +74,7 @@ async function renderNow({html,width,height,scale,fonts:families,measure},parent
    return {dataURL:image.resize({width:outputWidth,height:outputHeight,quality:'best'}).toDataURL(),width:outputWidth,height:outputHeight,...(boxes&&Object.keys(boxes).length?{boxes}:{}),fonts:{loaded:fonts.loaded,missing:fonts.missing}};
   }finally{close();parent?.removeListener('closed',close);}
 }
-function registerRendering(handle,parent){let active=false;
+function registerRendering(handle,parent){let active=false;registerArtworkExport(handle,parent);
  handle('renderDesign',async input=>{if(active)throw Error('An export is already rendering');renderOptions(input);active=true;try{return await renderHTML(input,parent)}finally{active=false}});
  // Editor canvas fonts: the renderer asks for embedded @font-face CSS for the families a document uses.
  handle('fontFaces',async families=>{
@@ -83,4 +84,53 @@ function registerRendering(handle,parent){let active=false;
   return {css:fonts.css,loaded:fonts.loaded,missing:fonts.missing};
  });
 }
-module.exports={registerRendering,renderOptions,renderHTML,familiesFromHtml,embedFonts};
+
+// ---------------------------------------------------------------------------------------------
+// Artwork export (inspector Export section): vector PDF of the selection, native save dialog and the
+// font catalog for the font family picker.
+const csp='<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data: blob:; style-src \'unsafe-inline\'; font-src data:">';
+async function renderPDF(input,parent=null){
+ const {html,width,height}=renderOptions({...input,scale:1});
+ const fonts=await embedFonts(html,null);
+ const window=new BrowserWindow({show:false,width,height,webPreferences:{partition:'pdf-'+Date.now(),sandbox:true,contextIsolation:true,nodeIntegration:false,javascript:false}});
+ const close=()=>{if(!window.isDestroyed())window.destroy();};parent?.once('closed',close);
+ window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',e=>e.preventDefault());
+ window.webContents.session.webRequest.onBeforeRequest((details,cb)=>cb({cancel:!details.url.startsWith('data:')&&!details.url.startsWith('blob:')}));
+ try{
+  // One page exactly the artwork size (CSS px → inches at 96 dpi), no margins.
+  const title=String(input.title||'Export').replace(/[<>&]/g,'').slice(0,120);
+  const page=`<title>${title}</title><style>@page{size:${width}px ${height}px;margin:0}html,body{margin:0;width:${width}px;height:${height}px;overflow:hidden}</style>`;
+  await window.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(csp+page+html));
+  if(fonts.css)await window.webContents.insertCSS(fonts.css);
+  const pdf=await window.webContents.printToPDF({printBackground:true,preferCSSPageSize:true,margins:{marginType:'none'},pageSize:{width:width/96,height:height/96}});
+  return {dataURL:'data:application/pdf;base64,'+pdf.toString('base64'),width,height,bytes:pdf.length,fonts:{loaded:fonts.loaded,missing:fonts.missing}};
+ }finally{close();parent?.removeListener('closed',close);}
+}
+const EXPORT_TYPES={png:['PNG image','image/png'],jpg:['JPEG image','image/jpeg'],webp:['WebP image','image/webp'],svg:['SVG image','image/svg+xml'],pdf:['PDF document','application/pdf'],html:['HTML document','text/html'],css:['CSS stylesheet','text/css']};
+/** Validate a save request: {name, data: data URL or text, extension}. */
+function saveRequest(options){
+ if(!options||typeof options.name!=='string'||typeof options.data!=='string')throw Error('Invalid export');
+ const extension=String(options.extension||'').toLowerCase();if(!EXPORT_TYPES[extension])throw Error('Unsupported export format');
+ const base=options.name.replace(/[\\/:*?"<>|\u0000-\u001f]+/g,'-').replace(/^[.\s-]+/,'').slice(0,120)||'export';
+ let bytes;const data=/^data:([a-z+/.-]+);base64,([A-Za-z0-9+/=]*)$/i.exec(options.data);
+ if(data)bytes=Buffer.from(data[2],'base64');else if(options.data.startsWith('data:'))throw Error('Unsupported data URL');else bytes=Buffer.from(options.data,'utf8');
+ if(bytes.length>200*1024*1024)throw Error('Export exceeds 200 MB');
+ return {name:base.toLowerCase().endsWith('.'+extension)?base:base+'.'+extension,extension,bytes};
+}
+let catalogPromise=null;
+function registerArtworkExport(handle,parent){
+ handle('renderPDF',input=>renderPDF(input,parent));
+ handle('saveExport',async options=>{
+  const {name,extension,bytes}=saveRequest(options);
+  const result=await dialog.showSaveDialog(parent,{title:'Export',defaultPath:path.join(app.getPath('downloads'),name),filters:[{name:EXPORT_TYPES[extension][0],extensions:[extension]}]});
+  if(result.canceled||!result.filePath)return null;
+  await fs.writeFile(result.filePath,bytes);
+  return {path:result.filePath,name:path.basename(result.filePath),bytes:bytes.length};
+ });
+ handle('fontCatalog',async()=>{
+  catalogPromise??=loadFonts().then(f=>f.fontCatalog()).catch(()=>null);
+  const result=await catalogPromise;if(!result||result.source==='bundled')catalogPromise=null;
+  return result||{fonts:[],source:'none'};
+ });
+}
+module.exports={registerRendering,registerArtworkExport,saveRequest,renderPDF,renderOptions,renderHTML,familiesFromHtml,embedFonts};

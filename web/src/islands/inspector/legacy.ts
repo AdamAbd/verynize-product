@@ -3,7 +3,7 @@
 // into it), so its same-named fields never collide with the island's visible fields. Legacy handlers that still
 // matter (precision align, scale, duplicate, delete, colour picker, shader gallery, artwork export) are driven by
 // clicking the detached elements.
-import { hideLegacy, legacy, legacyClick, legacySet, takeOver } from "@/lib/bridge";
+import { hideLegacy, legacy, legacyClick, takeOver } from "@/lib/bridge";
 
 let form: HTMLFormElement | null = null;
 const ROOT_ID = "bd-inspector-root";
@@ -67,10 +67,6 @@ function tokenRow(name: string): HTMLElement | null {
   for (const row of Array.from(list.children) as HTMLElement[])
     if (row.querySelector("span")?.textContent === name) return row;
   return null;
-}
-
-export function setTokenColor(name: string, color: string) {
-  legacySet(tokenRow(name)?.querySelector<HTMLInputElement>("input[type=color]") ?? null, color);
 }
 
 export function deleteToken(name: string) {

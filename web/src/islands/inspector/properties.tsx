@@ -52,7 +52,12 @@ import {
   Swatch,
   type IconType,
 } from "./controls";
-import { formClick, openColorPicker } from "./legacy";
+import { formClick } from "./legacy";
+import { ColorPopover } from "./color-picker";
+import { BindableField } from "./bind";
+import { EXPORT_FORMATS, EXPORT_SCALES, exportArtwork, type ExportFormat } from "./export";
+import { toast } from "sonner";
+import { alphaPercent, parseColor, toHex, withAlpha } from "./color";
 import {
   HEX,
   SHADER_PRESETS,
@@ -91,7 +96,10 @@ function ToolGroup({ children, disabled }: { children: ReactNode; disabled?: boo
   return (
     <div
       role="group"
-      className={cn("flex h-6 items-center justify-around rounded-md bg-muted px-1", disabled && "bg-muted/50")}
+      className={cn(
+        "flex h-6 items-center justify-around rounded-md bg-muted px-1",
+        disabled && "bg-muted/50",
+      )}
     >
       {children}
     </div>
@@ -136,7 +144,14 @@ function PositionSection({ node, selection }: Props) {
         {ALIGN_GROUPS.map((group, i) => (
           <ToolGroup key={i} disabled={!many}>
             {group.map((b) => (
-              <ToolButton key={b.id} id={"precision-" + b.id} label={b.label} icon={b.icon} disabled={!many} onClick={() => align(b.id)} />
+              <ToolButton
+                key={b.id}
+                id={"precision-" + b.id}
+                label={b.label}
+                icon={b.icon}
+                disabled={!many}
+                onClick={() => align(b.id)}
+              />
             ))}
           </ToolGroup>
         ))}
@@ -144,7 +159,9 @@ function PositionSection({ node, selection }: Props) {
           <ToolButton
             label="Rotate 90°"
             icon={RotateCwSquare}
-            onClick={() => patchNodes(selection, (n) => ({ rotation: ((n.rotation || 0) + 90) % 360 }))}
+            onClick={() =>
+              patchNodes(selection, (n) => ({ rotation: ((n.rotation || 0) + 90) % 360 }))
+            }
           />
           <ToolButton
             id="precision-horizontal"
@@ -163,8 +180,22 @@ function PositionSection({ node, selection }: Props) {
         </ToolGroup>
       </div>
       <div className="grid grid-cols-3 gap-2">
-        <Field name="x" label="X position" numeric value={fmt(node.x)} onCommit={set("x")} prefix={<Affix>X</Affix>} />
-        <Field name="y" label="Y position" numeric value={fmt(node.y)} onCommit={set("y")} prefix={<Affix>Y</Affix>} />
+        <Field
+          name="x"
+          label="X position"
+          numeric
+          value={fmt(node.x)}
+          onCommit={set("x")}
+          prefix={<Affix>X</Affix>}
+        />
+        <Field
+          name="y"
+          label="Y position"
+          numeric
+          value={fmt(node.y)}
+          onCommit={set("y")}
+          prefix={<Affix>Y</Affix>}
+        />
         <Field
           name="rotation"
           label="Rotation"
@@ -194,7 +225,11 @@ function PositionSection({ node, selection }: Props) {
 // Flexbox uses the same stack glyph as the frame's layer row (sidebar/icons.tsx), following its direction.
 const display = (direction: string) => [
   { value: "free", label: "Free position", icon: Shapes },
-  { value: "flex", label: "Flexbox", icon: direction === "column" ? StackColumnIcon : StackRowIcon },
+  {
+    value: "flex",
+    label: "Flexbox",
+    icon: direction === "column" ? StackColumnIcon : StackRowIcon,
+  },
   { value: "block", label: "Block flow", icon: Square },
   { value: "grid", label: "Grid", icon: LayoutGrid },
 ];
@@ -204,7 +239,12 @@ const DIRECTION = [
 ];
 const UNIT_LABEL: Record<SizingMode, string> = { fixed: "px", hug: "Hug", fill: "Fill" };
 
-function SizeField({ node, parent, axis, selection }: Props & { parent: Node | undefined; axis: "w" | "h" }) {
+function SizeField({
+  node,
+  parent,
+  axis,
+  selection,
+}: Props & { parent: Node | undefined; axis: "w" | "h" }) {
   const mode = sizingMode(node, axis, parent);
   return (
     <Field
@@ -241,6 +281,28 @@ function LayoutSection(props: Props) {
   const frame = node.type === "frame";
   const layout = node.layout === "inline" ? "block" : node.layout;
   const flow = frame && node.layout !== "free";
+  const gapField = (
+    <BindableField
+      doc={doc}
+      node={node}
+      selection={selection}
+      field="gap"
+      label="Gap"
+      prefix={<Affix>↔</Affix>}
+    >
+      {(suffix) => (
+        <Field
+          name="gap"
+          label="Gap"
+          numeric
+          value={fmt(node.gap)}
+          onCommit={set("gap")}
+          prefix={<Affix>↔</Affix>}
+          suffix={suffix}
+        />
+      )}
+    </BindableField>
+  );
   return (
     <Section
       id="layout-section"
@@ -271,41 +333,59 @@ function LayoutSection(props: Props) {
       {frame && node.layout === "flex" ? (
         <div className="grid grid-cols-2 gap-2">
           <Caption label="Direction">
-            <Segmented label="Direction" value={node.direction} onChange={set("direction")} items={DIRECTION} />
+            <Segmented
+              label="Direction"
+              value={node.direction}
+              onChange={set("direction")}
+              items={DIRECTION}
+            />
           </Caption>
-          <Caption label="Gap">
-            <Field name="gap" label="Gap" numeric value={fmt(node.gap)} onCommit={set("gap")} prefix={<Affix>↔</Affix>} />
-          </Caption>
+          <Caption label="Gap">{gapField}</Caption>
         </div>
       ) : null}
       {flow ? (
         <div className="grid grid-cols-2 gap-2">
           <Caption label="Padding">
-            <Field
-              name="padding"
+            <BindableField
+              doc={doc}
+              node={node}
+              selection={selection}
+              field="padding"
               label="Padding"
-              numeric
-              value={fmt(node.padding)}
-              onCommit={set("padding")}
               prefix={<IconAffix icon={Scan} />}
-            />
+            >
+              {(suffix) => (
+                <Field
+                  name="padding"
+                  label="Padding"
+                  numeric
+                  value={fmt(node.padding)}
+                  onCommit={set("padding")}
+                  prefix={<IconAffix icon={Scan} />}
+                  suffix={suffix}
+                />
+              )}
+            </BindableField>
           </Caption>
           {node.layout === "grid" ? (
             <Caption label="Columns">
-              <Field name="columns" label="Grid columns" numeric value={fmt(node.columns)} onCommit={set("columns")} prefix={<Affix>#</Affix>} />
+              <Field
+                name="columns"
+                label="Grid columns"
+                numeric
+                value={fmt(node.columns)}
+                onCommit={set("columns")}
+                prefix={<Affix>#</Affix>}
+              />
             </Caption>
           ) : node.layout !== "flex" ? (
-            <Caption label="Gap">
-              <Field name="gap" label="Gap" numeric value={fmt(node.gap)} onCommit={set("gap")} prefix={<Affix>↔</Affix>} />
-            </Caption>
+            <Caption label="Gap">{gapField}</Caption>
           ) : null}
         </div>
       ) : null}
       {frame && node.layout === "grid" ? (
         <div className="grid grid-cols-2 gap-2">
-          <Caption label="Gap">
-            <Field name="gap" label="Gap" numeric value={fmt(node.gap)} onCommit={set("gap")} prefix={<Affix>↔</Affix>} />
-          </Caption>
+          <Caption label="Gap">{gapField}</Caption>
         </div>
       ) : null}
       {frame && (node.layout === "flex" || node.layout === "grid") ? (
@@ -316,7 +396,10 @@ function LayoutSection(props: Props) {
               label="Cross axis alignment"
               value={node.alignItems}
               onChange={set("alignItems")}
-              options={["stretch", "flex-start", "center", "flex-end"].map((v) => ({ value: v, label: v.replace("flex-", "") }))}
+              options={["stretch", "flex-start", "center", "flex-end"].map((v) => ({
+                value: v,
+                label: v.replace("flex-", ""),
+              }))}
             />
           </Caption>
           <Caption label="Justify">
@@ -325,10 +408,12 @@ function LayoutSection(props: Props) {
               label="Main axis alignment"
               value={node.justifyContent}
               onChange={set("justifyContent")}
-              options={["flex-start", "center", "flex-end", "space-between", "space-around"].map((v) => ({
-                value: v,
-                label: v.replace("flex-", ""),
-              }))}
+              options={["flex-start", "center", "flex-end", "space-between", "space-around"].map(
+                (v) => ({
+                  value: v,
+                  label: v.replace("flex-", ""),
+                }),
+              )}
             />
           </Caption>
         </div>
@@ -378,7 +463,7 @@ function InspectorCheckbox({
   );
 }
 
-function AppearanceSection({ node, selection }: Props) {
+function AppearanceSection({ doc, node, selection }: Props) {
   const set = (key: string) => (value: string) => setField(selection, node, key, value);
   const hidden = !!node.hidden;
   return (
@@ -396,25 +481,48 @@ function AppearanceSection({ node, selection }: Props) {
     >
       <div className="flex items-end gap-2">
         <Caption label="Opacity" className="flex-1">
-          <Field
-            name="opacity"
+          <BindableField
+            doc={doc}
+            node={node}
+            selection={selection}
+            field="opacity"
             label="Opacity"
-            numeric
-            value={fmt(node.opacity)}
-            onCommit={set("opacity")}
             prefix={<IconAffix icon={SquareDashed} />}
-            suffix="%"
-          />
+          >
+            {(suffix) => (
+              <Field
+                name="opacity"
+                label="Opacity"
+                numeric
+                value={fmt(node.opacity)}
+                onCommit={set("opacity")}
+                prefix={<IconAffix icon={SquareDashed} />}
+                suffix={<>%{suffix}</>}
+              />
+            )}
+          </BindableField>
         </Caption>
         <Caption label="Corner radius" className="flex-1">
-          <Field
-            name="radius"
+          <BindableField
+            doc={doc}
+            node={node}
+            selection={selection}
+            field="radius"
             label="Corner radius"
-            numeric
-            value={fmt(node.radius)}
-            onCommit={set("radius")}
             prefix={<IconAffix icon={Scan} />}
-          />
+          >
+            {(suffix) => (
+              <Field
+                name="radius"
+                label="Corner radius"
+                numeric
+                value={fmt(node.radius)}
+                onCommit={set("radius")}
+                prefix={<IconAffix icon={Scan} />}
+                suffix={suffix}
+              />
+            )}
+          </BindableField>
         </Caption>
         <span className="size-6 shrink-0" aria-hidden />
       </div>
@@ -457,7 +565,9 @@ function VariableMenu({ doc, node, selection }: Props) {
         {node.token ? (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => setField(selection, node, "token", "")}>Detach variable</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setField(selection, node, "token", "")}>
+              Detach variable
+            </DropdownMenuItem>
           </>
         ) : null}
       </DropdownMenuContent>
@@ -465,51 +575,90 @@ function VariableMenu({ doc, node, selection }: Props) {
   );
 }
 
+/** Live canvas preview while dragging in the colour picker (committed on release through updateNodes). */
+function previewFill(nodes: Node[], color: string) {
+  for (const n of nodes) {
+    const el = document.querySelector<HTMLElement>(`#canvas [data-id="${CSS.escape(n.id)}"]`);
+    if (!el) continue;
+    if (n.type === "text") el.style.color = color;
+    else el.style.backgroundColor = color;
+  }
+}
+
 function PaintRow({ doc, node, selection }: Props) {
+  const [open, setOpen] = useState(false);
   const tokenColor = node.token ? doc.tokens?.[node.token] : undefined;
   const color = tokenColor || node.color;
   const hidden = !!node.hidden;
+  const selected = pageNodes(doc).filter((n) => selection.includes(n.id));
+  const commit = (next: string) => patchNodes(selection, () => ({ color: next, token: "" }));
   return (
     <div className="flex items-center gap-2">
-      <div className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field focus-within:ring-1 focus-within:ring-ring">
-        <button
-          type="button"
-          name="color"
-          aria-label="Fill colour"
-          title="Pick colour"
-          className="flex size-4.5 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
-          onClick={openColorPicker}
+      <ColorPopover
+        open={open}
+        onOpenChange={setOpen}
+        value={color}
+        onPreview={(next) => previewFill(selected, next)}
+        onCommit={commit}
+        tokens={doc.tokens}
+        token={node.token}
+        onToken={(name) => setField(selection, node, "token", name)}
+      >
+        <div
+          data-color-anchor
+          className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field focus-within:ring-1 focus-within:ring-ring"
         >
-          <Swatch color={color} className="size-4.5 rounded-sm" />
-        </button>
-        {node.token ? (
-          <span className="min-w-0 flex-1 truncate pl-1 text-foreground" title={`Variable: ${node.token}`}>
-            {node.token}
-          </span>
-        ) : (
+          <button
+            type="button"
+            name="color"
+            aria-label="Fill colour"
+            aria-expanded={open}
+            title="Pick colour"
+            className="flex size-4.5 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={() => setOpen(!open)}
+          >
+            <Swatch color={color} className="size-4.5 rounded-sm" />
+          </button>
+          {node.token ? (
+            <span
+              className="min-w-0 flex-1 truncate pl-1 text-foreground"
+              title={`Variable: ${node.token}`}
+            >
+              {node.token}
+            </span>
+          ) : (
+            <Field
+              label="Fill hex colour"
+              value={hexLabel(node.color)}
+              placeholder={HEX.test(node.color) ? "" : node.color}
+              className="h-5 flex-1 bg-transparent px-1 shadow-none focus-within:ring-0"
+              inputClassName="uppercase"
+              onCommit={(value) => {
+                const hex =
+                  parseHex(value, node.color) ??
+                  (parseColor(value) ? toHex(parseColor(value)!) : null);
+                if (!hex) return "Use a hex colour such as A58BDD";
+                commit(hex);
+              }}
+            />
+          )}
           <Field
-            label="Fill hex colour"
-            value={hexLabel(node.color)}
-            placeholder={HEX.test(node.color) ? "" : node.color}
-            className="h-5 flex-1 bg-transparent px-1 shadow-none focus-within:ring-0"
-            inputClassName="uppercase"
+            label="Fill opacity"
+            numeric
+            disabled={!!node.token}
+            value={String(alphaPercent(color))}
+            className="h-5 w-12 shrink-0 bg-transparent px-0 shadow-none focus-within:ring-0"
+            inputClassName="text-right"
+            suffix="%"
             onCommit={(value) => {
-              const hex = parseHex(value);
-              if (!hex) return "Use a six-digit hex color";
-              return setField(selection, node, "color", hex);
+              const n = Number(value);
+              const next = Number.isFinite(n) ? withAlpha(node.color, n) : null;
+              if (!next) return "Enter a percentage";
+              commit(next);
             }}
           />
-        )}
-        <Field
-          label="Fill opacity"
-          numeric
-          value={fmt(node.opacity)}
-          className="h-5 w-12 shrink-0 bg-transparent px-0 shadow-none focus-within:ring-0"
-          inputClassName="text-right"
-          suffix="%"
-          onCommit={(value) => setField(selection, node, "opacity", value)}
-        />
-      </div>
+        </div>
+      </ColorPopover>
       <IconButton
         icon={hidden ? EyeOff : Eye}
         label={hidden ? "Show layer" : "Hide layer"}
@@ -552,7 +701,14 @@ function ShaderSettings({ node, selection }: { node: Node | undefined; selection
           </Caption>
           <div className="grid grid-cols-2 gap-2">
             <Caption label="Speed">
-              <Field name="shaderSpeed" label="Shader speed" numeric step={0.1} value={fmt(node.shaderSpeed)} onCommit={set("shaderSpeed")} />
+              <Field
+                name="shaderSpeed"
+                label="Shader speed"
+                numeric
+                step={0.1}
+                value={fmt(node.shaderSpeed)}
+                onCommit={set("shaderSpeed")}
+              />
             </Caption>
             <Caption label="Intensity">
               <Field
@@ -573,20 +729,34 @@ function ShaderSettings({ node, selection }: { node: Node | undefined; selection
           >
             Choose shader…
           </button>
-          <p className="text-2xs text-subtle-foreground">Fill colour or a colour variable drives the shader colour. Speed 0 freezes motion.</p>
+          <p className="text-2xs text-subtle-foreground">
+            Fill colour or a colour variable drives the shader colour. Speed 0 freezes motion.
+          </p>
         </div>
       ) : null}
     </details>
   );
 }
 
-function FillSection({ doc, node, selection }: { doc: DesignDocument; node: Node | undefined; selection: string[] }) {
+function FillSection({
+  doc,
+  node,
+  selection,
+}: {
+  doc: DesignDocument;
+  node: Node | undefined;
+  selection: string[];
+}) {
   const set = (key: string) => (value: string) => node && setField(selection, node, key, value);
   return (
     <section id="fill-section" hidden={!node} className="border-b border-border">
       <div className="flex h-7.75 items-center justify-between gap-2 px-3">
         <h3 className="truncate text-xs text-foreground-3">
-          {node?.type === "text" ? "Text Fill" : node?.type === "shader" ? "Shader Fill" : "Background Fill"}
+          {node?.type === "text"
+            ? "Text Fill"
+            : node?.type === "shader"
+              ? "Shader Fill"
+              : "Background Fill"}
         </h3>
         {node ? <VariableMenu doc={doc} node={node} selection={selection} /> : null}
       </div>
@@ -597,10 +767,22 @@ function FillSection({ doc, node, selection }: { doc: DesignDocument; node: Node
             <PaintRow doc={doc} node={node} selection={selection} />
             <div className="grid grid-cols-2 gap-2">
               <Caption label="Gradient">
-                <Field name="gradient" label="Gradient (CSS)" value={node.gradient} placeholder="linear-gradient(…)" onCommit={set("gradient")} />
+                <Field
+                  name="gradient"
+                  label="Gradient (CSS)"
+                  value={node.gradient}
+                  placeholder="linear-gradient(…)"
+                  onCommit={set("gradient")}
+                />
               </Caption>
               <Caption label="Animated">
-                <NativeSelect name="animated" label="Animated gradient" value={node.animated} onChange={set("animated")} options={ANIMATED} />
+                <NativeSelect
+                  name="animated"
+                  label="Animated gradient"
+                  value={node.animated}
+                  onChange={set("animated")}
+                  options={ANIMATED}
+                />
               </Caption>
             </div>
           </>
@@ -626,27 +808,75 @@ function useOptional(nodeId: string | undefined, hasValue: boolean) {
   return [open, setOpen] as const;
 }
 
-function BorderSection({ node, selection }: Props) {
+function BorderSection({ doc, node, selection }: Props) {
   const [open, setOpen] = useOptional(node.id, node.strokeWidth > 0);
+  const [picker, setPicker] = useState(false);
   const set = (key: string) => (value: string) => setField(selection, node, key, value);
+  const commit = (color: string) => setField(selection, node, "strokeColor", color);
   return (
     <OptionalSection id="border-section" title="Border" open={open} onOpenChange={setOpen}>
       <div className="grid grid-cols-2 gap-2">
         <Caption label="Width">
-          <Field name="strokeWidth" label="Border width" numeric value={fmt(node.strokeWidth)} onCommit={set("strokeWidth")} prefix={<Affix>W</Affix>} suffix="px" />
+          <BindableField
+            doc={doc}
+            node={node}
+            selection={selection}
+            field="strokeWidth"
+            label="Border width"
+            prefix={<Affix>W</Affix>}
+            suffix="px"
+          >
+            {(suffix) => (
+              <Field
+                name="strokeWidth"
+                label="Border width"
+                numeric
+                value={fmt(node.strokeWidth)}
+                onCommit={set("strokeWidth")}
+                prefix={<Affix>W</Affix>}
+                suffix={suffix}
+              />
+            )}
+          </BindableField>
         </Caption>
         <Caption label="Colour">
-          <Field
-            name="strokeColor"
-            label="Border colour"
-            value={hexLabel(node.strokeColor)}
-            inputClassName="uppercase"
-            prefix={<Swatch color={node.strokeColor} className="size-3.5" />}
-            onCommit={(value) => {
-              const hex = parseHex(value);
-              return hex ? setField(selection, node, "strokeColor", hex) : "Use a six-digit hex color";
-            }}
-          />
+          <ColorPopover
+            open={picker}
+            onOpenChange={setPicker}
+            value={node.strokeColor || "#000000"}
+            onCommit={commit}
+          >
+            <div data-color-anchor>
+              <Field
+                name="strokeColor"
+                label="Border colour"
+                value={hexLabel(node.strokeColor)}
+                inputClassName="uppercase"
+                prefix={
+                  <button
+                    type="button"
+                    aria-label="Pick border colour"
+                    aria-expanded={picker}
+                    className="flex rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => setPicker(!picker)}
+                  >
+                    <Swatch color={node.strokeColor} className="size-3.5" />
+                  </button>
+                }
+                scrub={false}
+                suffix={
+                  alphaPercent(node.strokeColor) < 100
+                    ? `${alphaPercent(node.strokeColor)}%`
+                    : undefined
+                }
+                onCommit={(value) => {
+                  const hex = parseHex(value, node.strokeColor);
+                  return hex ? commit(hex) : "Use a hex colour such as A58BDD";
+                }}
+              />
+            </div>
+          </ColorPopover>
         </Caption>
       </div>
     </OptionalSection>
@@ -683,14 +913,52 @@ function MaskSection({ node, selection }: Props) {
   );
 }
 
-function ExportSection({ node }: Props) {
+function ExportSection({ node, selection }: Props) {
   const [open, setOpen] = useOptional(node.id, false);
-  const [format, setFormat] = useState("PNG");
+  const [format, setFormat] = useState<ExportFormat>("PNG");
   const [scale, setScale] = useState("2");
   const [scope, setScope] = useState("selection");
+  const [name, setName] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const fileName = name ?? node.name;
+  useEffect(() => {
+    setName(null);
+    setStatus("");
+  }, [node.id]);
+  const label = EXPORT_FORMATS.find((f) => f.value === format)!.label;
+  const run = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      const count = scope === "selection" ? selection.length : 1;
+      const saved = await exportArtwork({
+        format,
+        scale: Number(scale),
+        selectionOnly: scope === "selection",
+        name: fileName,
+      });
+      if (!saved) return; // save dialog cancelled
+      const message = `Exported ${count} ${count === 1 ? "element" : "elements"}`;
+      setStatus(`${message} · ${saved}`);
+      toast.success(message, { id: "artwork-export", description: saved });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(message);
+      toast.error("Export failed", { id: "artwork-export", description: message });
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <OptionalSection id="export-section" title="Export" open={open} onOpenChange={setOpen}>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
+        <Field
+          label="Export file name"
+          className="col-span-2"
+          value={fileName}
+          onCommit={(value) => setName(value.trim() || null)}
+        />
         <NativeSelect
           id="artwork-scope"
           label="Export scope"
@@ -701,33 +969,47 @@ function ExportSection({ node }: Props) {
             { value: "page", label: "Page" },
           ]}
         />
-        <div className="grid grid-cols-2 gap-2">
-          <NativeSelect
-            id="artwork-scale"
-            label="Export scale"
-            value={scale}
-            onChange={setScale}
-            options={["1", "2", "3"].map((v) => ({ value: v, label: v + "x" }))}
-          />
-          <NativeSelect
-            id="artwork-format"
-            label="Export format"
-            value={format}
-            onChange={setFormat}
-            options={["PNG", "JPG", "WEBP", "SVG", "HTML"].map((v) => ({ value: v, label: v === "WEBP" ? "WebP" : v }))}
-          />
-        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <NativeSelect
+          id="artwork-scale"
+          label="Export scale"
+          value={scale}
+          onChange={setScale}
+          options={EXPORT_SCALES.map((v) => ({
+            value: v,
+            label: v + "x",
+            disabled: format === "PDF" || format === "HTML" ? v !== "1" : false,
+          }))}
+        />
+        <NativeSelect
+          id="artwork-format"
+          label="Export format"
+          value={format}
+          onChange={(v) => {
+            setFormat(v as ExportFormat);
+            if (v === "PDF" || v === "HTML") setScale("1");
+          }}
+          options={EXPORT_FORMATS}
+        />
       </div>
       <button
         type="button"
         id="artwork-download"
-        className="flex h-6 items-center justify-center rounded-md bg-input text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
-        // The legacy handler reads #artwork-format/#artwork-scale/#artwork-scope from the document (these selects).
-        onClick={() => formClick("artwork-download")}
+        disabled={busy}
+        className="flex h-6 items-center justify-center rounded-md bg-input text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+        onClick={run}
       >
-        Export as {format === "WEBP" ? "WebP" : format}
+        {busy ? "Exporting…" : `Export as ${label}`}
       </button>
-      <p id="artwork-status" role="status" className="text-2xs text-subtle-foreground empty:hidden" />
+      <p
+        id="artwork-status"
+        role="status"
+        className="truncate text-2xs text-subtle-foreground empty:hidden"
+        title={status}
+      >
+        {status}
+      </p>
     </OptionalSection>
   );
 }
@@ -739,7 +1021,12 @@ function LayerSection({ doc, node, selection }: Props) {
   return (
     <OptionalSection id="layer-section" title="Layer" open={open} onOpenChange={setOpen}>
       <Caption label="Name">
-        <Field name="name" label="Layer name" value={node.name} onCommit={(value) => setField(selection, node, "name", value)} />
+        <Field
+          name="name"
+          label="Layer name"
+          value={node.name}
+          onCommit={(value) => setField(selection, node, "name", value)}
+        />
       </Caption>
       <Caption label="Parent frame">
         <NativeSelect
@@ -747,7 +1034,10 @@ function LayerSection({ doc, node, selection }: Props) {
           label="Parent frame"
           value={node.parentId ?? ""}
           onChange={(value) => setField(selection, node, "parentId", value)}
-          options={[{ value: "", label: "Canvas" }, ...frames.map((f) => ({ value: f.id, label: f.name }))]}
+          options={[
+            { value: "", label: "Canvas" },
+            ...frames.map((f) => ({ value: f.id, label: f.name })),
+          ]}
         />
       </Caption>
       <div className="grid grid-cols-4 gap-2">
@@ -760,7 +1050,12 @@ function LayerSection({ doc, node, selection }: Props) {
         <ActionButton id="duplicate" label="Duplicate layer" onClick={() => formClick("duplicate")}>
           <Copy className="size-3.5" aria-hidden />
         </ActionButton>
-        <ActionButton id="delete" label="Delete layer" onClick={() => formClick("delete")} destructive>
+        <ActionButton
+          id="delete"
+          label="Delete layer"
+          onClick={() => formClick("delete")}
+          destructive
+        >
           <Trash2 className="size-3.5" aria-hidden />
         </ActionButton>
       </div>
@@ -799,14 +1094,24 @@ function ActionButton({
 }
 
 /* ---------- Panel body ---------- */
-export function PropertiesBody({ doc, node, selection }: { doc: DesignDocument; node: Node | undefined; selection: string[] }) {
+export function PropertiesBody({
+  doc,
+  node,
+  selection,
+}: {
+  doc: DesignDocument;
+  node: Node | undefined;
+  selection: string[];
+}) {
   // Slots keep fixed positions so the always-mounted Fill section (with #shader-settings / #fill-hex) never remounts.
   return (
     <>
       {node ? <PositionSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <LayoutSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <AppearanceSection doc={doc} node={node} selection={selection} /> : null}
-      {node?.type === "text" ? <TypographySection key={node.id} node={node} selection={selection} /> : null}
+      {node?.type === "text" ? (
+        <TypographySection key={node.id} doc={doc} node={node} selection={selection} />
+      ) : null}
       <FillSection doc={doc} node={node} selection={selection} />
       {node ? <BorderSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <ShadowSection doc={doc} node={node} selection={selection} /> : null}
@@ -814,7 +1119,9 @@ export function PropertiesBody({ doc, node, selection }: { doc: DesignDocument; 
       {node ? <ExportSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <LayerSection doc={doc} node={node} selection={selection} /> : null}
       {!node ? (
-        <p className="px-3 py-3 text-xs text-muted-foreground">Select a layer to edit its properties.</p>
+        <p className="px-3 py-3 text-xs text-muted-foreground">
+          Select a layer to edit its properties.
+        </p>
       ) : null}
     </>
   );

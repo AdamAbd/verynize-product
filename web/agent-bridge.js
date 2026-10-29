@@ -146,6 +146,22 @@
     },
   };
 
+  // --- agent shell: editor commands for the execute_action MCP tool (desktop/agent-shell.cjs) ---
+  // Runs entries of the editor's own command registry (window.verynize.commands/runCommand),
+  // the same commands as the shortcuts and context menu, so each one is undoable like a user action.
+  // OS clipboard commands stay with the user.
+  const BLOCKED_ACTIONS = new Set(['edit.copy', 'edit.cut', 'edit.paste', 'edit.pasteInPlace']);
+  const actionList = () => (editor().commands?.() || []).filter(command => !BLOCKED_ACTIONS.has(command.id));
+  ops.actions = () => ({ actions: actionList() });
+  ops.action = ({ id, ids, pageId }) => {
+    if (!actionList().some(command => command.id === id)) throw new Error(`Unknown action ${id}; call execute_action without an id to list actions`);
+    if (pageId) { const view = editor().getView(); if (view.page !== pageId) editor().setView({ ...view, page: pageId }); }
+    if (Array.isArray(ids)) editor().setSelection(ids.filter(value => typeof value === 'string'));
+    const ran = editor().runCommand(id);
+    return { ran, selection: editor().getSelection(), activePage: editor().getDocument().activePage, tool: editor().getTool?.() || null, camera: editor().getCamera?.() || null };
+  };
+  // --- end agent shell ---
+
   api.onCall(async message => {
     const { requestId, op, args } = message || {};
     if (typeof requestId !== 'string') return;

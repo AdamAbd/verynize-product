@@ -65,7 +65,9 @@
     set('text-align', pick(n.textAlign, ['left', 'center', 'right', 'justify', 'start', 'end'], 'left'));
     set('line-height', String(num(n.lineHeight, 1.15)));
     set('letter-spacing', px(n.letterSpacing));
-    if (num(n.rotation)) set('transform', `rotate(${num(n.rotation)}deg)`);
+    // Rotation, then flips (negative scale) in the node's own frame: transform = rotate(r) scale(±1, ±1).
+    const flip = (n.flipX === true || n.flipY === true) ? `scale(${n.flipX === true ? -1 : 1}, ${n.flipY === true ? -1 : 1})` : '';
+    if (num(n.rotation) || flip) set('transform', [num(n.rotation) ? `rotate(${num(n.rotation)}deg)` : '', flip].filter(Boolean).join(' '));
     set('opacity', String(num(n.opacity, 100) / 100));
     set('border', `${Math.max(0, num(n.strokeWidth))}px solid ${safe(n.strokeColor, '#000000')}`);
     if (safe(n.shadow)) set('box-shadow', safe(n.shadow));
@@ -147,6 +149,8 @@
 
     // Shape and effects.
     if (Array.isArray(n.cornerRadii) && n.cornerRadii.length === 4) set('border-radius', n.cornerRadii.map(px).join(' '));
+    // Ellipse: any box type can be drawn as an ellipse inscribed in its bounds; it overrides corner radii.
+    if (n.ellipse === true && n.type !== 'text') set('border-radius', '50%');
     if (Array.isArray(n.strokeWidths) && n.strokeWidths.length === 4) set('border-width', n.strokeWidths.map(v => px(Math.max(0, num(v)))).join(' '));
     if (['dashed', 'dotted', 'double'].includes(n.strokeStyle)) set('border-style', n.strokeStyle);
     if (num(n.ringWidth) > 0) {

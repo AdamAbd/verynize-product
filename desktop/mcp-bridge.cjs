@@ -18,7 +18,7 @@
  *       ({agent?: 'claude'|'codex', task}) -> Promise<{text, agent, model}> backs the read-only
  *       ask_agent tool (second opinion / design review); calling startBridge again (or
  *       setBridgeOptions) replaces the options. Without it ask_agent reports unavailable.
- *   setBridgeOptions({askAgent})                                     update options at any time
+ *   setBridgeOptions({askAgent, shellExec, confirmExec})             update options at any time
  *   registerWindow(win, {designFiles, entryURL})                     per editor BrowserWindow
  *   getBridgeInfo() -> {url, token, file, documentsRoot, toolsVersion} | null   null until started
  *   toolsVersion: TOOLS_VERSION of integrations/design-tools.mjs (also in mcp.json and pushed to
@@ -36,6 +36,12 @@
  * embedded) and returns the PNG plus measured per-node boxes relative to the element (`bounds`) and
  * missing fonts; the tool layer turns these into a revision-bound receipt and a measured lint.
  *
+ * Shell tools (integrations/shell-tools.mjs, desktop/agent-shell.cjs): dev server, running-app
+ * preview automation, terminal commands and execute_action. Options: shellExec:false (or env
+ * VERYNIZE_SHELL_EXEC=0) refuses commands; confirmExec({title, detail, root, access}) ->
+ * boolean|{allowed, remember} replaces the native approval dialog. Requests may send header
+ * `x-verynize-access: readonly|ask|edit|auto|full`; see agent-shell.cjs for the policy.
+ *
  * Set VERYNIZE_DISABLE_MCP=1 to skip starting the bridge.
  */
 const path = require('node:path');
@@ -44,14 +50,17 @@ const { randomUUID } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { BrowserWindow } = require('electron');
 const { renderHTML } = require('./render.cjs');
+const agentShell = require('./agent-shell.cjs'); // running-app / terminal / editor-action tools
 
 const load = file => import(pathToFileURL(path.join(__dirname, '../integrations', file)).href);
 const SUFFIX = '.verynize.json';
 const windows = new Map(); // webContents.id -> {win, designFiles, entryURL, pending}
 let info = null, server = null, starting = null, lastFocused = null;
-const bridgeOptions = { askAgent: null };
+const bridgeOptions = { askAgent: null, shellExec: true, confirmExec: null };
 function setBridgeOptions(options = {}) {
   if (options && Object.hasOwn(options, 'askAgent')) bridgeOptions.askAgent = typeof options.askAgent === 'function' ? options.askAgent : null;
+  if (options && Object.hasOwn(options, 'shellExec')) bridgeOptions.shellExec = options.shellExec !== false;
+  if (options && Object.hasOwn(options, 'confirmExec')) bridgeOptions.confirmExec = typeof options.confirmExec === 'function' ? options.confirmExec : null;
 }
 // Tell an editor window which tool generation is serving it (Settings › Agents shows it).
 // Called on every did-finish-load and for every window once the bridge starts (a message sent
@@ -129,6 +138,7 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
   const withName = document => (typeof document.name === 'string' && document.name.trim() ? document : { ...document, name: 'Untitled' });
   return {
     mode: 'live',
+    shell: agentShell.createShell({ activeEditor, request, options: () => bridgeOptions }),
     async list() {
       const saved = await storeBackend.list();
       const entry = activeEditor(); let editor = null;
@@ -204,7 +214,8 @@ async function startBridge(app, options = {}) {
     const storeBackend = tools.createStoreBackend(store);
     const backend = createLiveBackend({ store, storeBackend, tools, edit, exportHTML, validateDocument, fonts });
     const instructions = `${tools.INSTRUCTIONS}\n\nConnected to the Verynize desktop app. Omit "document" to edit the document open in the editor (live, undoable). Saved documents live in ${documentsRoot}. Tools version ${tools.TOOLS_VERSION}.`;
-    server = await http.startHttpServer({ makeServer: () => tools.createDesignServer({ backend }, { instructions }), onError: error => console.error('[mcp-bridge]', error) });
+    // Per request: the optional x-verynize-access header (readonly|ask|edit|auto|full) scopes the shell tools.
+    server = await http.startHttpServer({ makeServer: ({ headers } = {}) => tools.createDesignServer({ backend, context: { access: agentShell.parseAccess(headers?.['x-verynize-access']) } }, { instructions }), onError: error => console.error('[mcp-bridge]', error) });
     const file = path.join(app.getPath('userData'), 'mcp.json');
     await http.writeBridgeFile(file, { url: server.url, token: server.token, pid: process.pid, version: tools.SERVER_VERSION, toolsVersion: tools.TOOLS_VERSION });
     info = { url: server.url, token: server.token, file, documentsRoot, toolsVersion: tools.TOOLS_VERSION, serverVersion: tools.SERVER_VERSION };

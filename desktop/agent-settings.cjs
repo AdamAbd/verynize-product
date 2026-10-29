@@ -91,7 +91,7 @@ function argumentsFor(agent, options = {}) {
     args = ['--print', '--permission-mode', CLAUDE_CLI_MODES[o.access]];
     if (o.sessionId) args.push('--resume', o.sessionId);
     if (typeof options.appendSystemPrompt === 'string' && options.appendSystemPrompt) args.push('--append-system-prompt', options.appendSystemPrompt);
-    if (options.bridge?.url) args.push('--mcp-config', JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: claudeMcpServer(options.bridge) } }), '--allowedTools', `mcp__${MCP_SERVER_NAME}__*`);
+    if (options.bridge?.url) args.push('--mcp-config', JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: claudeMcpServer(options.bridge, o.access) } }), '--allowedTools', `mcp__${MCP_SERVER_NAME}__*`);
   }
   if (o.model) args.push('--model', o.model);
   if (o.effort) args.push(...(agent === 'codex' ? ['--config', `model_reasoning_effort="${o.effort}"`] : ['--effort', o.effort]));
@@ -100,8 +100,10 @@ function argumentsFor(agent, options = {}) {
   return args;
 }
 
-function claudeMcpServer(bridge) {
-  return { type: 'http', url: bridge.url, ...(bridge.token ? { headers: { Authorization: `Bearer ${bridge.token}` } } : {}) };
+// `access` (ask|edit|auto|full|readonly) scopes the bridge's shell tools; see agent-shell.cjs.
+function claudeMcpServer(bridge, access) {
+  const headers = { ...(bridge.token ? { Authorization: `Bearer ${bridge.token}` } : {}), ...(access ? { 'x-verynize-access': access === 'readonly' ? 'readonly' : normalizeAccess(access) } : {}) };
+  return { type: 'http', url: bridge.url, ...(Object.keys(headers).length ? { headers } : {}) };
 }
 
 module.exports = { ACCESS_LEVELS, DESIGN_DEFAULTS, defaultsFor, withDefaults, normalizeAccess, normalizeOptions, argumentsFor, claudePermissionMode, codexPolicy, codexMcpArgs, claudeMcpServer, MCP_SERVER_NAME, MCP_TOKEN_ENV };

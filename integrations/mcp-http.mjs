@@ -33,8 +33,9 @@ async function readBody(req, limit) {
 }
 
 /**
- * Start the HTTP endpoint. `makeServer()` must return a fresh, unconnected McpServer per request
- * (stateless mode). Resolves to {url, port, token, close()}.
+ * Start the HTTP endpoint. `makeServer({headers})` must return a fresh, unconnected McpServer per
+ * request (stateless mode); headers are the request's (lower-cased), e.g. for a per-client access
+ * level. Resolves to {url, port, token, close()}.
  */
 export async function startHttpServer({ makeServer, token = newToken(), port = 0, maxBody = MAX_BODY, onError = () => {} }) {
   if (typeof token !== 'string' || token.length < 16) throw new Error('Bridge token must be at least 16 characters');
@@ -49,7 +50,7 @@ export async function startHttpServer({ makeServer, token = newToken(), port = 0
       if (req.method !== 'POST') return reject(res, 405, 'Method not allowed', { allow: 'POST' });
       let body;
       try { body = JSON.parse(await readBody(req, maxBody)); } catch (error) { return reject(res, error.status || 400, error.status ? error.message : 'Invalid JSON body'); }
-      const mcp = makeServer();
+      const mcp = makeServer({ headers: req.headers });
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       res.on('close', () => { transport.close().catch(() => {}); mcp.close().catch(() => {}); });
       await mcp.connect(transport);

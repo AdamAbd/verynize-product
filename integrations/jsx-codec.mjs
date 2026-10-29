@@ -277,13 +277,15 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
   if (node.type === 'image' && node.objectFit) c.push(`object-${node.objectFit}`);
   if (node.type === 'image' && node.icon && node.iconColor) c.push(colorClass('text', node.iconColor, '', tokens));
   // Shape and effects
-  if (Array.isArray(node.cornerRadii) && node.cornerRadii.length === 4 && !node.cornerRadii.every(v => v === node.cornerRadii[0])) {
+  if (node.ellipse === true && node.type !== 'text') c.push('rounded-[50%]');
+  else if (Array.isArray(node.cornerRadii) && node.cornerRadii.length === 4 && !node.cornerRadii.every(v => v === node.cornerRadii[0])) {
     const [tl, tr, br, bl] = node.cornerRadii; const r = (p, v) => (v ? radiusClass(p, v) : null);
     const out = tl === tr && bl === br ? [r('rounded-t', tl), r('rounded-b', bl)] : tl === bl && tr === br ? [r('rounded-l', tl), r('rounded-r', tr)] : [r('rounded-tl', tl), r('rounded-tr', tr), r('rounded-br', br), r('rounded-bl', bl)];
     c.push(...out.filter(Boolean));
   } else if (Number(node.radius)) c.push(radiusClass('rounded', Number(node.radius)));
   if (node.opacity !== undefined && Number(node.opacity) !== 100) c.push(Number.isInteger(node.opacity) ? `opacity-${node.opacity}` : `opacity-[${round(node.opacity)}%]`);
   if (Number(node.rotation)) c.push(`rotate-[${round(node.rotation)}deg]`);
+  if (node.flipX === true && node.flipY === true) c.push('-scale-100'); else if (node.flipX === true) c.push('-scale-x-100'); else if (node.flipY === true) c.push('-scale-y-100');
   const widths = Array.isArray(node.strokeWidths) && node.strokeWidths.length === 4 ? node.strokeWidths.map(Number) : null;
   if (widths && !widths.every(v => v === widths[0])) {
     ['t', 'r', 'b', 'l'].forEach((side, i) => { if (widths[i]) c.push(widths[i] === 1 ? `border-${side}` : Number.isInteger(widths[i]) ? `border-${side}-${widths[i]}` : `border-${side}-[${round(widths[i])}px]`); });

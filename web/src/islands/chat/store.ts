@@ -49,6 +49,10 @@ export type ChatMessage = {
   usage?: ChatUsage;
   /** User message injected into a running turn (steer). */
   steered?: boolean;
+  /** Where this reply's turn ended in the provider session (rewind forks the session here). */
+  resumePoint?: { sessionId: string; at: string; agent?: string };
+  /** Second-opinion review of the reply at index `of`, written by the other provider. */
+  review?: { of: number; author?: string; diff?: boolean };
 };
 export type ChatDefaults = { agent: string; model: string; access: string; effort: string; instructions: string };
 export type ChatState = {
@@ -109,6 +113,8 @@ type Workspace = {
   addMention?(mention: ChatMention): void;
   removeMention?(id: string): void;
   rewindTo?(messageIndex: number): void;
+  /** Ask the other provider to review the reply at `messageIndex` (read-only; adds a review message). */
+  secondOpinion?(messageIndex: number): void;
   retry?(messageIndex: number): void;
   editMessage?(messageIndex: number, text: string): void;
   copyMessage?(messageIndex: number): void;

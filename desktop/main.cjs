@@ -12,6 +12,7 @@ const {registerGeneration}=require('./generate.cjs');
 const {registerFigma}=require('./figma.cjs');
 const {registerRendering}=require('./render.cjs');
 const {registerAgentAuth}=require('./agent-auth.cjs');
+const {registerGitChanges}=require('./git-changes.cjs');
 const mcpBridge=require('./mcp-bridge.cjs'); // agent-bridge hook: live MCP server (getBridgeInfo for agent runtimes)
 const {registerAgentRuntime}=require('./agent-runtime.cjs'); // agent chat runtime (Claude Agent SDK / Codex app-server)
 const entry=path.join(__dirname,'../web/index.html');
@@ -55,12 +56,17 @@ app.whenReady().then(() => {
     });
     handle('listFiles',()=>current().list());handle('readFile',p=>current().read(p));handle('writeFile',(p,c)=>current().write(p,c));
     handle('gitStatus',()=>current().status());handle('createWorktree',b=>current().worktree(b));
+    // Changes panel (desktop/git-changes.cjs): gitChanges, gitDiff, gitCommit, gitDiscard, gitPush, gitPullRequest, gitCreatePullRequest.
+    registerGitChanges(handle,{getProject:()=>project});
     handle('readMemory',()=>current().memory());handle('writeMemory',text=>current().write('VERYNIZE.md',text));
     handle('discoverAgents',()=>agents.discover());
     // --- agent chat runtime (desktop/agent-runtime.cjs): runAgent, cancelAgent, respondAgentPermission, listAgentModels, saveAgentImage ---
     // --- also: respondAgentQuestion, steerAgent, listAgentRuns, listAllowRules, removeAllowRule, agentToolsVersion, agentTitle, designPreferences* ---
     agentRuntime=registerAgentRuntime(handle,win,{userData:app.getPath('userData'),getProject:()=>project});
     primaryRuntime=agentRuntime;win.on('closed',()=>{if(primaryRuntime===agentRuntime)primaryRuntime=null;});
+    // --- agent shell (desktop/agent-shell.cjs): open project for the dev server / terminal MCP tools ---
+    require('./agent-shell.cjs').registerShellWindow(win,{getProject:()=>project});
+    // --- end agent shell ---
     win.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
     win.webContents.on('will-navigate', event => event.preventDefault());
     win.loadFile(entry);

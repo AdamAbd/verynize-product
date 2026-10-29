@@ -75,6 +75,10 @@ process.stdin.on('data', chunk => {
     if (method === 'initialize') send({ id, result: { userAgent: 'fake-codex' } });
     else if (method === 'initialized') {}
     else if (method === 'thread/start') { const thread = { id: 'thr-' + ++threadCount }; send({ id, result: { thread, model: params.model || 'fake-model', cwd: params.cwd } }); notify('thread/started', { thread }); }
+    else if (method === 'thread/fork') {
+      if (params.threadId === 'thr-missing' || params.lastTurnId === 'turn-missing') send({ id, error: { code: -32000, message: 'cannot fork: unknown turn' } });
+      else { const thread = { id: 'thr-fork-' + ++threadCount }; send({ id, result: { thread, model: params.model || 'fake-model', cwd: params.cwd } }); notify('thread/started', { thread }); }
+    }
     else if (method === 'thread/resume') { if (params.threadId === 'thr-missing') send({ id, error: { code: -32000, message: 'no rollout found' } }); else send({ id, result: { thread: { id: params.threadId } } }); }
     else if (method === 'turn/start') {
       const turnId = 'turn-' + Math.random().toString(36).slice(2, 8);

@@ -1,5 +1,5 @@
 // Dock header (29, 33, 34): project / chat switcher on the left, "Start preview" split button on the right.
-import { CameraIcon, ChevronDownIcon, ChevronsUpDownIcon, FileDownIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, GitForkIcon, LaptopIcon, MessageSquareIcon, ChevronLeftIcon, PlayIcon } from "lucide-react";
+import { CameraIcon, SparklesIcon, ChevronDownIcon, ChevronsUpDownIcon, FileDownIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, GitForkIcon, LaptopIcon, MessageSquareIcon, ChevronLeftIcon, PlayIcon } from "lucide-react";
 import { PanelLeftIcon, PlusIcon } from "@/components/icons";
 import { legacyClick } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,8 @@ import {
   ChatMenuSubTrigger,
   ChatMenuTrigger,
 } from "./menu";
+import { ChangesButton } from "./changes-panel";
+import { presetImplementPrompt } from "./changes";
 import { hook } from "./hooks";
 import { workspace, type ChatState } from "./store";
 
@@ -170,6 +172,10 @@ function PreviewButton() {
             <FileDownIcon />
             Export PDF
           </ChatMenuItem>
+          <ChatMenuItem onSelect={presetImplementPrompt}>
+            <SparklesIcon />
+            Implement selection in code
+          </ChatMenuItem>
           <ChatMenuSeparator />
           <ChatMenuItem onSelect={() => legacyClick("project-git")}>
             <GitBranchIcon />
@@ -222,7 +228,9 @@ export function DockHeader({ state }: { state: ChatState }) {
         </button>
       </div>
       {attached && (
-        <div className="flex h-10 shrink-0 items-center justify-end border-b border-border bg-settings pr-2">
+        <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border bg-settings pr-2 pl-1.5">
+          <ChangesButton state={state} />
+          <span className="flex-1" />
           <PreviewButton />
         </div>
       )}
