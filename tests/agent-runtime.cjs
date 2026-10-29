@@ -6,7 +6,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { AgentRuntime, buildTurnContext, normalizeContext, claudeQueryOptions, buildPersona, createDesignTurnGuard, designHooks, toolOutcome, composePrompt, buildSeedBlock, claudeQuestions, claudeAnswerInput, codexQuestions, codexAnswers, normalizeAnswers, allowRuleFor, ruleMatches, AllowRules, heuristicTitle, cleanTitle, agentToolsVersion } = require('../desktop/agent-runtime.cjs');
+const { AgentRuntime, buildTurnContext, normalizeContext, claudeQueryOptions, buildPersona, createDesignTurnGuard, designHooks, toolOutcome, composePrompt, buildSeedBlock, claudeQuestions, claudeAnswerInput, codexQuestions, codexAnswers, normalizeAnswers, allowRuleFor, ruleMatches, AllowRules, heuristicTitle, cleanTitle, agentToolsVersion, normalizeFork, buildReviewTask } = require('../desktop/agent-runtime.cjs');
+const { execFileSync } = require('node:child_process');
 const { createClaudeMapper, createCodexMapper, claudeRateLimit, codexRateLimits } = require('../desktop/agent-runtime-events.cjs');
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -14,6 +15,8 @@ const CHAT = '11111111-2222-3333-4444-555555555555';
 
 function fakeClaudeSdk(record) {
   return {
+    // Saved transcripts: session id -> chain entry uuids (getSessionMessages reads them locally).
+    async getSessionMessages(sessionId, options) { record.sessionLookups = [...(record.sessionLookups || []), { sessionId, dir: options?.dir }]; return ({ 'sess-new': ['uuid-a1', 'uuid-u1'] }[sessionId] || []).map(uuid => ({ type: 'assistant', uuid, session_id: sessionId, message: {}, parent_tool_use_id: null })); },
     query({ prompt, options }) {
       record.options = options;
       let interrupted, interruptedPromise = new Promise(r => { interrupted = r; });
@@ -22,7 +25,7 @@ function fakeClaudeSdk(record) {
         const first = (await iterator.next()).value;
         record.message = first;
         const text = first.message.content[0].text;
-        const sid = options.resume || 'sess-new';
+        const sid = options.forkSession ? 'sess-fork' : options.resume || 'sess-new';
         if (/Write a 3 to 6 word title/.test(text)) { record.titleOptions = options; yield { type: 'system', subtype: 'init', session_id: 't', model: options.model }; yield { type: 'result', subtype: 'success', result: '"Blue Header Refresh."', session_id: 't' }; return; }
         if (/^REVIEW/.test(text)) { record.reviewOptions = options; yield { type: 'system', subtype: 'init', session_id: 'r', model: 'fake-opus' }; yield { type: 'result', subtype: 'success', result: 'The header contrast is fine.', session_id: 'r' }; return; }
         yield { type: 'system', subtype: 'init', session_id: sid, model: 'fake-sonnet', mcp_servers: options.mcpServers ? [{ name: 'verynize', status: 'connected' }] : [] };
@@ -39,13 +42,14 @@ function fakeClaudeSdk(record) {
         yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'tu-1', name: 'mcp__verynize__update_elements' } } };
         yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"pageId":"p' } } };
         const input = { pageId: 'page-1', edit: 'x' };
-        yield { type: 'assistant', session_id: sid, message: { content: [{ type: 'text', text: 'Hello' }, { type: 'tool_use', id: 'tu-1', name: 'mcp__verynize__update_elements', input }] } };
+        yield { type: 'assistant', uuid: 'uuid-a1', session_id: sid, message: { content: [{ type: 'text', text: 'Hello' }, { type: 'tool_use', id: 'tu-1', name: 'mcp__verynize__update_elements', input }] } };
         if (/question/.test(text)) record.question = await options.canUseTool('AskUserQuestion', { questions: [{ question: 'Which accent color?', header: 'Accent', multiSelect: false, options: [{ label: 'Teal', description: 'Calm' }, { label: 'Orange', description: 'Loud' }] }] }, { signal: new AbortController().signal, toolUseID: 'tu-q' });
         if (/steer/.test(text)) { record.steer = (await iterator.next()).value; yield { type: 'stream_event', session_id: sid, event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '!' } } }; }
         let allowed = true;
         if (options.permissionMode === 'default') allowed = (await options.canUseTool('Bash', { command: 'rm -rf build' }, { signal: new AbortController().signal })).behavior === 'allow';
         record.allowed = allowed;
-        yield { type: 'user', session_id: sid, message: { content: [{ type: 'tool_result', tool_use_id: 'tu-1', content: [{ type: 'text', text: 'updated 1 element' }], is_error: false }] } };
+        yield { type: 'user', uuid: 'uuid-u1', session_id: sid, message: { content: [{ type: 'tool_result', tool_use_id: 'tu-1', content: [{ type: 'text', text: 'updated 1 element' }], is_error: false }] } };
+        yield { type: 'user', uuid: 'uuid-sub', parent_tool_use_id: 'tu-1', session_id: sid, message: { content: [] } };
         yield { type: 'result', subtype: 'success', is_error: false, result: 'Hello', session_id: sid, usage: { input_tokens: 9, output_tokens: 2 }, total_cost_usd: 0.001 };
         if (/steer/.test(text)) yield { type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: sid };
         // A real SDK keeps going until input ends; make sure the runtime ends input after `result`.
@@ -111,7 +115,7 @@ test('Claude SDK options: preset prompt + persona, partial messages, resume, per
   assert.equal(options.allowDangerouslySkipPermissions, true);
   assert.equal(options.resume, 's-1');
   assert.equal(options.pathToClaudeCodeExecutable, '/bin/claude');
-  assert.deepEqual(options.mcpServers, { 'verynize': { type: 'http', url: bridge.url, headers: { Authorization: 'Bearer abc' } } });
+  assert.deepEqual(options.mcpServers, { 'verynize': { type: 'http', url: bridge.url, headers: { Authorization: 'Bearer abc', 'x-verynize-access': 'full' } } });
   assert.deepEqual(options.allowedTools, ['mcp__verynize__*']);
   const ask = claudeQueryOptions({ cwd: '/p', access: 'ask', persona: 'P' });
   assert.equal(ask.permissionMode, 'default');
@@ -520,7 +524,8 @@ test('helpers: ask_agent runs read-only, titles fall back to a heuristic, tools 
   const options = record.reviewOptions;
   assert.equal(options.permissionMode, 'default');
   assert.deepEqual(options.tools, ['Read', 'Glob', 'Grep']);
-  for (const tool of ['Write', 'Edit', 'Bash', 'mcp__verynize__update_elements', 'mcp__verynize__ask_agent']) assert.ok(options.disallowedTools.includes(tool), tool);
+  for (const tool of ['Write', 'Edit', 'Bash', 'mcp__verynize__update_elements', 'mcp__verynize__ask_agent', 'mcp__verynize__run_terminal_command', 'mcp__verynize__preview_click', 'mcp__verynize__execute_action']) assert.ok(options.disallowedTools.includes(tool), tool);
+  if (options.mcpServers) assert.equal(options.mcpServers['verynize'].headers['x-verynize-access'], 'readonly', 'the helper reaches the bridge as read-only');
   assert.equal((await options.canUseTool('Write', {}, {})).behavior, 'deny');
   assert.equal(options.persistSession, false);
   await assert.rejects(() => runtime.ask({ agent: 'gemini', task: 'x' }), /agent must be/);
@@ -549,4 +554,103 @@ test('helpers: ask_agent runs read-only, titles fall back to a heuristic, tools 
   assert.notEqual(await agentToolsVersion({ importTools: async () => ({}), root: dir }), hashed);
   assert.equal(await agentToolsVersion({ importTools: async () => ({ TOOLS_VERSION: '7' }), root: dir }), '7');
   assert.equal(typeof await agentToolsVersion(), 'string');
+});
+
+// --- rewind (provider session forks) and second-opinion review -----------------------------------
+
+test('rewind: fork points validate and map to Claude resume + resumeSessionAt + forkSession', () => {
+  assert.deepEqual(normalizeFork({ sessionId: 'sess-1', at: 'uuid-1', extra: 1 }), { sessionId: 'sess-1', at: 'uuid-1' });
+  for (const bad of [null, 'x', {}, { sessionId: 'a b', at: 'u' }, { sessionId: 's', at: '' }, { sessionId: 's', at: 'x'.repeat(201) }]) assert.equal(normalizeFork(bad), null);
+  const options = claudeQueryOptions({ cwd: '/p', access: 'ask', persona: 'P', sessionId: 'ignored', fork: { sessionId: 'sess-1', at: 'uuid-1' } });
+  assert.deepEqual([options.resume, options.resumeSessionAt, options.forkSession], ['sess-1', 'uuid-1', true]);
+  const plain = claudeQueryOptions({ cwd: '/p', access: 'ask', persona: 'P', sessionId: 'sess-2' });
+  assert.deepEqual([plain.resume, plain.resumeSessionAt, plain.forkSession], ['sess-2', undefined, undefined]);
+});
+
+test('rewind (Claude): done reports the last main-chain entry; a fork resumes a copy cut there, else falls back to the seed', async t => {
+  const { runtime, events, record, until } = await setup(t);
+  await runtime.run({ agent: 'claude', chatId: CHAT, prompt: 'First turn', access: 'full' });
+  const first = await until(e => e.type === 'done');
+  assert.deepEqual([first.sessionId, first.resumeAt], ['sess-new', 'uuid-u1'], 'subagent entries are not fork points');
+  events.length = 0;
+  const forked = await runtime.run({ agent: 'claude', chatId: CHAT, prompt: 'Second take', access: 'full', sessionId: 'sess-new', fork: { sessionId: 'sess-new', at: 'uuid-a1' }, seed: 'user: First turn' });
+  assert.deepEqual([forked.rewound, forked.seeded], [true, false]);
+  const second = await until(e => e.type === 'done');
+  assert.deepEqual([record.options.resume, record.options.resumeSessionAt, record.options.forkSession], ['sess-new', 'uuid-a1', true]);
+  assert.equal(record.message.message.content[0].text, 'Second take', 'a working fork carries the history; no seed is prepended');
+  assert.equal(second.sessionId, 'sess-fork');
+  assert.deepEqual(record.sessionLookups.at(-1), { sessionId: 'sess-new', dir: forked.cwd }, 'the fork point is checked in the transcript of the chat folder');
+  // Unknown fork point (e.g. the transcript was deleted): fresh session seeded from the transcript.
+  events.length = 0;
+  const fallback = await runtime.run({ agent: 'claude', chatId: CHAT, prompt: 'Third take', access: 'full', fork: { sessionId: 'sess-gone', at: 'uuid-a1' }, seed: 'user: First turn' });
+  assert.deepEqual([fallback.rewound, fallback.seeded], [false, true]);
+  await until(e => e.type === 'done');
+  assert.ok(events.some(e => e.type === 'status' && /Could not rewind/.test(e.text)));
+  assert.equal(record.options.resume, undefined);
+  assert.equal(record.options.forkSession, undefined);
+  assert.match(record.message.message.content[0].text, /^<previous-conversation>[\s\S]*user: First turn[\s\S]*Third take$/);
+});
+
+test('rewind (Codex): done reports the turn id; thread/fork continues through it, a refused fork falls back to the seed', async t => {
+  const { runtime, events, until, log } = await setup(t);
+  await runtime.run({ agent: 'codex', chatId: CHAT, prompt: 'first codex turn', access: 'edit' });
+  const first = await until(e => e.type === 'done');
+  assert.equal(first.sessionId, 'thr-1');
+  assert.match(first.resumeAt, /^turn-/);
+  events.length = 0;
+  const forked = await runtime.run({ agent: 'codex', chatId: CHAT, prompt: 'second take', access: 'ask', fork: { sessionId: 'thr-1', at: first.resumeAt }, seed: 'user: first codex turn' });
+  assert.deepEqual([forked.rewound, forked.seeded], [true, false]);
+  const second = await until(e => e.type === 'done');
+  assert.match(second.sessionId, /^thr-fork-/);
+  const calls = (await fs.readFile(log, 'utf8')).trim().split('\n').map(JSON.parse);
+  const fork = calls.find(c => c.rpc === 'thread/fork').params;
+  assert.deepEqual([fork.threadId, fork.lastTurnId, fork.sandbox, fork.approvalPolicy, fork.excludeTurns], ['thr-1', first.resumeAt, 'read-only', 'untrusted', true]);
+  assert.match(fork.developerInstructions, /Verynize/);
+  assert.equal(calls.filter(c => c.rpc === 'turn/start').at(-1).params.threadId, second.sessionId);
+  assert.equal(calls.filter(c => c.rpc === 'turn/start').at(-1).params.input[0].text, 'second take');
+  events.length = 0;
+  const fallback = await runtime.run({ agent: 'codex', chatId: CHAT, prompt: 'third take', fork: { sessionId: 'thr-1', at: 'turn-missing' }, seed: 'user: first codex turn' });
+  assert.deepEqual([fallback.rewound, fallback.seeded], [false, true]);
+  const third = await until(e => e.type === 'done');
+  assert.ok(events.some(e => e.type === 'status' && /Could not rewind/.test(e.text)));
+  assert.doesNotMatch(third.sessionId, /fork/);
+  const last = (await fs.readFile(log, 'utf8')).trim().split('\n').map(JSON.parse).filter(c => c.rpc === 'turn/start').at(-1).params.input[0].text;
+  assert.match(last, /^<previous-conversation>[\s\S]*first codex turn[\s\S]*third take$/);
+});
+
+test('second opinion: the answer and the uncommitted diff go read-only to the other provider', async t => {
+  const project = await fs.mkdtemp(path.join(os.tmpdir(), 'review-project-'));
+  t.after(() => fs.rm(project, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', ['-C', project, ...args], { stdio: 'pipe' });
+  git('init', '-q'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 'T');
+  await fs.writeFile(path.join(project, 'index.html'), '<h1>Old</h1>\n');
+  git('add', '.'); git('commit', '-qm', 'init');
+  await fs.writeFile(path.join(project, 'index.html'), '<h1>New heading</h1>\n');
+  await fs.writeFile(path.join(project, 'notes.txt'), 'untracked\n');
+  const { runtime, log } = await setup(t, { getProject: () => ({ root: project }) });
+  await assert.rejects(() => runtime.review({ agent: 'codex', answer: '  ' }), /no answer/);
+  await assert.rejects(() => runtime.review({ agent: 'gemini', answer: 'x' }), /agent must be/);
+  const result = await runtime.review({ agent: 'codex', author: 'claude', request: 'Rename the heading', answer: 'I changed the heading to "New heading".' });
+  assert.equal(result.agent, 'codex');
+  assert.equal(result.requested, 'codex');
+  assert.equal(result.diff, true);
+  assert.ok(result.text);
+  const calls = (await fs.readFile(log, 'utf8')).trim().split('\n').map(JSON.parse);
+  const thread = calls.filter(c => c.rpc === 'thread/start').at(-1).params;
+  assert.deepEqual([thread.sandbox, thread.approvalPolicy, thread.ephemeral, thread.cwd], ['read-only', 'never', true, project]);
+  assert.ok(thread.config['mcp_servers.verynize.disabled_tools'].includes('update_elements'), 'canvas edits are disabled for the reviewer');
+  const task = calls.filter(c => c.rpc === 'turn/start').at(-1).params.input[0].text;
+  assert.match(task, /^Give a second opinion on a turn another agent \(Claude\)/);
+  assert.match(task, /<user-request>\nRename the heading\n<\/user-request>/);
+  assert.match(task, /<agent-answer>\nI changed the heading/);
+  assert.match(task, /<uncommitted-changes>\ngit status --short:\n M index.html\n\?\? notes.txt[\s\S]*-<h1>Old<\/h1>\n\+<h1>New heading<\/h1>/);
+  // Without the requested provider, the other installed one answers; without a project there is no diff.
+  const solo = new AgentRuntime({ userData: path.join(project, '.ud'), discover: async () => [{ id: 'codex', available: false, path: null }, { id: 'claude', available: true, path: '/usr/bin/true' }], loadClaudeSdk: async () => fakeClaudeSdk({}), getBridge: async () => null });
+  t.after(() => solo.close());
+  const fallback = await solo.review({ agent: 'codex', answer: 'Done.', includeDiff: true });
+  assert.deepEqual([fallback.agent, fallback.requested, fallback.diff], ['claude', 'codex', false]);
+  // Long inputs are clipped in the middle so the task stays under the helper limit.
+  const long = buildReviewTask({ request: 'r'.repeat(50000), answer: 'a'.repeat(200000), diff: 'd'.repeat(200000) });
+  assert.ok(long.length < 100000, String(long.length));
+  assert.match(long, /characters omitted/);
 });

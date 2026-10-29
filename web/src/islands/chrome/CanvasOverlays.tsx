@@ -2,7 +2,19 @@
 // zoom readout + zoom menu. Rendered through a portal into a host appended to #workspace.
 import { useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Popover } from "radix-ui";
-import { Check, ChevronsUpDown, File, Hand, MousePointer2, Pin, SquareArrowUpRight, Scan, Type } from "lucide-react";
+import {
+  Check,
+  ChevronsUpDown,
+  Circle,
+  File,
+  Hand,
+  MousePointer2,
+  Pin,
+  Pipette,
+  SquareArrowUpRight,
+  Scan,
+  Type,
+} from "lucide-react";
 import { activePage, legacySet, legacy, portalContainer, useBodyClass, useDesign } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import {
@@ -45,10 +57,14 @@ const TOOLS: { id: string; tool: string; label: string; key: string; icon: Icon 
   { id: "select-tool", tool: "move", label: "Move", key: "V", icon: MousePointer2 },
   { id: "scale-tool", tool: "scale", label: "Scale", key: "K", icon: SquareArrowUpRight },
   { id: "pan-tool", tool: "hand", label: "Hand", key: "H", icon: Hand },
+  { id: "eyedropper-tool", tool: "eyedropper", label: "Eyedropper", key: "I", icon: Pipette },
   { id: "add-frame", tool: "frame", label: "Frame", key: "F", icon: Scan },
+  { id: "add-ellipse", tool: "ellipse", label: "Ellipse", key: "O", icon: Circle },
   { id: "add-shader", tool: "shader", label: "Shader", key: "S", icon: ShaderIcon },
   { id: "text", tool: "text", label: "Text", key: "T", icon: Type },
 ];
+/** Index of the first creation tool (Frame); a divider separates it from the pointer tools. */
+const TOOL_GROUP_SPLIT = TOOLS.findIndex((t) => t.id === "add-frame");
 const LAYOUT_ICONS: Record<LayoutName, Icon> = {
   details: DetailsLayoutIcon,
   design: DesignLayoutIcon,
@@ -96,7 +112,7 @@ function Toolbar() {
     >
       <div className="flex items-center gap-1 pr-2 pl-1.5">
         {TOOLS.map(({ id, tool: name, label, key, icon: Icon }, index) => (
-          <ToolSlot key={id} separator={index === 3}>
+          <ToolSlot key={id} separator={index === TOOL_GROUP_SPLIT}>
             <Tip label={label} shortcut={key}>
               <button
                 type="button"
@@ -281,8 +297,12 @@ const SHORTCUTS: [string, string][] = [
   ["Hand", "H / Space"],
   ["Frame", "F"],
   ["Rectangle", "R"],
+  ["Ellipse", "O"],
   ["Text", "T"],
   ["Shader", "S"],
+  ["Eyedropper", "I"],
+  ["Flip horizontal / vertical", "⇧H / ⇧V"],
+  ["Rotate 90°", "⌥⇧R"],
   ["Zoom in / out", "⌘+ / ⌘−"],
   ["Zoom to fit", "⇧1"],
   ["Zoom to 100%", "⇧0"],

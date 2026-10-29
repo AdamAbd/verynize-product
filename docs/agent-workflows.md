@@ -54,6 +54,21 @@ Image paths are accepted only under `userData/agent-attachments/<chatId>/`. Past
 
 Only loopback URLs are wired.
 
+### Shell tools and access levels
+
+The bridge also serves bridge-only shell tools: `get_dev_server`, `start_dev_server`, `stop_dev_server`, `configure_dev_server`, `preview_open`, `preview_snapshot`, `preview_screenshot`, `preview_click`, `preview_type`, `preview_scroll`, `preview_console`, `capture_preview_to_canvas`, `run_terminal_command`, `read_terminal` and `execute_action`. They are described in `desktop/README.md`. The stdio server without the app answers them with a "needs the desktop app" error.
+
+Exec tools (start/configure dev server, terminal commands) follow the chat's access level when the request carries `x-verynize-access`:
+- `auto` and `full` run them without asking.
+- `ask` and `edit` show a native approval dialog.
+- `readonly` (helper agents) refuses every tool that changes the app or runs something.
+
+Requests without the header are treated like Ask. The runtime does not send this header yet, so every in-app chat currently gets the approval dialog for exec tools. Two follow-ups for `desktop/agent-runtime.cjs` / `agent-settings.cjs`:
+- add the header to `claudeMcpServer()` headers and to the Codex MCP config, set per access level
+- add the shell tools to `HELPER_BLOCKED_DESIGN_TOOLS` or send `readonly` for `ask_agent` helpers
+
+Until then, the read-only helper is protected only by the approval dialog. `VERYNIZE_SHELL_EXEC=0` or `setBridgeOptions({shellExec:false})` turns exec tools off entirely.
+
 ## Events and UI
 
 Main sends typed events on `desktop:agent-event`. Each one has `{id, chatId, seq, type}`. The types are:
@@ -62,13 +77,15 @@ Main sends typed events on `desktop:agent-event`. Each one has `{id, chatId, seq
 - `tool-call`, `tool-input-delta`, `tool-result`
 - `permission-request`, `permission-resolved`
 - `usage`, `error`
-- `done {code, stopped, sessionId}`
+- `done {code, stopped, sessionId, resumeAt?}`. `resumeAt` is the fork point of the finished turn: Claude's last main-chain transcript entry uuid, or the Codex turn id.
 
 Translators live in `desktop/agent-runtime-events.cjs`, one each for SDK messages, app-server notifications and `exec --json` lines. The renderer (`web/desktop-panel.js`) handles them as follows:
 - It streams text and re-renders only the active reply, at most once per frame.
 - Thinking shows in a collapsible block. Tool calls show as collapsible cards with input (partial JSON while streaming) and result. Permission requests show as Allow/Deny cards.
 - **Stop** interrupts the turn.
 - Each conversation stores the provider `sessionId`. A follow-up with the same agent in the same project passes `sessionId` to resume the native session, and the saved transcript is not re-sent. Switching agents, or **Continue from here** (a transcript branch), starts a new session seeded with the last eight messages. Files are never reverted.
+- **Rewind** (Restore / Rewind to here, Retry, Edit) truncates the chat before a user message. Each reply stores `resumePoint {sessionId, at}` from its `done` event, so the next turn passes `fork: {sessionId, at}` for the last kept reply. Claude resumes a forked copy of the session cut there (`resume` + `resumeSessionAt` + `forkSession`), after checking with `getSessionMessages` that the entry exists. Codex calls `thread/fork` with `lastTurnId`. If the fork point is missing or refused, the transcript `seed` sent with it is used instead. The canvas is restored only when a canvas checkpoint exists. Files are not reverted.
+- **Second opinion** (a reply action) sends the reply, the user request before it, and the project's `git status --short` and `git diff HEAD` to the other provider through `reviewAgent`. It runs as the read-only helper used by `ask_agent`: Claude gets only Read/Glob/Grep, and Codex gets a `read-only` sandbox, `never` approvals and canvas edit tools disabled. If the other provider is not installed, the installed one answers. The review is added to the chat as a separate assistant message.
 - The model field is free text, with suggestions from Claude `supportedModels()` or Codex `model/list`.
 
 Transcripts, including tool and permission parts, persist per project in `localStorage`. Runs that were in progress when the app closed are shown as interrupted when reloaded.
@@ -99,6 +116,8 @@ Usage counters are local task counts, not subscription limits or billing.
   - branching, docking and persistence
 
 No test calls a real model unless the smoke flag is set.
+
+`BD_LIVE_AGENTS=1 node --test tests/agent-runtime-live.cjs` runs one real turn per installed provider through the runtime module. Each turn uses Ask access, a small model, low effort and a temporary quick-chat folder. The test checks the event shape, streamed text, usage and `resumeAt`. It also starts a throwaway loopback MCP server and checks that the provider connected with the bearer token and listed its tool. Fork points are checked without a model call. Set `BD_LIVE_AGENTS_REWIND=1` to also run one forked turn per provider, or set `BD_LIVE_AGENTS_ONLY=claude|codex` to test only one provider.
 
 ## Documentation
 

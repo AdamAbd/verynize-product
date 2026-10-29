@@ -10,6 +10,7 @@ import {
   HistoryIcon,
   PencilIcon,
   RotateCcwIcon,
+  ScaleIcon,
   CircleDotIcon,
   CircleAlertIcon,
   FileIcon,
@@ -398,21 +399,27 @@ function CopyButton({ index, message }: { index: number; message: ChatMessage })
   );
 }
 
-/** "Restore to here" with an inline confirmation: reverts the canvas to the checkpoint before this message. */
-function RestoreButton({ index }: { index: number }) {
+/**
+ * "Rewind to here" with an inline confirmation: removes this and later messages, continues the agent
+ * session from the reply before it and, when a canvas checkpoint exists, restores the canvas too.
+ */
+function RestoreButton({ index, canvas }: { index: number; canvas: boolean }) {
+  const label = canvas ? "Restore checkpoint" : "Rewind to here";
   return (
     <ChatMenu modal={false}>
-      <ChatMenuTrigger title="Restore checkpoint" aria-label="Restore checkpoint" className={ACTION}>
+      <ChatMenuTrigger title={label} aria-label={label} className={ACTION}>
         <HistoryIcon className="size-3.5" />
       </ChatMenuTrigger>
       <ChatMenuContent align="end" side="bottom" className="w-64">
         <ChatMenuLabel className="h-auto py-1 leading-4.5">
-          Restore the canvas to how it was before this message? Later messages are removed from the chat.
+          {canvas
+            ? "Restore the canvas to how it was before this message? Later messages are removed and the agent continues from here."
+            : "Rewind the chat to before this message? Later messages are removed and the agent continues from here. Files and the canvas are not changed."}
         </ChatMenuLabel>
         <ChatMenuSeparator />
         <ChatMenuItem onSelect={() => workspace()?.rewindTo?.(index)}>
           <HistoryIcon />
-          Restore to here
+          {canvas ? "Restore to here" : "Rewind to here"}
         </ChatMenuItem>
         <ChatMenuItem>Cancel</ChatMenuItem>
       </ChatMenuContent>
@@ -548,7 +555,7 @@ function UserMessage({ message, index, busy }: { message: ChatMessage; index: nu
                 </ActionButton>
               </span>
             )}
-            {ws?.rewindTo && message.checkpoint && <RestoreButton index={index} />}
+            {ws?.rewindTo && <RestoreButton index={index} canvas={!!message.checkpoint} />}
           </ActionBar>
         )}
       </div>
@@ -632,7 +639,8 @@ function AssistantMessage({
   live: boolean;
 }) {
   const ws = workspace();
-  const running = live && message.state === "running";
+  // A second opinion runs outside the chat's task slot, so it is "live" on its own.
+  const running = (live || !!message.review) && message.state === "running";
   const now = useNow(running);
   const parts = message.parts ?? [];
   const nesting = nestTools(parts);
@@ -722,6 +730,13 @@ function AssistantMessage({
         "group/msg relative m-0 flex w-full max-w-none flex-col gap-2.5 rounded-none border-0 bg-transparent p-0 text-base leading-5.25 text-foreground",
       )}
     >
+      {message.review && (
+        <p className="flex items-center gap-1.5 text-xs text-subtle-foreground">
+          <ScaleIcon className="size-3.5" />
+          Second opinion · {message.agent === "codex" ? "Codex" : "Claude"}
+          {message.review.diff ? " · answer and uncommitted changes" : ""}
+        </p>
+      )}
       {content}
       {links.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
@@ -736,9 +751,17 @@ function AssistantMessage({
         <ActionBar className="left-0">
           <ForkButton index={index} />
           <CopyButton index={index} message={message} />
-          {ws?.retry && (
+          {ws?.retry && !message.review && (
             <ActionButton label="Retry" onClick={() => ws.retry?.(index)}>
               <RotateCcwIcon className="size-3.5" />
+            </ActionButton>
+          )}
+          {ws?.secondOpinion && !message.review && message.state !== "error" && (
+            <ActionButton
+              label={`Second opinion from ${message.agent === "codex" ? "Claude" : "Codex"} (read-only review)`}
+              onClick={() => ws.secondOpinion?.(index)}
+            >
+              <ScaleIcon className="size-3.5" />
             </ActionButton>
           )}
         </ActionBar>

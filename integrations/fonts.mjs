@@ -282,3 +282,54 @@ export async function missingFonts(document, opts = {}) {
 export async function listCachedFonts({ cacheDir = defaultFontCacheDir() } = {}) {
   try { return (await readdir(path.join(cacheDir, 'files'))).filter(f => f.endsWith('.woff2')); } catch { return []; }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Font catalog for the inspector's font family picker: every Fontsource family (cached on disk for a
+// week), the bundled Inter and the macOS/web-safe system fonts. Offline or on network failure the cached
+// list is used; with no cache, the bundled popular list (weights unknown → assume 400/700) is returned.
+export const FONTSOURCE_LIST = 'https://api.fontsource.org/v1/fonts';
+const CATALOG_MAX_AGE = 7 * 24 * 3600 * 1000;
+const SYSTEM_CATALOG = [
+  ['system-ui', 'sans-serif'], ['Arial', 'sans-serif'], ['Helvetica', 'sans-serif'], ['Helvetica Neue', 'sans-serif'], ['Avenir', 'sans-serif'],
+  ['Avenir Next', 'sans-serif'], ['Futura', 'sans-serif'], ['Gill Sans', 'sans-serif'], ['Optima', 'sans-serif'], ['Verdana', 'sans-serif'],
+  ['Tahoma', 'sans-serif'], ['Trebuchet MS', 'sans-serif'], ['Georgia', 'serif'], ['Times New Roman', 'serif'], ['Palatino', 'serif'],
+  ['Baskerville', 'serif'], ['Didot', 'serif'], ['American Typewriter', 'serif'], ['Courier New', 'monospace'], ['Menlo', 'monospace'],
+  ['Monaco', 'monospace'], ['sans-serif', 'sans-serif'], ['serif', 'serif'], ['monospace', 'monospace'],
+];
+const ALL_WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900];
+const slimEntry = f => ({ family: f.family, id: f.id, category: f.category || 'other', weights: (f.weights || []).filter(Number.isFinite), styles: (f.styles || ['normal']).filter(s => s === 'normal' || s === 'italic'), kind: 'web' });
+
+/**
+ * -> {fonts:[{family, id, kind:'bundled'|'system'|'generic'|'web', category, weights, styles}], source:'network'|'cache'|'bundled'}
+ * Never throws. Inter first, then system fonts, then the catalog sorted by family.
+ */
+export async function fontCatalog({ fetch, cacheDir = defaultFontCacheDir(), offline = false, maxAge = CATALOG_MAX_AGE } = {}) {
+  const file = path.join(cacheDir, 'meta', 'catalog.json');
+  let list = null, source = 'bundled';
+  try {
+    const st = await stat(file);
+    const cached = JSON.parse(await readFile(file, 'utf8'));
+    if (Array.isArray(cached)) { list = cached; source = 'cache'; }
+    if (list && Date.now() - st.mtimeMs < maxAge) offline = true;
+  } catch {}
+  if (!offline) {
+    try {
+      const res = await safeFetch(fetch)(FONTSOURCE_LIST, { headers: { accept: 'application/json' } });
+      if (!res.ok) throw Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!Array.isArray(data)) throw Error('unexpected Fontsource response');
+      const slim = data.filter(f => f && typeof f.family === 'string' && typeof f.id === 'string' && f.family.length <= 120).slice(0, 5000).map(slimEntry);
+      if (slim.length) { list = slim; source = 'network'; await writeAtomic(file, JSON.stringify(slim)).catch(() => {}); }
+    } catch {}
+  }
+  if (!list) list = POPULAR_FONTS.map(family => ({ family, id: fontId(family), category: 'other', weights: [400, 700], styles: ['normal'], kind: 'web' }));
+  const fonts = [{ family: 'Inter', id: 'inter', kind: 'bundled', category: 'sans-serif', weights: ALL_WEIGHTS, styles: ['normal', 'italic'] }];
+  for (const [family, category] of SYSTEM_CATALOG) fonts.push({ family, id: null, kind: familyKind(family), category, weights: GENERIC_FAMILIES.has(family.toLowerCase()) ? ALL_WEIGHTS : [400, 700], styles: ['normal', 'italic'] });
+  const seen = new Set(fonts.map(f => f.family.toLowerCase()));
+  for (const f of [...list].sort((a, b) => a.family.localeCompare(b.family))) {
+    if (seen.has(f.family.toLowerCase())) continue;
+    seen.add(f.family.toLowerCase());
+    fonts.push({ ...f, kind: 'web', weights: f.weights?.length ? f.weights : [400] });
+  }
+  return { fonts, source };
+}

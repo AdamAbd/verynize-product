@@ -221,6 +221,13 @@ export function parseClasses(className, { tokens = {} } = {}) {
   if ((d = take('opacity'))) { const l = lengthOf(d.resolved); const n = l?.frac !== undefined ? l.frac * 100 : l?.n !== undefined ? l.n * 100 : l?.px === 0 ? 0 : NaN; if (Number.isFinite(n)) set('opacity', Math.min(100, Math.max(0, round(n)))); else ignore(d.cls, 'invalid opacity'); }
   if ((d = take('visibility'))) { if (d.resolved === 'hidden') set('hidden', true); }
   if ((d = take('rotate'))) { const m = d.resolved.match(/^(-?[\d.]+)deg$/); if (m) set('rotation', Number(m[1])); else if (d.resolved !== 'none') ignore(d.cls, `rotate ${d.resolved} is not supported`); }
+  // Flips: -scale-x-100 / -scale-y-100 / -scale-100 (Tailwind's `scale` = x y factors). Only ±1 factors are represented.
+  if ((d = take('scale'))) {
+    const factor = part => { const l = lengthOf(part); return l?.frac !== undefined && !l.px ? l.frac : l?.n !== undefined ? l.n : null; };
+    const parts = splitTop(d.resolved, ' '), fx = factor(parts[0] ?? ''), fy = parts.length > 1 ? factor(parts[1]) : fx;
+    if (d.resolved === 'none') { /* no scale */ } else if ([fx, fy].every(f => f !== null && Math.abs(Math.abs(f) - 1) < 1e-6)) { if (fx < 0) set('flipX', true); if (fy < 0) set('flipY', true); }
+    else ignore(d.cls, `scale ${d.resolved} is not supported (only flips: -scale-x-100, -scale-y-100)`);
+  }
 
   // --- backgrounds
   if ((d = take('background-color'))) { const c = color(d); if (c && !c.inherit) { set('fill', c.color); if (c.token) set('fillToken', c.token); } }
@@ -255,7 +262,10 @@ export function parseClasses(className, { tokens = {} } = {}) {
   const corners = [undefined, undefined, undefined, undefined];
   for (const [p, idx] of Object.entries(CORNERS)) {
     if (!(d = take(p))) continue;
-    const l = lengthOf(d.resolved); if (!l || l.px === undefined || l.frac !== undefined) { ignore(d.cls, `radius ${d.resolved} is not supported`); continue; }
+    const l = lengthOf(d.resolved);
+    // rounded-[50%] on every corner is an ellipse inscribed in the box (other percentages are not represented).
+    if (p === 'border-radius' && l?.frac === 0.5 && !l.px) { set('ellipse', true); continue; }
+    if (!l || l.px === undefined || l.frac !== undefined) { ignore(d.cls, `radius ${d.resolved} is not supported`); continue; }
     const v = l.px === Infinity ? 9999 : Math.min(9999, Math.max(0, l.px));
     for (const i of idx) corners[i] = v;
   }

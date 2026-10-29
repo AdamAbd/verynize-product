@@ -306,6 +306,8 @@
     const chat=entry.chat;active.delete(chat.id);if(entry.runId)runs.delete(entry.runId);
     entry.replies.forEach((reply,i)=>finalizeReply(reply,event,i===entry.replies.length-1));
     if(event.sessionId){chat.sessionId=event.sessionId;chat.sessionAgent=entry.task.agent;chat.sessionKey=entry.key;chat.toolsVersion=entry.version;}
+    // agent-runtime parity: remember where this turn ended in the provider session so a later rewind can fork there.
+    if(event.sessionId&&event.resumeAt&&entry.replies.length)entry.replies.at(-1).resumePoint={sessionId:event.sessionId,at:event.resumeAt,agent:entry.task.agent,key:entry.key,toolsVersion:entry.version};
     if(event.code===0||event.stopped)stats.completed++;else stats.failed++;
     output(`\n[${event.stopped?'stopped':'exit '+event.code}]\n`);persistChat(entry);renderHistory();if(projectKey!=='unattached'&&entry.key===projectKey)refresh().catch(()=>{});
     status(chat!==conversation?`“${chat.title}” ${event.stopped?'stopped':event.code===0?'finished':'failed'}`:event.stopped?'Stopped':event.code===0?'Done':'The agent reported an error');
@@ -366,9 +368,11 @@
       if(seed&&!seedParam)prompt=tail('<previous-conversation>\n'+seed+'\n</previous-conversation>',Math.max(0,195000-prompt.length))+'\n\n'+prompt;
       if(!seedParam&&task.mentions?.length)prompt+='\n\nReferenced canvas elements: '+task.mentions.map(m=>`${m.label} (id ${m.id}${m.shortId?', short id '+m.shortId:''}, page ${m.pageId})`).join('; ');
       entry.resumed=!!resume;
-      const result=await api.runAgent({agent:task.agent,model:task.model==='default'?'':task.model,access:task.access,effort:task.effort,instructions:task.instructions,prompt,chatId:chat.id,...(resume?{sessionId:resume}:{}),...(seed&&seedParam?{seed}:{}),...(task.mentions?.length?{mentions:task.mentions}:{}),context});
-      entry.runId=result.id;runs.set(result.id,entry);reply.access=result.access;reply.runtime=result.runtime;inflight--;
-      if(chat===conversation)status((result.quickChat?'Quick chat · scratch folder':'Running in project')+' · '+result.runtime+(result.mcp?' · canvas tools connected':' · canvas tools not connected')+(resume?' · resumed session':seed?' · new session seeded from transcript':''));
+      // agent-runtime parity: after a rewind, fork the provider session at the kept reply (the seed stays as the fallback).
+      const fork=!resume&&seedParam&&chat.forkFrom&&chat.forkFrom.agent===task.agent&&chat.forkFrom.key===entry.key&&(!entry.version||chat.forkFrom.toolsVersion===entry.version)?chat.forkFrom:null;
+      const result=await api.runAgent({agent:task.agent,model:task.model==='default'?'':task.model,access:task.access,effort:task.effort,instructions:task.instructions,prompt,chatId:chat.id,...(resume?{sessionId:resume}:{}),...(fork?{fork:{sessionId:fork.sessionId,at:fork.at}}:{}),...(seed&&seedParam?{seed}:{}),...(task.mentions?.length?{mentions:task.mentions}:{}),context});
+      entry.runId=result.id;runs.set(result.id,entry);reply.access=result.access;reply.runtime=result.runtime;inflight--;chat.forkFrom=null;
+      if(chat===conversation)status((result.quickChat?'Quick chat · scratch folder':'Running in project')+' · '+result.runtime+(result.mcp?' · canvas tools connected':' · canvas tools not connected')+(resume?' · resumed session':result.rewound?' · session rewound':seed?' · new session seeded from transcript':''));
       for(const event of orphans.filter(e=>e.id===result.id)){orphans.splice(orphans.indexOf(event),1);handleEvent(event);}
       if(!inflight)orphans.length=0;
       if(entry.cancelOnStart&&active.get(chat.id)===entry)api.cancelAgent(result.id).catch(e=>status(e.message));
@@ -410,12 +414,32 @@
     conversations.splice(conversations.indexOf(chat),0,branch);
     let restored=false;const saved=message.checkpoint&&checkpoints.get(message.checkpoint);
     if(saved&&saved.fileId===(window.fileLibrary?.currentId||'')&&window.design?.loadDocument){try{window.design.loadDocument(structuredClone(saved.doc));restored=true;}catch(e){status('Could not restore the canvas: '+e.message);}}
-    chat.messages=chat.messages.slice(0,i);chat.sessionId=null;
+    // agent-runtime parity: the next run forks the provider session at the last kept reply when it reported a fork point.
+    const kept=chat.messages.slice(0,i),keptReply=kept.findLast(m=>m.role==='assistant'&&!m.review);
+    chat.forkFrom=keptReply?.resumePoint?.sessionId&&keptReply.resumePoint.at?{...keptReply.resumePoint}:null;
+    chat.messages=kept;chat.sessionId=null;
     persist();renderHistory();
     status(restored?'Rewound the chat and canvas (undo restores the canvas)':'Rewound the chat; no canvas snapshot was available for that message');
     return {message,restored};
   };
   const resend=(message,text)=>{const original=taskOf.get(message);const displayPrompt=text??message.text;const suffix=original&&original.prompt.startsWith(original.displayPrompt)?original.prompt.slice(original.displayPrompt.length):'';return runTask({...currentDefaults(),id:crypto.randomUUID(),at:Date.now(),prompt:displayPrompt+suffix,displayPrompt,images:original?.images||[],mentions:original?.mentions||message.mentions||[],withCanvas:original?original.withCanvas:!!message.canvas},conversation);};
+  // agent-runtime parity: second opinion. The other provider reviews the latest reply (and uncommitted changes), read-only.
+  const secondOpinion=async index=>{
+    const chat=conversation;if(!chat)return;if(!api.reviewAgent)throw Error('Second opinions need the desktop agent runtime');if(isRunning(chat))throw Error('Wait for the current task to finish');
+    let i=Math.min(index??chat.messages.length-1,chat.messages.length-1);while(i>0&&(chat.messages[i]?.role!=='assistant'||chat.messages[i].review))i--;
+    const reply=chat.messages[i];if(!reply||reply.role!=='assistant'||reply.review)throw Error('Choose a reply to review');
+    const answer=(reply.parts||[]).filter(p=>p.kind==='text'&&p.text).map(p=>p.text).join('\n\n')||reply.text||'';if(!answer.trim()||reply.state==='error')throw Error('There is no answer to review yet');
+    const request=chat.messages.slice(0,i).findLast(m=>m.role==='user')?.text||'';
+    const author=reply.agent==='codex'?'codex':'claude',agent=author==='codex'?'claude':'codex',label=a=>a==='claude'?'Claude':'Codex';
+    const review={role:'assistant',text:'',parts:[],agent,at:Date.now(),state:'running',review:{of:i,author}};
+    chat.messages.push(review);persist();renderHistory();status('Asking '+label(agent)+' for a second opinion');
+    try{
+      const result=await api.reviewAgent({agent,author,request,answer,includeDiff:true});
+      review.agent=result.agent||agent;review.model=result.model||'';review.text=String(result.text||'');review.parts=[{kind:'text',text:review.text,at:review.at}];review.state='complete';review.review.diff=!!result.diff;
+      status('Second opinion from '+label(review.agent)+(result.diff?' on the answer and uncommitted changes':''));
+    }catch(e){review.text=e.message;review.state='error';status(e.message);}
+    review.end=Date.now();persist();renderHistory();
+  };
   const copyMessage=index=>{const message=conversation?.messages[index];if(!message)return;const text=message.text||(message.parts||[]).filter(p=>p.kind==='text').map(p=>p.text).join('\n\n');const fallback=()=>{const area=document.createElement('textarea');area.value=text;document.body.append(area);area.select();document.execCommand('copy');area.remove();};(navigator.clipboard?.writeText?navigator.clipboard.writeText(text):Promise.reject()).catch(fallback).then(()=>status('Copied'));};
   const answerQuestion=(messageIndex,partIndex,answers)=>{const part=conversation?.messages[messageIndex]?.parts?.[partIndex];if(part?.kind!=='question'||part.state!=='pending')return;const clean={};for(const [key,value] of Object.entries(answers||{}))clean[key]=Array.isArray(value)?value.join(', '):String(value);part.answers=clean;part.state='answered';const runId=part.runId||entryOf(conversation)?.runId;if(api.respondAgentQuestion)Promise.resolve().then(()=>api.respondAgentQuestion({runId,requestId:part.requestId,answers:clean})).catch(e=>status(e.message));else status('This agent runtime cannot receive answers');persist();renderHistory();};
   $('project-run').onclick=action(async()=>{const text=$('project-prompt').value.trim();if(!text)throw Error('Enter a task.');const chat=conversation||newChat();const task=composeTask(text);$('project-prompt').value='';setDraft('',chat);if(isRunning(chat)){enqueue(chat,task);return;}await runTask(task,chat);});
@@ -434,6 +458,7 @@
     listModels:async agent=>{if(!modelLists.has(agent))modelLists.set(agent,await api.listAgentModels({agent}));return modelLists.get(agent);},
     answerQuestion,steer:run(steer),editQueued,moveQueued,removeQueued,sendQueuedNow:run(sendQueuedNow),
     rewindTo:run(index=>{rewindCore(index);}),
+    secondOpinion:run(secondOpinion),
     retry:run(async index=>{const r=rewindCore(index);if(r)await resend(r.message);}),
     editMessage:run(async(index,text)=>{text=String(text||'').trim();if(!text)throw Error('Enter a message');const r=rewindCore(index);if(r)await resend(r.message,text);}),
     copyMessage,attachFiles:run(attachFiles),attachFigma:run(attachFigma),linkChat:run(linkChat),

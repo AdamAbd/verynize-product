@@ -41,7 +41,12 @@ export function IconButton({
   iconClassName,
   active,
   ...props
-}: ComponentProps<"button"> & { icon: IconType; label: string; iconClassName?: string; active?: boolean }) {
+}: ComponentProps<"button"> & {
+  icon: IconType;
+  label: string;
+  iconClassName?: string;
+  active?: boolean;
+}) {
   return (
     <button
       type="button"
@@ -81,7 +86,9 @@ export function Section({
         <h3 className="truncate text-xs text-foreground-3">{title}</h3>
         {tools ? <div className="flex items-center gap-2">{tools}</div> : null}
       </div>
-      {children ? <div className={cn("flex flex-col gap-2 px-3 pt-1 pb-2.75", bodyClassName)}>{children}</div> : null}
+      {children ? (
+        <div className={cn("flex flex-col gap-2 px-3 pt-1 pb-2.75", bodyClassName)}>{children}</div>
+      ) : null}
     </section>
   );
 }
@@ -120,14 +127,25 @@ export function OptionalSection({
           onClick={() => onOpenChange(!open)}
         />
       </div>
-      <div hidden={!open} className={cn(open ? "flex" : "hidden", "flex-col gap-2 px-3 pt-1 pb-2.75")}>
+      <div
+        hidden={!open}
+        className={cn(open ? "flex" : "hidden", "flex-col gap-2 px-3 pt-1 pb-2.75")}
+      >
         {children}
       </div>
     </section>
   );
 }
 
-export function Caption({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+export function Caption({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <div className={cn("flex min-w-0 flex-col gap-1", className)}>
       <span className="truncate text-xs text-muted-foreground">{label}</span>
@@ -152,7 +170,12 @@ export function IconAffix({ icon: Icon }: { icon: IconType }) {
 
 export function Affix({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span className={cn("flex w-3 shrink-0 select-none items-center justify-center text-muted-foreground", className)}>
+    <span
+      className={cn(
+        "flex w-3 shrink-0 select-none items-center justify-center text-muted-foreground",
+        className,
+      )}
+    >
       {children}
     </span>
   );
@@ -173,6 +196,8 @@ type FieldProps = {
   disabled?: boolean;
   /** Drag the prefix horizontally to scrub numeric values (committed once on release). */
   scrub?: boolean;
+  /** id of a <datalist> with suggestions. */
+  list?: string;
 };
 
 /** Commit on Enter/blur, Escape reverts, ArrowUp/Down ±step (Shift ×10). */
@@ -190,6 +215,7 @@ export function Field({
   inputClassName,
   disabled,
   scrub = numeric,
+  list,
 }: FieldProps) {
   const [draft, setDraftState] = useState<string | null>(null);
   const draftRef = useRef<string | null>(null);
@@ -238,7 +264,8 @@ export function Field({
       const dx = e.clientX - x0;
       if (Math.abs(dx) < 2 && !moved) return;
       moved = true;
-      const next = Math.round((start + Math.round(dx / 2) * step * (e.shiftKey ? 10 : 1)) * 1000) / 1000;
+      const next =
+        Math.round((start + Math.round(dx / 2) * step * (e.shiftKey ? 10 : 1)) * 1000) / 1000;
       setDraft(String(next));
     };
     const up = () => {
@@ -265,6 +292,7 @@ export function Field({
       <input
         ref={inputRef}
         name={name}
+        list={list}
         aria-label={label}
         title={label}
         value={draft ?? value}
@@ -273,12 +301,20 @@ export function Field({
         inputMode={numeric ? "decimal" : undefined}
         autoComplete="off"
         spellCheck={false}
-        className={cn("h-full w-full min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none", prefix ? "pl-1" : "", inputClassName)}
+        className={cn(
+          "h-full w-full min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none",
+          prefix ? "pl-1" : "",
+          inputClassName,
+        )}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={onKeyDown}
       />
-      {suffix ? <span className="flex shrink-0 select-none items-center text-muted-foreground">{suffix}</span> : null}
+      {suffix ? (
+        <span className="flex shrink-0 select-none items-center text-muted-foreground">
+          {suffix}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -309,7 +345,12 @@ export function NativeSelect({
   bare?: boolean;
 }) {
   return (
-    <div className={cn(bare ? "relative flex h-6 items-center" : cn(fieldBox, "relative pr-0"), className)}>
+    <div
+      className={cn(
+        bare ? "relative flex h-6 items-center" : cn(fieldBox, "relative pr-0"),
+        className,
+      )}
+    >
       {prefix}
       <select
         id={id}
@@ -325,14 +366,22 @@ export function NativeSelect({
         onChange={(event) => onChange(event.target.value)}
       >
         {options.map((o) => (
-          <option key={o.value} value={o.value} disabled={o.disabled} className="bg-popover text-foreground">
+          <option
+            key={o.value}
+            value={o.value}
+            disabled={o.disabled}
+            className="bg-popover text-foreground"
+          >
             {o.label}
           </option>
         ))}
       </select>
       <ChevronDown
         aria-hidden
-        className={cn("pointer-events-none absolute size-3 text-muted-foreground", bare ? "right-0" : "right-2")}
+        className={cn(
+          "pointer-events-none absolute size-3 text-muted-foreground",
+          bare ? "right-0" : "right-2",
+        )}
       />
     </div>
   );
@@ -396,5 +445,11 @@ export function Swatch({ color, className }: { color: string; className?: string
   useLayoutEffect(() => {
     if (ref.current) ref.current.style.background = color || "transparent";
   }, [color]);
-  return <span ref={ref} aria-hidden className={cn("block size-4 shrink-0 rounded-sm ring-1 ring-card", className)} />;
+  return (
+    <span
+      ref={ref}
+      aria-hidden
+      className={cn("block size-4 shrink-0 rounded-sm ring-1 ring-card", className)}
+    />
+  );
 }

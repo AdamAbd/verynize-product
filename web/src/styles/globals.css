@@ -250,6 +250,14 @@ html[data-ui-theme="light"] {
   --color-chat-codex: #7c7cf2; /* Codex provider mark (30) */
   --color-chat-chip-bg: color-mix(in srgb, var(--foreground) 8%, var(--card)); /* context chip fill #333 (51) */
   --color-chat-chip-border: color-mix(in srgb, var(--foreground) 18%, var(--card)); /* context chip edge #454545 (51) */
+  /* Changes panel diff colors: mixing with the foreground lightens them on dark and darkens them on light. */
+  --color-diff-add: color-mix(in srgb, #3fb950 78%, var(--foreground));
+  --color-diff-add-bg: color-mix(in srgb, #3fb950 13%, transparent);
+  --color-diff-remove: color-mix(in srgb, #f85149 78%, var(--foreground));
+  --color-diff-remove-bg: color-mix(in srgb, #f85149 13%, transparent);
+  --spacing-changes: 1040px; /* changes dialog max width */
+  --spacing-changes-height: 720px; /* changes dialog max height */
+  --spacing-changes-list: 272px; /* changed-file column */
   /* </chat-tokens> */
   /* <settings-tokens> */
   --spacing-settings-nav: 256px; /* settings navigation column */

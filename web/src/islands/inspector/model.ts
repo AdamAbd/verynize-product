@@ -33,9 +33,18 @@ export type Node = LayerNode & {
   shaderPreset: string;
   shaderSpeed: number;
   shaderIntensity: number;
-  textRuns: { start: number; end: number; bold: boolean; italic: boolean; color?: string; fontSize?: number }[];
+  textRuns: {
+    start: number;
+    end: number;
+    bold: boolean;
+    italic: boolean;
+    color?: string;
+    fontSize?: number;
+  }[];
   wMode?: SizingMode;
   hMode?: SizingMode;
+  /** Property → variable name (see vars.ts). */
+  bindings?: Record<string, string>;
 };
 export type SizingMode = "fixed" | "hug" | "fill";
 
@@ -65,7 +74,8 @@ export function descendants(doc: DesignDocument, id: string): Set<string> {
 
 export function sizingAllowed(node: Node, parent: Node | undefined, mode: SizingMode): boolean {
   if (mode === "fixed") return true;
-  if (mode === "hug") return node.type === "text" || (node.type === "frame" && node.layout !== "free");
+  if (mode === "hug")
+    return node.type === "text" || (node.type === "frame" && node.layout !== "free");
   return !!parent && parent.type === "frame" && parent.layout !== "free";
 }
 
@@ -75,19 +85,38 @@ export function sizingMode(node: Node, axis: "w" | "h", parent: Node | undefined
 }
 
 const NUMERIC = new Set([
-  "x", "y", "w", "h", "fontSize", "radius", "zIndex", "gap", "padding", "columns", "shaderSpeed",
-  "shaderIntensity", "rotation", "opacity", "strokeWidth", "lineHeight", "letterSpacing",
+  "x",
+  "y",
+  "w",
+  "h",
+  "fontSize",
+  "radius",
+  "zIndex",
+  "gap",
+  "padding",
+  "columns",
+  "shaderSpeed",
+  "shaderIntensity",
+  "rotation",
+  "opacity",
+  "strokeWidth",
+  "lineHeight",
+  "letterSpacing",
 ]);
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
 /** Validate a field value the way app.js does. Returns the value to store, or an error message. */
-export function normalize(key: string, raw: string | boolean): { value: unknown } | { error: string } {
+export function normalize(
+  key: string,
+  raw: string | boolean,
+): { value: unknown } | { error: string } {
   if (typeof raw === "boolean") return { value: raw };
   if (NUMERIC.has(key)) {
     let v = Number(raw.trim());
     if (raw.trim() === "" || !Number.isFinite(v)) return { error: "Enter a number." };
     if (key === "w" || key === "h") v = Math.max(10, v);
-    if (key === "radius" || key === "gap" || key === "padding" || key === "strokeWidth") v = Math.max(0, v);
+    if (key === "radius" || key === "gap" || key === "padding" || key === "strokeWidth")
+      v = Math.max(0, v);
     if (key === "opacity") v = clamp(v, 0, 100);
     if (key === "lineHeight") v = Math.max(0.1, v);
     if (key === "fontSize") v = clamp(v, 8, 200);
@@ -96,7 +125,11 @@ export function normalize(key: string, raw: string | boolean): { value: unknown 
     if (key === "columns") v = clamp(Math.round(v), 1, 12);
     return { value: v };
   }
-  if ((key === "gradient" || key === "mask") && raw && (/url\s*\(/i.test(raw) || !CSS.supports("background-image", raw)))
+  if (
+    (key === "gradient" || key === "mask") &&
+    raw &&
+    (/url\s*\(/i.test(raw) || !CSS.supports("background-image", raw))
+  )
     return { error: "Enter a CSS gradient without external URLs." };
   if (key === "shadow" && raw && (/url\s*\(/i.test(raw) || !CSS.supports("box-shadow", raw)))
     return { error: "Enter a CSS box shadow." };
@@ -110,7 +143,12 @@ const SINGLE = new Set(["name", "text", "parentId"]);
  * Write one field to the selection through `window.design.updateNodes` (validated, one undo step).
  * Returns an error message when the value is rejected.
  */
-export function setField(selection: string[], primary: Node, key: string, raw: string | boolean): string | null {
+export function setField(
+  selection: string[],
+  primary: Node,
+  key: string,
+  raw: string | boolean,
+): string | null {
   const result = normalize(key, raw);
   if ("error" in result) {
     notify(result.error);
@@ -125,8 +163,17 @@ export function setField(selection: string[], primary: Node, key: string, raw: s
       if (key === "text") patch.textRuns = [];
       if (key === "w" && node.wMode && node.wMode !== "fixed") patch.wMode = "fixed";
       if (key === "h" && node.hMode && node.hMode !== "fixed") patch.hMode = "fixed";
+      // Typing a value detaches the property from its variable.
+      if (node.bindings?.[key]) {
+        const { [key]: _detached, ...rest } = node.bindings;
+        patch.bindings = Object.keys(rest).length ? rest : undefined;
+      }
       patch[key] =
-        key === "parentId" ? value || null : key === "name" ? String(value).trim() || node.type : value;
+        key === "parentId"
+          ? value || null
+          : key === "name"
+            ? String(value).trim() || node.type
+            : value;
       return patch as Partial<LayerNode>;
     });
   } catch (error) {
@@ -146,20 +193,27 @@ export function patchNodes(ids: string[], patch: (node: Node) => Record<string, 
   }
 }
 
-export const HEX = /^#[0-9a-f]{6}$/i;
+export const HEX = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
 
-/** "#a58bdd" → "A58BDD"; non-hex values (e.g. "transparent") → "". */
-export const hexLabel = (color: string) => (HEX.test(color) ? color.slice(1).toUpperCase() : "");
+/** "#a58bdd" / "#a58bdd80" → "A58BDD" (alpha is shown separately); non-hex values (e.g. "transparent") → "". */
+export const hexLabel = (color: string) => (HEX.test(color) ? color.slice(1, 7).toUpperCase() : "");
 
-/** Parse a user-typed hex ("fff", "#A58BDD", "a58bdd") into "#rrggbb". */
-export function parseHex(raw: string): string | null {
+/**
+ * Parse a user-typed hex ("fff", "#A58BDD", "a58bdd80") into "#rrggbb[aa]". Six-digit input keeps the alpha of
+ * `current` (so retyping the hex of a 50% fill keeps it at 50%).
+ */
+export function parseHex(raw: string, current = ""): string | null {
   let v = raw.trim().replace(/^#/, "");
-  if (/^[0-9a-f]{3}$/i.test(v)) v = v.replace(/./g, (c) => c + c);
-  return /^[0-9a-f]{6}$/i.test(v) ? "#" + v.toLowerCase() : null;
+  if (/^[0-9a-f]{3,4}$/i.test(v)) v = v.replace(/./g, (c) => c + c);
+  if (/^[0-9a-f]{8}$/i.test(v)) return "#" + (v.endsWith("ff") ? v.slice(0, 6) : v).toLowerCase();
+  if (!/^[0-9a-f]{6}$/i.test(v)) return null;
+  const alpha = /^#[0-9a-f]{8}$/i.test(current) ? current.slice(7).toLowerCase() : "";
+  return "#" + v.toLowerCase() + alpha;
 }
 
 /** Number shown in a field: at most two decimals, no trailing zeros. */
-export const fmt = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? String(Math.round(v * 100) / 100) : "");
+export const fmt = (v: unknown) =>
+  typeof v === "number" && Number.isFinite(v) ? String(Math.round(v * 100) / 100) : "";
 
 export const WEIGHTS: [string, string][] = [
   ["100", "Thin"],

@@ -10,6 +10,8 @@
 //  * Structured questions (Claude AskUserQuestion, Codex item/tool/requestUserInput), steering of a
 //    running turn, "always allow" rules, nested read-only helper runs (ask_agent) and auto-titles
 //    are handled here too; see registerAgentRuntime for the IPC surface.
+//  * Rewind forks the provider session at an earlier turn (Claude resumeSessionAt + forkSession,
+//    Codex thread/fork); second opinions send the latest answer and diff to the other provider.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
@@ -228,6 +230,42 @@ function composePrompt(prompt, context, seed) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Rewind. Every finished turn reports `resumeAt` on its `done` event: the provider-specific id of
+// the turn's last kept point (Claude: uuid of the last main-chain transcript entry; Codex: the turn
+// id). Rewinding a chat to before user message N runs the next turn with
+// `fork: {sessionId, at: <resumeAt of the reply before N>}`: Claude resumes a forked copy of the
+// session cut at that entry (resume + resumeSessionAt + forkSession), Codex forks the thread
+// through that turn (thread/fork lastTurnId). If the fork point is unusable the run falls back to
+// the transcript `seed` sent with it, so a rewind never silently loses the earlier context.
+const FORK_ID = /^[a-zA-Z0-9._:-]{1,200}$/;
+function normalizeFork(fork) {
+  if (!fork || typeof fork !== 'object') return null;
+  const { sessionId, at } = fork;
+  return typeof sessionId === 'string' && FORK_ID.test(sessionId) && typeof at === 'string' && FORK_ID.test(at) ? { sessionId, at } : null;
+}
+const REWIND_FALLBACK = 'Could not rewind the earlier agent session; starting a new session seeded from the transcript.';
+
+// ---------------------------------------------------------------------------------------------
+// Second opinion: the latest answer (and the project's uncommitted diff) is sent to the other
+// provider through the read-only helper run (`ask`).
+const REVIEW_LIMITS = { request: 8000, answer: 30000, diff: 50000 };
+function clipMiddle(text, limit) {
+  const value = String(text || '');
+  return value.length > limit ? value.slice(0, Math.floor(limit * 0.6)) + `\n… (${value.length - limit} characters omitted) …\n` + value.slice(-Math.floor(limit * 0.4)) : value;
+}
+function buildReviewTask({ request = '', answer = '', diff = '', author = '' } = {}) {
+  const lines = [
+    `Give a second opinion on a turn another agent${author ? ` (${author})` : ''} just finished in Verynize. You are reviewing, not redoing the work: do not edit files, run commands or change the canvas.`,
+    'Check whether the answer actually does what the user asked, whether claims in it are correct, and whether the changes (when a diff is included) contain bugs, regressions, unsafe edits or missed requirements. You may read project files and inspect the open design with the read-only tools to verify.',
+    'Reply in this shape: a one-line verdict ("Looks good" or "Needs changes"), then at most five concrete findings ordered by severity, each naming the file, element or sentence it concerns. Say plainly when you could not verify something. Keep it short.',
+  ];
+  if (request.trim()) lines.push('<user-request>\n' + clipMiddle(request.trim(), REVIEW_LIMITS.request) + '\n</user-request>');
+  lines.push('<agent-answer>\n' + clipMiddle(answer.trim(), REVIEW_LIMITS.answer) + '\n</agent-answer>');
+  if (diff.trim()) lines.push('<uncommitted-changes>\n' + clipMiddle(diff.trim(), REVIEW_LIMITS.diff) + '\n</uncommitted-changes>');
+  return lines.join('\n\n');
+}
+
+// ---------------------------------------------------------------------------------------------
 // Structured questions. Claude: AskUserQuestion input {questions:[{question, header, options:[{label,
 // description}], multiSelect}]}; the answer goes back as updatedInput.answers keyed by question text.
 // Codex: item/tool/requestUserInput {questions:[{id, header, question, options}]} answered with
@@ -369,11 +407,13 @@ function cleanTitle(text) {
 }
 
 // Tools a read-only helper must never call.
-const HELPER_BLOCKED_DESIGN_TOOLS = [...MUTATING_DESIGN_TOOLS, 'finish_artboard', 'ask_agent'];
+// Shell tools that act on the project or preview (the read-only ones stay available).
+const HELPER_BLOCKED_SHELL_TOOLS = ['start_dev_server', 'stop_dev_server', 'configure_dev_server', 'preview_open', 'preview_click', 'preview_type', 'preview_scroll', 'capture_preview_to_canvas', 'run_terminal_command', 'execute_action'];
+const HELPER_BLOCKED_DESIGN_TOOLS = [...MUTATING_DESIGN_TOOLS, 'finish_artboard', 'ask_agent', ...HELPER_BLOCKED_SHELL_TOOLS];
 const HELPER_PERSONA = 'You are a read-only helper agent consulted by the designer agent inside Verynize (a local desktop design editor). Answer the task you are given precisely and concisely. You may read project files and inspect the open design with the read-only `verynize` MCP tools (get_design_context, get_element_code, take_screenshot and similar), but you must not edit files, run commands, or change the canvas. Reply with your findings only.';
 
 // Pure option builder for the Claude Agent SDK, kept separate for unit tests.
-function claudeQueryOptions({ cwd, access, model, effort, sessionId, persona, bridge, executable, additionalDirectories }) {
+function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, persona, bridge, executable, additionalDirectories }) {
   const mode = settings.claudePermissionMode(access);
   const options = {
     cwd,
@@ -385,11 +425,16 @@ function claudeQueryOptions({ cwd, access, model, effort, sessionId, persona, br
   if (mode === 'bypassPermissions') options.allowDangerouslySkipPermissions = true;
   if (model) options.model = model;
   if (effort) options.effort = effort;
-  if (sessionId) options.resume = sessionId;
+  if (fork?.sessionId && fork.at) {
+    // Rewind: continue a copy of the earlier session cut after its last kept chain entry.
+    options.resume = fork.sessionId;
+    options.resumeSessionAt = fork.at;
+    options.forkSession = true;
+  } else if (sessionId) options.resume = sessionId;
   if (executable) options.pathToClaudeCodeExecutable = executable;
   if (additionalDirectories?.length) options.additionalDirectories = additionalDirectories;
   if (bridge?.url) {
-    options.mcpServers = { [settings.MCP_SERVER_NAME]: settings.claudeMcpServer(bridge) };
+    options.mcpServers = { [settings.MCP_SERVER_NAME]: settings.claudeMcpServer(bridge, access) };
     options.allowedTools = [`mcp__${settings.MCP_SERVER_NAME}__*`];
   }
   return options;
@@ -534,9 +579,11 @@ class AgentRuntime {
       const context = normalizeContext(rawContext, this.attachmentRoot);
       // A seed replaces resume: the old session is not continued, its summary is prepended instead.
       const seed = typeof options.seed === 'string' && options.seed.trim() ? options.seed.slice(-SEED_LIMIT) : '';
-      const sessionId = seed ? '' : normalized.sessionId;
+      // A fork (rewind) replaces resume too; the seed then only serves as its fallback.
+      const fork = normalizeFork(options.fork);
+      const sessionId = seed || fork ? '' : normalized.sessionId;
       const run = { id: randomUUID(), chatId, agent: options.agent, cwd, projectKey: project?.root || 'unattached', stopped: false, done: false, sessionId: sessionId || null, cancel: () => {} };
-      const params = { ...normalized, sessionId, seed, run, cwd, persona, bridge, context, prompt: options.prompt, executable: found?.path || null, quickChat };
+      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt: options.prompt, executable: found?.path || null, quickChat };
       this.runs.set(run.id, run);
       let runtime;
       try {
@@ -547,7 +594,7 @@ class AgentRuntime {
         }
       } catch (error) { this.runs.delete(run.id); throw error; }
       run.runtime = runtime;
-      return { id: run.id, runId: run.id, chatId, runtime, cwd, quickChat, access: normalized.access, mcp: !!bridge, steerable: !!run.steer, seeded: !!seed };
+      return { id: run.id, runId: run.id, chatId, runtime, cwd, quickChat, access: normalized.access, mcp: !!bridge, steerable: !!run.steer, seeded: !!params.seed, rewound: !!run.rewound };
     } finally { this.pendingStarts--; }
   }
 
@@ -559,7 +606,7 @@ class AgentRuntime {
     if (this.codex) for (const [threadId, child] of this.codex.children) if (child.run === run) this.codex.children.delete(threadId);
     if (error && !run.stopped) this.emit(run, { type: 'error', text: String(error).slice(0, 4000) });
     this.runs.delete(run.id);
-    this.emit(run, { type: 'done', code: run.stopped ? 130 : code, stopped: run.stopped, ...(run.sessionId ? { sessionId: run.sessionId } : {}) });
+    this.emit(run, { type: 'done', code: run.stopped ? 130 : code, stopped: run.stopped, ...(run.sessionId ? { sessionId: run.sessionId } : {}), ...(run.sessionId && run.resumeAt ? { resumeAt: run.resumeAt } : {}) });
   }
 
   forward(run, event) {
@@ -659,6 +706,10 @@ class AgentRuntime {
       if (!params.executable) throw Error('Claude Code is not installed');
       return this.startClaudeCli(params);
     }
+    if (params.fork) {
+      if (await claudeForkPointExists(sdk, params.fork, params.cwd)) { run.rewound = true; params.seed = ''; }
+      else { params.fork = null; this.emit(run, { type: 'status', text: REWIND_FALLBACK }); }
+    }
     const abort = new AbortController();
     // Streaming input stays open for the whole run: interrupt() control requests and steering
     // messages (priority 'next', folded into the running turn) go through it.
@@ -687,7 +738,7 @@ class AgentRuntime {
     };
     let stderr = '';
     const options = {
-      ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: params.context?.images?.length ? [path.dirname(params.context.images[0])] : [] }),
+      ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, fork: params.fork, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: params.context?.images?.length ? [path.dirname(params.context.images[0])] : [] }),
       abortController: abort,
       ...(params.bridge?.url ? { hooks: designHooks(createDesignTurnGuard()) } : {}),
       env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `verynize/${VERSION}`, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' }),
@@ -706,6 +757,8 @@ class AgentRuntime {
       try {
         for await (const message of q) {
           if (message?.type === 'stream_event' || message?.type === 'assistant' || message?.type === 'user') { turnOpen = true; clearTimeout(run.settleTimer); }
+          // Last main-chain transcript entry: the fork point a later rewind to after this turn uses.
+          if ((message?.type === 'assistant' || message?.type === 'user') && !message.parent_tool_use_id && typeof message.uuid === 'string' && FORK_ID.test(message.uuid)) run.resumeAt = message.uuid;
           for (const event of map(message)) {
             if (event.type === 'turn-complete') {
               // No follow-up was sent: the run is over. Otherwise wait for idle / a new turn.
@@ -798,7 +851,11 @@ class AgentRuntime {
       const run = threadId && server.threads.get(threadId);
       if (!run || run.done) return;
       for (const event of run.map(message)) {
-        if (event.type === 'turn-complete') { server.threads.delete(threadId); this.finish(run, { code: event.ok || event.interrupted ? 0 : 1 }); continue; }
+        if (event.type === 'turn-complete') {
+          const turnId = message.params?.turn?.id || run.turnId;
+          if (typeof turnId === 'string' && FORK_ID.test(turnId)) run.resumeAt = turnId;
+          server.threads.delete(threadId); this.finish(run, { code: event.ok || event.interrupted ? 0 : 1 }); continue;
+        }
         if (event.type === 'subagent-threads') { link(run, event); continue; }
         if (event.type === 'session') continue; // emitted when the thread is opened
         this.forward(run, event);
@@ -838,7 +895,13 @@ class AgentRuntime {
     const server = await this.codexServer(params.executable, params.bridge);
     const threadParams = codexThreadParams(params);
     let thread;
-    if (params.sessionId) {
+    if (params.fork) {
+      try { thread = (await server.rpc.request('thread/fork', { threadId: params.fork.sessionId, lastTurnId: params.fork.at, ...threadParams, excludeTurns: true })).thread; }
+      catch {}
+      if (thread?.id) { run.rewound = true; params.seed = ''; }
+      else { thread = null; this.emit(run, { type: 'status', text: REWIND_FALLBACK }); }
+    }
+    if (!thread && params.sessionId) {
       try { thread = (await server.rpc.request('thread/resume', { threadId: params.sessionId, ...threadParams })).thread; }
       catch { this.emit(run, { type: 'status', text: 'Could not resume the previous Codex thread; starting a new one.' }); }
     }
@@ -906,6 +969,42 @@ class AgentRuntime {
     return { text: result.text || '(The helper agent returned no answer.)', agent, model: result.model || model || '' };
   }
 
+  /**
+   * Second opinion on the latest turn: `answer` (and, with includeDiff, the project's uncommitted
+   * git diff) goes to `agent` (normally the other provider) as a read-only helper run. Falls back
+   * to the other installed provider when the requested one is missing. Resolves
+   * {text, agent, model, requested, diff}.
+   */
+  async review({ agent, author, request, answer, includeDiff = true } = {}) {
+    if (!['claude', 'codex'].includes(agent)) throw Error('agent must be "claude" or "codex"');
+    if (typeof answer !== 'string' || !answer.trim()) throw Error('There is no answer to review yet');
+    const installed = (await this.discover()).filter(a => a.available).map(a => a.id);
+    const chosen = installed.includes(agent) ? agent : installed.find(id => id === 'claude' || id === 'codex');
+    if (!chosen) throw Error('Install Claude Code or Codex to get a second opinion');
+    const root = this.getProject()?.root || null;
+    const diff = includeDiff !== false && root ? await this.gitDiff(root) : '';
+    const task = buildReviewTask({ request: typeof request === 'string' ? request : '', answer, diff, author: ['claude', 'codex'].includes(author) ? (author === 'claude' ? 'Claude' : 'Codex') : '' });
+    const result = await this.ask({ agent: chosen, task, ...(root ? { cwd: root } : {}) });
+    return { ...result, requested: agent, diff: !!diff };
+  }
+
+  /** `git status --short` + `git diff HEAD` of a project, bounded; '' when it is not a repository. */
+  gitDiff(root) {
+    const git = args => new Promise(resolve => {
+      let out = '', child;
+      try { child = this.spawnProcess('git', ['-C', root, ...args], { env: agents.childEnv({ GIT_OPTIONAL_LOCKS: '0' }), stdio: ['ignore', 'pipe', 'ignore'] }); } catch { resolve(''); return; }
+      const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve(''); }, 10000);
+      timer.unref?.();
+      child.stdout?.on('data', d => { if (out.length < 400000) out += d; });
+      child.on('error', () => { clearTimeout(timer); resolve(''); });
+      child.on('close', code => { clearTimeout(timer); resolve(code === 0 ? out : ''); });
+    });
+    return Promise.all([git(['status', '--short']), git(['diff', 'HEAD', '--no-color', '--no-ext-diff'])]).then(([status, diff]) => {
+      if (!status.trim() && !diff.trim()) return '';
+      return (status.trim() ? 'git status --short:\n' + status.replace(/^\n+|\s+$/g, '') + '\n\n' : '') + (diff.trim() ? diff.trim() : '(no tracked changes)');
+    });
+  }
+
   /** Short chat title for the first message. Never throws; falls back to a heuristic title. */
   async title({ agent, text } = {}) {
     const fallback = { title: heuristicTitle(text), source: 'heuristic' };
@@ -950,7 +1049,7 @@ class AgentRuntime {
       options.tools = ['Read', 'Glob', 'Grep'];
       options.disallowedTools = ['Write', 'Edit', 'NotebookEdit', 'Bash', 'Agent', 'Task', 'AskUserQuestion', ...HELPER_BLOCKED_DESIGN_TOOLS.map(name => `mcp__${settings.MCP_SERVER_NAME}__${name}`)];
       options.allowedTools = ['Read', 'Glob', 'Grep'];
-      if (bridge?.url) { options.mcpServers = { [settings.MCP_SERVER_NAME]: settings.claudeMcpServer(bridge) }; options.allowedTools.push(`mcp__${settings.MCP_SERVER_NAME}__*`); }
+      if (bridge?.url) { options.mcpServers = { [settings.MCP_SERVER_NAME]: settings.claudeMcpServer(bridge, 'readonly') }; options.allowedTools.push(`mcp__${settings.MCP_SERVER_NAME}__*`); }
     } else {
       options.systemPrompt = system;
       options.tools = [];
@@ -1056,6 +1155,7 @@ function registerAgentRuntime(handle, win, { userData, getProject }) {
   handle('removeAllowRule', options => runtime.removeAllowRule(options));
   handle('agentToolsVersion', () => agentToolsVersion());
   handle('agentTitle', options => runtime.title(options));
+  handle('reviewAgent', options => runtime.review(options));
   handle('listAgentModels', options => runtime.models(options));
   handle('saveAgentImage', options => runtime.saveImage(options));
   handle('designPreferencesList', async () => { try { return await (await preferenceStore()).list(); } catch { return []; } });
@@ -1072,6 +1172,15 @@ function validPreference(text) {
 function validPreferenceId(id) {
   if (typeof id !== 'string' || !id || id.length > 200) throw Error('Invalid preference');
   return id;
+}
+
+/** Whether `fork.at` is an entry of the saved Claude session (read from its local transcript). */
+async function claudeForkPointExists(sdk, fork, cwd) {
+  if (typeof sdk?.getSessionMessages !== 'function') return true; // the CLI validates the fork itself
+  try {
+    const messages = await sdk.getSessionMessages(fork.sessionId, { dir: cwd, includeSystemMessages: true });
+    return Array.isArray(messages) && messages.some(m => m?.uuid === fork.at);
+  } catch { return false; }
 }
 
 function codexInput(text, images = []) {
@@ -1092,4 +1201,5 @@ async function claudeContent(text, images = []) {
 module.exports = {
   AgentRuntime, registerAgentRuntime, buildPersona, createDesignTurnGuard, designHooks, toolOutcome, STOP_REASON, buildTurnContext, normalizeContext, composePrompt, buildSeedBlock, claudeQueryOptions, codexThreadParams, JsonRpcChild, defaultBridge,
   claudeQuestions, claudeAnswerInput, codexQuestions, codexAnswers, normalizeAnswers, allowRuleFor, ruleMatches, AllowRules, heuristicTitle, cleanTitle, agentToolsVersion, preferenceStore, MAX_RUNS,
+  normalizeFork, buildReviewTask,
 };

@@ -42,6 +42,7 @@ export function useDocSummary(): DocSummary {
 export type TreeNode = Pick<LayerNode, "id" | "name" | "type" | "parentId" | "hidden" | "locked"> & {
   layout?: string;
   direction?: string;
+  ellipse?: boolean;
 };
 
 export function useTreeNodes(): TreeNode[] {
@@ -55,6 +56,7 @@ export function useTreeNodes(): TreeNode[] {
       locked: n.locked || undefined,
       layout: typeof n.layout === "string" ? n.layout : undefined,
       direction: typeof n.direction === "string" ? n.direction : undefined,
+      ellipse: n.ellipse === true || undefined,
     })),
   );
 }

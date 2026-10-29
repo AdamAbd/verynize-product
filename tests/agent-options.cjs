@@ -32,7 +32,7 @@ test('fallback CLI argv carries model, effort, permissions, resume and MCP witho
   assert.doesNotMatch(codex.join(' '), /tok-secret/, 'Codex token travels via env, not argv');
   const claude = argumentsFor('claude', { bridge });
   const config = JSON.parse(claude[claude.indexOf('--mcp-config') + 1]);
-  assert.deepEqual(config.mcpServers['verynize'], { type: 'http', url: bridge.url, headers: { Authorization: 'Bearer tok-secret' } });
+  assert.deepEqual(config.mcpServers['verynize'], { type: 'http', url: bridge.url, headers: { Authorization: 'Bearer tok-secret', 'x-verynize-access': 'edit' } }, 'the chat access level scopes the bridge shell tools');
   assert.deepEqual(settings.codexMcpArgs({ url: 'https://evil.example/mcp', token: 'x' }), [], 'only loopback bridges are wired');
   assert.throws(() => argumentsFor('codex', { access: 'danger-full-access' }));
   assert.throws(() => argumentsFor('codex', { model: '--inject arg' }));

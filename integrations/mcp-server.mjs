@@ -34,7 +34,7 @@ if (!bridge && !storeBackend) { console.error('Verynize desktop app is not runni
 const mode = bridge
   ? 'Connected to the running Verynize desktop app: edits to the open document are live and undoable.'
   : `Headless mode: editing documents stored in ${store.root}. Edits are written to disk; an open editor picks them up when it reloads the file.`;
-const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions: `${INSTRUCTIONS}\n\n${mode}${bridge ? '' : ' ask_agent is unavailable here (it needs the desktop app).'} Tools version ${TOOLS_VERSION}.` });
+const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions: `${INSTRUCTIONS}\n\n${mode}${bridge ? '' : ' ask_agent and the running-app, terminal and execute_action tools are unavailable here (they need the desktop app).'} Tools version ${TOOLS_VERSION}.` });
 
 const forward = async (name, args) => {
   if (bridge) {

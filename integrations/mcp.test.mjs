@@ -7,10 +7,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { DesignStore } from './design-store.mjs';
 import { TOOLS_VERSION, INSTRUCTIONS, TOOL_NAMES, createDesignServer, createStoreBackend, runTool, sessionFor } from './design-tools.mjs';
+import { SHELL_TOOL_NAMES } from './shell-tools.mjs';
 import { createPreferenceStore } from './preferences.mjs';
 import { connectBridge, readBridgeFile, startHttpServer, writeBridgeFile } from './mcp-http.mjs';
 
-const EXPECTED_TOOLS = ['get_design_context', 'get_artboards', 'get_element_tree', 'get_element_code', 'find_elements', 'take_screenshot', 'create_artboard', 'update_elements', 'duplicate_elements', 'delete_elements', 'rename_elements', 'finish_artboard', 'get_design_guidelines', 'get_skills', 'get_icons', 'search_images', 'apply_style_tokens', 'get_design_tokens', 'create_design_tokens', 'update_design_tokens', 'delete_design_tokens', 'list_documents', 'open_document', 'create_document', 'create_page', 'rename_page', 'read_document', 'apply_operations', 'save_design_preference', 'list_design_preferences', 'update_design_preference', 'delete_design_preference', 'ask_agent', 'export_document'];
+// Bridge-only shell tools (integrations/shell-tools.mjs): listed everywhere, usable only through the desktop app.
+const SHELL_TOOLS = ['get_dev_server', 'start_dev_server', 'stop_dev_server', 'configure_dev_server', 'preview_open', 'preview_snapshot', 'preview_screenshot', 'preview_click', 'preview_type', 'preview_scroll', 'preview_console', 'capture_preview_to_canvas', 'run_terminal_command', 'read_terminal', 'execute_action'];
+const EXPECTED_TOOLS = ['get_design_context', 'get_artboards', 'get_element_tree', 'get_element_code', 'find_elements', 'take_screenshot', 'create_artboard', 'update_elements', 'duplicate_elements', 'delete_elements', 'rename_elements', 'finish_artboard', 'get_design_guidelines', 'get_skills', 'get_icons', 'search_images', 'apply_style_tokens', 'get_design_tokens', 'create_design_tokens', 'update_design_tokens', 'delete_design_tokens', 'list_documents', 'open_document', 'create_document', 'create_page', 'rename_page', 'read_document', 'apply_operations', 'save_design_preference', 'list_design_preferences', 'update_design_preference', 'delete_design_preference', 'ask_agent', 'export_document', ...SHELL_TOOLS];
 const SERVER = path.resolve('integrations/mcp-server.mjs');
 
 async function tempDir(t, prefix) { const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix)); t.after(() => fs.rm(dir, { recursive: true, force: true })); return dir; }
@@ -294,4 +297,40 @@ test('TOOLS_VERSION, instructions, design preferences, ask_agent and per-side ap
   const rev = JSON.parse(body(await run('read_document', { name: 'doc' }))).revision;
   const bad = await run('apply_operations', { name: 'doc', revision: rev, operations: [{ type: 'update_node', pageId, nodeId: 'sec', properties: { paddingTop: -4, hMode: 'auto', cornerRadii: [1, 2] } }] });
   assert.equal(bad.isError, true); assert.match(body(bad), /paddingTop/); assert.match(body(bad), /hMode/); assert.match(body(bad), /cornerRadii/);
+});
+
+test('shell tools: stdio file mode answers "needs the desktop app"; a bridge shell receives the request access level', async t => {
+  assert.deepEqual(SHELL_TOOL_NAMES, SHELL_TOOLS);
+  assert.match(INSTRUCTIONS, /Running app and editor actions \(desktop app only\)/);
+  const root = await tempDir(t, 'verynize-shell-');
+  const client = await stdioClient(t, ['--root', root]);
+  const samples = { get_dev_server: {}, start_dev_server: {}, stop_dev_server: {}, configure_dev_server: { command: ['npm', 'run', 'dev'] }, preview_open: { url: 'http://localhost:3000' }, preview_snapshot: {}, preview_screenshot: {}, preview_click: { selector: 'button' }, preview_type: { text: 'hi', selector: 'input' }, preview_scroll: { deltaY: 200 }, preview_console: {}, capture_preview_to_canvas: {}, run_terminal_command: { argv: ['ls'] }, read_terminal: {}, execute_action: {} };
+  for (const name of SHELL_TOOLS) {
+    const result = await call(client, name, samples[name]);
+    assert.equal(result.isError, true, name);
+    assert.match(result.content[0].text, new RegExp(`^${name} needs the Verynize desktop app`), name);
+  }
+  // Schema checks still run first: non-localhost URLs and shell strings are refused.
+  assert.match((await call(client, 'preview_open', { url: 'https://example.com' })).content[0].text, /localhost/);
+  assert.equal((await call(client, 'run_terminal_command', { argv: 'rm -rf /' })).isError, true);
+
+  // A bridge backend with `shell` gets each call with the per-request access header.
+  const store = await DesignStore.open(root);
+  const seen = [];
+  const backend = { ...createStoreBackend(store), shell: { call: async (op, args, context) => { seen.push({ op, args, access: context.access }); return { op }; } } };
+  const server = await startHttpServer({ makeServer: ({ headers }) => createDesignServer({ backend, context: { access: headers['x-verynize-access'] || null } }) });
+  t.after(() => server.close());
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const http = new Client({ name: 'shell-test', version: '1' });
+  await http.connect(new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: { Authorization: `Bearer ${server.token}`, 'x-verynize-access': 'readonly' } } }));
+  t.after(() => http.close());
+  assert.deepEqual(json(await http.callTool({ name: 'read_terminal', arguments: { id: 'dev-server', since: 3 } })), { op: 'terminalRead' });
+  json(await http.callTool({ name: 'read_terminal', arguments: { id: 'job-1', stop: true } }));
+  json(await http.callTool({ name: 'run_terminal_command', arguments: { argv: ['npm', 'test'], background: true } }));
+  assert.deepEqual(seen, [
+    { op: 'terminalRead', args: { id: 'dev-server', since: 3, limit: undefined }, access: 'readonly' },
+    { op: 'terminalStop', args: { id: 'job-1' }, access: 'readonly' },
+    { op: 'terminalRun', args: { argv: ['npm', 'test'], background: true }, access: 'readonly' },
+  ]);
 });

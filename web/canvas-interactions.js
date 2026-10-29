@@ -7,9 +7,9 @@
   const MIN_ZOOM = ZOOM_STOPS[0], MAX_ZOOM = ZOOM_STOPS.at(-1);
   const SAFE = {top: 48, right: 40, bottom: 96, left: 40};
   const BOARD = {x: 0, y: 0, w: 1000, h: 700};
-  const DRAW_TOOLS = new Set(['frame', 'rectangle', 'text', 'shader']);
-  const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', frame: 'add-frame', rectangle: 'rectangle', text: 'text', shader: 'add-shader'};
-  const STYLE_KEYS = ['color', 'token', 'gradient', 'radius', 'strokeWidth', 'strokeColor', 'shadow', 'opacity', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'mask', 'animated', 'clipContent'];
+  const DRAW_TOOLS = new Set(['frame', 'rectangle', 'ellipse', 'text', 'shader']);
+  const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', eyedropper: 'eyedropper-tool', frame: 'add-frame', rectangle: 'rectangle', ellipse: 'add-ellipse', text: 'text', shader: 'add-shader'};
+  const STYLE_KEYS = ['color', 'token', 'gradient', 'radius', 'ellipse', 'strokeWidth', 'strokeColor', 'shadow', 'opacity', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'mask', 'animated', 'clipContent'];
   const CLIP_MARKER = 'verynize/nodes';
   const FRAME_PRESETS = [
     ['Smartphone', [['iPhone 17', 402, 874], ['iPhone 18 Pro', 402, 874], ['iPhone Air', 420, 912], ['iPhone 18 Pro Max', 440, 956]]],
@@ -140,10 +140,69 @@
     // ---------- Tools ----------
     function setTool(next) {
       if (next === 'image') { setTool('move'); $('#image')?.click(); return; }
+      const previous = tool;
       tool = TOOL_BUTTONS[next] ? next : 'move';
       workspace.dataset.tool = tool;
       for (const [name, id] of Object.entries(TOOL_BUTTONS)) document.getElementById(id)?.classList.toggle('tool-active', name === tool);
       const presets = $('#frame-presets'); if (presets) presets.hidden = tool !== 'frame';
+      if (tool === 'eyedropper' && previous !== 'eyedropper') openEyedropper();
+    }
+    // Legacy command buttons for the tools added here; the chrome island takes their ids over (toolbar / app menu).
+    for (const [id, label, run] of [['eyedropper-tool', 'Eyedropper', () => setTool(tool === 'eyedropper' ? 'move' : 'eyedropper')], ['add-ellipse', 'Ellipse', () => insertEllipse()]]) {
+      if (document.getElementById(id)) continue;
+      const b = document.createElement('button'); b.type = 'button'; b.id = id; b.hidden = true; b.textContent = label; b.setAttribute('aria-label', label); b.onclick = run;
+      document.body.append(b); // not in the legacy toolbar: wonder-shell.js rebuilds that one
+    }
+    function insertEllipse(extra = {}) { ed.add('rectangle', {name: 'Ellipse', ellipse: true, w: 200, h: 200, radius: 0, ...extra}); }
+
+    // ---------- Eyedropper (I): pick a screen color and apply it to the selection's fill (text: ink) ----------
+    const hexOf = value => {
+      const m = String(value).match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:[\s,/]+([\d.]+%?))?\s*\)$/i);
+      if (m) return m[4] !== undefined && parseFloat(m[4]) === 0 ? null : '#' + [m[1], m[2], m[3]].map(v => Number(v).toString(16).padStart(2, '0')).join('');
+      return /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : null;
+    };
+    function applyPickedColor(hex) {
+      const list = selectedNodes().filter(n => !n.locked);
+      writeSystemClipboard(hex);
+      if (!list.length) { footer('Picked ' + hex + ' (copied)'); return false; }
+      ed.checkpoint();
+      for (const n of list) { n.color = hex; n.token = ''; if (n.type !== 'text') n.gradient = ''; }
+      ed.render(); footer('Applied ' + hex);
+      return true;
+    }
+    let eyedropperRun = 0;
+    async function openEyedropper() {
+      const run = ++eyedropperRun;
+      if (typeof window.EyeDropper !== 'function') { footer('Click the canvas to pick a color'); return; }
+      try {
+        const result = await new window.EyeDropper().open();
+        if (run !== eyedropperRun || tool !== 'eyedropper') return;
+        const hex = hexOf(result?.sRGBHex);
+        if (hex) applyPickedColor(hex);
+        setTool('move');
+      } catch (error) {
+        if (run !== eyedropperRun) return;
+        // Cancelled by the user (Escape): leave the tool. Otherwise (e.g. no user activation) pick by clicking a layer.
+        if (error?.name === 'AbortError') setTool('move'); else footer('Click the canvas to pick a color');
+      }
+    }
+    // Fallback picker: the painted color of the layer under the pointer (image pixels are sampled).
+    function colorAt(clientX, clientY) {
+      for (const el of document.elementsFromPoint(clientX, clientY)) {
+        if (!canvas.contains(el) || el === canvas) continue;
+        if (el.tagName === 'IMG' && el.complete && el.naturalWidth) {
+          try {
+            const r = el.getBoundingClientRect(), c = document.createElement('canvas'); c.width = c.height = 1;
+            const ctx = c.getContext('2d'); ctx.drawImage(el, (clientX - r.left) / r.width * el.naturalWidth, (clientY - r.top) / r.height * el.naturalHeight, 1, 1, 0, 0, 1, 1);
+            const [red, green, blue, alpha] = ctx.getImageData(0, 0, 1, 1).data; if (alpha) return hexOf(`rgb(${red}, ${green}, ${blue})`);
+          } catch {}
+          continue;
+        }
+        const layer = el.closest('.layer'); if (!layer) continue;
+        const style = getComputedStyle(el), own = el === layer ? layer.dataset.designType === 'text' ? hexOf(style.color) : hexOf(style.backgroundColor) : el.tagName === 'SPAN' ? hexOf(style.color) : null;
+        if (own) return own;
+      }
+      return null;
     }
 
     // ---------- Selection helpers ----------
@@ -189,6 +248,7 @@
       if (e.target.closest('.frame-label')) return;
       if (space || tool === 'hand' || e.button === 1) { startPan(e); return; }
       if (e.button !== 0) return;
+      if (tool === 'eyedropper') { e.preventDefault(); const hex = colorAt(e.clientX, e.clientY); if (hex) { eyedropperRun++; applyPickedColor(hex); setTool('move'); } return; }
       if (DRAW_TOOLS.has(tool)) { startDraw(e); return; }
       const handle = e.target.closest('#canvas .handle');
       if (handle) { startResize(e, handle.closest('.layer').dataset.id, handle.dataset.corner); return; }
@@ -326,7 +386,7 @@
         g.commit();
         const dx = (ev.clientX - start.x) / cam.zoom, dy = (ev.clientY - start.y) / cam.zoom, angle = total * Math.PI / 180;
         const localX = dx * Math.cos(angle) + dy * Math.sin(angle), localY = -dx * Math.sin(angle) + dy * Math.cos(angle);
-        const sx = corner.includes('e') ? 1 : -1, sy = corner.includes('s') ? 1 : -1, centered = ev.altKey ? 2 : 1;
+        const sx = (corner.includes('e') ? 1 : -1) * (n.flipX ? -1 : 1), sy = (corner.includes('s') ? 1 : -1) * (n.flipY ? -1 : 1), centered = ev.altKey ? 2 : 1; // handles flip with the layer
         let w = Math.max(10, s.w + sx * localX * centered), h = Math.max(10, s.h + sy * localY * centered);
         if (ev.shiftKey || scaling) { const fx = w / s.w, fy = h / s.h, f = Math.abs(fx - 1) > Math.abs(fy - 1) ? fx : fy; w = Math.max(10, s.w * f); h = Math.max(10, s.h * f); }
         const dw = w - s.w, dh = h - s.h, a = (Number(n.rotation) || 0) * Math.PI / 180, parent = find(n.parentId);
@@ -386,7 +446,7 @@
         marqueeBox.hidden = true;
         let r = rectFor(last, square);
         if (r.w * cam.zoom < 3 && r.h * cam.zoom < 3) {
-          const size = {frame: [400, 300], rectangle: [200, 150], text: [240, 60], shader: [480, 300]}[kind];
+          const size = {frame: [400, 300], rectangle: [200, 150], ellipse: [200, 200], text: [240, 60], shader: [480, 300]}[kind];
           r = {x: p0.x, y: p0.y, w: size[0], h: size[1]};
         }
         r.w = Math.max(10, r.w); r.h = Math.max(10, r.h);
@@ -396,7 +456,7 @@
         if (kind === 'shader') Object.assign(extra, {name: 'Aurora shader', color: '#a58bdd'});
         if (kind === 'text') extra.fontSize = 24;
         setTool('move');
-        ed.add(kind, extra);
+        if (kind === 'ellipse') insertEllipse(extra); else ed.add(kind, extra);
         if (kind === 'text') editText();
       });
     }
@@ -539,6 +599,107 @@
       for (const n of list) { if (value) n[key] = true; else delete n[key]; }
       ed.render();
     }
+    // Normalize an angle to (-180, 180].
+    const angle = a => { const r = ((Math.round(a * 100) / 100 + 180) % 360 + 360) % 360 - 180; return r === -180 ? 180 : r || 0; };
+    // Flip (⇧H / ⇧V): mirror each layer in place (flipX/flipY = negative scale). Mirroring a rotated layer on screen
+    // negates its rotation. Several free-positioned siblings flip as a group: positions mirror across their bounds.
+    function flip(axis) {
+      const list = topSelected().filter(n => !n.locked); if (!list.length) return false;
+      ed.checkpoint();
+      const key = axis === 'x' ? 'flipX' : 'flipY', size = axis === 'x' ? 'w' : 'h';
+      const parentId = list[0].parentId || null, parent = find(parentId);
+      if (list.length > 1 && !isFlow(parent) && list.every(n => (n.parentId || null) === parentId)) {
+        const lo = Math.min(...list.map(n => n[axis])), hi = Math.max(...list.map(n => n[axis] + n[size]));
+        for (const n of list) n[axis] = Math.round((lo + hi - n[axis] - n[size]) * 100) / 100;
+      }
+      for (const n of list) { if (n[key]) delete n[key]; else n[key] = true; if (Number(n.rotation)) n.rotation = angle(-n.rotation); }
+      ed.render();
+      return true;
+    }
+    function rotate90(direction = 1) {
+      const list = topSelected().filter(n => !n.locked); if (!list.length) return false;
+      ed.checkpoint();
+      for (const n of list) n.rotation = angle((Number(n.rotation) || 0) + 90 * direction);
+      ed.render();
+      return true;
+    }
+
+    // ---------- Re-parent / reorder (layers panel drag & drop) ----------
+    // World position of a frame's content origin (inside its border). Ancestor rotation is ignored.
+    function contentOrigin(id) {
+      const n = id ? find(id) : null; if (!n) return {x: 0, y: 0};
+      const tl = layerOrigin(n), el = elementOf(n.id);
+      return {x: tl.x + (el ? el.clientLeft : Number(n.strokeWidth) || 0), y: tl.y + (el ? el.clientTop : Number(n.strokeWidth) || 0)};
+    }
+    function layerOrigin(n) {
+      const o = contentOrigin(n.parentId), el = elementOf(n.id);
+      if (isFlow(find(n.parentId)) && n.position !== 'absolute' && el && el.offsetParent) return {x: o.x + el.offsetLeft, y: o.y + el.offsetTop};
+      return {x: o.x + n.x, y: o.y + n.y};
+    }
+    /**
+     * Move layers next to (`above` = in front of, `below` = behind) or `inside` (frontmost child of) a target layer,
+     * as in the layers panel where the top row is frontmost. Keeps world positions when the parent changes, keeps the
+     * moved layers' relative order, skips locked layers and refuses drops into a locked or moved frame. One undo step.
+     * Returns the moved ids, or null when nothing could move.
+     */
+    function moveNodes(ids, targetId, position) {
+      const all = ed.nodes(), target = targetId ? find(targetId) : null;
+      if (!['above', 'below', 'inside'].includes(position) || (targetId && !target)) return null;
+      const wanted = new Set(ids);
+      let roots = all.filter(n => wanted.has(n.id) && !n.locked);
+      roots = roots.filter(n => !roots.some(o => o !== n && ed.descendants(o.id).has(n.id)));
+      if (!roots.length) return null;
+      const parentId = position === 'inside' ? (target ? target.id : null) : (target?.parentId || null), parent = find(parentId);
+      if (position === 'inside' && target && target.type !== 'frame') return null;
+      if (parent && (parent.locked || roots.some(n => ed.descendants(n.id).has(parent.id)))) return null;
+      if (target && position !== 'inside' && roots.includes(target)) {
+        // Dropping next to a dragged layer: anchor on the nearest sibling that is not being moved.
+        const siblings = all.filter(n => (n.parentId || null) === parentId), i = siblings.indexOf(target);
+        const step = position === 'above' ? 1 : -1;
+        let j = i; while (siblings[j] && roots.includes(siblings[j])) j += step;
+        if (siblings[j]) return moveNodes(ids, siblings[j].id, position === 'above' ? 'below' : 'above');
+        // Every sibling on that side moves: drop at the very front / back of the parent.
+        return moveRoots(roots, parentId, position === 'above' ? 'front' : 'back');
+      }
+      return moveRoots(roots, parentId, position === 'inside' ? 'front' : {target, after: position === 'above'});
+    }
+    function moveRoots(roots, parentId, where) {
+      const before = ed.snapshot(), all = ed.nodes(), parent = find(parentId), origin = contentOrigin(parentId);
+      const plan = roots.map(n => {
+        const world = layerOrigin(n), next = {x: Math.round((world.x - origin.x) * 100) / 100, y: Math.round((world.y - origin.y) * 100) / 100};
+        return {n, same: (n.parentId || null) === (parentId || null), ...next};
+      });
+      const order = all.filter(n => !roots.includes(n));
+      let index;
+      if (where === 'front') index = order.length;
+      else if (where === 'back') { const first = order.find(n => (n.parentId || null) === (parentId || null)); index = first ? order.indexOf(first) : order.length; }
+      else index = order.indexOf(where.target) + (where.after ? 1 : 0);
+      order.splice(index, 0, ...roots);
+      const candidate = structuredClone(ed.design), page = candidate.pages.find(p => p.id === ed.page().id), byId = new Map(page.nodes.map(n => [n.id, n]));
+      page.nodes = order.map(n => byId.get(n.id));
+      for (const step of plan) { const c = byId.get(step.n.id); c.parentId = parentId || null; if (!step.same) { c.x = step.x; c.y = step.y; } }
+      try { ed.validate(candidate); } catch (error) { footer('Unable to move layers: ' + error.message); return null; }
+      all.splice(0, all.length, ...order);
+      for (const {n, same, x, y} of plan) {
+        if (same) continue;
+        n.parentId = parentId || null; n.x = x; n.y = y;
+        if (!isFlow(parent)) { if (n.wMode === 'fill') n.wMode = 'fixed'; if (n.hMode === 'fill') n.hMode = 'fixed'; }
+      }
+      ed.pushHistory(before);
+      ed.setSelection(new Set(roots.map(n => n.id))); ed.render();
+      return roots.map(n => n.id);
+    }
+
+    function selectInverse() {
+      const scope = selectedNodes()[0]?.parentId || null;
+      select(ed.nodes().filter(n => (n.parentId || null) === scope && !n.hidden && !n.locked && !sel().has(n.id)).map(n => n.id));
+    }
+    // Select all matching layers: same kind (type, ellipse, icon) on the page.
+    function selectMatching() {
+      const kind = n => [n.type, n.ellipse ? 'ellipse' : '', n.icon ? 'icon' : ''].join(':'), wanted = new Set(selectedNodes().map(kind));
+      if (!wanted.size) return;
+      select(ed.nodes().filter(n => wanted.has(kind(n)) && !n.hidden && !n.locked).map(n => n.id));
+    }
 
     // ---------- Navigation ----------
     function selectChildren() {
@@ -573,9 +734,9 @@
       const world = {}; for (const n of roots) { const r = worldRect(n.id); if (r) world[n.id] = {x: r.x, y: r.y}; }
       return {format: CLIP_MARKER, version: 1, page: ed.page().id, roots: roots.map(n => n.id), nodes: list, tokens, world};
     }
-    function writeSystemClipboard(text) {
+    function writeSystemClipboard(text, extra = {}) {
       let written = false;
-      const onCopy = e => { e.clipboardData.setData('text/plain', text); e.preventDefault(); written = true; };
+      const onCopy = e => { e.clipboardData.setData('text/plain', text); for (const [type, value] of Object.entries(extra)) e.clipboardData.setData(type, value); e.preventDefault(); written = true; };
       document.addEventListener('copy', onCopy);
       try { document.execCommand('copy'); } catch {}
       document.removeEventListener('copy', onCopy);
@@ -588,6 +749,33 @@
       return true;
     }
     function cut() { if (copy()) $('#delete')?.click(); }
+    // Copy as PNG: 2× raster of the selection on the system clipboard. When the async clipboard API may not write
+    // images (the desktop shell denies clipboard permissions), the PNG goes out as an HTML <img> with a data URL.
+    async function copyAsPng() {
+      if (!sel().size) return false;
+      let result;
+      try { result = await ed.exportArtwork({format: 'PNG', scale: 2, selectionOnly: true}); }
+      catch (error) { footer('Unable to copy as PNG: ' + (error?.message || error)); return false; }
+      const size = `${result.width} × ${result.height}`;
+      try {
+        if (window.desktop?.writeClipboardImage) await window.desktop.writeClipboardImage(result.dataURL);
+        else {
+          const bytes = Uint8Array.from(atob(String(result.dataURL).split(',')[1] || ''), c => c.charCodeAt(0));
+          await navigator.clipboard.write([new ClipboardItem({'image/png': new Blob([bytes], {type: 'image/png'})})]);
+        }
+        footer(`Copied ${size} PNG`);
+      } catch {
+        writeSystemClipboard(result.dataURL, {'text/html': `<img src="${result.dataURL}" width="${result.width / 2}" height="${result.height / 2}" alt="">`});
+        footer(`Copied ${size} PNG as an HTML image`);
+      }
+      return true;
+    }
+    // Copy as code: standalone HTML of the selection (inline styles, same renderer as export).
+    async function copyAsCode() {
+      if (!sel().size) return false;
+      try { const result = await ed.exportArtwork({format: 'HTML', selectionOnly: true}); writeSystemClipboard(result.content); footer('Copied selection as HTML'); return true; }
+      catch (error) { footer('Unable to copy as code: ' + (error?.message || error)); return false; }
+    }
     function parseClipboard(text) {
       try { const data = JSON.parse(text); return data?.format === CLIP_MARKER && Array.isArray(data.nodes) && Array.isArray(data.roots) ? data : null; } catch { return null; }
     }
@@ -661,18 +849,24 @@
       {id: 'tool.rectangle', label: 'Rectangle', section: 'Tools', keys: ['r'], run: () => setTool('rectangle')},
       {id: 'tool.text', label: 'Text', section: 'Tools', keys: ['t'], run: () => setTool('text')},
       {id: 'tool.shader', label: 'Shader', section: 'Tools', keys: ['s'], run: () => setTool('shader')},
-      {id: 'tool.image', label: 'Image', section: 'Tools', keys: ['i'], run: () => setTool('image')},
+      {id: 'tool.ellipse', label: 'Ellipse', section: 'Tools', keys: ['o'], run: () => setTool('ellipse')},
+      {id: 'tool.eyedropper', label: 'Eyedropper', section: 'Tools', keys: ['i', 'ctrl+c'], run: () => setTool(tool === 'eyedropper' ? 'move' : 'eyedropper')},
+      {id: 'tool.image', label: 'Image', section: 'Tools', keys: [], run: () => setTool('image')},
       {id: 'edit.undo', label: 'Undo', section: 'Edit', keys: ['mod+z'], run: () => $('#undo')?.click()},
       {id: 'edit.redo', label: 'Redo', section: 'Edit', keys: ['mod+shift+z', 'mod+y'], run: () => $('#redo')?.click()},
       {id: 'edit.copy', label: 'Copy', section: 'Edit', keys: ['mod+c'], when: needsSelection, run: copy},
       {id: 'edit.cut', label: 'Cut', section: 'Edit', keys: ['mod+x'], when: needsSelection, run: cut},
       {id: 'edit.paste', label: 'Paste', section: 'Edit', keys: ['mod+v'], native: true, run: () => paste(clipboard)},
       {id: 'edit.pasteInPlace', label: 'Paste in place', section: 'Edit', keys: ['mod+shift+v'], native: true, run: () => paste(clipboard, {inPlace: true})},
+      {id: 'edit.copyPng', label: 'Copy as PNG', section: 'Edit', keys: [], when: needsSelection, run: copyAsPng},
+      {id: 'edit.copyCode', label: 'Copy as code', section: 'Edit', keys: ['mod+shift+c'], when: needsSelection, run: copyAsCode},
       {id: 'edit.copyStyle', label: 'Copy style', section: 'Edit', keys: ['mod+alt+c'], when: needsSelection, run: copyStyle},
       {id: 'edit.pasteStyle', label: 'Paste style', section: 'Edit', keys: ['mod+alt+v'], when: needsSelection, run: pasteStyle},
       {id: 'edit.duplicate', label: 'Duplicate', section: 'Edit', keys: ['mod+d'], when: needsSelection, run: () => $('#duplicate')?.click()},
       {id: 'edit.delete', label: 'Delete', section: 'Edit', keys: ['delete', 'backspace'], when: needsSelection, run: () => $('#delete')?.click()},
       {id: 'select.all', label: 'Select all', section: 'Selection', keys: ['mod+a'], run: selectAll},
+      {id: 'select.inverse', label: 'Select inverse', section: 'Selection', keys: ['mod+shift+a'], run: selectInverse},
+      {id: 'select.matching', label: 'Select all matching layers', section: 'Selection', keys: ['mod+alt+a'], when: needsSelection, run: selectMatching},
       {id: 'select.child', label: 'Select children', section: 'Selection', keys: ['enter'], when: needsSelection, run: selectChildren},
       {id: 'select.parent', label: 'Select parent', section: 'Selection', keys: ['shift+enter', '\\'], when: needsSelection, run: selectParent},
       {id: 'select.next', label: 'Select next sibling', section: 'Selection', keys: ['tab'], when: needsSelection, run: () => cycleSibling(1)},
@@ -687,6 +881,10 @@
       {id: 'transform.unframe', label: 'Unframe selection', section: 'Transform', keys: ['mod+shift+g'], when: needsSelection, run: unframeSelection},
       {id: 'transform.autoLayout', label: 'Add auto layout', section: 'Transform', keys: ['shift+a'], when: needsSelection, run: addAutoLayout},
       {id: 'transform.removeAutoLayout', label: 'Remove auto layout', section: 'Transform', keys: ['alt+shift+a'], when: needsSelection, run: removeAutoLayout},
+      {id: 'transform.flipH', label: 'Flip horizontal', section: 'Transform', keys: ['shift+h'], when: needsSelection, run: () => flip('x')},
+      {id: 'transform.flipV', label: 'Flip vertical', section: 'Transform', keys: ['shift+v'], when: needsSelection, run: () => flip('y')},
+      {id: 'transform.rotate90', label: 'Rotate 90° right', section: 'Transform', keys: ['alt+shift+r'], when: needsSelection, run: () => rotate90(1)},
+      {id: 'transform.rotate90ccw', label: 'Rotate 90° left', section: 'Transform', keys: ['alt+shift+l'], when: needsSelection, run: () => rotate90(-1)},
       {id: 'arrange.forward', label: 'Bring forward', section: 'Transform', keys: ['mod+]'], when: needsSelection, run: () => arrange('forward')},
       {id: 'arrange.backward', label: 'Send backward', section: 'Transform', keys: ['mod+['], when: needsSelection, run: () => arrange('backward')},
       {id: 'arrange.front', label: 'Bring to front', section: 'Transform', keys: ['mod+alt+]'], when: needsSelection, run: () => arrange('front')},
@@ -745,14 +943,14 @@
       const el = e.target.closest('#canvas .layer');
       if (el) { const id = resolveHit(el.dataset.id); if (!sel().has(id)) select([id]); }
       menu = document.createElement('div'); menu.id = 'canvas-menu'; menu.setAttribute('role', 'menu');
-      const groups = [['edit.copy', 'edit.cut', 'edit.paste', 'edit.duplicate', 'edit.delete'], ['edit.copyStyle', 'edit.pasteStyle'], ['arrange.front', 'arrange.forward', 'arrange.backward', 'arrange.back'], ['transform.frame', 'transform.unframe', 'transform.autoLayout', 'transform.removeAutoLayout'], ['layer.visibility', 'layer.lock'], ['view.fit', 'view.selection']];
+      const groups = [['edit.copy', 'edit.cut', 'edit.paste', 'edit.duplicate', 'edit.delete'], ['edit.copyPng', 'edit.copyCode', 'edit.copyStyle', 'edit.pasteStyle'], ['select.all', 'select.inverse', 'select.matching'], ['arrange.front', 'arrange.forward', 'arrange.backward', 'arrange.back'], ['transform.flipH', 'transform.flipV', 'transform.rotate90'], ['transform.frame', 'transform.unframe', 'transform.autoLayout', 'transform.removeAutoLayout'], ['layer.visibility', 'layer.lock'], ['view.fit', 'view.selection']];
       for (const group of groups) {
         const items = group.map(id => commands.find(c => c.id === id)).filter(c => c.id === 'edit.paste' ? !!clipboard : (!c.when || c.when()));
         if (!items.length) continue;
         if (menu.childElementCount) menu.append(document.createElement('hr'));
         for (const c of items) {
           const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'menuitem'); b.dataset.command = c.id;
-          const label = document.createElement('span'); label.textContent = c.label; const keys = document.createElement('kbd'); keys.textContent = shortcutText(c.keys[0]);
+          const label = document.createElement('span'); label.textContent = c.label; const keys = document.createElement('kbd'); keys.textContent = c.keys[0] ? shortcutText(c.keys[0]) : '';
           b.append(label, keys); b.onclick = () => { closeMenu(); c.run(); }; menu.append(b);
         }
       }
@@ -771,7 +969,7 @@
         const scale = document.createElement('button'); scale.id = 'scale-tool'; scale.type = 'button'; scale.title = 'Scale (K)'; scale.setAttribute('aria-label', 'Scale tool');
         scale.onclick = () => setTool(tool === 'scale' ? 'move' : 'scale'); select.after(scale);
       }
-      for (const [id, key] of [['add-frame', 'F'], ['rectangle', 'R'], ['text', 'T'], ['add-shader', 'S'], ['image', 'I']]) { const b = document.getElementById(id); if (b && !b.title.includes('(')) b.title += ` (${key} to draw)`; }
+      for (const [id, key] of [['add-frame', 'F'], ['rectangle', 'R'], ['add-ellipse', 'O'], ['text', 'T'], ['add-shader', 'S']]) { const b = document.getElementById(id); if (b && !b.title.includes('(')) b.title += ` (${key} to draw)`; }
       if (!document.getElementById('frame-presets')) {
         const panel = document.createElement('div'); panel.id = 'frame-presets'; panel.hidden = true; panel.setAttribute('aria-label', 'Frame presets');
         const hint = document.createElement('p'); hint.textContent = 'Drag on the canvas to draw a frame, or choose a size'; panel.append(hint);
@@ -813,6 +1011,7 @@
       applyView: view => setCamera(Number.isFinite(view.x) ? view.x : -(Number(view.scrollLeft) || 0), Number.isFinite(view.y) ? view.y : -(Number(view.scrollTop) || 0), Number(view.zoom) || 1),
       commands: () => commands.filter(c => !c.hidden).map(({id, label, section, keys}) => ({id, label, section, keys: [...keys]})),
       runCommand, copy, cut, paste: options => paste(clipboard, options), copyStyle, pasteStyle, frameSelection, unframeSelection, addAutoLayout, removeAutoLayout, arrange,
+      moveNodes, flip, rotate90, copyAsPng, copyAsCode, selectInverse, selectMatching,
       getDrilled: () => [...drilled],
     };
   }

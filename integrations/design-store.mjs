@@ -6,11 +6,43 @@ const TYPES = new Set(['rectangle', 'text', 'frame', 'image', 'shader']);
 const LIMIT = 20 * 1024 * 1024;
 const clone = value => JSON.parse(JSON.stringify(value));
 function requireString(value, label, max=200) { if(typeof value !== 'string' || !value.trim() || value.length>max) throw new Error(`${label} must be a nonempty string of at most ${max} characters`); }
+// Typed design variables (Wonder: Dimensions, Numbers, Font family, Font weight) live next to the color
+// `tokens` map: `variables: {name: {type, value}}`. Layers bind a property to one with
+// `bindings: {property: name}`; the property itself always holds the resolved value, so every reader that
+// ignores variables still renders correctly. Keep in sync with validate() in web/app.js.
+export const VARIABLE_TYPES = ['dimension', 'number', 'fontFamily', 'fontWeight'];
+export const BINDABLE = { radius: ['dimension', 'number'], gap: ['dimension', 'number'], padding: ['dimension', 'number'], strokeWidth: ['dimension', 'number'], fontSize: ['dimension', 'number'], letterSpacing: ['dimension', 'number'], lineHeight: ['number'], opacity: ['number'], fontFamily: ['fontFamily'], fontWeight: ['fontWeight'] };
+export const VARIABLE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,99}$/;
+const RESERVED_NAMES = ['__proto__', 'prototype', 'constructor'];
+export function checkVariableValue(type, value) {
+  if (type === 'dimension' || type === 'number') return Number.isFinite(value) && Math.abs(value) <= 1e6;
+  if (type === 'fontFamily') return typeof value === 'string' && !!value.trim() && value.length <= 200 && !/[;{}<>\\]/.test(value) && !/url\s*\(/i.test(value);
+  if (type === 'fontWeight') return /^(normal|bold|[1-9][0-9]{0,2}|1000)$/.test(String(value));
+  return false;
+}
+function validateVariables(document) {
+  if (document.variables === undefined) return;
+  const vars = document.variables;
+  if (!vars || typeof vars !== 'object' || Array.isArray(vars)) throw new Error('variables must be an object');
+  const entries = Object.entries(vars);
+  if (entries.length > 500) throw new Error('At most 500 variables');
+  for (const [name, variable] of entries) {
+    if (!VARIABLE_NAME.test(name) || RESERVED_NAMES.includes(name)) throw new Error(`Invalid variable name ${JSON.stringify(name)}`);
+    if (Object.hasOwn(document.tokens, name)) throw new Error(`Variable ${name} collides with a color token`);
+    if (!variable || typeof variable !== 'object' || !VARIABLE_TYPES.includes(variable.type) || !checkVariableValue(variable.type, variable.value)) throw new Error(`Invalid variable ${name}`);
+  }
+}
+function validateBindings(bindings) {
+  if (bindings === undefined) return;
+  if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings)) throw new Error('Invalid node bindings');
+  for (const [key, name] of Object.entries(bindings)) if (!Object.hasOwn(BINDABLE, key) || typeof name !== 'string' || !VARIABLE_NAME.test(name)) throw new Error(`Invalid binding ${key}`);
+}
 export function validateDocument(document) {
   if(!document || document.version!==2 || !Array.isArray(document.pages) || !document.pages.length || document.pages.length>100) throw new Error('Expected version 2 document with 1–100 pages');
   requireString(document.name, 'Document name');
   if(!document.tokens || Array.isArray(document.tokens) || typeof document.tokens!=='object') throw new Error('tokens must be an object');
-  for(const [key,value] of Object.entries(document.tokens)) { requireString(key,'Token name'); requireString(value,'Token value',1000); if(!/^#[0-9a-f]{6}$/i.test(value))throw new Error('Token values must be six-digit hex colors'); if(['__proto__','prototype','constructor'].includes(key)) throw new Error('Reserved token name'); }
+  for(const [key,value] of Object.entries(document.tokens)) { requireString(key,'Token name'); requireString(value,'Token value',1000); if(!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value))throw new Error('Token values must be six- or eight-digit hex colors'); if(['__proto__','prototype','constructor'].includes(key)) throw new Error('Reserved token name'); }
+  validateVariables(document);
   const ids=new Set(); let total=0;
   for(const page of document.pages) {
     requireString(page.id,'Page id'); requireString(page.name,'Page name');
@@ -26,11 +58,12 @@ export function validateDocument(document) {
       if(node.textRuns!==undefined&&(!Array.isArray(node.textRuns)||node.textRuns.some(r=>!r||!Number.isInteger(r.start)||!Number.isInteger(r.end)||r.start<0||r.end<=r.start||r.end>(node.text||'').length||typeof r.bold!=='boolean'||typeof r.italic!=='boolean'||(r.color!==undefined&&!/^#[0-9a-f]{6}$/i.test(r.color))||(r.fontSize!==undefined&&(!Number.isFinite(r.fontSize)||r.fontSize<8||r.fontSize>200)))))throw new Error('Invalid text ranges');
       if(node.src && (!/^data:image\/(png|jpeg|webp|gif|svg\+xml);/i.test(node.src)))throw new Error('Image source must be an embedded image');
       for(const key of ['fontSize','radius','gap','padding','columns','zIndex','rotation','opacity','strokeWidth','lineHeight','letterSpacing'])if(node[key]!==undefined&&!Number.isFinite(node[key]))throw new Error(`Invalid node ${key}`);
-      if(node.opacity!==undefined&&(node.opacity<0||node.opacity>100))throw Error('Invalid opacity');if(node.clipContent!==undefined&&typeof node.clipContent!=='boolean')throw Error('Invalid clipping');
+      if(node.opacity!==undefined&&(node.opacity<0||node.opacity>100))throw Error('Invalid opacity');if(node.clipContent!==undefined&&typeof node.clipContent!=='boolean')throw Error('Invalid clipping');for(const key of ['locked','hidden','flipX','flipY','ellipse'])if(node[key]!==undefined&&typeof node[key]!=='boolean')throw new Error(`Invalid node ${key}`);
       if(node.type==='shader'){if(!['aurora','waves','noise','ribbon','mesh','swirl'].includes(node.shaderPreset||'aurora'))throw new Error('Invalid shader preset');for(const [key,max] of [['shaderSpeed',5],['shaderIntensity',2]])if(node[key]!==undefined&&(!Number.isFinite(node[key])||node[key]<0||node[key]>max))throw new Error('Invalid shader uniform '+key);}
       if(node.animated!==undefined&&!['','aurora','sunset','ocean'].includes(node.animated))throw new Error('Invalid animated palette');
       if(node.layout!==undefined&&!['free','flex','grid','block','inline'].includes(node.layout))throw new Error('Invalid node layout');
       if(node.fontWeight!==undefined&&!/^(normal|bold|[1-9][0-9]{0,2}|1000)$/.test(String(node.fontWeight)))throw new Error('Invalid node fontWeight');
+      validateBindings(node.bindings);
       for(const key of ['color','fontFamily','textAlign','direction','layout','token','gradient','mask','strokeColor','shadow','alignItems','justifyContent'])if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key].length>4000))throw new Error(`Invalid node ${key}`);
     }
     for(const node of page.nodes) {

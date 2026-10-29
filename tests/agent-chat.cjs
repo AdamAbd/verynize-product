@@ -180,6 +180,18 @@ const path = require('node:path');
     const rewound = await state();
     assert.deepEqual(rewound.messages.filter(m => m.role === 'user').map(m => m.text), ['slow parity task', 'queued one edited']);
     assert.ok(rewound.conversations.some(c => / · before rewind$/.test(c.title) && c.count === messages.length), 'the full transcript is kept as a branch');
+    // The next turn forks the provider thread through the kept reply's turn instead of re-seeding (thread/fork).
+    const keptPoint = rewound.messages.at(-1).resumePoint;
+    assert.ok(keptPoint && keptPoint.at && keptPoint.agent === 'codex', 'the kept reply carries its fork point');
+    const forksBefore = (await rpc('thread/fork')).length, rewindBase = (await ws(() => window.agentWorkspace.getUsage())).completed;
+    await sendText('after rewind');
+    await completed(rewindBase + 1);
+    const forks = await rpc('thread/fork');
+    assert.equal(forks.length, forksBefore + 1, 'a rewound chat forks its thread');
+    assert.deepEqual([forks.at(-1).params.threadId, forks.at(-1).params.lastTurnId], [keptPoint.sessionId, keptPoint.at]);
+    assert.equal((await rpc('turn/start')).at(-1).params.input[0].text.endsWith('after rewind'), true);
+    assert.doesNotMatch((await rpc('turn/start')).at(-1).params.input[0].text, /previous-conversation|Summary of the earlier conversation/, 'a working fork is not seeded');
+    assert.match((await state()).session, /thr-fork-|Continues codex session/);
 
     // A tools-version change invalidates the provider session: the next run starts fresh with a transcript seed.
     await ws(() => window.agentWorkspace.newChat());

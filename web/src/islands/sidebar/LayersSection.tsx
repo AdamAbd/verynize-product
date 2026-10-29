@@ -1,7 +1,18 @@
-// "Layers" section: search, collapse-all and the layer tree of the active page.
+// "Layers" section: search, collapse-all and the layer tree of the active page. Rows can be dragged to reorder
+// siblings or move layers into / out of frames (see layer-drag.ts).
 // Rows keep the legacy test contract: `.layer-row` (+ `.active`, `.is-hidden`, `.is-locked`) with
 // `[data-toggle=locked|hidden]` buttons inside.
-import { memo, type CSSProperties, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import {
+  memo,
+  type CSSProperties,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
 import { ChevronRight, Eye, EyeOff, ListChevronsDownUp, Lock, LockOpen, Pencil, Search, Type } from "lucide-react";
 import { design, useSelection } from "@/lib/bridge";
 import {
@@ -17,6 +28,7 @@ import { LayerTypeIcon } from "./icons";
 import { useTakeOver } from "./legacy";
 import { contract } from "./contract";
 import { useTreeNodes, type TreeNode } from "./hooks";
+import { dragJustEnded, useLayerDrag, type Drop } from "./layer-drag";
 
 type Row = { node: TreeNode; depth: number; hasChildren: boolean; expanded: boolean };
 
@@ -77,11 +89,22 @@ type RowProps = {
   selected: boolean;
   focusable: boolean;
   renaming: boolean;
+  dragging: boolean;
   onToggleExpand: (id: string) => void;
   onRename: (id: string | null) => void;
+  onDragStart: (event: PointerEvent<HTMLElement>, id: string) => void;
 };
 
-const LayerRow = memo(function LayerRow({ row, selected, focusable, renaming, onToggleExpand, onRename }: RowProps) {
+const LayerRow = memo(function LayerRow({
+  row,
+  selected,
+  focusable,
+  renaming,
+  dragging,
+  onToggleExpand,
+  onRename,
+  onDragStart,
+}: RowProps) {
   const { node, depth, hasChildren, expanded } = row;
   const action = cn(
     "hidden size-6 shrink-0 items-center justify-center rounded-md bg-transparent group-hover:flex group-has-focus-visible:flex hover:bg-foreground/10 hover:text-foreground",
@@ -123,9 +146,13 @@ const LayerRow = memo(function LayerRow({ row, selected, focusable, renaming, on
             contract("layer-row", selected && "active", node.hidden && "is-hidden", node.locked && "is-locked"),
             "group relative m-0 flex h-7.5 w-full shrink-0 items-center rounded-md border-0 bg-transparent py-0 pr-2 text-xs text-foreground-2 hover:bg-muted",
             selected && "bg-selection hover:bg-selection",
+            dragging && "opacity-50",
           )}
           style={{ "--layer-depth": depth } as CSSProperties}
-          onClick={(e) => select(node.id, e)}
+          onPointerDown={renaming ? undefined : (e) => onDragStart(e, node.id)}
+          onClick={(e) => {
+            if (!dragJustEnded()) select(node.id, e);
+          }}
           onDoubleClick={() => onRename(node.id)}
           onKeyDown={onKeyDown}
         >
@@ -247,7 +274,15 @@ export function LayersSection({ open, onToggle }: { open: boolean; onToggle: () 
   const [renaming, setRenaming] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const treeRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   useTakeOver("layer-search", searchRef);
+  const { drop, dragging, onPointerDown } = useLayerDrag({
+    listRef,
+    scrollRef: treeRef,
+    nodes,
+    onExpand: (id) => setExpanded((prev) => (prev.has(id) ? prev : new Set([...prev, id]))),
+  });
+  const draggingSet = useMemo(() => new Set(dragging), [dragging]);
 
   // Reveal layers selected on the canvas: expand their ancestors and scroll them into view.
   const selectionKey = selection.join(",");
@@ -338,7 +373,7 @@ export function LayersSection({ open, onToggle }: { open: boolean; onToggle: () 
         hidden={!open}
         className="min-h-0 flex-1 overflow-y-auto px-1.5 pt-1 pb-3"
       >
-        <div className="flex flex-col gap-0.5">
+        <div ref={listRef} className="relative flex flex-col gap-0.5">
           {rows.map((row, index) => (
             <LayerRow
               key={row.node.id}
@@ -346,10 +381,13 @@ export function LayersSection({ open, onToggle }: { open: boolean; onToggle: () 
               selected={selected.has(row.node.id)}
               focusable={selected.size ? selected.has(row.node.id) : index === 0}
               renaming={renaming === row.node.id}
+              dragging={draggingSet.has(row.node.id)}
               onToggleExpand={toggleExpand}
               onRename={setRenaming}
+              onDragStart={onPointerDown}
             />
           ))}
+          {drop && <DropIndicator drop={drop} />}
         </div>
         {rows.length === 0 && (
           <p className="px-3 py-2 text-xs text-subtle-foreground">
@@ -358,5 +396,23 @@ export function LayersSection({ open, onToggle }: { open: boolean; onToggle: () 
         )}
       </div>
     </section>
+  );
+}
+
+/** Insertion line (above/below a row, indented to the drop depth) or an outline around the frame row for `inside`. */
+function DropIndicator({ drop }: { drop: Drop }) {
+  const inside = drop.position === "inside";
+  return (
+    <div
+      id="bd-layer-drop-indicator"
+      aria-hidden="true"
+      data-target={drop.id}
+      data-position={drop.position}
+      className={cn(
+        "pointer-events-none absolute right-0 z-10",
+        inside ? "left-0 rounded-md border border-primary" : "h-0.5 -translate-y-1/2 rounded-full bg-primary",
+      )}
+      style={{ "--drop-top": `${drop.top}px`, "--drop-height": `${drop.height}px`, "--drop-depth": drop.indent } as CSSProperties}
+    />
   );
 }
