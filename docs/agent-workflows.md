@@ -73,6 +73,12 @@ Each prompt is prefixed with a `<verynize-context>` block. When **Send canvas co
 
 Image paths are accepted only under `userData/agent-attachments/<chatId>/`. Pasted or picked images are saved there by `saveAgentImage`, after their magic bytes are checked against PNG, JPEG, GIF and WebP. The persona tells the agent to fetch content through the `verynize` MCP tools and to pass the given `pageId`.
 
+## Composer "+" menu and slash commands
+
+- **+ menu** (`web/src/islands/chat/attach-menu.tsx`): *Add to this worktree* copies picked files or a folder into the chat's worktree (`worktreeAddFiles`, never overwriting, folders without `.git`/`node_modules`) and *Link a chat or worktree* lists the chats of every repository: linking one attaches its transcript as `<linked-chat>` and adds its worktree as a working directory; *New worktree* creates a fresh worktree of the current repository and links it. *Attach to this message*: files and images, the recent output of the Code workspace terminal (`terminalRecentOutput`, sent as `<terminal-output>`), a Figma link, and *Design references*: saved image collections in `userData/design-references/` (`designReferences*`; *Save attached as a collection* stores the attached images). *Commands* opens the slash-command list.
+- **Working directories** (`/add-dir`, linked worktrees) are stored per chat and sent as `runAgent({directories})`: Claude `additionalDirectories`, Codex `sandbox_workspace_write.writable_roots`, and a line in the turn context.
+- **Slash commands** (`slash-commands.tsx`, `desktop/agent-commands.cjs`): "/" at the start of the prompt lists Verynize's own commands (run in the app: `/add-dir`, `/add-file`, `/clear` = fresh provider session, `/canvas-context`, `/attach-canvas`, `/open-file`, `/review-changes`, `/apply-design`) and the agent's: for Claude the SDK's `supportedCommands()` / init `slash_commands` plus `~/.claude/commands`, `~/.claude/skills` and the chat folder's `.claude/…`; for Codex `~/.codex/prompts` (as `prompts:name`) and `~/.codex/skills`. A sent `/name args` reaches Claude as typed (no context preamble, so Claude Code runs it); for Codex the runtime expands custom prompts (`$ARGUMENTS`, `$1`…`$9`, `$$`) and skills before the turn.
+
 ## MCP bridge
 
 `desktop/mcp-bridge.cjs` exposes `getBridgeInfo() -> {url, token}` for the loopback Streamable HTTP server. The runtime loads it lazily with `require` inside `try`, so chat keeps working without it.

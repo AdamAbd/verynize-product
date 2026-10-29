@@ -11,6 +11,9 @@
  *   terminalWrite({id, data})            data: string of at most WRITE_LIMIT characters (the renderer chunks pastes)
  *   terminalResize({id, cols, rows})     2..1000 columns, 1..500 rows
  *   terminalKill({id})                   -> true when the terminal existed
+ *   terminalRecentOutput({cwd?})         -> {id, cwd, text} | null   recent output (ANSI stripped, last RECENT_LIMIT
+ *                                           characters) of the most recently active terminal, preferring one in `cwd`;
+ *                                           the chat composer's "+ › Terminal output" attaches it
  * Events (webContents.send):
  *   desktop:terminal-data  {id, data}            output, batched per OUTPUT_FLUSH_MS and cut into MESSAGE_LIMIT pieces
  *   desktop:terminal-exit  {id, exitCode, signal} sent once, after the last data event
@@ -43,6 +46,7 @@ const MAX_PER_WINDOW = 8;
 const WRITE_LIMIT = 64 * 1024; // characters per terminalWrite call
 const MESSAGE_LIMIT = 64 * 1024; // characters per desktop:terminal-data message
 const OUTPUT_FLUSH_MS = 8;
+const RECENT_LIMIT = 16 * 1024; // characters of recent output kept per terminal for terminalRecentOutput
 const DEFAULT_COLS = 80, DEFAULT_ROWS = 24;
 const workspacesRoot = () => path.join(os.homedir(), 'Verynize', 'workspaces');
 
@@ -162,6 +166,16 @@ function hookQuit() {
   process.on('exit', () => { try { killTerminals(allTerminals); } catch {} });
 }
 
+/** Terminal output as plain text: ANSI/OSC escape sequences removed, carriage-return overwrites applied. */
+function plainTerminalText(raw) {
+  const text = String(raw)
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, '')
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\u001b[@-Z\\-_]/g, '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
+  return text.split('\n').map(line => line.split('\r').filter(Boolean).pop() ?? '').join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function registerTerminal(handle, win, { getProject } = {}) {
   hookQuit();
   const terminals = new Map(); // id -> terminal
@@ -192,10 +206,12 @@ function registerTerminal(handle, win, { getProject } = {}) {
     const shell = userShell();
     const cols = size(options.cols, 2, 1000, DEFAULT_COLS), rows = size(options.rows, 1, 500, DEFAULT_ROWS);
     const proc = loadPty().spawn(shell, ['-l'], { name: 'xterm-256color', cols, rows, cwd, env: shellEnv(), encoding: 'utf8' });
-    const term = { id: crypto.randomUUID(), proc, pending: '', timer: null };
+    const term = { id: crypto.randomUUID(), proc, pending: '', timer: null, cwd, recent: '', activeAt: Date.now() };
     terminals.set(term.id, term);
     allTerminals.add(term);
     proc.onData(data => {
+      term.recent = (term.recent + data).slice(-RECENT_LIMIT * 2);
+      term.activeAt = Date.now();
       term.pending += data;
       if (term.pending.length >= MESSAGE_LIMIT) flush(term);
       else if (!term.timer) term.timer = setTimeout(() => flush(term), OUTPUT_FLUSH_MS);
@@ -232,8 +248,16 @@ function registerTerminal(handle, win, { getProject } = {}) {
     return true;
   });
 
+  handle('terminalRecentOutput', async (options = {}) => {
+    const want = typeof options?.cwd === 'string' && options.cwd ? await fs.realpath(options.cwd).catch(() => options.cwd) : null;
+    const list = [...terminals.values()].filter(term => term.recent).sort((a, b) => b.activeAt - a.activeAt);
+    const term = (want && list.find(t => t.cwd === want || inside(want, t.cwd))) || list[0];
+    if (!term) return null;
+    return { id: term.id, cwd: term.cwd, text: plainTerminalText(term.recent).slice(-RECENT_LIMIT) };
+  });
+
   win.on('closed', () => { killTerminals(terminals.values()); terminals.clear(); });
   return { count: () => terminals.size, killAll: () => killTerminals(terminals.values()) };
 }
 
-module.exports = { registerTerminal, isAllowedTerminalCwd, setTerminalCwdValidator, MAX_PER_WINDOW, WRITE_LIMIT };
+module.exports = { registerTerminal, plainTerminalText, isAllowedTerminalCwd, setTerminalCwdValidator, MAX_PER_WINDOW, WRITE_LIMIT };
