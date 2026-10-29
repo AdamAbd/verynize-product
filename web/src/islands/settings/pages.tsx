@@ -21,7 +21,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { ClaudeMark, CodexMark, FigmaIcon } from "@/components/icons";
-import { AllowedActionsSection, DesignPreferencesSection, useToolsInfo } from "./agent-memory";
+import { DesignPreferencesSection, useToolsInfo } from "./agent-memory";
+import { AgentBehaviorSections } from "./agents-behavior";
 import { agentWorkspace, type AgentInfo, type AuthKind, type Preferences, type SettingsApi } from "./api";
 import {
   Card,
@@ -441,6 +442,7 @@ export function AgentsPage({ api, accounts }: PageProps) {
             </Row>
           </Card>
         </Section>
+        <AgentBehaviorSections />
       </Pages>
     </>
   );
@@ -694,18 +696,6 @@ export function MemoryPage({ api }: PageProps) {
             </Row>
           </Card>
         </Section>
-      </Pages>
-    </>
-  );
-}
-
-/* ---------- Allowed actions (permissions remembered with “Always allow”) ---------- */
-export function AllowedActionsPage() {
-  return (
-    <>
-      <PageHeader title="Allowed actions" description="Agents ask before running tools that change files or run commands. These are the ones you allowed for good." />
-      <Pages>
-        <AllowedActionsSection />
       </Pages>
     </>
   );
