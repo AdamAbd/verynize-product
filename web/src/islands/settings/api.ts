@@ -12,8 +12,15 @@ export type Preferences = {
   selection: "classic" | "deep";
   displayName: string;
   notifications: boolean;
-  sound: "none" | "chime" | "pop";
+  sound: "none" | "chime" | "bell" | "marimba" | "crystal" | "rise" | "droplet" | "pop" | "custom";
   cloudServer: string;
+  // Preferences › Notifications / Advanced (behaviour in preference-runtime.ts, the code and chat islands).
+  customSoundName: string;
+  chatTabs: boolean;
+  lineChanges: boolean;
+  openLinksInApp: boolean;
+  attachSelection: boolean;
+  openPullRequest: boolean;
 };
 
 export type AgentInfo = { id: string; available: boolean };
