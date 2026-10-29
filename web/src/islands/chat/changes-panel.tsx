@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { portalContainer } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { errorText, gitApi, presetImplementPrompt, suggestMessage, useChanges, type ChangedFile, type ChangesSummary, type FileDiff, type PullRequestStatus } from "./changes";
+import { usePreference } from "../settings/preference-store";
 import type { ChatState } from "./store";
 
 const MAX_RENDERED_LINES = 5000;
@@ -467,15 +468,78 @@ function ChangesDialog({
   );
 }
 
+/** "Open the side panel on the pull request": the branch's pull request, read with `gh` when the preference is on. */
+function usePullRequest(root: string | null, summary: ChangesSummary | null, enabled: boolean, reload: number) {
+  const [status, setStatus] = useState<PullRequestStatus | null>(null);
+  const key = enabled && root && summary?.branch ? `${root}\n${summary.branch}\n${summary.upstream ?? ""}\n${summary.ahead}` : "";
+  useEffect(() => {
+    setStatus(null);
+    const api = gitApi();
+    if (!key || !api || !root) return;
+    let live = true;
+    api.gitPullRequest({ root }).then(
+      (value) => live && setStatus(value),
+      () => live && setStatus(null),
+    );
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` covers root and the branch state
+  }, [key, reload]);
+  return status?.pr ?? null;
+}
+
 /** Header button ("3 files +12 −4") and its dialog, for repo-backed chats only. */
 export function ChangesButton({ state }: { state: ChatState }) {
   // The chat's own folder (worktree or repository root) once the main process made it the active project.
   const root = state.activeRoot && gitApi() ? state.activeRoot : null;
   const { summary, error, refresh, setSummary } = useChanges(root);
   const [open, setOpen] = useState(false);
+  const [closed, setClosed] = useState(0);
+  const preferPr = usePreference("openPullRequest") === true;
+  const pr = usePullRequest(root, summary, preferPr, closed);
   const running = state.busy || (state.busyChats?.length ?? 0) > 0;
   if (!root || (!summary && error)) return null;
   const count = summary?.totals.files ?? 0;
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setClosed((n) => n + 1);
+  };
+  const dialog = (
+    <ChangesDialog open={open} onOpenChange={onOpenChange} state={state} root={root} summary={summary} refresh={refresh} setSummary={setSummary} running={running} />
+  );
+  if (pr) {
+    const label = pr.isDraft ? "Draft" : pr.state.charAt(0) + pr.state.slice(1).toLowerCase();
+    return (
+      <>
+        <button
+          type="button"
+          id="changes-pr-button"
+          title={`${pr.title} · ${pr.url}`}
+          className="flex h-6.5 min-w-0 items-center gap-2 rounded-md px-2 text-base leading-5.25 text-foreground-2 hover:bg-muted"
+          onClick={() => void gitApi()?.openExternal(pr.url)}
+        >
+          <GitPullRequestIcon className="size-3.5 shrink-0 text-primary-text" />
+          <span className="truncate">
+            #{pr.number} {pr.title}
+          </span>
+          <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+          <ExternalLinkIcon className="size-3 shrink-0 text-muted-foreground" />
+        </button>
+        <Button
+          id="changes-button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={`Show changes (${count} ${count === 1 ? "file" : "files"})`}
+          title="Show changes"
+          onClick={() => setOpen(true)}
+        >
+          <FileDiffIcon className="size-3.5" />
+        </Button>
+        {dialog}
+      </>
+    );
+  }
   return (
     <>
       <button
@@ -499,7 +563,7 @@ export function ChangesButton({ state }: { state: ChatState }) {
           </span>
         )}
       </button>
-      <ChangesDialog open={open} onOpenChange={setOpen} state={state} root={root} summary={summary} refresh={refresh} setSummary={setSummary} running={running} />
+      {dialog}
     </>
   );
 }
