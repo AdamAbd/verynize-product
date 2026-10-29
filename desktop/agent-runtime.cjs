@@ -432,7 +432,7 @@ function cleanTitle(text) {
 
 // Tools a read-only helper must never call.
 // Shell tools that act on the project or preview (the read-only ones stay available).
-const HELPER_BLOCKED_SHELL_TOOLS = ['start_dev_server', 'stop_dev_server', 'configure_dev_server', 'preview_open', 'preview_click', 'preview_type', 'preview_scroll', 'capture_preview_to_canvas', 'run_terminal_command', 'execute_action'];
+const HELPER_BLOCKED_SHELL_TOOLS = ['start_dev_server', 'stop_dev_server', 'configure_dev_server', 'propose_preview', 'preview_open', 'preview_click', 'preview_type', 'preview_scroll', 'capture_preview_to_canvas', 'run_terminal_command', 'execute_action'];
 const HELPER_BLOCKED_DESIGN_TOOLS = [...MUTATING_DESIGN_TOOLS, 'finish_artboard', 'ask_agent', ...HELPER_BLOCKED_SHELL_TOOLS];
 const HELPER_PERSONA = 'You are a read-only helper agent consulted by the designer agent inside Verynize (a local desktop design editor). Answer the task you are given precisely and concisely. You may read project files and inspect the open design with the read-only `verynize` MCP tools (get_design_context, get_element_code, take_screenshot and similar), but you must not edit files, run commands, or change the canvas. Reply with your findings only.';
 

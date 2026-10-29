@@ -1,9 +1,40 @@
-const {BrowserWindow, dialog, webFrameMain} = require('electron');
+const {BrowserWindow, dialog, webFrameMain, shell} = require('electron');
 const fs = require('node:fs/promises');
 function localURL(value) {
   const url = new URL(value);
   if (!['http:', 'https:'].includes(url.protocol) || !['localhost','127.0.0.1','[::1]'].includes(url.hostname) || url.username || url.password) throw Error('Enter a localhost app URL, such as http://localhost:3000');
   return url.href;
+}
+// Explicit local-preview edits are transient DOM changes; capture turns them into design layers.
+function editPreviewElement(options) {
+  const key = '__verynizePreviewEdits';
+  const history = window[key] || (window[key] = []);
+  if (options.undo) {
+    const previous = history.pop();
+    if (!previous) return { undone: false };
+    if (previous.element.isConnected) {
+      if (previous.text !== null) previous.element.textContent = previous.text;
+      if (previous.style === null) previous.element.removeAttribute('style');
+      else previous.element.setAttribute('style', previous.style);
+    }
+    return { undone: true };
+  }
+  let element;
+  try { element = document.querySelector(options.selector); } catch { throw Error('Enter a valid CSS selector'); }
+  if (!element || !(element instanceof HTMLElement)) throw Error('No editable element matches this selector');
+  if (element.matches('script,style,iframe,object,embed,input,textarea,select') || element.closest('[contenteditable]')) throw Error('Choose a text or layout element');
+  const computed = getComputedStyle(element);
+  const keys = ['color', 'backgroundColor', 'fontSize', 'fontWeight', 'borderRadius', 'padding', 'margin', 'opacity'];
+  if (options.inspect) return { selector: options.selector, tag: element.tagName.toLowerCase(), text: element.children.length ? null : element.textContent.slice(0,10000), styles: Object.fromEntries(keys.map(key => [key, computed[key]])) };
+  if (options.text !== undefined && element.children.length) throw Error('Text editing requires an element without child elements');
+  for (const [key, value] of Object.entries(options.styles || {})) {
+    if (!keys.includes(key) || typeof value !== 'string' || value.length > 200 || /url\s*\(|expression|[{};]/i.test(value) || (value && !CSS.supports(key.replace(/[A-Z]/g, char => '-'+char.toLowerCase()), value))) throw Error('Unsupported style: '+key);
+  }
+  history.push({element, text: options.text !== undefined ? element.textContent : null, style: element.getAttribute('style')});
+  if (history.length > 50) history.shift();
+  if (options.text !== undefined) element.textContent = options.text;
+  for (const [key, value] of Object.entries(options.styles || {})) element.style[key] = value;
+  return { applied: true, undoAvailable: true };
 }
 function snapshotDocument(region) {
  const numBrowser=v=>parseFloat(v)||0;
@@ -57,6 +88,42 @@ function registerPreview(handle, parent) {
     finally { if(capture&&!window.isDestroyed())window.destroy(); }
   });
   handle('captureLivePreview',async ({url,region=null}={})=>captureLiveFrame(parent,{url:localURL(url),region}));
+  const edit = async (options, inspect = false) => {
+    if (!options || typeof options !== 'object') throw Error('Preview edit options are required');
+    if (!options.undo && (typeof options.selector !== 'string' || options.selector.length > 1000)) throw Error('A CSS selector is required');
+    if (options.text !== undefined && (typeof options.text !== 'string' || options.text.length > 10000)) throw Error('Text exceeds the preview edit limit');
+    return previewFrame(parent).executeJavaScript('('+editPreviewElement.toString()+')('+JSON.stringify({...options,inspect})+')');
+  };
+  let inputToApp = false;
+  const releaseInput = () => {
+    inputToApp = false;
+    if (!parent.webContents.isDestroyed()) {
+      parent.webContents.setIgnoreMenuShortcuts(false);
+      void parent.webContents.executeJavaScript("window.dispatchEvent(new Event('bd:preview-input-released'))").catch(()=>{});
+    }
+  };
+  parent.webContents.on('before-input-event', (event, input) => {
+    if (inputToApp && input.type === 'keyDown' && input.key === 'Escape' && input.shift && (input.meta || input.control)) {event.preventDefault();releaseInput();}
+  });
+  parent.on('blur', releaseInput);
+  handle('previewInput', async ({enabled} = {}) => {
+    if (typeof enabled !== 'boolean') throw Error('Input mode must be a boolean');
+    if (!enabled) {releaseInput();return {enabled:false};}
+    const frame = previewFrame(parent);
+    await frame.executeJavaScript(`(()=>{window.focus();if(!window.__verynizeInputRelease){window.__verynizeInputRelease=true;document.addEventListener('keydown',event=>{if(event.key==='Escape'&&event.shiftKey&&(event.metaKey||event.ctrlKey)){event.preventDefault();event.stopImmediatePropagation();parent.postMessage({type:'verynize-preview-release-input'},'*');}},true);}})()`);
+    inputToApp = true;
+    parent.webContents.setIgnoreMenuShortcuts(true);
+    return {enabled:true};
+  });
+  handle('previewOpenBrowser', () => shell.openExternal(localURL(previewFrame(parent).url)));
+  handle('previewNavigate', async ({direction} = {}) => {
+    if (!['back','forward','reload'].includes(direction)) throw Error('Invalid preview navigation');
+    const frame = previewFrame(parent);
+    await frame.executeJavaScript(direction === 'reload' ? 'location.reload()' : direction === 'back' ? 'history.back()' : 'history.forward()');
+    return {navigated: true};
+  });
+  handle('previewInspect', options => edit(options, true));
+  handle('previewEdit', options => edit(options));
   automations.set(parent,createPreviewAutomation(parent)); // agent shell tools (desktop/agent-shell.cjs)
   handle('exportPDF', async html => {
     if(typeof html!=='string'||Buffer.byteLength(html)>5*1024*1024)throw Error('Design exceeds PDF size limit');
@@ -220,7 +287,7 @@ function createPreviewAutomation(parent){
  wc.on('did-fail-load',(_e,code,description,url,isMain,pid,rid)=>{if(isMain||code===-3||!isPreview(frameOf(pid,rid)))return;record('error','Failed to load '+url+': '+description+' ('+code+')','navigation');});
  // The editor page: our own renderer. Fixed expressions only, with JSON-encoded values.
  const editor=expression=>wc.executeJavaScript(expression);
- const paneState=()=>editor(`(()=>{const pane=document.getElementById('live-preview'),frame=document.getElementById('live-frame');if(!pane||!frame)return null;const r=frame.getBoundingClientRect();return {open:!pane.hidden,url:window.livePreview?.getURL?.()||'',rect:{x:r.left+frame.clientLeft,y:r.top+frame.clientTop,width:frame.clientWidth,height:frame.clientHeight}}})()`);
+ const paneState=()=>editor(`(()=>{const pane=document.getElementById('live-preview'),frame=document.getElementById('live-frame');if(!pane||!frame)return null;const r=frame.getBoundingClientRect();return {open:!pane.hidden,url:window.livePreview?.getURL?.()||'',scaleX:r.width/frame.offsetWidth,scaleY:r.height/frame.offsetHeight,rect:{x:r.left+frame.clientLeft*(r.width/frame.offsetWidth),y:r.top+frame.clientTop*(r.height/frame.offsetHeight),width:frame.clientWidth,height:frame.clientHeight}}})()`);
  const run=(frame,fn,arg)=>frame.executeJavaScript('('+fn.toString()+')('+JSON.stringify(arg??null)+')');
  async function waitForLoad(expected,timeoutMs){
   const deadline=Date.now()+timeoutMs;let last=null;
@@ -258,7 +325,8 @@ function createPreviewAutomation(parent){
   finally{if(mine)try{d.detach()}catch{}}
  }
  async function clickAt(pane,point,clickCount=1){
-  const x=pane.rect.x+point.x,y=pane.rect.y+point.y;
+  await editor('window.livePreview.reveal();window.livePreview.navigateMode()');
+  const x=pane.rect.x+point.x*pane.scaleX,y=pane.rect.y+point.y*pane.scaleY;
   const steps=[['Input.dispatchMouseEvent',{type:'mouseMoved',x,y}]];
   for(let i=1;i<=clickCount;i++)steps.push(['Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',buttons:1,clickCount:i}],['Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',buttons:0,clickCount:i}]);
   const ok=await trusted(steps);
@@ -296,7 +364,7 @@ function createPreviewAutomation(parent){
    if(selector){const {found}=await locate({selector:String(selector)});const r=found.rect;const x=Math.max(0,r.x),y=Math.max(0,r.y);rect={x,y,width:Math.min(pane.rect.width,r.x+r.width)-x,height:Math.min(pane.rect.height,r.y+r.height)-y};if(rect.width<1||rect.height<1)throw Error('The element is not inside the visible preview viewport');}
    await sleep(80);
    const zoom=wc.getZoomFactor()||1;
-   let image=await wc.capturePage({x:Math.round((pane.rect.x+rect.x)*zoom),y:Math.round((pane.rect.y+rect.y)*zoom),width:Math.max(1,Math.round(rect.width*zoom)),height:Math.max(1,Math.round(rect.height*zoom))});
+   let image=await wc.capturePage({x:Math.round((pane.rect.x+rect.x*pane.scaleX)*zoom),y:Math.round((pane.rect.y+rect.y*pane.scaleY)*zoom),width:Math.max(1,Math.round(rect.width*pane.scaleX*zoom)),height:Math.max(1,Math.round(rect.height*pane.scaleY*zoom))});
    if(image.isEmpty())throw Error('The preview could not be captured (is the window minimized?)');
    const limit=Math.max(200,Math.min(2400,maxWidth|0||1600));
    if(image.getSize().width>limit)image=image.resize({width:limit,quality:'good'});
@@ -334,6 +402,7 @@ function createPreviewAutomation(parent){
   },
   async scroll({selector,deltaX=0,deltaY=0,to}={}){
    if(!selector&&!deltaX&&!deltaY&&!to)throw Error('Pass selector, deltaX/deltaY or to ("top" | "bottom")');
+   await editor('window.livePreview.reveal();window.livePreview.navigateMode()');
    const result=await run(previewFrame(parent),scrollPage,{selector:selector||null,deltaX,deltaY,to:to||null});
    if(result.error)throw Error(result.error);
    return result;

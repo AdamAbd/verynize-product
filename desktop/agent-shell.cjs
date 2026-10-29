@@ -31,7 +31,7 @@ const ACCESS = new Set(['readonly', 'ask', 'edit', 'auto', 'full']);
 const parseAccess = value => { const v = String(Array.isArray(value) ? value[0] : value || '').trim().toLowerCase(); return ACCESS.has(v) ? v : null; };
 
 const OPS = {
-  devStatus: 'read', devStart: 'exec', devStop: 'interact', devConfigure: 'exec',
+  devStatus: 'read', devStart: 'exec', devStop: 'interact', devConfigure: 'exec', devPropose: 'interact',
   previewOpen: 'interact', previewSnapshot: 'read', previewScreenshot: 'read', previewClick: 'interact', previewType: 'interact', previewScroll: 'interact', previewConsole: 'read', previewCapture: 'interact',
   terminalRun: 'exec', terminalRead: 'read', terminalStop: 'interact',
   actions: 'read', action: 'interact',
@@ -117,6 +117,7 @@ function createShell({ activeEditor, request, options = () => ({}) }) {
         return status;
       }
       case 'devStop': return pm.stop(projectRoot(entry));
+      case 'devPropose': return pm.propose(projectRoot(entry), args);
       case 'devConfigure': {
         const root = projectRoot(entry);
         if (args.command === null) return pm.configure(root, { command: null });
@@ -163,11 +164,46 @@ function createShell({ activeEditor, request, options = () => ({}) }) {
  * Renderer controls for the dev server of the open project (the Code workspace "Start preview" button).
  * These are explicit user actions, so no approval dialog: devServerStatus(), devServerStart(), devServerStop().
  */
-function registerDevServerIPC(handle, { getProject }) {
-  const root = () => { const project = getProject(); if (!project?.root) throw new Error('Open a repository first'); return project.root; };
-  handle('devServerStatus', () => { const project = getProject(); return project?.root ? processManager().status(project.root) : { state: 'stopped', root: null }; });
-  handle('devServerStart', () => processManager().start(root(), { waitMs: 20000 }));
-  handle('devServerStop', () => processManager().stop(root()));
+function registerDevServerIPC(handle, { getProject, resolveRoot }) {
+  const root = expected => { const project = getProject(); if (expected && expected !== project?.root) throw new Error('Repository changed. Open preview configuration again.'); if (!project?.root) throw new Error('Open a repository first'); return project.root; };
+  const setups = new Map();
+  const previewRoot = async expected => expected && resolveRoot ? (await resolveRoot(expected)).root : root(expected);
+  handle('devServerStatus', async options => {
+    const projectRoot = options?.root ? await previewRoot(options.root) : getProject()?.root;
+    if (!projectRoot) return {state:'stopped',root:null};
+    const status = await processManager().status(projectRoot), pending = setups.get(projectRoot);
+    if (pending) { const job = await pending; const proc = processManager().find(job.id, projectRoot); if (proc && !proc.exited) status.setup = processManager().jobInfo(proc, {tail:20}); }
+    return status;
+  });
+  handle('devServerConfigure', async options => { const projectRoot = root(options?.root); await processManager().configure(projectRoot, options); return processManager().status(projectRoot); });
+  handle('devServerDismissProposal', options => processManager().propose(root(options?.root), options?.saved ? {saved:true} : {command:null}));
+  handle('devServerSetup', async options => {
+    const projectRoot = root(options?.root), manager = processManager();
+    const config = await manager.projectConfig(projectRoot);
+    if (!config?.setup) return { exitCode: 0 };
+    if (setups.has(projectRoot)) throw Error('Preview setup is already running');
+    const pending = manager.run(projectRoot, config.setup, { timeoutMs: 600000, background: true });
+    setups.set(projectRoot, pending);
+    try {
+      const job = await pending, proc = manager.find(job.id, projectRoot);
+      await proc.exitPromise;
+      const result = manager.jobInfo(proc, {output:true});
+      const retry = require('./dev-server.cjs').recoverIgnoredBuilds(config.setup, result);
+      if (!retry) return result;
+      const retryPending = manager.run(projectRoot, retry, {timeoutMs:600000, background:true});
+      setups.set(projectRoot, retryPending);
+      const retryJob = await retryPending, retryProc = manager.find(retryJob.id, projectRoot);
+      await retryProc.exitPromise;
+      const recovered = manager.jobInfo(retryProc, {output:true});
+      if (recovered.exitCode === 0) {
+        await manager.configure(projectRoot, {...config, setup:retry});
+        return {...recovered, setup:retry, recovery:'Dependency build scripts remain skipped; installation completed in non-strict mode.'};
+      }
+      return recovered;
+    } finally { setups.delete(projectRoot); }
+  });
+  handle('devServerStart', async options => processManager().start(await previewRoot(options?.root), { waitMs: 20000 }));
+  handle('devServerStop', async options => { const projectRoot = await previewRoot(options?.root); const pending = setups.get(projectRoot); if (pending) { const job = await pending; await processManager().kill(job.id, {root:projectRoot}); } return processManager().stop(projectRoot); });
 }
 
 module.exports = { registerShellWindow, registerDevServerIPC, createShell, parseAccess, processManager };

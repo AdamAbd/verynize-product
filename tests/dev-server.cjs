@@ -126,3 +126,131 @@ test('terminal commands: foreground output, timeout, background read/stop and st
   assert.equal(m.stopAll(), 2);
   assert.ok(await waitGone(orphan.pid) && await waitGone(server.pid) && await waitGone(serverPid), 'app quit stops every process group');
 });
+
+test('preview setup argv persists and runs before an explicitly started server', async t => {
+  const root = await fixture(t);
+  const configFile = path.join(root, 'preview-config.json');
+  const manager = new ProcessManager({ configFile });
+  t.after(() => manager.stopAll());
+  const setup = [process.execPath, '-e', "require('fs').writeFileSync('setup-done','yes')"];
+  await manager.configure(root, { command: [process.execPath, 'server.js'], setup });
+  const restored = new ProcessManager({ configFile });
+  assert.deepEqual((await restored.projectConfig(root)).setup, setup);
+  assert.equal((await manager.status(root)).state, 'stopped');
+  const result = await manager.run(root, (await manager.projectConfig(root)).setup);
+  assert.equal(result.exitCode, 0);
+  assert.equal(await fs.readFile(path.join(root, 'setup-done'), 'utf8'), 'yes');
+  await assert.rejects(manager.configure(root, { command: ['npm', 'run', 'dev'], setup: 'npm install' }), /argument array/);
+});
+
+ test('preview command fields roundtrip quotes, whitespace, empty and literal backslash arguments', async () => {
+  const { parsePreviewCommand, formatCommand } = await import('../web/src/islands/code/preview-command.ts');
+  const argv = ['node', '-e', 'console.log("hello")', "it's a test", '', String.raw`C:\tools\app`, 'two words'];
+  assert.deepEqual(parsePreviewCommand(formatCommand(argv)), argv);
+  assert.throws(() => parsePreviewCommand('npm "install'), /quotation/);
+});
+
+test('preview proposal persists without configuring or executing until accepted', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'preview-proposal-'));
+  try {
+    const configFile = path.join(root, 'config.json');
+    const manager = new ProcessManager({configFile});
+    await manager.propose(root, {command:['npm','run','dev'], setup:['npm','install'], port:5173, chatId:'chat-a', name:'App'});
+    assert.equal((await manager.status(root)).state, 'stopped');
+    assert.equal(await manager.projectConfig(root), null);
+    const restored = new ProcessManager({configFile});
+    assert.equal((await restored.proposal(root)).chatId, 'chat-a');
+    assert.equal((await restored.proposal(root)).port, 5173);
+    await assert.rejects(restored.propose(root, {command:['npm'], port:0}), /Port/);
+    await restored.propose(root, {saved:true});
+    assert.equal((await new ProcessManager({configFile}).proposal(root)).saved, true);
+    await restored.propose(root, {command:null});
+    assert.equal(await restored.proposal(root), null);
+  } finally { await fs.rm(root, {recursive:true,force:true}); }
+});
+
+test('ignored dependency builds recover only supported install commands without approving scripts', () => {
+  const {recoverIgnoredBuilds} = require('../desktop/dev-server.cjs');
+  const failure = {exitCode:1, output:'ERR_PNPM_IGNORED_BUILDS'};
+  assert.deepEqual(recoverIgnoredBuilds(['vp','install'],failure), ['vp','install','--','--config.strict-dep-builds=false']);
+  assert.deepEqual(recoverIgnoredBuilds(['/bin/pnpm','install'],failure), ['/bin/pnpm','install','--config.strict-dep-builds=false']);
+  assert.equal(recoverIgnoredBuilds(['npm','install'],failure),null);
+  assert.equal(recoverIgnoredBuilds(['vp','dev'],failure),null);
+  assert.equal(recoverIgnoredBuilds(['vp','install','--','--config.strict-dep-builds=true'],failure),null);
+  assert.equal(recoverIgnoredBuilds(['vp','install'],{...failure,state:'stopped'}),null);
+  assert.equal(recoverIgnoredBuilds(['vp','install'],{exitCode:1,output:'network error'}),null);
+});
+
+test('project-local executables take precedence over the host application toolchain', async t => {
+  const root = await fixture(t);
+  const bin = path.join(root,'node_modules','.bin');
+  await fs.mkdir(bin,{recursive:true});
+  await fs.writeFile(path.join(bin,'node'), '#!/bin/sh\nprintf "project toolchain"\n', {mode:0o755});
+  const manager = new ProcessManager();
+  t.after(()=>manager.stopAll());
+  const result = await manager.run(root,['node','--version']);
+  assert.equal(result.exitCode,0);
+  assert.equal(result.output,'project toolchain');
+});
+
+test('Yarn devEngines declaration takes precedence over unrelated lockfiles', async t => {
+  const root = await fixture(t,{dev:'node server.js'},{devEngines:{packageManager:{name:'yarn',version:'4.9.2'}}});
+  await fs.writeFile(path.join(root,'package-lock.json'),'{}');
+  const detected = await new ProcessManager().detect(root);
+  assert.deepEqual(detected.command,['yarn','run','dev']);
+});
+
+test('plain HTML starts with a real Python HTTP server without Node dependencies or Vite+', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(),'bd-static-preview-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  await fs.writeFile(path.join(root,'index.html'),'<h1>Plain HTML preview</h1>');
+  const manager = new ProcessManager();
+  t.after(()=>manager.stopAll());
+  const detected = await manager.detect(root);
+  assert.ok(detected,'Python is available on this test machine');
+  assert.equal(detected.source,'index.html');
+  assert.equal(detected.packageManager,null);
+  const command = detected.command.map(arg=>arg==='8000'?'0':arg);
+  const status = await manager.start(root,{command,waitMs:15000});
+  assert.equal(status.state,'running',status.tail);
+  assert.match(await (await fetch(status.url)).text(),/Plain HTML preview/);
+  assert.equal((await manager.stop(root)).state,'stopped');
+  await assert.rejects(fetch(status.url));
+});
+
+test('Yarn starts a real project server without Vite+', async t => {
+  const root = await fixture(t,{dev:'node server.js'},{packageManager:'yarn@1.22.22'});
+  const manager = new ProcessManager();
+  t.after(()=>manager.stopAll());
+  const status = await manager.start(root,{waitMs:15000});
+  assert.equal(status.state,'running',status.tail);
+  assert.deepEqual(status.command,['yarn','run','dev']);
+  assert.match(await (await fetch(status.url)).text(),/Fixture app/);
+  assert.equal((await manager.stop(root)).state,'stopped');
+});
+
+test('occupied preview port fails before launching instead of briefly showing another server', async t => {
+  const http=require('node:http');
+  const server=http.createServer((_req,res)=>res.end('Existing app'));
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const root=await fixture(t), manager=new ProcessManager();
+  await assert.rejects(manager.start(root,{url:`http://127.0.0.1:${server.address().port}/`}),/already in use/);
+  assert.equal(manager.servers.size,0);
+});
+
+test('preview server group exits when its editor process crashes', async t => {
+  const {spawn}=require('node:child_process');
+  const root=await fixture(t);
+  const script=`const fs=require('node:fs');const {ProcessManager}=require(${JSON.stringify(path.resolve(__dirname,'../desktop/dev-server.cjs'))});new ProcessManager().start(${JSON.stringify(root)},{waitMs:10000}).then(s=>fs.writeFileSync(${JSON.stringify(path.join(root,'ready.json'))},JSON.stringify(s)));setInterval(()=>{},1000);`;
+  const parent=spawn(process.execPath,['-e',script],{stdio:'ignore'});
+  t.after(()=>{try{parent.kill('SIGKILL')}catch{}});
+  let status;
+  for(let i=0;i<100&&!status;i++){try{status=JSON.parse(await fs.readFile(path.join(root,'ready.json'),'utf8'));}catch{await new Promise(resolve=>setTimeout(resolve,100));}}
+  assert.equal(status?.state,'running');
+  const serverPid=Number(await fs.readFile(path.join(root,'server.pid'),'utf8'));
+  t.after(()=>{try{process.kill(-status.pid,'SIGKILL')}catch{}});
+  parent.kill('SIGKILL');
+  assert.ok(await waitGone(serverPid,5000),'orphan server should be terminated');
+  await assert.rejects(fetch(status.url));
+});

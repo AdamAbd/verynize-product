@@ -37,7 +37,7 @@ const LOCK_FILES = [['pnpm-lock.yaml', 'pnpm'], ['yarn.lock', 'yarn'], ['bun.loc
 const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
 const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|\[::\])(?::\d{2,5})?(?:\/[^\s'"`<>)\]]*)?/i;
 
-const extraDirs = () => ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local/bin'), path.join(os.homedir(), '.bun/bin'), path.join(os.homedir(), '.volta/bin'), path.join(os.homedir(), 'Library/pnpm')];
+const extraDirs = () => ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local/bin'), path.join(os.homedir(), '.vite-plus/bin'), path.join(os.homedir(), '.bun/bin'), path.join(os.homedir(), '.volta/bin'), path.join(os.homedir(), 'Library/pnpm')];
 /** Child environment: the app's env plus the usual tool directories (GUI apps get a short PATH). */
 function childEnv(extra = {}) {
   const env = { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', NO_COLOR: '1', ...extra };
@@ -56,6 +56,15 @@ function resolveProgram(program, env) {
     try { fs.accessSync(candidate, fs.constants.X_OK); if (fs.statSync(candidate).isFile()) return candidate; } catch {}
   }
   throw new Error(`Command not found: ${program}. Install it or set the dev server command with configure_dev_server.`);
+}
+
+/** Retry only pnpm's unreviewed-build error; this does not approve dependency scripts. */
+function recoverIgnoredBuilds(argv, result) {
+  if (result.exitCode === 0 || result.state === 'stopped' || !/ERR_PNPM_IGNORED_BUILDS/.test(result.output || '')) return null;
+  const program = path.basename(argv[0] || '');
+  if (!['vp', 'pnpm'].includes(program) || !['install', 'i'].includes(argv[1])) return null;
+  if (argv.some(arg => /strict[-D]ep[-B]uilds|strict-dep-builds/i.test(arg))) return null;
+  return [...argv, ...(program === 'vp' && !argv.includes('--') ? ['--'] : []), '--config.strict-dep-builds=false'];
 }
 
 /** Validate an argument array; returns a copy. */
@@ -127,8 +136,9 @@ const groupAlive = pid => { try { process.kill(process.platform === 'win32' ? pi
 /** Spawn argv in cwd as a new process group, piping output into a RingLog. */
 function launch(argv, cwd, log, extraEnv = {}) {
   const env = childEnv(extraEnv);
+  env.PATH = path.join(cwd, 'node_modules/.bin') + path.delimiter + env.PATH;
   const program = resolveProgram(argv[0], env);
-  const child = spawn(program, argv.slice(1), { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn(process.execPath, [path.join(__dirname,'process-supervisor.cjs'), String(process.pid), program, ...argv.slice(1)], { cwd, env:{...env,ELECTRON_RUN_AS_NODE:'1'}, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
   child.stdout.on('data', data => log.write('stdout', data));
   child.stderr.on('data', data => log.write('stderr', data));
@@ -173,21 +183,41 @@ class ProcessManager {
   async loadConfig() {
     if (this.config) return this.config;
     let data = { version: 1, projects: {} };
-    if (this.configFile) { try { const parsed = JSON.parse(await fsp.readFile(this.configFile, 'utf8')); if (parsed && typeof parsed.projects === 'object' && !Array.isArray(parsed.projects)) data = { version: 1, projects: parsed.projects }; } catch {} }
+    if (this.configFile) { try { const parsed = JSON.parse(await fsp.readFile(this.configFile, 'utf8')); if (parsed && typeof parsed.projects === 'object' && !Array.isArray(parsed.projects)) data = { version: 1, projects: parsed.projects, proposals: parsed.proposals || {} }; } catch {} }
     this.config = data; return data;
+  }
+  async proposal(root) {
+    return (await this.loadConfig()).proposals?.[root] || null;
+  }
+  async propose(root, { command, setup, port, chatId, name, saved } = {}) {
+    const data = await this.loadConfig();
+    data.proposals ||= {};
+    if (saved === true && data.proposals[root]) data.proposals[root].saved = true;
+    else if (command === null) delete data.proposals[root];
+    else {
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port must be between 1 and 65535');
+      data.proposals[root] = { id: randomUUID(), command: checkArgv(command), ...(setup ? {setup: checkArgv(setup)} : {}), port, root, chatId: typeof chatId === 'string' ? chatId.slice(0,200) : null, name: typeof name === 'string' ? name.slice(0,200) : null, createdAt: new Date().toISOString() };
+    }
+    if (this.configFile) {
+      await fsp.mkdir(path.dirname(this.configFile), {recursive:true});
+      const temp = `${this.configFile}.${process.pid}.${randomUUID()}.tmp`;
+      await fsp.writeFile(temp, JSON.stringify(data,null,2) + '\n', {mode:0o600});
+      await fsp.rename(temp,this.configFile);
+    }
+    return { proposal: await this.proposal(root) };
   }
   async projectConfig(root) {
     const entry = (await this.loadConfig()).projects[root];
     if (!entry || typeof entry !== 'object') return null;
-    try { return { command: checkArgv(entry.command), ...(entry.url ? { url: normalizeLocalURL(entry.url) } : {}), updatedAt: entry.updatedAt || null }; } catch { return null; }
+    try { return { command: checkArgv(entry.command), ...(entry.setup ? { setup: checkArgv(entry.setup) } : {}), ...(entry.url ? { url: normalizeLocalURL(entry.url) } : {}), updatedAt: entry.updatedAt || null }; } catch { return null; }
   }
-  async configure(root, { command, url } = {}) {
+  async configure(root, { command, url, setup } = {}) {
     const data = await this.loadConfig();
     if (command === null) delete data.projects[root];
-    else data.projects[root] = { command: checkArgv(command), ...(url ? { url: normalizeLocalURL(url) } : {}), updatedAt: new Date().toISOString() };
+    else data.projects[root] = { command: checkArgv(command), ...(setup ? { setup: checkArgv(setup) } : {}), ...(url ? { url: normalizeLocalURL(url) } : {}), updatedAt: new Date().toISOString() };
     if (this.configFile) {
       await fsp.mkdir(path.dirname(this.configFile), { recursive: true });
-      const temp = `${this.configFile}.${process.pid}.tmp`;
+      const temp = `${this.configFile}.${process.pid}.${randomUUID()}.tmp`;
       await fsp.writeFile(temp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
       await fsp.rename(temp, this.configFile);
     }
@@ -197,23 +227,37 @@ class ProcessManager {
   // ---- start command detection ----
   async detect(root) {
     let pkg;
-    try { const file = path.join(root, 'package.json'); const stat = await fsp.stat(file); if (stat.size > 1024 * 1024) return null; pkg = JSON.parse(await fsp.readFile(file, 'utf8')); } catch { return null; }
+    try { const file = path.join(root, 'package.json'); const stat = await fsp.stat(file); if (stat.size > 1024 * 1024) return null; pkg = JSON.parse(await fsp.readFile(file, 'utf8')); } catch (error) { return error.code === 'ENOENT' ? this.detectStatic(root) : null; }
     const scripts = pkg && typeof pkg.scripts === 'object' ? pkg.scripts : {};
     const script = SCRIPT_ORDER.find(name => typeof scripts[name] === 'string' && scripts[name].trim());
     if (!script) return null;
     let packageManager = null;
     const declared = typeof pkg.packageManager === 'string' ? /^(npm|pnpm|yarn|bun)@/.exec(pkg.packageManager) : null;
     if (declared) packageManager = declared[1];
-    else for (const [file, pm] of LOCK_FILES) { try { await fsp.access(path.join(root, file)); packageManager = pm; break; } catch {} }
+    else if (['npm','pnpm','yarn','bun'].includes(pkg.devEngines?.packageManager?.name)) packageManager = pkg.devEngines.packageManager.name;
+    if (!packageManager) for (const [file, pm] of LOCK_FILES) { try { await fsp.access(path.join(root, file)); packageManager = pm; break; } catch {} }
+    if (!packageManager) for (const candidate of ['npm','yarn','pnpm','bun']) { try { resolveProgram(candidate,childEnv()); packageManager=candidate; break; } catch {} }
     packageManager ||= 'npm';
     return { command: [packageManager, 'run', script], script, scriptBody: scripts[script].slice(0, 500), packageManager, source: 'package.json' };
+  }
+  async detectStatic(root) {
+    try { if (!(await fsp.stat(path.join(root, 'index.html'))).isFile()) return null; } catch { return null; }
+    const env = childEnv();
+    for (const executable of [path.join(root,'.venv/bin/python'), 'python3', 'python']) {
+      try {
+        const program = resolveProgram(executable, env);
+        await fsp.access(program, fs.constants.X_OK);
+        return {command:[program,'-u','-m','http.server','8000','--bind','127.0.0.1'], packageManager:null, source:'index.html', script:null};
+      } catch { /* Try the next available interpreter. */ }
+    }
+    return null;
   }
   async resolveCommand(root, override) {
     if (override) return { command: checkArgv(override), source: 'argument' };
     const config = await this.projectConfig(root);
     if (config) return { command: config.command, url: config.url, source: 'saved' };
     const detected = await this.detect(root);
-    if (detected) return { command: detected.command, source: 'package.json' };
+    if (detected) return { command: detected.command, source: detected.source };
     return null;
   }
 
@@ -231,7 +275,7 @@ class ProcessManager {
   }
   async status(root) {
     const [config, detected] = await Promise.all([this.projectConfig(root), this.detect(root)]);
-    return { ...this.describe(this.servers.get(root), root), config, detected };
+    return { ...this.describe(this.servers.get(root), root), config, detected, proposal: await this.proposal(root) };
   }
   async start(root, { command, url, waitMs = 20000 } = {}) {
     const existing = this.servers.get(root);
@@ -239,6 +283,7 @@ class ProcessManager {
     const resolved = await this.resolveCommand(root, command);
     if (!resolved) throw new Error('No dev server command found: package.json has no dev/start/serve/preview script. Pass command (an argument array) or save one with configure_dev_server.');
     const fixedURL = url ? normalizeLocalURL(url) : resolved.url || null;
+    if (fixedURL && await probe(fixedURL, Date.now()+500)) throw new Error(`Preview address ${fixedURL} is already in use. Stop the existing server or choose another port before starting this preview.`);
     const log = new RingLog();
     const proc = { id: `dev-server:${root}`, kind: 'dev-server', root, argv: resolved.command, source: resolved.source, log, startedAt: Date.now(), exited: false, url: fixedURL, urlSource: fixedURL ? 'config' : null, ready: false };
     proc.child = launch(resolved.command, root, log);
@@ -249,7 +294,7 @@ class ProcessManager {
     });
     const urlFound = new Promise(resolve => {
       if (proc.url) return resolve();
-      const listener = entry => { const found = detectURL(entry.text); if (found) { proc.url = found; proc.urlSource = 'output'; log.listeners.delete(listener); resolve(); } };
+      const listener = entry => { const found = detectURL(entry.text); if (found) { proc.url = found; proc.urlSource = 'output'; log.listeners.delete(listener); this.watchReady(proc); resolve(); } };
       log.listeners.add(listener);
     });
     const deadline = Date.now() + Math.max(0, Math.min(120000, Number(waitMs) || 0));
@@ -346,4 +391,4 @@ class ProcessManager {
   }
 }
 
-module.exports = { ProcessManager, RingLog, detectURL, normalizeLocalURL, checkArgv, childEnv };
+module.exports = { recoverIgnoredBuilds, ProcessManager, RingLog, detectURL, normalizeLocalURL, checkArgv, childEnv };

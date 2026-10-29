@@ -1,0 +1,17 @@
+/* Reference crop is at 2×: 40px toolbar, 32px controls, 14px labels and 66px menu. */
+#preview-toolbar{position:absolute;left:50%;bottom:68px;transform:translateX(-50%);z-index:31;display:flex;align-items:center;gap:2px;height:40px;padding:4px;border:1px solid var(--toolbar-edge);border-radius:12px;background:var(--background);color:var(--muted-foreground);box-shadow:var(--shadow-toolbar);white-space:nowrap;pointer-events:auto}
+#preview-toolbar>button,#preview-toolbar>[data-state]{display:flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:0;padding:0 8px;border:0;border-radius:8px;background:transparent;color:inherit;font:400 14px/20px Inter,system-ui,sans-serif;cursor:pointer}
+#preview-toolbar button:disabled{opacity:.45;cursor:default}
+#preview-toolbar button:hover:not(:disabled),#preview-toolbar button[data-state=open]{background:var(--muted);color:var(--foreground)}
+#preview-toolbar button[aria-pressed=true]{color:var(--foreground)}
+#preview-toolbar button:focus-visible{outline:1px solid var(--ring);outline-offset:-1px}
+#preview-toolbar>[role=separator]{width:1px;height:24px;margin:0 2px;background:var(--border)}
+#preview-toolbar #preview-more{width:32px;padding:0}
+#preview-toolbar>p{position:absolute;bottom:100%;left:0;max-width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--background);white-space:normal;font-size:12px}
+#preview-options-menu{z-index:80;min-width:177px;padding:4px;border:1px solid var(--border);border-radius:10px;background:var(--background);color:var(--foreground);box-shadow:var(--shadow-toolbar);outline:none;pointer-events:auto}
+#preview-options-menu>[role^=menuitem]{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-radius:6px;font:400 14px/20px Inter,system-ui,sans-serif;outline:none;cursor:default;white-space:nowrap}
+#preview-options-menu>[data-highlighted]{background:var(--muted)}
+#preview-options-menu>[data-disabled]{opacity:.45}
+#preview-options-menu>[data-state=checked]{background:var(--muted)}
+#preview-options-menu svg{color:var(--muted-foreground);flex-shrink:0}
+body.code-mode #preview-toolbar,body.files-view #preview-toolbar{display:none}

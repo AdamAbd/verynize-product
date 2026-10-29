@@ -60,6 +60,7 @@ import {
   Shortcut,
 } from "./menu";
 import { Tip } from "./tip";
+import { PreviewToolbar } from "./PreviewToolbar";
 
 type Icon = ComponentType<{ className?: string }>;
 const TOOLS: { id: string; tool: string; label: string; key: string; icon: Icon }[] = [
@@ -94,6 +95,7 @@ export function CanvasOverlays() {
   return (
     <>
       <Toolbar />
+      <PreviewToolbar />
       {leftCollapsed && <PagePill />}
       <Help />
       <Zoom />

@@ -1,6 +1,6 @@
 {
   "name": "verynize",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "private": true,
   "description": "Independent local design editor reconstructed from documented Wonder workflows",
   "type": "module",
@@ -13,7 +13,7 @@
     "deploy": "npm run build && cf deploy --prebuilt",
     "test": "npm run build:ui && npm run test:canvas && npm run test:desktop && npm run test:integrations && npm run test:ux && npm run test:cloud && node tests/cloud-desktop.mjs",
     "test:canvas": "node tests/canvas.cjs && node tests/canvas-advanced.cjs && node tests/canvas-roundtrip.cjs && node tests/canvas-shaders.cjs && node tests/canvas-precision.cjs && node tests/canvas-resize.cjs && node tests/canvas-interactions.cjs && node tests/render-export.cjs && node tests/canvas-codec.cjs && node tests/canvas-layers-dnd.cjs && node tests/canvas-page.cjs && node tests/inspector-parity.cjs",
-    "test:desktop": "node --test tests/desktop-projects.cjs && node --test tests/git-changes.cjs && node --test tests/repositories.cjs && node tests/code-workspace.cjs && node tests/code-terminal.cjs && node tests/changes-panel.cjs && node tests/desktop-ipc.cjs && node tests/desktop-integration.cjs && node --test tests/figma-import.cjs && node tests/generation.cjs && node --test tests/agent-options.cjs tests/agent-auth.cjs tests/agent-behavior.cjs tests/agent-runtime.cjs tests/agent-runtime-live.cjs tests/agent-usage-memory.cjs tests/agent-tools.cjs tests/agent-commands.cjs tests/agent-live-status.cjs && node tests/agent-chat.cjs && node tests/chat-composer-menu.cjs && node tests/chat-indicators.cjs && node tests/chat-markdown.cjs && node tests/capture-fidelity.cjs && node tests/capture-live-state.cjs && node tests/mcp-live.cjs && node --test tests/dev-server.cjs && node tests/mcp-shell.cjs",
+    "test:desktop": "node --test tests/desktop-projects.cjs && node --test tests/git-changes.cjs && node --test tests/repositories.cjs && node tests/code-workspace.cjs && node tests/code-terminal.cjs && node tests/changes-panel.cjs && node tests/desktop-ipc.cjs && node tests/desktop-integration.cjs && node --test tests/figma-import.cjs && node tests/generation.cjs && node --test tests/agent-options.cjs tests/agent-auth.cjs tests/agent-behavior.cjs tests/agent-runtime.cjs tests/agent-runtime-live.cjs tests/agent-usage-memory.cjs tests/agent-tools.cjs tests/agent-commands.cjs tests/agent-live-status.cjs && node tests/agent-chat.cjs && node tests/chat-composer-menu.cjs && node tests/chat-indicators.cjs && node tests/chat-markdown.cjs && node tests/capture-fidelity.cjs && node tests/capture-live-state.cjs && node tests/preview-setup-lifecycle.cjs && node tests/preview-toolbar.cjs && node tests/preview-interaction.cjs && node tests/window-layout.cjs && node tests/mcp-live.cjs && node --test tests/dev-server.cjs && node tests/mcp-shell.cjs",
     "test:integrations": "node --test integrations/*.test.mjs",
     "test:cloud": "node tests/cloud-rooms.mjs",
     "mcp": "node integrations/mcp-server.mjs",

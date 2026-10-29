@@ -247,7 +247,7 @@ export type CodeWorkspaceApi = {
 declare global {
   interface Window {
     codeWorkspace?: CodeWorkspaceApi;
-    livePreview?: { show(url: string): void; hide(): void };
+    livePreview?: { show(url: string, options?: {root?: string; name?: string; chatId?: string}): void; ensure(options: {root: string; name?: string; chatId?: string; url?: string}): unknown; hide(): void };
   }
 }
 export const codeWorkspace = () => window.codeWorkspace;

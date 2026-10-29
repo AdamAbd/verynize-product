@@ -1,13 +1,165 @@
-(()=>{
- const workspace=document.getElementById('workspace');const pane=document.createElement('section');pane.id='live-preview';pane.hidden=true;pane.innerHTML=`<div class="live-preview-bar"><button id="live-back">← Canvas</button><input id="live-url" aria-label="Local app URL" placeholder="http://localhost:3000"><button id="live-go" title="Load app">↵</button><select id="live-size" aria-label="App viewport"><option value="100%">Responsive</option><option value="390px">Mobile · 390</option><option value="768px">Tablet · 768</option><option value="1000px">Desktop · 1000</option></select><button id="live-capture">Capture to canvas</button></div><div class="live-frame-wrap"><iframe name="verynize-live-preview" id="live-frame" title="Running local application" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads"></iframe></div><p id="live-status" role="status"></p>`;workspace.append(pane);
- const $=id=>document.getElementById(id);let currentURL='';
- const valid=value=>{const url=new URL(value);if(!['http:','https:'].includes(url.protocol)||!['localhost','127.0.0.1','[::1]'].includes(url.hostname)||url.username||url.password)throw Error('Enter a localhost application URL');return url.href;};
- const status=text=>{$('live-status').textContent=text;};
- function show(value){try{const url=valid(value);currentURL=url;$('live-url').value=url;$('live-frame').src=url;pane.hidden=false;document.body.classList.add('live-preview-open');status('Running app · interact with the page or capture an editable snapshot');localStorage.setItem('better-preview-url',url);}catch(e){status(e.message);throw e;}}
- function hide(){pane.hidden=true;document.body.classList.remove('live-preview-open');}
- $('live-back').onclick=hide;$('live-go').onclick=()=>{try{show($('live-url').value)}catch{}};$('live-url').onkeydown=e=>{if(e.key==='Enter')$('live-go').click();};$('live-size').onchange=()=>{$('live-frame').style.width=$('live-size').value;};
- $('live-capture').onclick=async()=>{if(!window.desktop){status('Capture requires the desktop app.');return;}$('live-capture').disabled=true;const fileId=window.fileLibrary?.currentId;try{const captured=await window.desktop.captureLivePreview({url:currentURL});if(fileId!==window.fileLibrary?.currentId)throw Error('Document changed during capture. Capture again in the intended file.');if(captured.document){const doc=window.design.getDocument(),target=doc.pages.find(p=>p.id===doc.activePage);const nodes=captured.document.pages.flatMap(p=>p.nodes),ids=new Map(nodes.map(n=>[n.id,crypto.randomUUID()]));target.nodes.push(...nodes.map(n=>({...n,id:ids.get(n.id),parentId:n.parentId?ids.get(n.parentId):null})));window.design.setDocument(doc);}else window.design.importHTML(captured.html);hide();const message=captured.warnings?.length?`Captured with ${captured.warnings.length} approximations. ${captured.warnings.slice(0,3).join(' ')}`:'Captured app layers';const footer=document.querySelector('#workspace footer');if(footer)footer.textContent=message;}catch(e){status(e.message);}finally{$('live-capture').disabled=false;}};
- function reveal(){if(!currentURL)return false;pane.hidden=false;document.body.classList.add('live-preview-open');return true;} // show the loaded app again without reloading it (agent shell tools)
- window.livePreview={show,hide,reveal,getURL:()=>currentURL};
- const button=document.createElement('button');button.id='show-live-preview';button.title='Running app';button.setAttribute('aria-label','Running app');button.textContent='Running app';button.onclick=async()=>{const url=await window.askText('Local application URL',currentURL||localStorage.getItem('better-preview-url')||'http://localhost:3000');if(url){try{show(url)}catch(e){alert(e.message)}}};document.getElementById('preview').after(button);
+(() => {
+  const entries = new Map();
+  let activeId = null;
+  const valid = value => {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.username || url.password) throw Error('Enter a localhost application URL');
+    return url.href;
+  };
+  const allNodes = () => window.design.getDocument().pages.flatMap(page => page.nodes);
+  const current = () => entries.get(activeId);
+  const changed = () => window.dispatchEvent(new Event('bd:preview-state'));
+  function selected() { const ids=window.design.getSelection(); return ids.length===1 ? entries.get(ids[0]) : null; }
+  function releaseInput(entry) { if(entry?.inputToApp){entry.inputToApp=false;void window.desktop?.previewInput?.({enabled:false});} }
+  const project = () => { const s = window.agentWorkspace?.getState?.() || {}; return {root: s.activeRoot || '', name: s.projectName || s.activeRoot?.split('/').pop() || 'Local app', chatId: s.conversationId || ''}; };
+  function activate(entry) {
+    for (const other of entries.values()) {
+      other.el.removeAttribute('id'); other.frame.removeAttribute('id'); other.frame.name = '';
+      for (const [key, el] of Object.entries(other.controls)) if (key.startsWith('live-')) el.removeAttribute('id');
+    }
+    if(current()!==entry) releaseInput(current());
+    activeId = entry.node.id;
+    entry.el.id = 'live-preview'; entry.frame.id = 'live-frame'; entry.frame.name = 'verynize-live-preview';
+    for (const [key, el] of Object.entries(entry.controls)) if (key.startsWith('live-')) el.id = key;
+  }
+  function paint(entry, state, message = '') {
+    if(state!=='running'){releaseInput(entry);entry.mode='select';entry.frame.style.pointerEvents='none';}
+    entry.state = state; entry.el.dataset.previewState = state;
+    entry.controls.state.textContent = state === 'running' ? '' : state === 'starting' ? 'Setting up preview…' : state === 'error' ? 'Preview failed' : 'Preview paused';
+    entry.controls.toggle.textContent = state === 'running' || state === 'starting' ? '⊙ Stop' : '▶ Start';
+    entry.controls.title.textContent = state === 'starting' ? 'Starting your app' : state === 'error' ? 'Unable to start preview' : 'Ready to start your preview';
+    entry.controls.message.textContent = message || (state === 'starting' ? 'Waiting for the local application to be ready…' : 'Start this preview to connect to your local app.');
+    entry.controls.placeholder.hidden = state === 'running'; entry.frame.hidden = state !== 'running'; changed();
+  }
+  function navigate(entry, url, remember = true) {
+    const target = valid(url);
+    activate(entry);
+    if (entry.url !== target || !entry.frame.getAttribute('src')) entry.frame.src = target;
+    entry.url = target; entry.controls['live-url'].value = new URL(target).pathname + new URL(target).search + new URL(target).hash;
+    paint(entry, 'running');
+    if (remember && entry.node.preview.url !== target) window.design.updateNodes([entry.node.id], {preview: {...entry.node.preview, url: target}});
+  }
+  async function toggle(entry) {
+    activate(entry);
+    const api = window.desktop?.devServer;
+    if (!api || !entry.node.preview.root) { paint(entry, 'error', 'Connect this preview to a repository through chat.'); return; }
+    try {
+      if (entry.state === 'running' || entry.state === 'starting') {
+        await api.stop({root: entry.node.preview.root}); entry.settingUp=false; entry.frame.removeAttribute('src'); paint(entry, 'paused');
+      } else {
+        paint(entry, 'starting');
+        const result = await api.start({root: entry.node.preview.root});
+        if (result.state === 'running' && result.url) navigate(entry, result.url);
+        else if (result.state !== 'starting') paint(entry, 'error', result.error || result.tail || 'The app did not start.');
+      }
+    } catch (error) { paint(entry, 'error', error.message); }
+  }
+  async function capture(entry) {
+    activate(entry);
+    const fileId = window.fileLibrary?.currentId;
+    entry.capturing=true;changed();
+    try {
+      const captured = await window.desktop.captureLivePreview({url: entry.url});
+      if (fileId !== window.fileLibrary?.currentId) throw Error('Document changed during capture.');
+      if (captured.document) {
+        const doc = window.design.getDocument(), page = doc.pages.find(p => p.id === doc.activePage);
+        const nodes = captured.document.pages.flatMap(p => p.nodes), ids = new Map(nodes.map(n => [n.id, crypto.randomUUID()]));
+        page.nodes.push(...nodes.map(n => ({...n, id: ids.get(n.id), parentId: n.parentId ? ids.get(n.parentId) : null, ...(!n.parentId ? {x: n.x + entry.node.x + entry.node.w + 80, y: n.y + entry.node.y} : {})})));
+        window.design.setDocument(doc);
+      } else window.design.importHTML(captured.html);
+      entry.controls.message.textContent = 'Captured editable layers beside the preview.';
+    } catch (error) { entry.controls.message.textContent = error.message; }
+    finally { entry.capturing=false;changed(); }
+  }
+  function create(node, el) {
+    el.innerHTML = `<div class="preview-breadcrumb"><span data-part="breadcrumb"></span><span class="preview-local">Local</span></div><section class="preview-surface"><div class="live-preview-bar"><button data-part="back" aria-label="Back">‹</button><button data-part="forward" aria-label="Forward">›</button><button data-part="live-reload" aria-label="Reload preview">↻</button><span data-part="state"></span><input data-part="live-url" aria-label="Preview path" value="/"/><button data-part="toggle">▶ Start</button><button data-part="live-expand" aria-label="Expand preview" aria-pressed="false">⤢</button></div><div class="live-frame-wrap"><iframe title="Running local application" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads"></iframe><div class="preview-placeholder" data-part="placeholder"><div class="preview-setup-card"><strong data-part="title">Ready to start your preview</strong><small data-part="project"></small><p data-part="message">Start this preview to connect to your local app.</p><button data-part="start">▶ Start preview</button></div></div></div></section><form class="preview-edit" hidden><label>Element selector<input name="selector" value="body"/></label><button type="button" data-part="inspect">Inspect</button><label>Text<input name="text"/></label><label>Text color<input name="color" placeholder="#ffffff"/></label><label>Background<input name="backgroundColor" placeholder="#171717"/></label><label>Font size<input name="fontSize" placeholder="16px"/></label><div><button type="submit">Apply</button><button type="button" data-part="undo">Undo</button></div><p role="status"></p></form>`;
+    const controls = Object.fromEntries([...el.querySelectorAll('[data-part]')].map(control => [control.dataset.part, control]));
+    const entry = {el, node, controls, frame: el.querySelector('iframe'), url: '', state: 'paused', mode:'select', inputToApp:false, fileId: window.fileLibrary?.currentId, identity: JSON.stringify([node.preview.root,node.preview.chatId])};
+    entry.frame.style.pointerEvents='none';
+    entries.set(node.id, entry);
+    el.classList.add('canvas-preview');
+    // Toolbar inputs own pointer gestures; frame borders and resize handles retain canvas gestures.
+    for (const region of el.querySelectorAll('.live-preview-bar,.preview-context,.preview-placeholder,.preview-edit')) region.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      if (!window.design.getSelection().includes(entry.node.id)) window.design.setSelection([entry.node.id]);
+      activate(entry);
+      if (event.target.closest('button,input,form')) event.stopPropagation();
+    });
+    el.addEventListener('pointerdown', () => activate(entry));
+    controls.toggle.onclick = controls.start.onclick = () => void toggle(entry);
+    controls['live-reload'].onclick = () => { if (entry.url) entry.frame.src = entry.url; };
+    controls.back.onclick = async () => { activate(entry); try { await window.desktop.previewNavigate({direction:'back'}); } catch (error) { controls.message.textContent=error.message; } };
+    controls.forward.onclick = async () => { activate(entry); try { await window.desktop.previewNavigate({direction:'forward'}); } catch (error) { controls.message.textContent=error.message; } };
+    controls['live-url'].onkeydown = event => { if (event.key === 'Enter' && entry.url) { try { navigate(entry, new URL(event.target.value, entry.url).href); } catch (error) { controls.message.textContent = error.message; } } };
+    controls['live-expand'].onclick = () => {
+      const expanded = controls['live-expand'].getAttribute('aria-pressed') !== 'true';
+      controls['live-expand'].setAttribute('aria-pressed', String(expanded));
+      if (expanded) { entry.view = window.design.getView(); window.design.setSelection([node.id]); const rect = document.getElementById('canvas-wrap').getBoundingClientRect(); const zoom = Math.min((rect.width - 100) / node.w, (rect.height - 140) / node.h, 2); window.design.setCamera(50 - node.x * zoom, 60 - node.y * zoom, zoom); }
+      else if (entry.view) window.design.setView(entry.view);
+    };
+    const form = el.querySelector('form');
+    controls.inspect.onclick = async () => { try { activate(entry); const result = await window.desktop.previewInspect({selector: form.elements.selector.value}); form.elements.text.disabled=result.text===null; for (const key of ['text','color','backgroundColor','fontSize']) form.elements[key].value = key === 'text' ? result.text || '' : result.styles?.[key] || ''; } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
+    form.onsubmit = async event => { event.preventDefault(); try { activate(entry); const styles = {}; for (const key of ['color','backgroundColor','fontSize']) if (form.elements[key].value) styles[key] = form.elements[key].value; await window.desktop.previewEdit({selector: form.elements.selector.value, ...(form.elements.text.disabled?{}:{text: form.elements.text.value}), styles}); form.querySelector('[role=status]').textContent = 'Applied to the running page.'; } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
+    controls.undo.onclick = async () => { try { activate(entry); await window.desktop.previewEdit({undo: true}); } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
+    paint(entry, 'paused');
+    return entry;
+  }
+  function renderNode(node, el) {
+    const entry = entries.get(node.id) || create(node, el);
+    const fileId=window.fileLibrary?.currentId;
+    const identity=JSON.stringify([node.preview.root,node.preview.chatId]);
+    if(entry.identity!==identity || entry.fileId!==fileId){entry.frame.removeAttribute('src');entry.url='';entry.settingUp=false;entry.controls['live-url'].value='/';paint(entry,'paused');}
+    entry.fileId=fileId;entry.identity=identity;entry.node = node;
+    el.classList.add('canvas-preview'); el.style.color='var(--shell-text,#ddd)';el.style.fontSize='13px';el.style.fontFamily='Inter,system-ui,sans-serif'; el.style.overflow = 'visible'; el.style.padding = '0';
+    entry.controls.breadcrumb.textContent = node.preview.name || node.name;
+    entry.controls.project.textContent = node.preview.name || node.preview.root.split('/').pop() || 'Local app';
+    if (!activeId) activate(entry);
+    return entry;
+  }
+  function focus(entry){const rect=document.getElementById('canvas-wrap').getBoundingClientRect(),zoom=Math.max(.05,Math.min((rect.width-100)/entry.node.w,(rect.height-140)/entry.node.h,1));window.design.setCamera(50-entry.node.x*zoom,60-entry.node.y*zoom,zoom);}
+  function ensure(options = {}) {
+    const info = {...project(), ...options};
+    let doc = window.design.getDocument();
+    const found = doc.pages.flatMap(p => p.nodes.map(n => ({page: p, node: n}))).find(({node}) => node.preview && node.preview.root === info.root && (node.preview.chatId || '') === (info.chatId || ''));
+    if (found) { window.design.setActivePage(found.page.id); activeId = found.node.id; if (!entries.has(activeId)) window.design.setSelection([activeId]); activate(entries.get(activeId));focus(entries.get(activeId)); return activeId; }
+    const nodes = doc.pages.find(p => p.id === doc.activePage).nodes;
+    const right = nodes.length ? Math.max(...nodes.map(n => n.x + n.w)) + 100 : 80;
+    const preview = {root: info.root, name: info.name || 'Local app', chatId: info.chatId || '', ...(info.url ? {url: valid(info.url)} : {})};
+    const id = window.design.addNode('frame', {name: `${preview.name} · Preview`, parentId: null, x: right, y: 100, w: 1200, h: 800, color: '#191919', radius: 8, padding: 0, preview});
+    activate(entries.get(id));focus(entries.get(id));
+    return id;
+  }
+  function show(value, options = {}) { const url = valid(value); const id = ensure({...options, url}); const entry=entries.get(id); navigate(entry, url); window.design.setSelection([id]); const rect=document.getElementById('canvas-wrap').getBoundingClientRect(), zoom=Math.min((rect.width-100)/entry.node.w,(rect.height-140)/entry.node.h,1); window.design.setCamera(50-entry.node.x*zoom,60-entry.node.y*zoom,zoom); document.body.classList.add('live-preview-open'); }
+  function hide() { document.body.classList.remove('live-preview-open'); window.design.setSelection([]); }
+  function reveal() { const entry = current(); if (!entry) return false; window.design.setSelection([entry.node.id]); return true; }
+  function selectionState() {const entry=selected();return entry?{nodeId:entry.node.id,state:entry.state,mode:entry.mode,inputToApp:entry.inputToApp,url:entry.url,capturing:!!entry.capturing}:null;}
+  function navigateMode(){const entry=selected();if(!entry)return;activate(entry);entry.mode='navigate';entry.el.querySelector('form').hidden=true;entry.frame.style.pointerEvents=entry.state==='running'?'auto':'none';changed();}
+  function editMode(){const entry=selected();if(!entry)return;activate(entry);releaseInput(entry);entry.mode='edit';entry.frame.style.pointerEvents='none';entry.el.querySelector('form').hidden=false;changed();}
+  async function sendAllInput(){const entry=selected();if(!entry||entry.state!=='running')return;activate(entry);const enabled=!entry.inputToApp;if(enabled)navigateMode();await window.desktop.previewInput({enabled});entry.inputToApp=enabled;if(enabled)entry.frame.focus();changed();}
+  async function openInBrowser(){const entry=selected();if(!entry||!entry.url)return;activate(entry);await window.desktop.previewOpenBrowser();}
+  document.addEventListener('pointerdown',event=>{const entry=current();if(entry?.inputToApp&&!event.target.closest('#preview-toolbar')){releaseInput(entry);changed();}},true);
+  window.addEventListener('message',event=>{const entry=current();if(entry?.inputToApp&&event.source===entry.frame.contentWindow&&event.data?.type==='verynize-preview-release-input'){releaseInput(entry);changed();}});
+  window.addEventListener('bd:preview-input-released',()=>{for(const entry of entries.values())entry.inputToApp=false;changed();});
+  window.livePreview = {show, hide, reveal, ensure, renderNode, getSelectionState:selectionState,navigateMode,editMode,captureSelected:()=>{const entry=selected();return entry?capture(entry):Promise.resolve();},sendAllInput,openInBrowser, nodeElement: id => entries.get(id)?.el, getURL: () => current()?.url || '', getNodeId: () => activeId};
+  window.addEventListener('bd:preview-setup-state', event => {for(const entry of entries.values())if(entry.node.preview.root===event.detail.root){entry.settingUp=event.detail.state==='setting-up';paint(entry,event.detail.state==='failed'?'error':'starting',event.detail.message||'');}});
+  window.design.subscribe(doc => {
+    const alive = new Set(doc.pages.find(p => p.id === doc.activePage).nodes.filter(n => n.preview).map(n => n.id));
+    for (const [id, entry] of entries) if (!alive.has(id)) { releaseInput(entry);entry.frame.removeAttribute('src'); entries.delete(id); if (id === activeId) activeId = null; }
+    const chosen=selected();
+    for(const entry of entries.values()){if(entry!==chosen){releaseInput(entry);entry.mode='select';entry.el.querySelector('form').hidden=true;}entry.frame.style.pointerEvents=entry===chosen&&entry.state==='running'&&entry.mode==='navigate'?'auto':'none';}
+    if(chosen)activate(chosen);changed();
+  });
+  // Rehydrate persisted frames, but never auto-run code when opening a document.
+  window.design.setSelection(window.design.getSelection());
+  setInterval(async () => {
+    for (const entry of entries.values()) {
+      if (!entry.node.preview.root || !window.desktop?.devServer || !entry.el.isConnected) continue;
+      try { const state = await window.desktop.devServer.status({root: entry.node.preview.root}); if (!entry.el.isConnected) continue;
+        if(state.setup?.state==='running'){entry.settingUp=true;paint(entry,'starting',state.setup.tail||'Running setup command…');continue;}if(entry.settingUp)continue;
+        if (state.state === 'running' && state.url && entry.state === 'starting') navigate(entry, state.url);
+        else if (['stopped','failed','exited'].includes(state.state) && ['starting','running'].includes(entry.state)) { entry.frame.removeAttribute('src'); paint(entry, ['failed','exited'].includes(state.state) ? 'error' : 'paused', state.error || state.tail || (state.state==='exited'?'The preview process exited. Check the run command.':'')); }
+      } catch { /* Repository may no longer be connected; explicit Start reports the error. */ }
+    }
+  }, 1500);
+  const button = document.createElement('button'); button.id = 'show-live-preview'; button.textContent = 'Running app'; button.onclick = async () => { const url = await window.askText('Local application URL', current()?.url || 'http://localhost:3000'); if (url) show(url); }; document.getElementById('preview').after(button);
 })();

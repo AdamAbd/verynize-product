@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { hideLegacy } from "@/lib/bridge";
 import { mountIsland } from "@/lib/mount";
+import { PreviewSetup } from "./chat/preview-setup";
 import { Composer } from "./chat/composer";
 import { DockHeader } from "./chat/header";
 import { QueueList } from "./chat/queue";
@@ -50,6 +51,7 @@ function Island() {
       {header && createPortal(<DockHeader state={state} />, header)}
       <Transcript state={state} />
       <QueueList state={state} />
+      <PreviewSetup state={state} />
       <Composer state={state} />
     </>
   );

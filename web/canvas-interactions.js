@@ -244,8 +244,22 @@
 
     // ---------- Pointer: pan / move / resize / marquee / draw ----------
     function track(e, move, end) {
-      const up = ev => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); end?.(ev); };
-      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+      const pointerId = e.pointerId, buttonMask = e.button === 1 ? 4 : e.button === 2 ? 2 : 1;
+      let finished = false;
+      const up = ev => {
+        if (finished || (ev.pointerId !== undefined && ev.pointerId !== pointerId)) return;
+        finished = true;
+        window.removeEventListener('pointermove', moving); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+        window.removeEventListener('blur', up); wrap.removeEventListener('lostpointercapture', up);
+        try { if (wrap.hasPointerCapture(pointerId)) wrap.releasePointerCapture(pointerId); } catch {}
+        end?.(ev);
+      };
+      const moving = ev => { if (ev.pointerId !== pointerId) return; if (!(ev.buttons & buttonMask)) { up(ev); return; }
+        if (Math.hypot(ev.clientX-e.clientX,ev.clientY-e.clientY)>3) { try { if(!wrap.hasPointerCapture(pointerId))wrap.setPointerCapture(pointerId); } catch {} }
+        move(ev); };
+      window.addEventListener('pointermove', moving); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+      window.addEventListener('blur', up); wrap.addEventListener('lostpointercapture', up);
+      // The canvas wrapper survives rerenders and keeps release events outside the iframe.
       e.preventDefault();
     }
     function startPan(e) {
@@ -501,7 +515,7 @@
     // Name labels above top-level frames (artboards); drag a label to move its frame.
     function drawFrameLabels() {
       frameLabels.replaceChildren();
-      for (const n of ed.nodes().filter(n => !n.parentId && n.type === 'frame' && !n.hidden)) {
+      for (const n of ed.nodes().filter(n => !n.parentId && n.type === 'frame' && !n.hidden && !n.preview)) {
         const r = worldRect(n.id); if (!r || sel().has(n.id)) continue;
         const label = document.createElement('span'); label.className = 'frame-label'; label.textContent = n.name; label.dataset.id = n.id;
         label.style.left = toScreenX(r.x) + 'px'; label.style.top = toScreenY(r.y) - 18 + 'px';
