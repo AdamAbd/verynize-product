@@ -16,7 +16,7 @@ export type LayerNode = {
   locked?: boolean;
   [key: string]: unknown;
 };
-export type DesignPage = { id: string; name: string; nodes: LayerNode[] };
+export type DesignPage = { id: string; name: string; nodes: LayerNode[]; background?: string };
 export type DesignDocument = {
   version: number;
   name: string;
@@ -31,7 +31,12 @@ export type DesignApi = {
   subscribe(fn: (doc: DesignDocument) => void): () => void;
   getSelection(): string[];
   setSelection(ids: string[]): void;
-  updateNodes(ids: string[], patch: Partial<LayerNode> | ((node: LayerNode) => Partial<LayerNode>)): boolean;
+  updateNodes(
+    ids: string[],
+    patch: Partial<LayerNode> | ((node: LayerNode) => Partial<LayerNode>),
+  ): boolean;
+  /** Patch the active page (validated, one undo step); `undefined` values remove the key. */
+  updatePage(patch: Partial<Omit<DesignPage, "id" | "nodes">>): boolean;
   setActivePage(id: string): void;
   canUndo(): boolean;
   canRedo(): boolean;
@@ -167,7 +172,12 @@ export function takeOver(id: string, options: { park?: boolean } = {}): HTMLElem
   pending.set(id, el);
   if (!pendingObserver) {
     pendingObserver = new MutationObserver(claimPending);
-    pendingObserver.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["id"] });
+    pendingObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["id"],
+    });
   }
   claimPending();
   return el;
@@ -175,7 +185,9 @@ export function takeOver(id: string, options: { park?: boolean } = {}): HTMLElem
 
 /** The legacy element for an id, whether or not it has been taken over. */
 export function legacy<T extends HTMLElement = HTMLElement>(id: string): T | null {
-  return (taken.get(id) ?? document.getElementById(`legacy-${id}`) ?? document.getElementById(id)) as T | null;
+  return (taken.get(id) ??
+    document.getElementById(`legacy-${id}`) ??
+    document.getElementById(id)) as T | null;
 }
 
 /** Click a legacy control (runs its original handler). */
@@ -184,7 +196,10 @@ export function legacyClick(id: string) {
 }
 
 /** Set a legacy form control value and fire `change` (and `input`) like a user edit. */
-export function legacySet(el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null, value: string | boolean) {
+export function legacySet(
+  el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null,
+  value: string | boolean,
+) {
   if (!el) return;
   if (el instanceof HTMLInputElement && el.type === "checkbox") el.checked = Boolean(value);
   else el.value = String(value);
