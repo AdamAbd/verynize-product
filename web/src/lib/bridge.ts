@@ -17,6 +17,8 @@ export type LayerNode = {
   [key: string]: unknown;
 };
 export type DesignPage = { id: string; name: string; nodes: LayerNode[]; background?: string };
+/** An SVG in the file's icon library (`document.icons`); `src` is a base64 `data:image/svg+xml` URL. */
+export type DesignIcon = { id: string; name: string; src: string };
 export type DesignDocument = {
   version: number;
   name: string;
@@ -35,6 +37,10 @@ export type DesignApi = {
     ids: string[],
     patch: Partial<LayerNode> | ((node: LayerNode) => Partial<LayerNode>),
   ): boolean;
+  /** Insert a layer (one undo step) where the user is looking; selects it and returns its id. */
+  addNode(type: string, extra?: Partial<LayerNode>): string;
+  /** Replace the file's icon library (validated, one undo step); an empty list removes it. */
+  setIcons(icons: DesignIcon[]): boolean;
   /** Patch the active page (validated, one undo step); `undefined` values remove the key. */
   updatePage(patch: Partial<Omit<DesignPage, "id" | "nodes">>): boolean;
   setActivePage(id: string): void;

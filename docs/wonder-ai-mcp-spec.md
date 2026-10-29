@@ -326,6 +326,7 @@ All tools take `pageId`. Ids are short ids, unique per page: `<root>.<abc>`. Add
 | `duplicate_elements` | `{pageId, id, newArtboard?, count?, overrides?}` | new ids/trees |
 | `delete_elements`, `rename_elements` | ids / `{id,label}[]` | |
 | `get/create/update/delete_design_tokens` | `tokens[{name:'color/x', type, value}]` | `{id, name, type, cssVar, value}`; replace today's hex-only `set_token` op |
+| `bind_variables` | `bindings[{id, property, token}]` (`token: null` unbinds) | binds radius/gap/padding/strokeWidth/fontSize/letterSpacing/lineHeight/opacity/fontFamily/fontWeight to a typed token; token `type` may be color, dimension, number, fontFamily or fontWeight |
 | `list_documents`, `open_document`, `create_document`, `create_page`, `rename_page` | | |
 | `execute_action` | `{id, params?, paramsList?}` | expose the existing command-palette actions (`web/ui.js`) with param schemas and `isAvailable` |
 | `finish_artboard` | `{pageId, id}` | select and zoom the node in the editor; return a `verynize://node/<doc>/<page>/<id>` link |

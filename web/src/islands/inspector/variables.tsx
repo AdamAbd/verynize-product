@@ -204,15 +204,7 @@ function GroupLabel({ children }: { children: string }) {
   return <div className="flex h-7 items-center px-3 text-xs text-foreground-3">{children}</div>;
 }
 
-export function VariablesSection({
-  open,
-  onToggle,
-  grow,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  grow: boolean;
-}) {
+export function VariablesSection({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const doc = useDesign();
   const tokens = Object.entries(doc.tokens ?? {});
   const vars = Object.entries(variablesOf(doc));
@@ -232,10 +224,9 @@ export function VariablesSection({
     <section
       id="insp-variables"
       className={cn(
-        "flex min-h-0 shrink-0 flex-col border-b border-divider",
-        // Accordion: an open Variables list keeps its own height and only shrinks (and scrolls) when space runs out.
-        open && grow && "shrink",
-        open && !grow && "max-h-1/2",
+        "flex min-h-0 flex-col border-b border-divider",
+        // Panel accordion (inspector.tsx): an open section fills the space, collapsed ones keep their header height.
+        open ? "flex-1" : "shrink-0",
       )}
     >
       <PanelSectionHeader

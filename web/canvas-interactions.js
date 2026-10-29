@@ -115,7 +115,17 @@
         setCamera(cam.x - dx, cam.y - dy, cam.zoom);
       }
     }, {passive: false});
-    new ResizeObserver(() => { if (autoFit) fit(true); else applyCamera(); }).observe(wrap);
+    // Opening or closing a panel on the left (layers, chat dock, chats sidebar) moves the viewport's left edge: shift the
+    // camera by the same amount so the artwork stays put on screen instead of sliding with the panel (panels are ≥200px
+    // wide; smaller moves are start-up layout settling).
+    let viewportLeft = null, panelToggledAt = -Infinity;
+    new MutationObserver(() => { panelToggledAt = performance.now(); }).observe(document.body, {attributes: true, attributeFilter: ['class']});
+    new ResizeObserver(() => {
+      const left = viewport().left, moved = viewportLeft !== null && Math.abs(left - viewportLeft) >= 100 && performance.now() - panelToggledAt < 1000;
+      if (moved) { cam.x -= left - viewportLeft; autoFit = false; }
+      viewportLeft = left;
+      if (autoFit) fit(true); else applyCamera();
+    }).observe(wrap);
     // Bring a layer into view by moving the camera (scrolling cannot reach negative world space).
     function reveal(id) {
       const b = worldRect(id); if (!b) return;

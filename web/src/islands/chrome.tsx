@@ -1,14 +1,14 @@
 // Island entry: chrome. Owned by the "chrome" workstream (see web/src/islands/README.md).
 // Window chrome (replaces header.app-chrome), main grid + panel collapse CSS, canvas overlays in #workspace
 // (toolbar, page pill, help, zoom) and the main app menu.
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { mountIsland } from "@/lib/mount";
-import { useWindowEvent } from "@/lib/bridge";
+import { useBodyClass, useWindowEvent } from "@/lib/bridge";
 import { TitleBar } from "./chrome/TitleBar";
 import { AppMenu } from "./chrome/AppMenu";
 import { CanvasOverlays } from "./chrome/CanvasOverlays";
-import { applyLayout, type LayoutName } from "./chrome/hooks";
+import { applyLayout, toggleBodyClass, type LayoutName } from "./chrome/hooks";
 import { initLegacy } from "./chrome/legacy";
 import "./chrome/chrome.css";
 
@@ -18,7 +18,9 @@ function useLayoutShortcuts() {
     if (!e.altKey || e.metaKey || e.ctrlKey || e.defaultPrevented) return;
     const target = e.target as HTMLElement | null;
     if (target?.closest("input, textarea, select, [contenteditable=true]")) return;
-    const name = ({ Digit1: "details", Digit2: "design", Digit0: "canvas" } as Record<string, LayoutName>)[e.code];
+    const name = (
+      { Digit1: "details", Digit2: "design", Digit0: "canvas" } as Record<string, LayoutName>
+    )[e.code];
     if (!name) return;
     e.preventDefault();
     applyLayout(name);
@@ -26,8 +28,26 @@ function useLayoutShortcuts() {
   useWindowEvent("keydown", onKey);
 }
 
+/** Opening the chat dock hides the layers panel (Wonder 29) and closing it restores the panel; while the dock is
+ * open the user can still show the layers beside it (page pill) or hide them again (file header). */
+function useChatLayers() {
+  const chatOpen = useBodyClass("agent-chat-open");
+  const restore = useRef(false);
+  useEffect(() => {
+    const body = document.body.classList;
+    if (chatOpen) {
+      restore.current = !body.contains("left-collapsed");
+      if (restore.current) toggleBodyClass("left-collapsed", true);
+    } else if (restore.current) {
+      restore.current = false;
+      toggleBodyClass("left-collapsed", false);
+    }
+  }, [chatOpen]);
+}
+
 function Island({ overlayHost }: { overlayHost: HTMLElement | null }) {
   useLayoutShortcuts();
+  useChatLayers();
   return (
     <>
       <TitleBar />

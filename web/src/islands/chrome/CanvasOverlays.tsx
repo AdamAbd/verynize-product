@@ -15,7 +15,14 @@ import {
   Scan,
   Type,
 } from "lucide-react";
-import { activePage, legacySet, legacy, portalContainer, useBodyClass, useDesign } from "@/lib/bridge";
+import {
+  activePage,
+  legacySet,
+  legacy,
+  portalContainer,
+  useBodyClass,
+  useDesign,
+} from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import {
   CanvasLayoutIcon,
@@ -23,7 +30,9 @@ import {
   DetailsLayoutIcon,
   LogoIcon,
   PanelLeftIcon,
-  ShaderIcon, PlusIcon } from "@/components/icons";
+  ShaderIcon,
+  PlusIcon,
+} from "@/components/icons";
 import {
   applyLayout,
   currentLayout,
@@ -81,12 +90,11 @@ const floating = "absolute z-30 border border-toolbar-edge bg-background";
 export function CanvasOverlays() {
   const filesView = useBodyClass("files-view");
   const leftCollapsed = useBodyClass("left-collapsed");
-  const chatOpen = useBodyClass("agent-chat-open");
   if (filesView) return <ZoomProxies />;
   return (
     <>
       <Toolbar />
-      {(leftCollapsed || chatOpen) && <PagePill chatOpen={chatOpen} />}
+      {leftCollapsed && <PagePill />}
       <Help />
       <Zoom />
     </>
@@ -119,7 +127,10 @@ function Toolbar() {
                 id={id}
                 aria-label={label}
                 aria-pressed={tool === name}
-                className={cn(toolButton, tool === name && "bg-accent text-foreground hover:bg-accent")}
+                className={cn(
+                  toolButton,
+                  tool === name && "bg-accent text-foreground hover:bg-accent",
+                )}
                 onClick={() => run(id)}
               >
                 <Icon />
@@ -140,7 +151,12 @@ function Toolbar() {
                   id={`layout-${name}`}
                   aria-label={`${label} layout`}
                   aria-pressed={applied && layout === name}
-                  className={cn(layoutButton, applied && layout === name && "bg-accent text-primary-text hover:text-primary-text")}
+                  className={cn(
+                    layoutButton,
+                    applied &&
+                      layout === name &&
+                      "bg-accent text-primary-text hover:text-primary-text",
+                  )}
                   onClick={() => applyLayout(name)}
                 >
                   <Icon />
@@ -174,7 +190,12 @@ function ViewMenu({ layout }: { layout: LayoutName }) {
     <MenuRoot open={open} onOpenChange={setOpen} modal={false}>
       <Tip label="Views">
         <MenuTrigger asChild>
-          <button type="button" id="bd-view-menu-button" aria-label="Views" className={layoutButton}>
+          <button
+            type="button"
+            id="bd-view-menu-button"
+            aria-label="Views"
+            className={layoutButton}
+          >
             <PlusIcon />
           </button>
         </MenuTrigger>
@@ -215,7 +236,7 @@ function ViewMenu({ layout }: { layout: LayoutName }) {
 }
 
 /* ---------- Page pill (sidebar hidden / chat open) ---------- */
-function PagePill({ chatOpen }: { chatOpen: boolean }) {
+function PagePill() {
   const doc = useDesign();
   const page = doc ? activePage(doc) : null;
   return (
@@ -223,7 +244,10 @@ function PagePill({ chatOpen }: { chatOpen: boolean }) {
       id="bd-page-pill"
       role="group"
       aria-label="Page"
-      className={cn(floating, "top-1.75 left-1.75 flex h-10.5 w-page-pill items-center rounded-lg p-1.5")}
+      className={cn(
+        floating,
+        "top-1.75 left-1.75 flex h-10.5 w-page-pill items-center rounded-lg p-1.5",
+      )}
     >
       <Tip label="Main menu" side="bottom">
         <button
@@ -250,7 +274,11 @@ function PagePill({ chatOpen }: { chatOpen: boolean }) {
           <MenuGroup>
             <MenuLabel>Pages</MenuLabel>
             {doc?.pages.map((p) => (
-              <MenuItem key={p.id} aria-checked={p.id === doc.activePage} onSelect={() => window.design.setActivePage(p.id)}>
+              <MenuItem
+                key={p.id}
+                aria-checked={p.id === doc.activePage}
+                onSelect={() => window.design.setActivePage(p.id)}
+              >
                 <File />
                 <span className="truncate">{p.name}</span>
                 {p.id === doc.activePage && <Check className="ml-auto" />}
@@ -272,10 +300,7 @@ function PagePill({ chatOpen }: { chatOpen: boolean }) {
           type="button"
           aria-label="Show sidebar"
           className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-4"
-          onClick={() => {
-            if (chatOpen) (window.agentWorkspace as { closeChat?: () => void } | undefined)?.closeChat?.();
-            toggleBodyClass("left-collapsed", false);
-          }}
+          onClick={() => toggleBodyClass("left-collapsed", false)}
         >
           <PanelLeftIcon />
         </button>
@@ -336,7 +361,9 @@ function Help() {
           aria-label="Keyboard shortcuts"
           className="z-50 w-view-menu rounded-2xl border border-menu-edge bg-background p-1 text-xs text-foreground shadow-menu outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
         >
-          <p className="flex h-6.25 items-center px-1.5 text-muted-foreground">Keyboard shortcuts</p>
+          <p className="flex h-6.25 items-center px-1.5 text-muted-foreground">
+            Keyboard shortcuts
+          </p>
           <dl className="m-0 flex flex-col gap-px">
             {SHORTCUTS.map(([label, keys]) => (
               <div key={label} className="flex h-6.25 items-center gap-2 px-1.5">
@@ -389,7 +416,14 @@ function Zoom() {
             {zoom}%
           </button>
         </MenuTrigger>
-        <MenuContent id="bd-zoom-menu" aria-label="Zoom" side="top" align="end" sideOffset={6} className="w-view-menu">
+        <MenuContent
+          id="bd-zoom-menu"
+          aria-label="Zoom"
+          side="top"
+          align="end"
+          sideOffset={6}
+          className="w-view-menu"
+        >
           <MenuGroup>
             <MenuItem id="zoom-in" onSelect={() => run("zoom-in")}>
               Zoom in
@@ -441,7 +475,15 @@ function Zoom() {
 }
 
 /** Hidden owners of the zoom ids while the zoom menu is closed (or the editor is behind Files). */
-function ZoomProxies({ zoom, snap, setSnap }: { zoom?: number; snap?: boolean; setSnap?: (v: boolean) => void }) {
+function ZoomProxies({
+  zoom,
+  snap,
+  setSnap,
+}: {
+  zoom?: number;
+  snap?: boolean;
+  setSnap?: (v: boolean) => void;
+}) {
   const fallbackZoom = useZoom();
   const [fallbackSnap, setFallbackSnap] = useSnap();
   return (
