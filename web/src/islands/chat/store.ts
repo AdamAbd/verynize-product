@@ -93,6 +93,8 @@ export type ChatState = {
   statusAt?: number;
   /** Project keys with a run in progress. */
   busyKeys?: string[];
+  /** Extra working directories of the current chat (/add-dir, linked worktrees). */
+  directories?: string[];
 };
 export type ChatSummary = { id: string; title: string; created: number; count: number; branch?: string; /** Worktree folder (absent when the chat shares the repository root). */ root?: string; busy?: boolean };
 export type WorkspaceActions = Partial<
@@ -140,7 +142,17 @@ type Workspace = {
   /** No argument: open the file picker; `{folder:true}`: attach a folder tree; File[]: attach dropped files (images go to attachImages). */
   attachFiles?(input?: File[] | FileList | { folder?: boolean }): void;
   attachFigma?(url: string): void;
-  linkChat?(conversationId: string): void;
+  /** Link a chat of any repository (`key` = its project key; default the open one): transcript + worktree as context. */
+  linkChat?(conversationId: string, key?: string): void;
+  addDirectory?(path: string): void;
+  removeDirectory?(path: string): void;
+  /** Attach images already saved under userData/agent-attachments (design reference collections). */
+  attachImagePaths?(items: { path: string; name: string }[]): void;
+  /** Attach a text block to the next message (kind "terminal": `<terminal-output>`). */
+  attachText?(kind: string, name: string, text: string, meta?: Record<string, string>): void;
+  attachedImages?(): { path: string; name: string }[];
+  /** Start a fresh provider session for the next message (keeps the transcript). */
+  clearSession?(): void;
   setDraft?(text: string): void;
   getQueue?(): QueuedTask[];
   /** Run id of the current conversation's active run (tests/debugging). */
