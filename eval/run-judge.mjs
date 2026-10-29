@@ -2,7 +2,7 @@
 // Tier 2: checklist judge. Sends one screenshot + the frozen brief checklist + rubric to an
 // installed CLI and stores validated JSON at eval/results/<app>/<brief>/<run>.json (keyed by judge).
 //
-//   node eval/run-judge.mjs --brief <id> --image <png> [--app better-design|wonder|pen|figma|figcraft]
+//   node eval/run-judge.mjs --brief <id> --image <png> [--app verynize|wonder|pen|figma|figcraft]
 //        [--judge claude|codex] [--model <m>] [--run <name>] [--retries 1] [--dry-run]
 //
 // The judge never sees the app name. Tall full-page captures are sent as an overview plus slices so
@@ -17,7 +17,7 @@ const args = process.argv.slice(2);
 const opt = (name, fallback) => { const i = args.indexOf(name); return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : fallback; };
 const flag = name => args.includes(name);
 if (flag('--help') || !opt('--brief') || !opt('--image')) {
-  console.log('usage: node eval/run-judge.mjs --brief <id> --image <png> [--app better-design] [--judge claude|codex] [--model m] [--run name] [--retries 1] [--results-dir dir] [--dry-run]');
+  console.log('usage: node eval/run-judge.mjs --brief <id> --image <png> [--app verynize] [--judge claude|codex] [--model m] [--run name] [--retries 1] [--results-dir dir] [--dry-run]');
   process.exit(flag('--help') ? 0 : 2);
 }
 const brief = loadBrief(opt('--brief'));
@@ -32,7 +32,7 @@ if (!existsSync(imagePath)) throw new Error(`image not found: ${imagePath}`);
 if (!APPS.includes(app)) throw new Error(`--app must be one of ${APPS.join(', ')} (got ${app})`);
 if (!['claude', 'codex'].includes(judge)) throw new Error('--judge must be claude or codex');
 
-function inferApp(path) { const m = path.match(/results\/([^/]+)\/[^/]+\/[^/]+$/); return m ? m[1] : 'better-design'; }
+function inferApp(path) { const m = path.match(/results\/([^/]+)\/[^/]+\/[^/]+$/); return m ? m[1] : 'verynize'; }
 
 // ---------------------------------------------------------------------------------------------
 // Images: candidate (+ slices when tall) and, for reconstruction/refinement, the brief's input image.

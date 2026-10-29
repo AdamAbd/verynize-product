@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Tier 3a: build a blind, randomized pairwise review page from eval/results/<app>/<brief>/*.png.
 //
-//   node eval/make-pairs.mjs [--apps better-design,wonder,pen] [--briefs 01,02] [--seed 42]
+//   node eval/make-pairs.mjs [--apps verynize,wonder,pen] [--briefs 01,02] [--seed 42]
 //        [--max-per-brief 12] [--repeat-swapped 0.1] [--results-dir eval/results] [--out-dir eval/pairwise]
 //
 // Writes eval/pairwise/review.html (self-contained, images embedded, NO app names) and

@@ -81,9 +81,9 @@
       return out;
     }catch{return [];}
   };
-  // betterdesign://node/<document>/<pageId>/<shortId or id> (finish_artboard designLink) -> select and zoom the element.
+  // verynize://node/<document>/<pageId>/<shortId or id> (finish_artboard designLink) -> select and zoom the element.
   const openLink=url=>{
-    const match=/^betterdesign:\/\/node\/(?:([^/]*)\/)?([^/]+)\/([^/?#]+)/.exec(String(url||''));const design=window.design;if(!match||!design?.getDocument)return false;
+    const match=/^verynize:\/\/node\/(?:([^/]*)\/)?([^/]+)\/([^/?#]+)/.exec(String(url||''));const design=window.design;if(!match||!design?.getDocument)return false;
     try{
       const pageId=decodeURIComponent(match[2]),ref=decodeURIComponent(match[3]),doc=design.getDocument();
       for(const page of [...doc.pages.filter(p=>p.id===pageId),...doc.pages.filter(p=>p.id!==pageId)]){
@@ -102,7 +102,7 @@
   const takeCheckpoint=chat=>{try{const doc=window.design?.getDocument?.();if(!doc)return undefined;const id=crypto.randomUUID();checkpoints.set(id,{chatId:chat.id,fileId:window.fileLibrary?.currentId||'',doc});const mine=[...checkpoints].filter(([,c])=>c.chatId===chat.id);if(mine.length>20)checkpoints.delete(mine[0][0]);if(checkpoints.size>60)checkpoints.delete(checkpoints.keys().next().value);return id;}catch{return undefined;}};
 
   // ---------- Seed: compact transcript summary for a fresh provider session ----------
-  const LINK_RE=/betterdesign:\/\/node\/[^\s"'<>)\]]+/g;
+  const LINK_RE=/verynize:\/\/node\/[^\s"'<>)\]]+/g;
   const buildSeed=(messages,turns=10)=>{
     const starts=[];messages.forEach((m,i)=>{if(m.role==='user')starts.push(i);});
     const from=starts.length>turns?starts[starts.length-turns]:0,lines=[],links=new Set(),artboards=new Set();

@@ -1,4 +1,4 @@
-// Named style archetypes. Original to Better Design.
+// Named style archetypes. Original to Verynize.
 //
 // Binding parameters: typography (display/body/mono), radius scale, elevation recipe, density.
 // Suggested parameters: palette (adapt hue to the brand, keep the roles and the contrast).

@@ -1,4 +1,4 @@
-// Better Design JSX codec: a small reader/writer for the Tailwind JSX subset that agents use to
+// Verynize JSX codec: a small reader/writer for the Tailwind JSX subset that agents use to
 // read and write designs. It never evaluates code: attribute expressions are limited to string,
 // number and boolean literals, and child expressions are limited to comments and string literals.
 // Classes are resolved by the real Tailwind v4 engine (tailwind-map.mjs); the serializer writes

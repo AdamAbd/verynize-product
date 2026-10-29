@@ -1,4 +1,4 @@
-// CSS-style text inheritance for Better Design nodes.
+// CSS-style text inheritance for Verynize nodes.
 //
 // Frames store the inheritable text declarations from their classes in `textStyle` (declared values,
 // e.g. {color, fontSize, lineHeightPx, letterSpacingEm}). Text nodes store fully resolved values

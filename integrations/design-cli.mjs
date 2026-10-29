@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { DesignStore } from './design-store.mjs';
 import { exportHTML } from './export-html.mjs';
-const usage=`Better Design command interface
+const usage=`Verynize command interface
 Usage: design-cli.mjs --root DIRECTORY COMMAND [ARGS]
   list                              List document names
   read NAME                         Read document and revision
@@ -9,7 +9,7 @@ Usage: design-cli.mjs --root DIRECTORY COMMAND [ARGS]
   apply NAME REVISION               Read operations JSON array from stdin and atomically apply
   export NAME [PAGE_ID]              Export standalone HTML to stdout
 
-Documents are NAME.better-design.json inside the existing root directory.
+Documents are NAME.verynize.json inside the existing root directory.
 Errors use stderr and exit code 1. No commands execute code or contact a network.`;
 async function stdin(){let bytes=0,text='';for await(const chunk of process.stdin){bytes+=chunk.length;if(bytes>20*1024*1024)throw Error('Input exceeds 20 MiB');text+=chunk;}return JSON.parse(text);}
 try {

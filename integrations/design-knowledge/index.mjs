@@ -1,4 +1,4 @@
-// Better Design — design knowledge layer.
+// Verynize — design knowledge layer.
 // Fundamentals, named style archetypes, domain playbooks, job-routed skills and the agent persona.
 
 import { fundamentals } from './fundamentals.mjs';

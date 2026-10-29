@@ -7,9 +7,9 @@ import { createPreferenceStore, defaultPreferencesPath, MAX_PREFERENCES } from '
 
 async function temp(t) { const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bd-prefs-')); t.after(() => fs.rm(dir, { recursive: true, force: true })); return dir; }
 
-test('default path honours BETTER_DESIGN_PREFERENCES', () => {
-  assert.equal(defaultPreferencesPath({ BETTER_DESIGN_PREFERENCES: '/tmp/x/prefs.json' }), '/tmp/x/prefs.json');
-  assert.match(defaultPreferencesPath({}), /Better Design[\\/]design-preferences\.json$/);
+test('default path honours VERYNIZE_PREFERENCES', () => {
+  assert.equal(defaultPreferencesPath({ VERYNIZE_PREFERENCES: '/tmp/x/prefs.json' }), '/tmp/x/prefs.json');
+  assert.match(defaultPreferencesPath({}), /Verynize[\\/]design-preferences\.json$/);
 });
 
 test('CRUD, dedupe, validation and atomic file format', async t => {

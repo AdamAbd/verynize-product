@@ -1,4 +1,4 @@
-// Loopback Streamable-HTTP transport for the Better Design MCP tools, plus the small "bridge
+// Loopback Streamable-HTTP transport for the Verynize MCP tools, plus the small "bridge
 // file" protocol that lets the stdio server find a running desktop app.
 //
 // Security model: binds to 127.0.0.1 only; every request needs `Authorization: Bearer <token>`
@@ -45,7 +45,7 @@ export async function startHttpServer({ makeServer, token = newToken(), port = 0
       if (url.pathname !== '/mcp') return reject(res, 404, 'Not found');
       if (!allowedHosts.has(String(req.headers.host || '').toLowerCase())) return reject(res, 403, 'Forbidden host');
       if (req.headers.origin) return reject(res, 403, 'Browser origins are not allowed');
-      if (!authorized(req.headers.authorization, token)) return reject(res, 401, 'Missing or invalid bearer token', { 'www-authenticate': 'Bearer realm="better-design"' });
+      if (!authorized(req.headers.authorization, token)) return reject(res, 401, 'Missing or invalid bearer token', { 'www-authenticate': 'Bearer realm="verynize"' });
       if (req.method !== 'POST') return reject(res, 405, 'Method not allowed', { allow: 'POST' });
       let body;
       try { body = JSON.parse(await readBody(req, maxBody)); } catch (error) { return reject(res, error.status || 400, error.status ? error.message : 'Invalid JSON body'); }
@@ -73,11 +73,11 @@ export async function startHttpServer({ makeServer, token = newToken(), port = 0
 // Bridge file: {url, token, pid, version} written with mode 0600 into the app's user-data folder.
 
 export function defaultBridgeFile(env = process.env, platform = process.platform, home = os.homedir()) {
-  if (env.BETTER_DESIGN_MCP_FILE) return env.BETTER_DESIGN_MCP_FILE;
+  if (env.VERYNIZE_MCP_FILE) return env.VERYNIZE_MCP_FILE;
   const base = platform === 'darwin' ? path.join(home, 'Library', 'Application Support')
     : platform === 'win32' ? (env.APPDATA || path.join(home, 'AppData', 'Roaming'))
       : (env.XDG_CONFIG_HOME || path.join(home, '.config'));
-  return path.join(base, 'Better Design', 'mcp.json');
+  return path.join(base, 'Verynize', 'mcp.json');
 }
 
 export async function writeBridgeFile(file, info) {
@@ -105,7 +105,7 @@ export async function removeBridgeFile(file, token) {
 }
 
 /** Connect an MCP client to the bridge; rejects within timeoutMs when it is not reachable. */
-export async function connectBridge({ url, token }, { timeoutMs = 2000, name = 'better-design-stdio-proxy' } = {}) {
+export async function connectBridge({ url, token }, { timeoutMs = 2000, name = 'verynize-stdio-proxy' } = {}) {
   const client = new Client({ name, version: '1' });
   const transport = new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { Authorization: `Bearer ${token}` } } });
   let timer;

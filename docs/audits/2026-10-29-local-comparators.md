@@ -24,8 +24,8 @@ REA manifest-only analysis confirms ASAR SHA256 dee046c4ed2769fa27cab09e1efe0a62
 
 Existing `docs/wonder-ai-mcp-spec.md` describes context -> task skill -> read existing code/screenshot -> create skeleton -> edit sections -> screenshot -> finish. It documents style guidelines, design preferences, tokens, icons, image generation and real screenshot use. These are historical research findings, not newly observed generation today. The hosted design orchestrator implementation is not present in the desktop shell, so extracting Electron cannot establish full backend prompts or quality.
 
-`docs/wonder-canvas-spec.md` documents CSS-shaped layout, rich paints and typography, PixiJS rendering, and token binding. Its Better Design gap table predates subsequent implementation and must not be reused as current audit truth. `docs/canvas-reference-parity.md` records later infinite canvas, tools, guides, clipboard, sizing and interaction work. These improve editor capability, but do not establish generated-design taste.
+`docs/wonder-canvas-spec.md` documents CSS-shaped layout, rich paints and typography, PixiJS rendering, and token binding. Its Verynize gap table predates subsequent implementation and must not be reused as current audit truth. `docs/canvas-reference-parity.md` records later infinite canvas, tools, guides, clipboard, sizing and interaction work. These improve editor capability, but do not establish generated-design taste.
 
-## Implications for Better Design
+## Implications for Verynize
 
 Prioritize independently authored style archetypes with actual typography/color/composition examples, domain-specific playbooks, measured-layout diagnostics, section-level rendered visual critique, and asset-readiness barriers. A broad editor feature list alone cannot establish taste parity. Benchmark equal briefs, assets and model budgets against current Wonder and Pen using blind scoring of hierarchy, typography, composition, brand coherence, content realism and editability. A claim of 1:1 parity is unresolved until actual matched generations are assessed; static inspection alone cannot support it.

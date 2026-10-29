@@ -1,4 +1,4 @@
-# Better Design pipeline audit
+# Verynize pipeline audit
 
 Audit scope: static implementation inspection plus direct JSX codec probes. No competitive output generation or blind taste scoring performed. Findings below are code-backed, not claims about Wonder/Pen quality.
 

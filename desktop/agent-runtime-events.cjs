@@ -1,4 +1,4 @@
-// Translators from provider-specific streams into Better Design's typed agent events.
+// Translators from provider-specific streams into Verynize's typed agent events.
 //
 // Every event sent to the renderer on `desktop:agent-event` has
 // `{id, runId, chatId, conversationId, seq, type}` (id === runId, chatId === conversationId) plus:
@@ -37,7 +37,7 @@ const boundedInput = input => { const text = safeJSON(input ?? {}); return text.
 function toolTitle(name, input = {}) {
   const pick = input.file_path || input.path || input.pattern || input.command || input.url || input.query || input.description || '';
   const short = String(pick).replace(/\s+/g, ' ').slice(0, 90);
-  const label = String(name).replace(/^mcp__better-design__/, 'Canvas · ').replace(/^mcp__([^_]+)__/, '$1 · ');
+  const label = String(name).replace(/^mcp__verynize__/, 'Canvas · ').replace(/^mcp__([^_]+)__/, '$1 · ');
   return short ? `${label} ${short}` : label;
 }
 

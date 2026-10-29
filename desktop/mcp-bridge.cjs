@@ -1,7 +1,7 @@
 /**
- * Better Design live MCP bridge (desktop main process)
+ * Verynize live MCP bridge (desktop main process)
  * ====================================================
- * Serves the shared Better Design tool set (integrations/design-tools.mjs) over Streamable HTTP
+ * Serves the shared Verynize tool set (integrations/design-tools.mjs) over Streamable HTTP
  * at http://127.0.0.1:<random port>/mcp. Every request needs `Authorization: Bearer <token>`, a
  * random secret created per launch. Tool calls that target the document open in an editor window
  * are relayed over IPC to web/agent-bridge.js, which applies them through the editor's own
@@ -22,21 +22,21 @@
  *   registerWindow(win, {designFiles, entryURL})                     per editor BrowserWindow
  *   getBridgeInfo() -> {url, token, file, documentsRoot, toolsVersion} | null   null until started
  *   toolsVersion: TOOLS_VERSION of integrations/design-tools.mjs (also in mcp.json and pushed to
- *   editor windows as the 'info' bridge op -> window.betterDesignTools).
+ *   editor windows as the 'info' bridge op -> window.verynizeTools).
  *   stopBridge() -> void                                             closes server, deletes file
  *
  * For agent runtimes (desktop/agents.cjs) use getBridgeInfo():
- *   Claude Code:  --mcp-config '{"mcpServers":{"better-design":{"type":"http","url":"<url>",
+ *   Claude Code:  --mcp-config '{"mcpServers":{"verynize":{"type":"http","url":"<url>",
  *                   "headers":{"Authorization":"Bearer <token>"}}}}'
- *                 --allowedTools 'mcp__better-design__*'
- *   Codex:        -c mcp_servers.better-design.url="<url>"
- *                 -c mcp_servers.better-design.bearer_token_env_var="BETTER_DESIGN_MCP_TOKEN"
- *                 and set BETTER_DESIGN_MCP_TOKEN=<token> in the child environment.
+ *                 --allowedTools 'mcp__verynize__*'
+ *   Codex:        -c mcp_servers.verynize.url="<url>"
+ *                 -c mcp_servers.verynize.bearer_token_env_var="VERYNIZE_MCP_TOKEN"
+ *                 and set VERYNIZE_MCP_TOKEN=<token> in the child environment.
  * take_screenshot (live): the editor renders the element offscreen (desktop/render.cjs, fonts
  * embedded) and returns the PNG plus measured per-node boxes relative to the element (`bounds`) and
  * missing fonts; the tool layer turns these into a revision-bound receipt and a measured lint.
  *
- * Set BETTER_DESIGN_DISABLE_MCP=1 to skip starting the bridge.
+ * Set VERYNIZE_DISABLE_MCP=1 to skip starting the bridge.
  */
 const path = require('node:path');
 const fs = require('node:fs');
@@ -46,7 +46,7 @@ const { BrowserWindow } = require('electron');
 const { renderHTML } = require('./render.cjs');
 
 const load = file => import(pathToFileURL(path.join(__dirname, '../integrations', file)).href);
-const SUFFIX = '.better-design.json';
+const SUFFIX = '.verynize.json';
 const windows = new Map(); // webContents.id -> {win, designFiles, entryURL, pending}
 let info = null, server = null, starting = null, lastFocused = null;
 const bridgeOptions = { askAgent: null };
@@ -174,7 +174,7 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
       return request(target.entry, 'focus', { pageId, nodeId }, 5000);
     },
     async askAgent({ agent, task }) {
-      if (typeof bridgeOptions.askAgent !== 'function') throw new Error('ask_agent is unavailable: this Better Design build has no reviewer agent configured');
+      if (typeof bridgeOptions.askAgent !== 'function') throw new Error('ask_agent is unavailable: this Verynize build has no reviewer agent configured');
       const reply = await bridgeOptions.askAgent({ agent, task });
       return typeof reply === 'string' ? { text: reply, agent: agent || null, model: null } : reply;
     },
@@ -195,7 +195,7 @@ async function startBridge(app, options = {}) {
   setBridgeOptions(options);
   if (info) return info;
   if (starting) return starting;
-  if (process.env.BETTER_DESIGN_DISABLE_MCP === '1') return null;
+  if (process.env.VERYNIZE_DISABLE_MCP === '1') return null;
   starting = (async () => {
     const [{ DesignStore, validateDocument }, tools, edit, { exportHTML }, http, fonts] = await Promise.all([load('design-store.mjs'), load('design-tools.mjs'), load('design-edit.mjs'), load('export-html.mjs'), load('mcp-http.mjs'), load('fonts.mjs')]);
     const documentsRoot = path.join(app.getPath('userData'), 'documents');
@@ -203,7 +203,7 @@ async function startBridge(app, options = {}) {
     const store = await DesignStore.open(documentsRoot);
     const storeBackend = tools.createStoreBackend(store);
     const backend = createLiveBackend({ store, storeBackend, tools, edit, exportHTML, validateDocument, fonts });
-    const instructions = `${tools.INSTRUCTIONS}\n\nConnected to the Better Design desktop app. Omit "document" to edit the document open in the editor (live, undoable). Saved documents live in ${documentsRoot}. Tools version ${tools.TOOLS_VERSION}.`;
+    const instructions = `${tools.INSTRUCTIONS}\n\nConnected to the Verynize desktop app. Omit "document" to edit the document open in the editor (live, undoable). Saved documents live in ${documentsRoot}. Tools version ${tools.TOOLS_VERSION}.`;
     server = await http.startHttpServer({ makeServer: () => tools.createDesignServer({ backend }, { instructions }), onError: error => console.error('[mcp-bridge]', error) });
     const file = path.join(app.getPath('userData'), 'mcp.json');
     await http.writeBridgeFile(file, { url: server.url, token: server.token, pid: process.pid, version: tools.SERVER_VERSION, toolsVersion: tools.TOOLS_VERSION });

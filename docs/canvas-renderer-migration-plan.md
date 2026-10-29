@@ -65,7 +65,7 @@ document (v2 JSON) ──► LayoutHost (DOM tersembunyi, CSS asli) ──► La
 
 ## 5. Item roadmap Wonder yang perlu ditutup selain renderer
 
-| Roadmap (status Wonder) | Better Design sekarang | Pekerjaan |
+| Roadmap (status Wonder) | Verynize sekarang | Pekerjaan |
 | --- | --- | --- |
 | Vector editing (Planned) | Belum ada | Node `vector` (path) dengan Pixi `Graphics`, pen tool, edit titik, boolean (fase setelah 3) |
 | Measurements & Snapping (Shipped) | Ada (DOM) | Port ke overlay Pixi (fase 3) |
@@ -76,7 +76,7 @@ document (v2 JSON) ──► LayoutHost (DOM tersembunyi, CSS asli) ──► La
 | Wonder MCP / Chat (Shipped) | Ada (24 tool lokal) | `execute_action`, ikon, streaming ghost preview, image tools |
 | Real-time collab (Shipped) | Snapshot + WebSocket | Yjs per node (sesuai Wonder) agar edit agen dan user bisa digabung |
 | Advanced sharing, Comments (In Progress) | Publish snapshot | Izin per orang, komentar berjangkar ke node |
-| Better design search (Planned) | Pencarian nama/teks lokal | Pencarian semantik dan visual lintas file |
+| Verynize search (Planned) | Pencarian nama/teks lokal | Pencarian semantik dan visual lintas file |
 | Shared previews (Early access) | Belum ada | Bagikan URL preview app yang berjalan |
 | Public profiles, Cloud, Marketplace | Belum ada | Butuh akun hosted; di luar renderer dan dikerjakan terakhir |
 

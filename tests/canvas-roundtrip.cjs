@@ -18,7 +18,7 @@ const os = require('node:os');
     assert.equal(text.text.slice(red.start, red.end), 'and red italic');
     const original = await page.evaluate(() => window.design.getDocument());
     const html = await page.evaluate(() => window.design.exportHTML());
-    assert.ok(html.includes('better-design-document'));
+    assert.ok(html.includes('verynize-document'));
     await page.evaluate(() => { const d = window.design.getDocument(); d.pages[0].nodes = []; window.design.setDocument(d); });
     await page.evaluate(html => window.design.importHTML(html), html);
     const recovered = await page.evaluate(() => window.design.getDocument());

@@ -12,14 +12,14 @@ The repository has both [LICENSE-MIT](https://github.com/storytold/figcraft/blob
 
 The [README](https://github.com/storytold/figcraft/blob/90054a89c4ca8a96db6e3a26cd3af3a475eaa2d7/README.md) describes a native Rust, offline-first design application with frames, auto layout, components, variants, vectors, variables, prototypes and collaboration. It identifies itself as early alpha. These are repository declarations, not runtime-tested capabilities in this investigation.
 
-Its [MCP documentation](https://github.com/storytold/figcraft/blob/90054a89c4ca8a96db6e3a26cd3af3a475eaa2d7/docs/mcp.md) documents headless and attached operation, JSON-RPC over stdio, constrained read/write roots, and commands shared with the UI. This is the concrete reference used for Better Design's automation implementation. FigCraft's `.fig` import is described as best effort; this does not establish Better Design Figma import support.
+Its [MCP documentation](https://github.com/storytold/figcraft/blob/90054a89c4ca8a96db6e3a26cd3af3a475eaa2d7/docs/mcp.md) documents headless and attached operation, JSON-RPC over stdio, constrained read/write roots, and commands shared with the UI. This is the concrete reference used for Verynize's automation implementation. FigCraft's `.fig` import is described as best effort; this does not establish Verynize Figma import support.
 
 ## Implemented here
 
-Better Design exposes one tool set over two transports. The tools, schemas and handlers live in `integrations/design-tools.mjs`; the JSX/Tailwind codec is `integrations/jsx-codec.mjs`; short ids, JSX-to-node building and the directive script are in `integrations/design-edit.mjs`. All of it is independently written.
+Verynize exposes one tool set over two transports. The tools, schemas and handlers live in `integrations/design-tools.mjs`; the JSX/Tailwind codec is `integrations/jsx-codec.mjs`; short ids, JSX-to-node building and the directive script are in `integrations/design-edit.mjs`. All of it is independently written.
 
-- **Live bridge (desktop app).** `desktop/mcp-bridge.cjs` starts a Streamable HTTP MCP server on `http://127.0.0.1:<random port>/mcp` at launch. It requires `Authorization: Bearer <token>`, where the token is random per launch, and it refuses browser `Origin` headers and foreign `Host` headers. The bridge writes `{url, token, pid}` to `~/Library/Application Support/Better Design/mcp.json` (mode 0600) and removes the file on quit. Calls aimed at the document open in the editor are relayed over IPC (`bd:mcp-call` / `bd:mcp-reply`) to `web/agent-bridge.js`, which applies them with the editor's own `setDocument`. Edits therefore render immediately, persist the same way user edits do, and count as one undo step per tool call. A call that names a saved document that is not open is applied on disk in `<userData>/documents`.
-- **Stdio (`integrations/mcp-server.mjs`).** When `mcp.json` points at a reachable bridge, this server proxies every call to the bridge, so edits are live. Otherwise it edits `NAME.better-design.json` files under `--root` ("headless"). If the bridge stops during a session, it falls back to `--root` when one was given.
+- **Live bridge (desktop app).** `desktop/mcp-bridge.cjs` starts a Streamable HTTP MCP server on `http://127.0.0.1:<random port>/mcp` at launch. It requires `Authorization: Bearer <token>`, where the token is random per launch, and it refuses browser `Origin` headers and foreign `Host` headers. The bridge writes `{url, token, pid}` to `~/Library/Application Support/Verynize/mcp.json` (mode 0600) and removes the file on quit. Calls aimed at the document open in the editor are relayed over IPC (`bd:mcp-call` / `bd:mcp-reply`) to `web/agent-bridge.js`, which applies them with the editor's own `setDocument`. Edits therefore render immediately, persist the same way user edits do, and count as one undo step per tool call. A call that names a saved document that is not open is applied on disk in `<userData>/documents`.
+- **Stdio (`integrations/mcp-server.mjs`).** When `mcp.json` points at a reachable bridge, this server proxies every call to the bridge, so edits are live. Otherwise it edits `NAME.verynize.json` files under `--root` ("headless"). If the bridge stops during a session, it falls back to `--root` when one was given.
 
 Tools: `get_design_context`, `get_artboards`, `get_element_tree`, `get_element_code`, `find_elements`, `take_screenshot`, `create_artboard`, `update_elements`, `duplicate_elements`, `delete_elements`, `rename_elements`, `finish_artboard`, `get_design_tokens`, `create_design_tokens`, `update_design_tokens`, `delete_design_tokens`, `list_documents`, `open_document`, `create_document`, `create_page`, `rename_page`, plus the low-level `read_document`, `apply_operations` (revision-checked batches) and `export_document`.
 
@@ -36,7 +36,7 @@ Tools: `get_design_context`, `get_artboards`, `get_element_tree`, `get_element_c
 - **`take_screenshot`.** In the app, the screenshot is captured by the live renderer, or by an offscreen window when the element is not on the active page. In headless stdio mode the tool reports that screenshots are unavailable.
 - **Token names.** Tokens map onto the existing hex color variables. A name such as `color/text/primary` becomes `var(--color-text-primary)`.
 
-Document files end in `.better-design.json` and share the editor's version 2 schema: `{version:2,name,pages:[{id,name,nodes}],tokens:{}}`. Nodes reference parent frames using `parentId`. Validation and file safety:
+Document files end in `.verynize.json` and share the editor's version 2 schema: `{version:2,name,pages:[{id,name,nodes}],tokens:{}}`. Nodes reference parent frames using `parentId`. Validation and file safety:
 - Hierarchy cycles, duplicate IDs, invalid geometry and missing parents are rejected.
 - Deleting a frame deletes its descendants.
 - Lock files serialize writers. Writes go to a temporary file and are then renamed into place.
@@ -48,8 +48,8 @@ Document files end in `.better-design.json` and share the editor's version 2 sch
 With the desktop app running, external clients can connect straight to the bridge using the URL and token from `mcp.json`:
 
 ```sh
-cat ~/Library/Application\ Support/Better\ Design/mcp.json
-claude mcp add --transport http better-design <url> --header "Authorization: Bearer <token>"
+cat ~/Library/Application\ Support/Verynize/mcp.json
+claude mcp add --transport http verynize <url> --header "Authorization: Bearer <token>"
 ```
 
 The token changes each launch. To avoid copying it each time, configure the stdio server instead. It finds the running app automatically, and the `--root` folder is used when the app is closed (no client settings were changed here):
@@ -57,9 +57,9 @@ The token changes each launch. To avoid copying it each time, configure the stdi
 ```json
 {
   "mcpServers": {
-    "better-design": {
+    "verynize": {
       "command": "node",
-      "args": ["/absolute/path/to/better-design/integrations/mcp-server.mjs", "--root", "/absolute/path/to/designs"]
+      "args": ["/absolute/path/to/verynize/integrations/mcp-server.mjs", "--root", "/absolute/path/to/designs"]
     }
   }
 }
@@ -67,8 +67,8 @@ The token changes each launch. To avoid copying it each time, configure the stdi
 
 Flags:
 - `--no-bridge` forces file mode.
-- `--bridge-file FILE` (or `$BETTER_DESIGN_MCP_FILE`) points at a different bridge file.
-- `BETTER_DESIGN_DISABLE_MCP=1` stops the app from starting the bridge.
+- `--bridge-file FILE` (or `$VERYNIZE_MCP_FILE`) points at a different bridge file.
+- `VERYNIZE_DISABLE_MCP=1` stops the app from starting the bridge.
 - In-app agent runtimes get `{url, token}` from `getBridgeInfo()` in `desktop/mcp-bridge.cjs`. The header comment of that file shows the matching Claude `--mcp-config` and Codex `-c mcp_servers…` settings.
 
 The stdio server reserves stdout for MCP protocol traffic. It requires the root project's `@modelcontextprotocol/sdk` and `zod` dependencies.
@@ -81,7 +81,7 @@ Context7 resolved the official `/modelcontextprotocol/typescript-sdk` library an
 
 ## Shared desktop files
 
-The desktop bridge `desktop/design-files.cjs` adds native open/save dialogs and watches the selected document's directory. Saving a document as `name.better-design.json` inside the MCP root makes it available to both interfaces. External atomic MCP changes emit `design:file-changed`; the UI can ask whether to reload them. Saving a stale desktop version is refused until reloaded, avoiding silent lost updates. Renderer requests contain document data, never arbitrary disk paths. Native dialogs grant the file selection.
+The desktop bridge `desktop/design-files.cjs` adds native open/save dialogs and watches the selected document's directory. Saving a document as `name.verynize.json` inside the MCP root makes it available to both interfaces. External atomic MCP changes emit `design:file-changed`; the UI can ask whether to reload them. Saving a stale desktop version is refused until reloaded, avoiding silent lost updates. Renderer requests contain document data, never arbitrary disk paths. Native dialogs grant the file selection.
 
 `export_document` now provides a fifth MCP tool: standalone, inert HTML for a selected page with nested frames, flex/grid, embedded images and text. It returns HTML as tool data and does not write arbitrary export paths. Font and layout fidelity against the desktop is not asserted.
 

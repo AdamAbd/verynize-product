@@ -12,7 +12,7 @@ test('desktop file session watches MCP atomic writes and refuses stale saves',as
  const session=new DesignFileSession(event=>resolveChange(event));
  t.after(async()=>{session.close();await fs.rm(root,{recursive:true,force:true});});
  const store=await DesignStore.open(root),first=await store.create('shared','Shared');
- await session.open(path.join(root,'shared.better-design.json'));
+ await session.open(path.join(root,'shared.verynize.json'));
  await store.update('shared',first.revision,[{type:'rename_document',name:'Changed by MCP'}]);
  const timeout=setTimeout(()=>resolveChange({error:'Watch timeout'}),2000);
  const event=await changed;clearTimeout(timeout);assert.ok(!event.error,event.error);assert.equal(event.document.name,'Changed by MCP');
@@ -24,8 +24,8 @@ test('native file session validates filenames, supports new file and refuses sym
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'design-save-')),session=new DesignFileSession();
  t.after(async()=>{session.close();await fs.rm(root,{recursive:true,force:true});});
  const doc={version:2,name:'New',pages:[{id:'page',name:'Page',nodes:[]}],tokens:{}};
- await assert.rejects(session.save(doc,path.join(root,'arbitrary.json')),/better-design/);
- const saved=await session.save(doc,path.join(root,'new.better-design.json'));assert.equal(saved.document.name,'New');
- await fs.symlink(saved.path,path.join(root,'link.better-design.json'));
- await assert.rejects(session.open(path.join(root,'link.better-design.json')),/regular document/);
+ await assert.rejects(session.save(doc,path.join(root,'arbitrary.json')),/verynize/);
+ const saved=await session.save(doc,path.join(root,'new.verynize.json'));assert.equal(saved.document.name,'New');
+ await fs.symlink(saved.path,path.join(root,'link.verynize.json'));
+ await assert.rejects(session.open(path.join(root,'link.verynize.json')),/regular document/);
 });

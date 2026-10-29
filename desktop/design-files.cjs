@@ -5,7 +5,7 @@ const {pathToFileURL}=require('node:url');
 const engine=()=>import(pathToFileURL(path.join(__dirname,'../integrations/design-store.mjs')).href);
 class DesignFileSession {
  constructor(onChange=()=>{}){this.onChange=onChange;this.selected=null;this.watcher=null;this.timer=null;this.lastNotified=null;this.generation=0;} 
- async target(file){const suffix='.better-design.json';const base=path.basename(file);if(!base.endsWith(suffix))throw Error('Choose a .better-design.json filename');const name=base.slice(0,-suffix.length);const {DesignStore}=await engine();const store=await DesignStore.open(path.dirname(file));store.file(name);return {store,name,path:store.file(name)};}
+ async target(file){const suffix='.verynize.json';const base=path.basename(file);if(!base.endsWith(suffix))throw Error('Choose a .verynize.json filename');const name=base.slice(0,-suffix.length);const {DesignStore}=await engine();const store=await DesignStore.open(path.dirname(file));store.file(name);return {store,name,path:store.file(name)};}
  async open(file){const generation=++this.generation;const target=await this.target(file);const state=await target.store.read(target.name);if(generation!==this.generation)throw Error('Document switched while opening.');this.select(target,state.revision);return {path:target.path,...state};}
  select(target,revision){this.close();this.selected={...target,revision};this.lastNotified=revision;this.watcher=fs.watch(target.store.root,(_event,file)=>{if(!file||file.toString()===path.basename(target.path)){clearTimeout(this.timer);this.timer=setTimeout(()=>this.changed(),80);}});this.watcher.on('error',error=>this.onChange({path:target.path,error:error.message}));}
  async changed(){const target=this.selected;if(!target)return;try{const state=await target.store.read(target.name);if(this.selected!==target||state.revision===this.lastNotified)return;this.lastNotified=state.revision;this.onChange({path:target.path,...state});}catch(error){if(this.selected===target)this.onChange({path:target.path,error:error.message});}}
@@ -21,9 +21,9 @@ class DesignFileSession {
  close(){clearTimeout(this.timer);this.watcher?.close();this.watcher=null;}
 }
 function registerDesignFiles(handle,parent){const {dialog}=require('electron');const files=new DesignFileSession(data=>{if(!parent.isDestroyed())parent.webContents.send('design:file-changed',data);});
- handle('designOpen',async()=>{const selected=await dialog.showOpenDialog(parent,{title:'Open Better Design document',filters:[{name:'Better Design JSON',extensions:['json']}],properties:['openFile']});if(selected.canceled)return null;return files.open(selected.filePaths[0]);});
+ handle('designOpen',async()=>{const selected=await dialog.showOpenDialog(parent,{title:'Open Verynize document',filters:[{name:'Verynize JSON',extensions:['json']}],properties:['openFile']});if(selected.canceled)return null;return files.open(selected.filePaths[0]);});
  handle('designSave',async options=>{if(!options||typeof options!=='object')throw Error('Document required');const generation=files.generation;let destination;
-  if(options.saveAs||!files.selected){const selected=await dialog.showSaveDialog(parent,{title:'Save Better Design document',defaultPath:files.selected?.path||'untitled.better-design.json',filters:[{name:'Better Design JSON',extensions:['json']}],properties:['showOverwriteConfirmation','createDirectory']});if(selected.canceled)return null;destination=selected.filePath;}
+  if(options.saveAs||!files.selected){const selected=await dialog.showSaveDialog(parent,{title:'Save Verynize document',defaultPath:files.selected?.path||'untitled.verynize.json',filters:[{name:'Verynize JSON',extensions:['json']}],properties:['showOverwriteConfirmation','createDirectory']});if(selected.canceled)return null;destination=selected.filePath;}
   if(generation!==files.generation)return null;return files.save(options.document,destination,generation);
  });
  handle('designDetach',()=>{files.detach();return true;});

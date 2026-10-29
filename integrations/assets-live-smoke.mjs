@@ -1,6 +1,6 @@
 // Manual live check (hits the network; not part of the test glob):
 //   node integrations/assets-live-smoke.mjs
-// Uses a temporary font cache unless BETTER_DESIGN_FONT_CACHE is set.
+// Uses a temporary font cache unless VERYNIZE_FONT_CACHE is set.
 import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +8,7 @@ import { ensureFonts, fontFaceCss, resolveFontFamily } from './fonts.mjs';
 import { searchStockPhotos, fetchImageAsDataUrl, attribution } from './images.mjs';
 import { iconToNodeImage } from './assets.mjs';
 
-const cacheDir = process.env.BETTER_DESIGN_FONT_CACHE || await mkdtemp(path.join(os.tmpdir(), 'bd-font-smoke-'));
+const cacheDir = process.env.VERYNIZE_FONT_CACHE || await mkdtemp(path.join(os.tmpdir(), 'bd-font-smoke-'));
 let failed = false;
 const t0 = Date.now();
 const info = await resolveFontFamily('Playfair Display', { cacheDir });

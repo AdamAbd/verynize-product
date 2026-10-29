@@ -1,4 +1,4 @@
-// Shared node -> CSS mapping for Better Design documents. ONE source of truth for the live canvas
+// Shared node -> CSS mapping for Verynize documents. ONE source of truth for the live canvas
 // (web/app.js, loaded as a classic <script>) and the headless HTML export
 // (integrations/export-html.mjs, which imports this file through integrations/node-style.mjs), so the
 // canvas, screenshots and exported HTML cannot drift.

@@ -1,4 +1,4 @@
-# Better Design
+# Verynize
 
 A working macOS design workspace with a local canvas, project files, Claude/Codex execution, headless CLI/MCP editing, and Cloudflare collaboration. Independently implemented using evidence from installed Wonder 0.2.183, installed Pen 1.2.20, and ArtCraft's FigCraft project.
 
@@ -30,7 +30,7 @@ To build a standalone macOS application:
 ```sh
 npm run package:mac
 # To replace an earlier generated build: npm run package:mac -- --replace
-open "dist/Better Design.app"
+open "dist/Verynize.app"
 ```
 
 The package is locally ad-hoc signed, not notarized for distribution. It uses its own storage and does not alter Wonder or Pen.
@@ -61,14 +61,14 @@ Claude and Codex use installed CLIs and their existing accounts. Tasks execute o
 
 ## Shared desktop / CLI / MCP documents
 
-Use **Save design** to save `name.better-design.json`. Open that document through the native file workflow to receive notifications when another process changes it. Saves detect external changes and require reloading rather than silently overwriting them. Switching files detaches the old native save target; a delayed Save is canceled if the document changes before completion.
+Use **Save design** to save `name.verynize.json`. Open that document through the native file workflow to receive notifications when another process changes it. Saves detect external changes and require reloading rather than silently overwriting them. Switching files detaches the old native save target; a delayed Save is canceled if the document changes before completion.
 
 ```sh
 npm run cli -- --root /absolute/design-folder list
 npm run mcp -- --root /absolute/design-folder
 ```
 
-While the desktop app runs, it serves a loopback MCP bridge with a per-launch bearer token. The bridge details are written to `~/Library/Application Support/Better Design/mcp.json`. Through it, agents edit the open document live and each tool call is one undo step. `npm run mcp` proxies to the bridge automatically. When the app is closed, it edits the `--root` files directly instead. In both modes the tool set is the same:
+While the desktop app runs, it serves a loopback MCP bridge with a per-launch bearer token. The bridge details are written to `~/Library/Application Support/Verynize/mcp.json`. Through it, agents edit the open document live and each tool call is one undo step. `npm run mcp` proxies to the bridge automatically. When the app is closed, it edits the `--root` files directly instead. In both modes the tool set is the same:
 - **Read:** `get_design_context`, `get_element_code` (Tailwind-style JSX) and `find_elements`.
 - **Write:** `create_artboard` and the `update_elements` directive script.
 - **Tokens and documents:** the design-token tools and the document and page tools.

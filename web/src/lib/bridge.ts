@@ -48,7 +48,7 @@ export type DesignApi = {
 declare global {
   interface Window {
     design: DesignApi;
-    betterDesign: DesignApi;
+    verynize: DesignApi;
     agentWorkspace?: Record<string, (...args: never[]) => unknown>;
     fileLibrary?: Record<string, unknown> & { list(): unknown[]; currentId: string | null };
     appSettings?: { open(section?: string): void; close?(): void };

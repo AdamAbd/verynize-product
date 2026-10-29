@@ -1,4 +1,4 @@
-// One definition of the Better Design MCP tool set, shared by the stdio server
+// One definition of the Verynize MCP tool set, shared by the stdio server
 // (integrations/mcp-server.mjs) and the desktop app's loopback HTTP bridge
 // (desktop/mcp-bridge.cjs), so both expose identical names, schemas and behavior.
 //
@@ -41,7 +41,7 @@ import { searchStockPhotos, fetchImageAsDataUrl, attribution, trackUnsplashDownl
 import { missingFonts } from './fonts.mjs';
 import { createPreferenceStore, defaultPreferencesPath, MAX_PREFERENCE_LENGTH } from './preferences.mjs';
 
-export const SERVER_NAME = 'better-design';
+export const SERVER_NAME = 'verynize';
 export const SERVER_VERSION = '0.6.0';
 /**
  * Short fingerprint of the agent-facing tool layer: sha256 over the source of the tools, the
@@ -60,7 +60,7 @@ export const TOOLS_VERSION = (() => {
 })();
 export const revisionOf = document => createHash('sha256').update(JSON.stringify(document)).digest('hex');
 
-export const INSTRUCTIONS = `Better Design is a local design editor with a live canvas. These tools read and edit its version 2 design documents. You are the designer: the canvas is the deliverable, and it must look intentional, specific to the brief and finished.
+export const INSTRUCTIONS = `Verynize is a local design editor with a live canvas. These tools read and edit its version 2 design documents. You are the designer: the canvas is the deliverable, and it must look intentional, specific to the brief and finished.
 
 ## Mandatory workflow
 1. get_design_context first: document, pages, selection, tokens, artboards and the design fundamentals.
@@ -70,7 +70,7 @@ export const INSTRUCTIONS = `Better Design is a local design editor with a live 
 5. Fill one section at a time with update_elements. After each, take_screenshot of that section, read the image and the lint report, and fix what you see before moving on. Icons come from get_icons, photos from search_images.
 6. Design review: run the design-review skill on the whole artboard, apply its fixes, then take_screenshot of the whole artboard again.
 7. finish_artboard with reviewNote (what the review checked and what you fixed). It is refused while critical lint problems remain, and reports status "unverified" when the latest screenshot is missing, not a real render, or older than the last edit. Report that status honestly; never claim a verification you did not get.
-8. In your final reply include the designLink url that finish_artboard returns (betterdesign://node/…) verbatim, e.g. [Landing page](betterdesign://node/…), so the user can click it to jump to the artboard.
+8. In your final reply include the designLink url that finish_artboard returns (verynize://node/…) verbatim, e.g. [Landing page](verynize://node/…), so the user can click it to jump to the artboard.
 
 ## Decisions and preferences
 - get_design_context lists the user's saved design preferences: apply them unless the brief overrides them. When the user states a lasting preference ("always use 8px radius", "remember: no gradients"), save it with save_design_preference; manage them with list_design_preferences, update_design_preference and delete_design_preference.
@@ -98,7 +98,7 @@ Every element has a short page-unique id. A top-level artboard looks like "bok";
 take_screenshot returns the PNG (after pending images and fonts load), records a verification receipt bound to the current document revision, and appends a lint report: clipping, overflow, overlap, contrast against the real backdrop, leftover placeholders, missing assets and taste rules. Any edit invalidates receipts. Fix critical problems before finishing; repairs are capped at ${MAX_REPAIRS} blocked finish attempts per artboard, after which finish_artboard reports "unverified".
 
 ## Live editing
-While the Better Design desktop app runs, edits to the open document appear immediately and each tool call is one undo step. Otherwise documents are edited on disk ("headless") and screenshots are unavailable. apply_operations remains as a low-level, revision-checked batch API. No arbitrary filesystem paths or commands are accepted.`;
+While the Verynize desktop app runs, edits to the open document appear immediately and each tool call is one undo step. Otherwise documents are edited on disk ("headless") and screenshots are unavailable. apply_operations remains as a low-level, revision-checked batch API. No arbitrary filesystem paths or commands are accepted.`;
 
 // ---------------------------------------------------------------------------------------------
 // Schemas
@@ -163,7 +163,7 @@ async function readPrepared(backend, ref) {
   const document = clone(state.document); ensureShortIds(document);
   return { ...state, document };
 }
-const linkFor = (state, pageId, shortId) => `betterdesign://node/${encodeURIComponent(state.name || 'editor')}/${encodeURIComponent(pageId)}/${encodeURIComponent(shortId)}`;
+const linkFor = (state, pageId, shortId) => `verynize://node/${encodeURIComponent(state.name || 'editor')}/${encodeURIComponent(pageId)}/${encodeURIComponent(shortId)}`;
 const tagOf = node => node.htmlTag || ({ frame: 'div', rectangle: 'div', text: 'p', image: 'img', shader: 'Shader' })[node.type] || 'div';
 
 function artboardSummary(page) {
@@ -193,7 +193,7 @@ export function sessionFor(backend) {
 const docKey = (name, ref) => name ?? ref ?? null;
 
 // Design preferences: backend.preferences (tests, custom hosts) or the shared file at
-// defaultPreferencesPath() (env BETTER_DESIGN_PREFERENCES, set by the desktop app).
+// defaultPreferencesPath() (env VERYNIZE_PREFERENCES, set by the desktop app).
 const preferenceStores = new Map();
 function preferencesFor(backend) {
   if (backend.preferences) return backend.preferences;
@@ -365,7 +365,7 @@ function toolTable(backend) {
     },
   };
   t.take_screenshot = {
-    description: 'PNG image of one element (an artboard or a section such as "bok.tem"), rendered after pending images and fonts load. Also records a verification receipt bound to the current document revision and returns a lint report (clipping, overflow, overlap, contrast, placeholders, missing assets, taste rules) measured on the rendered layout when the app can measure it. Screenshot each section as you build it and the whole artboard before finish_artboard. Needs the Better Design desktop app; headless file mode reports it as unavailable.',
+    description: 'PNG image of one element (an artboard or a section such as "bok.tem"), rendered after pending images and fonts load. Also records a verification receipt bound to the current document revision and returns a lint report (clipping, overflow, overlap, contrast, placeholders, missing assets, taste rules) measured on the rendered layout when the app can measure it. Screenshot each section as you build it and the whole artboard before finish_artboard. Needs the Verynize desktop app; headless file mode reports it as unavailable.',
     inputSchema: { document: documentArg, pageId: pageArg, id: elementId, scale: z.number().min(0.25).max(3).optional() }, annotations: { readOnlyHint: true },
     raw: true,
     run: async ({ document: ref, pageId, id, scale = 1 }) => {
@@ -373,7 +373,7 @@ function toolTable(backend) {
       const first = await backend.read(ref);
       const assetsReady = await waitForAssets(backend, docKey(first.name, ref));
       const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page); const node = index.require(id);
-      if (!backend.screenshot) return failure(new Error('Screenshots are unavailable in headless mode: start the Better Design desktop app so this server can proxy to its live bridge. Use get_element_code to inspect the element instead. finish_artboard will report "unverified" without a screenshot.'));
+      if (!backend.screenshot) return failure(new Error('Screenshots are unavailable in headless mode: start the Verynize desktop app so this server can proxy to its live bridge. Use get_element_code to inspect the element instead. finish_artboard will report "unverified" without a screenshot.'));
       const key = docKey(state.name, ref);
       const revision = state.revision || revisionOf(state.document);
       const shot = await backend.screenshot(ref, page.id, node.id, scale, state);
@@ -453,7 +453,7 @@ function toolTable(backend) {
     },
   };
   t.finish_artboard = {
-    description: 'Finish an artboard after the design review. Requires reviewNote: what the design-review pass checked and what you fixed. Runs the finish gate: refused (isError, nothing focused) while critical lint problems remain; otherwise reports status "verified" (a real screenshot of this artboard at the current revision plus a review note) or "unverified" with reasons. Report the status honestly. On success selects and reveals the artboard in the live editor and returns a betterdesign:// link.',
+    description: 'Finish an artboard after the design review. Requires reviewNote: what the design-review pass checked and what you fixed. Runs the finish gate: refused (isError, nothing focused) while critical lint problems remain; otherwise reports status "verified" (a real screenshot of this artboard at the current revision plus a review note) or "unverified" with reasons. Report the status honestly. On success selects and reveals the artboard in the live editor and returns a verynize:// link.',
     inputSchema: { document: documentArg, pageId: pageArg, id: elementId, reviewNote: z.string().trim().min(1, 'reviewNote is required: describe the design-review pass').max(4000).describe('What the design review checked (hierarchy, spacing, contrast, clipping, placeholders, assets…) and what you fixed') },
     raw: true,
     run: async ({ document: ref, pageId, id, reviewNote }) => {
@@ -478,7 +478,7 @@ function toolTable(backend) {
         status: gate.status, verified: gate.status === 'verified', reasons: gate.reasons, artboardId,
         lint: lint ? { critical: lint.stats.critical, major: lint.stats.major, minor: lint.stats.minor, geometry: lint.stats.geometry, open: lint.problems.filter(p => p.severity !== 'minor').slice(0, 10).map(p => `${p.ref || artboardId}: ${p.message}`) } : null,
         headless: !state.live, focused: !!focus.focused, designLink: { name: node.name, url: linkFor(state, page.id, artboardId), markdown: `[${String(node.name || 'Artboard').replace(/[[\]]/g, '')}](${linkFor(state, page.id, artboardId)})` },
-        note: `${gate.status === 'verified' ? 'Verified: screenshot at the current revision plus design review.' : 'Unverified: tell the user which checks did not happen (see reasons).'} ${state.live ? 'The artboard is selected in the editor.' : 'Saved on disk. Open the document in Better Design to view it.'} Include designLink.markdown (or the url) verbatim in your final reply so the user can open the artboard.`,
+        note: `${gate.status === 'verified' ? 'Verified: screenshot at the current revision plus design review.' : 'Unverified: tell the user which checks did not happen (see reasons).'} ${state.live ? 'The artboard is selected in the editor.' : 'Saved on disk. Open the document in Verynize to view it.'} Include designLink.markdown (or the url) verbatim in your final reply so the user can open the artboard.`,
       });
     },
   };
@@ -599,7 +599,7 @@ function toolTable(backend) {
     inputSchema: { name: docName.optional(), fileId: z.string().min(1).max(200).optional() },
     run: async ({ name, fileId }) => {
       if (!name === !fileId) throw new Error('Provide exactly one of name or fileId');
-      if (!backend.open) throw new Error('open_document needs the Better Design desktop app running; headless mode edits saved documents directly by passing "document"');
+      if (!backend.open) throw new Error('open_document needs the Verynize desktop app running; headless mode edits saved documents directly by passing "document"');
       return backend.open({ name, fileId });
     },
   };
@@ -661,11 +661,11 @@ function toolTable(backend) {
     run: async ({ id }) => preferencesFor(backend).remove(id),
   };
   t.ask_agent = {
-    description: 'Get a second opinion or design review from another agent (Claude or Codex) running in the Better Design desktop app. Read-only: the other agent answers in text and cannot edit the canvas. Put everything it needs in task (the brief, what you built, element code or ids, the question). Use it sparingly, e.g. to critique a finished artboard before finish_artboard. Unavailable in headless mode.',
+    description: 'Get a second opinion or design review from another agent (Claude or Codex) running in the Verynize desktop app. Read-only: the other agent answers in text and cannot edit the canvas. Put everything it needs in task (the brief, what you built, element code or ids, the question). Use it sparingly, e.g. to critique a finished artboard before finish_artboard. Unavailable in headless mode.',
     inputSchema: { agent: z.enum(['claude', 'codex']).optional().describe('Which agent to ask; defaults to the other agent'), task: z.string().trim().min(1).max(20000).describe('The question or review request, with all needed context') },
     annotations: { readOnlyHint: true, openWorldHint: true },
     run: async ({ agent, task }) => {
-      if (typeof backend.askAgent !== 'function') throw new Error('ask_agent is unavailable in headless mode: it needs the Better Design desktop app (which runs the other agent). Continue with your own design-review skill instead.');
+      if (typeof backend.askAgent !== 'function') throw new Error('ask_agent is unavailable in headless mode: it needs the Verynize desktop app (which runs the other agent). Continue with your own design-review skill instead.');
       const answer = await backend.askAgent({ agent, task });
       const reply = typeof answer === 'string' ? { text: answer } : answer || {};
       if (!reply.text) throw new Error('The other agent returned no answer');

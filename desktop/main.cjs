@@ -16,11 +16,11 @@ const mcpBridge=require('./mcp-bridge.cjs'); // agent-bridge hook: live MCP serv
 const {registerAgentRuntime}=require('./agent-runtime.cjs'); // agent chat runtime (Claude Agent SDK / Codex app-server)
 const entry=path.join(__dirname,'../web/index.html');
 let primaryRuntime=null; // agent runtime of the latest editor window (serves ask_agent)
-app.setName('Better Design');
+app.setName('Verynize');
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   // Design preferences: one file shared by the agent persona (agent-runtime.cjs) and the MCP tools.
-  if(!process.env.BETTER_DESIGN_PREFERENCES)process.env.BETTER_DESIGN_PREFERENCES=path.join(app.getPath('userData'),'design-preferences.json');
+  if(!process.env.VERYNIZE_PREFERENCES)process.env.VERYNIZE_PREFERENCES=path.join(app.getPath('userData'),'design-preferences.json');
   // ask_agent MCP tool: nested read-only helper run on the most recent window's agent runtime.
   const askAgent=options=>{if(!primaryRuntime)return Promise.reject(Error('The agent runtime is not ready'));return primaryRuntime.ask(options||{});};
   mcpBridge.startBridge(app,{askAgent}).catch(error=>console.error('MCP bridge failed to start:',error)); // agent-bridge hook
@@ -55,7 +55,7 @@ app.whenReady().then(() => {
     });
     handle('listFiles',()=>current().list());handle('readFile',p=>current().read(p));handle('writeFile',(p,c)=>current().write(p,c));
     handle('gitStatus',()=>current().status());handle('createWorktree',b=>current().worktree(b));
-    handle('readMemory',()=>current().memory());handle('writeMemory',text=>current().write('BETTER_DESIGN.md',text));
+    handle('readMemory',()=>current().memory());handle('writeMemory',text=>current().write('VERYNIZE.md',text));
     handle('discoverAgents',()=>agents.discover());
     // --- agent chat runtime (desktop/agent-runtime.cjs): runAgent, cancelAgent, respondAgentPermission, listAgentModels, saveAgentImage ---
     // --- also: respondAgentQuestion, steerAgent, listAgentRuns, listAllowRules, removeAllowRule, agentToolsVersion, agentTitle, designPreferences* ---

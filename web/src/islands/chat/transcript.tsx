@@ -105,7 +105,7 @@ function ThinkingText({ text }: { text?: string }) {
 
 /* ---------- Tool calls: Wonder shows "Ran 5 commands ›" and the live step ("Editing the canvas", 39). ---------- */
 
-const CANVAS = /^mcp__better-design__/;
+const CANVAS = /^mcp__verynize__/;
 const SHELL = /^(shell|bash|exec_command|local_shell)$/i;
 const input = (part: ChatPart) => (part.input && typeof part.input === "object" ? (part.input as Record<string, unknown>) : {});
 const base = (value: unknown) => String(value ?? "").split(/[\\/]/).filter(Boolean).at(-1) ?? "";
@@ -585,7 +585,7 @@ function runningBlocks(parts: ChatPart[], nesting: Nesting): Block[] {
   return blocks;
 }
 
-/** betterdesign:// links reported by finish_artboard tool results (designLink), deduplicated. */
+/** verynize:// links reported by finish_artboard tool results (designLink), deduplicated. */
 function artboardLinks(parts: ChatPart[]): { url: string; name?: string }[] {
   const out = new Map<string, string | undefined>();
   for (const part of parts) {
@@ -594,11 +594,11 @@ function artboardLinks(parts: ChatPart[]): { url: string; name?: string }[] {
     try {
       const parsed = JSON.parse(part.result) as Record<string, unknown>;
       if (typeof parsed.name === "string") name = parsed.name;
-      if (typeof parsed.designLink === "string" && /^betterdesign:\/\//i.test(parsed.designLink)) out.set(parsed.designLink, name);
+      if (typeof parsed.designLink === "string" && /^verynize:\/\//i.test(parsed.designLink)) out.set(parsed.designLink, name);
     } catch {
       // Plain-text result: fall through to the URL scan.
     }
-    for (const match of part.result.matchAll(/betterdesign:\/\/[^\s"'<>()`\]]+/gi)) if (!out.has(match[0])) out.set(match[0], name);
+    for (const match of part.result.matchAll(/verynize:\/\/[^\s"'<>()`\]]+/gi)) if (!out.has(match[0])) out.set(match[0], name);
   }
   return [...out].map(([url, name]) => ({ url, name }));
 }

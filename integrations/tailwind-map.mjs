@@ -1,4 +1,4 @@
-// Tailwind classes -> Better Design node properties, using CSS declarations produced by the real
+// Tailwind classes -> Verynize node properties, using CSS declarations produced by the real
 // Tailwind v4 engine (tailwind-engine.mjs). Every class that cannot be represented is reported
 // with a reason; nothing is dropped silently.
 import { compileClass, sortClasses, resolveValue } from './tailwind-engine.mjs';

@@ -1,6 +1,6 @@
-# Wonder canvas/editor behavioral spec and Better Design parity gaps
+# Wonder canvas/editor behavioral spec and Verynize parity gaps
 
-Written 2026-10-28 against installed Wonder desktop 0.2.183. This is a description of behavior and interfaces, written from scratch. No Wonder source code is included. Better Design is an independent implementation.
+Written 2026-10-28 against installed Wonder desktop 0.2.183. This is a description of behavior and interfaces, written from scratch. No Wonder source code is included. Verynize is an independent implementation.
 
 ## Evidence and confidence
 
@@ -346,7 +346,7 @@ Other contextual sections: Icon, Page (background), Scale (K tool), Colors (edit
 
 ---
 
-## 5. Better Design today (web/app.js, wonder-shell.js, shaders.js)
+## 5. Verynize today (web/app.js, wonder-shell.js, shaders.js)
 
 **Model**
 - Flat `nodes[]` per page, with `parentId`.
@@ -381,7 +381,7 @@ Other contextual sections: Icon, Page (background), Scale (K tool), Colors (edit
 
 ## 6. Canvas parity gaps (prioritized by user-visible impact)
 
-| # | Feature | Wonder behavior | Better Design status | Effort | Recommended change |
+| # | Feature | Wonder behavior | Verynize status | Effort | Recommended change |
 |---|---|---|---|---|---|
 | 1 | Infinite canvas and camera | Unbounded world with top-level frames as artboards; zoom 5%–20000% on fixed stops; cursor-anchored smooth wheel/pinch zoom; ⇧0/⇧1/⇧2, N/⇧N **[O]** | Fixed 1000×700 board; 25–300% CSS scale; scroll-based pan; ctrl-wheel zoom not cursor-anchored | L | Replace `setZoom`/`fitCanvas` with a camera `{x,y,scale}` applied as a `translate+scale` transform on `#canvas`. Drop the 1000×700 assumptions in `setZoom`, `exportArtwork` and `exportHTML` (export per top-level frame instead). Add a `zoomStops` table and a `screenToWorld` helper. |
 | 2 | Tool modes and draw-to-create | V/K/H/F/S/T/I tools; drag to draw frames, text and shaders; Frame tool device presets **[O]** | Buttons insert at fixed positions (`add`) | M | Add `activeTool` state to the wonder-shell.js toolbar. On canvas pointerdown in a draw tool, rubber-band a rect and then `add(type,{x,y,w,h})`, parenting to the frame under the cursor. Add a preset list to the frame tool (§2.1). |

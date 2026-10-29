@@ -30,7 +30,7 @@ function Glyph({ children, ...props }: IconProps) {
   );
 }
 
-/** Better Design logo mark (filled; 12px of ink at size-4 like Wonder's mark in 11/22). */
+/** Verynize logo mark (filled; 12px of ink at size-4 like Wonder's mark in 11/22). */
 export function LogoIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>

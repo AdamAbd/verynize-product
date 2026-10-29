@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 (async () => {
-  const profile = await fs.mkdtemp(`${os.tmpdir()}/better-design-test-`);
+  const profile = await fs.mkdtemp(`${os.tmpdir()}/verynize-test-`);
   const env = {...process.env};
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({env, args: ['.', `--user-data-dir=${profile}`]});

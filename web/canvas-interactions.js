@@ -1,5 +1,5 @@
 'use strict';
-// Better Design canvas engine: camera, tools, selection, smart guides, clipboard and the
+// Verynize canvas engine: camera, tools, selection, smart guides, clipboard and the
 // command/shortcut registry. Independent implementation; app.js passes its editor state in
 // through BetterCanvas.install(editor) so this file never reaches into private globals.
 (() => {
@@ -10,7 +10,7 @@
   const DRAW_TOOLS = new Set(['frame', 'rectangle', 'text', 'shader']);
   const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', frame: 'add-frame', rectangle: 'rectangle', text: 'text', shader: 'add-shader'};
   const STYLE_KEYS = ['color', 'token', 'gradient', 'radius', 'strokeWidth', 'strokeColor', 'shadow', 'opacity', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'mask', 'animated', 'clipContent'];
-  const CLIP_MARKER = 'better-design/nodes';
+  const CLIP_MARKER = 'verynize/nodes';
   const FRAME_PRESETS = [
     ['Smartphone', [['iPhone 17', 402, 874], ['iPhone 18 Pro', 402, 874], ['iPhone Air', 420, 912], ['iPhone 18 Pro Max', 440, 956]]],
     ['Tablet', [['iPad Air 11"', 820, 1180], ['iPad Mini 8.3"', 744, 1133]]],

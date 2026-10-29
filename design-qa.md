@@ -28,7 +28,7 @@ Intentional differences: independent product identity and actual local design co
 - Toolbar: Move/Scale/Hand | Frame/Shader/Text | Details/Design layouts + Views menu (⌥1/⌥2/⌥0). The zoom readout opens zoom, snap and saved-views controls; `?` lists shortcuts.
 - Files home (grid + list columns), chat composer (attach menu, model/access popover, send arrow) and Settings navigation/cards restyled to the captures.
 
-Known differences: Wonder branding/avatar art, the Upgrade button, Outline/Filters sections, constraints (Left/Top) and the position grid are not shown because Better Design has no equivalent features. Wonder's Archived filter, Templates and textarea text editing remain. Tests that clicked relocated controls now open the menu first; `npm test` passes.
+Known differences: Wonder branding/avatar art, the Upgrade button, Outline/Filters sections, constraints (Left/Top) and the position grid are not shown because Verynize has no equivalent features. Wonder's Archived filter, Templates and textarea text editing remain. Tests that clicked relocated controls now open the menu first; `npm test` passes.
 
 ## React islands (2026-10-29)
 

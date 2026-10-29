@@ -19,7 +19,7 @@
   "inputs": [
     { "role": "starting screen image (attach this)", "path": "eval/references/08-start.png" },
     { "role": "starting screen as Tailwind HTML (attach or paste for apps that accept code)", "path": "eval/references/08-start.html" },
-    { "role": "starting screen as Better Design JSX (paste via create_artboard, then ask for the refinement)", "path": "eval/references/08-start.jsx" }
+    { "role": "starting screen as Verynize JSX (paste via create_artboard, then ask for the refinement)", "path": "eval/references/08-start.jsx" }
   ],
   "budget": { "maxMinutes": 15, "followUpTurns": 0 },
   "checklist": [

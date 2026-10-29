@@ -8,7 +8,7 @@ import { sanitizeSvg } from './assets.mjs';
 export const UNSPLASH_API = 'https://api.unsplash.com/search/photos';
 export const OPENVERSE_API = 'https://api.openverse.org/v1/images/';
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const USER_AGENT = 'BetterDesign/0.4 (+https://github.com/better-design)';
+const USER_AGENT = 'Verynize/0.4 (+https://github.com/verynize)';
 
 function withTimeout(fetchImpl, ms) {
   const f = fetchImpl || globalThis.fetch;
@@ -41,7 +41,7 @@ function unsplashResult(p) {
   const url = raw ? `${raw}${raw.includes('?') ? '&' : '?'}w=1600&q=80&fm=jpg&fit=max` : p?.urls?.regular;
   return {
     url, thumbnail: p?.urls?.small, width: p?.width, height: p?.height, alt: p?.alt_description || p?.description || '',
-    author: p?.user?.name || '', authorUrl: p?.user?.links?.html ? `${p.user.links.html}?utm_source=better_design&utm_medium=referral` : '',
+    author: p?.user?.name || '', authorUrl: p?.user?.links?.html ? `${p.user.links.html}?utm_source=verynize&utm_medium=referral` : '',
     license: 'Unsplash License', licenseUrl: 'https://unsplash.com/license', pageUrl: p?.links?.html || '', source: 'unsplash',
     downloadLocation: p?.links?.download_location || '', color: p?.color,
   };

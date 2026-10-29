@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Aggregate Tier 2 judge results: eval/results/<app>/<brief>/<run>.json.
 //
-//   node eval/summarize.mjs [--judge claude] [--focus better-design] [--json out.json]
+//   node eval/summarize.mjs [--judge claude] [--focus verynize] [--json out.json]
 //
 // Gate (Tier 2 part): focus app has zero critical defects, and its median weighted score is not
 // below any competitor's, overall and per brief (briefs where a competitor has no data are skipped).
@@ -12,7 +12,7 @@ import { median } from './lib/stats.mjs';
 
 const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
-const judge = opt('--judge', 'claude'), focus = opt('--focus', 'better-design');
+const judge = opt('--judge', 'claude'), focus = opt('--focus', 'verynize');
 const root = join(EVAL_DIR, 'results');
 const rows = [];
 for (const app of existsSync(root) ? readdirSync(root) : []) {

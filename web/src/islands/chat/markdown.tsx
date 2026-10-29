@@ -3,15 +3,15 @@
 import { Fragment, memo, type ReactNode } from "react";
 import { workspace } from "./store";
 
-/** Classifies a link target: only http(s) and betterdesign:// are ever clickable (no javascript:, data:, file: …). */
+/** Classifies a link target: only http(s) and verynize:// are ever clickable (no javascript:, data:, file: …). */
 export function linkKind(href: string): "web" | "app" | null {
   const value = href.trim();
   if (/^https?:\/\//i.test(value)) return "web";
-  if (/^betterdesign:\/\//i.test(value)) return "app";
+  if (/^verynize:\/\//i.test(value)) return "app";
   return null;
 }
 
-/** Opens a betterdesign:// link on the canvas; false when the workspace cannot handle it. */
+/** Opens a verynize:// link on the canvas; false when the workspace cannot handle it. */
 export function openAppLink(href: string): boolean {
   const open = workspace()?.openLink;
   if (!open || linkKind(href) !== "app") return false;
@@ -133,7 +133,7 @@ function parse(source: string): Block[] {
   return blocks;
 }
 
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*|__[^_\n]+__)|(\*[^*\s][^*\n]*\*|_[^_\s][^_\n]*_)|(\[[^\]\n]+\]\([^)\s]+\))|((?:https?|betterdesign):\/\/[^\s<>()`]+)/g;
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*|__[^_\n]+__)|(\*[^*\s][^*\n]*\*|_[^_\s][^_\n]*_)|(\[[^\]\n]+\]\([^)\s]+\))|((?:https?|verynize):\/\/[^\s<>()`]+)/g;
 
 function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];

@@ -1,6 +1,6 @@
 # Evaluasi bertingkat (Tahap 6)
 
-Tujuan: cara yang bisa diulang untuk membuktikan atau membantah bahwa taste UI hasil Better Design ≥ Wonder dan Pen. Dasar: [review kritis](../docs/audits/2026-10-29-design-quality-review.md) (Kritik 5, Tahap 6) dan [audit](../docs/audits/2026-10-29-design-quality.md) (definisi "minimal 1:1").
+Tujuan: cara yang bisa diulang untuk membuktikan atau membantah bahwa taste UI hasil Verynize ≥ Wonder dan Pen. Dasar: [review kritis](../docs/audits/2026-10-29-design-quality-review.md) (Kritik 5, Tahap 6) dan [audit](../docs/audits/2026-10-29-design-quality.md) (definisi "minimal 1:1").
 
 | Tier | Apa | Biaya | Perintah |
 |---|---|---|---|
@@ -19,28 +19,28 @@ Fixture = `eval/fidelity/fixtures/NN-nama.jsx` + `NN-nama.json` (asersi). Asersi
 `eval/briefs/*.json`: 8 brief, masing-masing berisi `prompt` (teks identik untuk semua app), `viewport`, `requiredContent`, `constraints`, `assetsAllowed`, `inputs`, `budget`, dan 12–14 item checklist biner (`critical: true` = cacat kritis).
 
 - 07 rekonstruksi: lampirkan `eval/references/07-reference.png` (desain orisinal; sumber `07-reference.html`, Tailwind v4). Jangan berikan HTML-nya ke app.
-- 08 refinement: lampirkan `eval/references/08-start.png`; untuk app yang menerima kode tempel `08-start.html`; untuk Better Design tempel `08-start.jsx` via `create_artboard` dulu, lalu kirim prompt.
+- 08 refinement: lampirkan `eval/references/08-start.png`; untuk app yang menerima kode tempel `08-start.html`; untuk Verynize tempel `08-start.jsx` via `create_artboard` dulu, lalu kirim prompt.
 - Jika referensi diubah: `node eval/render-references.mjs`, lalu naikkan `version` brief. Hasil dengan versi brief berbeda tidak boleh dibandingkan.
 
 ## Membekukan kondisi run
 
 Catat di `eval/results/<app>/RUNLOG.md` per run: versi app, model, effort, tanggal, durasi, jumlah follow-up.
 
-- Model/effort: Better Design dan Wonder sama-sama Claude Agent SDK → pakai model yang sama (mis. `claude-opus-5-5`, effort `high`) di kedua app. Pen: pilih model yang setara; bila tidak bisa disamakan, catat sebagai keterbatasan.
+- Model/effort: Verynize dan Wonder sama-sama Claude Agent SDK → pakai model yang sama (mis. `claude-opus-5-5`, effort `high`) di kedua app. Pen: pilih model yang setara; bila tidak bisa disamakan, catat sebagai keterbatasan.
 - Satu sesi/dokumen baru per run, tanpa riwayat chat, tanpa design system/library pribadi kecuali brief memintanya.
 - Kirim `prompt` apa adanya (copy dari JSON), lampiran sesuai `inputs`. `budget.followUpTurns` = 0: tidak ada koreksi manual. Hentikan pada `budget.maxMinutes`; ambil apa yang ada.
 - Simpan juga hasil pass pertama bila app melakukan iterasi terlihat: `<run>.first.png` (diabaikan pairwise).
 
 ## Mengambil output
 
-Konvensi file: `eval/results/<app>/<brief-id>/<run>.png`, `app` ∈ `better-design | wonder | pen | figma | figcraft`, `run` = `run-1`, `run-2`, …. Gunakan `eval/capture.mjs` agar ukuran seragam (1×, lebar = viewport brief):
+Konvensi file: `eval/results/<app>/<brief-id>/<run>.png`, `app` ∈ `verynize | wonder | pen | figma | figcraft`, `run` = `run-1`, `run-2`, …. Gunakan `eval/capture.mjs` agar ukuran seragam (1×, lebar = viewport brief):
 
 ```sh
 node eval/capture.mjs --brief 01-saas-dashboard --app wonder --run run-1 --png ~/Downloads/Frame.png
-node eval/capture.mjs --brief 01-saas-dashboard --app better-design --run run-1 --html /tmp/export.html
+node eval/capture.mjs --brief 01-saas-dashboard --app verynize --run run-1 --html /tmp/export.html
 ```
 
-**Better Design.** Jalankan app desktop (`npm start`), buka dokumen baru, kirim prompt di panel chat dengan model/effort yang dibekukan. Setelah selesai, ambil gambar artboard dengan salah satu cara (konsisten untuk semua run):
+**Verynize.** Jalankan app desktop (`npm start`), buka dokumen baru, kirim prompt di panel chat dengan model/effort yang dibekukan. Setelah selesai, ambil gambar artboard dengan salah satu cara (konsisten untuk semua run):
 1. Utama: pilih artboard → Export → PNG 1× → simpan → `capture.mjs --png`. Ini memakai renderer offscreen yang sama dengan `take_screenshot` MCP.
 2. Lewat MCP dari agent luar: `take_screenshot { id: <artboard>, scale: 1 }` mengembalikan PNG base64; simpan blok gambar ke file lalu `capture.mjs --png`.
 3. Cadangan headless: `npm run cli -- --root <folder-dokumen> export <NAMA> > /tmp/export.html` lalu `capture.mjs --html` (renderer `export-html.mjs` memakai mapping gaya yang sama dengan canvas, `web/node-style.js`; bedanya hanya font/lingkungan browser — tetap jangan dicampur dengan cara 1 dalam satu perbandingan).
@@ -65,7 +65,7 @@ Judge mendapat screenshot (halaman tinggi dikirim sebagai overview + potongan re
 ## Tier 3 — blind pairwise
 
 ```sh
-node eval/make-pairs.mjs --seed 2026 [--apps better-design,wonder,pen] [--max-per-brief 12]
+node eval/make-pairs.mjs --seed 2026 [--apps verynize,wonder,pen] [--max-per-brief 12]
 # buka eval/pairwise/review.html; tombol A/←, B/→, T/↓ (tie), U (kembali), Z (zoom). Vote tersimpan di localStorage.
 # reviewer menekan "Export votes JSON"; kumpulkan di eval/pairwise/votes/
 node eval/score-pairs.mjs [--margin 50] [--samples 2000]
@@ -75,16 +75,16 @@ node eval/score-pairs.mjs [--margin 50] [--samples 2000]
 
 ## Jumlah run
 
-- **Pilot**: 8 brief × 2 run × 3 app (Better Design, Wonder, Pen) = 48 gambar; 48 panggilan judge; pairwise 8 × 3 pasangan app × 4 kombinasi run = 96 pasangan (+ulangan), ≥3 reviewer. Tujuannya mengkalibrasi checklist dan judge, bukan klaim statistik.
+- **Pilot**: 8 brief × 2 run × 3 app (Verynize, Wonder, Pen) = 48 gambar; 48 panggilan judge; pairwise 8 × 3 pasangan app × 4 kombinasi run = 96 pasangan (+ulangan), ≥3 reviewer. Tujuannya mengkalibrasi checklist dan judge, bukan klaim statistik.
 - **Studi utama** (setelah pilot stabil): 3 run per brief per app (72 output, sesuai audit), ≥3 reviewer manusia. Judge dijalankan ulang bila rubrik atau brief berubah.
 
 ## Gate penerimaan
 
-Better Design dinyatakan "≥ Wonder dan Pen" hanya jika semua terpenuhi, terhadap **masing-masing** kompetitor:
+Verynize dinyatakan "≥ Wonder dan Pen" hanya jika semua terpenuhi, terhadap **masing-masing** kompetitor:
 
-1. **Nol cacat kritis**: tidak ada `criticalDefects` dan tidak ada item checklist `critical` yang gagal di run Better Design mana pun (`summarize.mjs`).
-2. **Median skor judge** (weighted, 0–100) Better Design tidak di bawah median kompetitor, secara keseluruhan dan per brief (`summarize.mjs`, exit 0).
-3. **Pairwise**: CI 95% selisih rating BT (Better Design − kompetitor) tidak berada di bawah −margin (default 50 Elo), yaitu verdict `non-inferior` atau `superior` (`score-pairs.mjs`, exit 0). `inconclusive` = data belum cukup, bukan lulus.
+1. **Nol cacat kritis**: tidak ada `criticalDefects` dan tidak ada item checklist `critical` yang gagal di run Verynize mana pun (`summarize.mjs`).
+2. **Median skor judge** (weighted, 0–100) Verynize tidak di bawah median kompetitor, secara keseluruhan dan per brief (`summarize.mjs`, exit 0).
+3. **Pairwise**: CI 95% selisih rating BT (Verynize − kompetitor) tidak berada di bawah −margin (default 50 Elo), yaitu verdict `non-inferior` atau `superior` (`score-pairs.mjs`, exit 0). `inconclusive` = data belum cukup, bukan lulus.
 4. Tier 1 hijau (`run-fidelity.mjs` exit 0) sebagai syarat sebelum menjalankan Tier 2/3 untuk rilis.
 
 Laporkan juga rentang skor, disagreement reviewer, versi app/model, dan keterbatasan (model yang tidak bisa disamakan, font yang hilang).

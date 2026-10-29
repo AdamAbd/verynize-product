@@ -10,6 +10,6 @@ REA manifest-only analysis parent Evidence: `ev_3d2545891f9b92a3086be682f3314c3e
 
 Manifest observations: Claude Agent SDK 0.3.293, Codex SDK 0.159.2, local `@ha/schema`, `@ha/headless`, `@ha/mcp`, `@ha/browser-inject`, `@ha/electron-browser-import`, Electron Store, and Chokidar dependencies. These support investigation of document-first editing, headless automation, agent integration, browser import, and local persistence as architectural candidates. They do not prove successful operations or reveal the private .pen schema.
 
-Better Design implements its own documented JSON schema, nested editable frame/layer hierarchy, variable binding, and browser-layout export. No Pen proprietary source or assets were copied; compatibility with native .pen documents is **not established**.
+Verynize implements its own documented JSON schema, nested editable frame/layer hierarchy, variable binding, and browser-layout export. No Pen proprietary source or assets were copied; compatibility with native .pen documents is **not established**.
 
 Context7 resolved `/mdn/content` and queried CSS grid/flex positioning: normal-flow children remain relative in layout containers, while freely positioned children use absolute coordinates. Reference: [MDN grid and other layout methods](https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Grid_layout/Relationship_with_other_layout_methods).

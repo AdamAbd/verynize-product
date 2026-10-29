@@ -102,7 +102,7 @@ type Workspace = {
   moveQueued?(id: string, delta: -1 | 1): void;
   removeQueued?(id: string): void;
   sendQueuedNow?(id: string): void;
-  /** Opens betterdesign:// links (artboards/elements) on the canvas; returns false if unhandled. */
+  /** Opens verynize:// links (artboards/elements) on the canvas; returns false if unhandled. */
   openLink?(url: string): boolean;
   /** Search canvas elements for the @ popover. */
   searchElements?(query: string): ChatMention[];
