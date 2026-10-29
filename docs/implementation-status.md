@@ -37,7 +37,7 @@ Updated 2026-10-29. This records actual implementation and tests, not a claim th
 - Photographic image model providers and smooth/high-fidelity curve tracing; implemented generation is agent-authored vector illustration with optional PNG rendering.
 - Exact Wonder shader library and parameter compatibility; the implemented WebGL presets are independently authored.
 - Full CSS/Tailwind import/export fidelity; external stylesheet resolution; general source round trips.
-- Provider-hosted multi-account management, account-specific billing/usage, tool/plugin configuration, comprehensive agent autonomy UI. Local CLI sign-in/switch and model defaults exist; successful provider browser login remains unverified.
+- Provider-hosted multi-account management (Settings › Usage shows the plan limits of the one signed-in Claude Code and Codex account), tool/plugin configuration, comprehensive agent autonomy UI. Local CLI sign-in/switch and model defaults exist; successful provider browser login remains unverified.
 - Accounts, public creator profiles, identity-based permissions, token recovery/rotation, full real-time semantic merging.
 - Published running applications with build/deployment automation; current public publishing is a design snapshot.
 - Global source-code search across projects, complete template/library ecosystem and history-preserving workspace moves. Local file/page/layer search, original templates and document-persisted shared views are implemented.

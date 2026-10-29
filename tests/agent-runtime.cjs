@@ -76,6 +76,7 @@ async function setup(t, extra = {}) {
   const events = [], record = {};
   const runtime = new AgentRuntime({
     userData: path.join(root, 'userData'),
+    home: path.join(root, 'home'), // never read the real ~/.codex/AGENTS.md
     discover: async () => [{ id: 'codex', available: true, path: codex }, { id: 'claude', available: true, path: '/usr/bin/true' }],
     loadClaudeSdk: async () => fakeClaudeSdk(record),
     getBridge: async () => extra.bridge ?? null,
