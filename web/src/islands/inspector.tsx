@@ -17,30 +17,41 @@ function Island() {
   const selection = useSelection();
   const node = primaryNode(doc, selection);
   const selected = !!node;
-  // Wonder: with a selection, Variables collapse and Properties expand; without one, the reverse (11 / 22).
+  // Variables start collapsed and Properties expanded; with nothing selected Properties shows the page settings.
   // The user can still toggle either; the automatic state is re-applied when the selection empties or fills.
-  const [variablesOpen, setVariablesOpen] = useState(!selected);
-  const [propertiesOpen, setPropertiesOpen] = useState(selected);
+  const [variablesOpen, setVariablesOpen] = useState(false);
+  const [propertiesOpen, setPropertiesOpen] = useState(true);
   useEffect(() => {
-    setVariablesOpen(!selected);
-    setPropertiesOpen(selected);
+    setVariablesOpen(false);
+    setPropertiesOpen(true);
   }, [selected]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-xs text-foreground-2">
       <PanelHeader />
-      <VariablesSection open={variablesOpen} onToggle={() => setVariablesOpen(!variablesOpen)} grow={!propertiesOpen} />
+      <VariablesSection
+        open={variablesOpen}
+        onToggle={() => setVariablesOpen(!variablesOpen)}
+        grow={!propertiesOpen}
+      />
       <section
         id="insp-properties"
         aria-label="Properties"
-        className={cn("flex min-h-0 flex-col", propertiesOpen ? "flex-1" : "mt-auto shrink-0 border-t border-divider")}
+        className={cn(
+          "flex min-h-0 flex-col",
+          propertiesOpen ? "flex-1" : "mt-auto shrink-0 border-t border-divider",
+        )}
       >
         <PanelSectionHeader
           label="Properties"
           open={propertiesOpen}
           onToggle={() => setPropertiesOpen(!propertiesOpen)}
         />
-        <div hidden={!propertiesOpen} data-scroll className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div
+          hidden={!propertiesOpen}
+          data-scroll
+          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
+        >
           <PropertiesBody doc={doc} node={node} selection={selection} />
         </div>
       </section>

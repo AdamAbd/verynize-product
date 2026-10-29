@@ -5,7 +5,7 @@
 #canvas-wrap{position:absolute!important;inset:0;width:auto!important;height:auto!important;margin:0!important;overflow:hidden;touch-action:none}
 #canvas{--iz:1;position:absolute;left:0;top:0;width:1000px;height:700px;transform-origin:0 0;overflow:visible!important;will-change:transform}
 #canvas .layer.selected{outline-width:calc(1.5px * var(--iz))!important;outline-offset:0!important}
-#canvas .layer.frame-layer:not(.selected){outline-width:calc(1px * var(--iz))}
+
 #canvas .layer>.handle{width:calc(8px * var(--iz))!important;height:calc(8px * var(--iz))!important;border-width:calc(1px * var(--iz))!important}
 #canvas .layer>.handle[data-corner=nw]{left:calc(-4px * var(--iz))!important;top:calc(-4px * var(--iz))!important}
 #canvas .layer>.handle[data-corner=ne]{right:calc(-4px * var(--iz))!important;top:calc(-4px * var(--iz))!important}

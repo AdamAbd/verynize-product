@@ -46,6 +46,7 @@ export function validateDocument(document) {
   const ids=new Set(); let total=0;
   for(const page of document.pages) {
     requireString(page.id,'Page id'); requireString(page.name,'Page name');
+    if(page.background!==undefined && (typeof page.background!=='string' || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(page.background))) throw new Error('Page background must be a six- or eight-digit hex colour');
     if(ids.has(page.id)) throw new Error('Duplicate id'); ids.add(page.id);
     if(!Array.isArray(page.nodes) || page.nodes.length>5000 || (total+=page.nodes.length)>10000) throw new Error('Maximum 10000 nodes');
     const nodes=new Map();

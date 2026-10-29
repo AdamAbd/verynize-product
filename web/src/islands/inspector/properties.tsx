@@ -19,6 +19,7 @@ import {
   LayoutGrid,
   GitCommitHorizontal,
   Proportions,
+  RotateCcw,
   RotateCw,
   RotateCwSquare,
   Scan,
@@ -30,7 +31,7 @@ import {
 } from "lucide-react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
 import { ShaderIcon, StackColumnIcon, StackRowIcon } from "@/components/icons";
-import type { DesignDocument } from "@/lib/bridge";
+import { activePage, type DesignDocument } from "@/lib/bridge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,7 +53,7 @@ import {
   Swatch,
   type IconType,
 } from "./controls";
-import { formClick } from "./legacy";
+import { formClick, notify } from "./legacy";
 import { ColorPopover } from "./color-picker";
 import { BindableField } from "./bind";
 import { EXPORT_FORMATS, EXPORT_SCALES, exportArtwork, type ExportFormat } from "./export";
@@ -794,6 +795,90 @@ function FillSection({
   );
 }
 
+/* ---------- Page (nothing selected) ---------- */
+const workspace = () => document.getElementById("workspace");
+
+/** The canvas backdrop the page falls back to without its own background (theme token). */
+function defaultPageColor() {
+  const el = workspace();
+  if (!el) return "#2B2B2B";
+  const inline = el.style.backgroundColor;
+  el.style.backgroundColor = "";
+  const parsed = parseColor(getComputedStyle(el).backgroundColor);
+  el.style.backgroundColor = inline;
+  return parsed ? toHex(parsed) : "#2B2B2B";
+}
+
+function updatePage(patch: { background?: string }) {
+  try {
+    window.design.updatePage(patch);
+  } catch (error) {
+    notify(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function PageSection({ doc }: { doc: DesignDocument }) {
+  const [open, setOpen] = useState(false);
+  const background = activePage(doc).background;
+  const color = background || defaultPageColor();
+  const commit = (next: string) => updatePage({ background: next });
+  return (
+    <Section
+      id="page-section"
+      title="Page"
+      tools={
+        background ? (
+          <IconButton
+            icon={RotateCcw}
+            label="Reset page colour"
+            onClick={() => updatePage({ background: undefined })}
+          />
+        ) : null
+      }
+    >
+      <ColorPopover
+        open={open}
+        onOpenChange={setOpen}
+        value={color}
+        onPreview={(next) => {
+          const el = workspace();
+          if (el) el.style.backgroundColor = next;
+        }}
+        onCommit={commit}
+      >
+        <div
+          data-color-anchor
+          className="flex h-6 min-w-0 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field focus-within:ring-1 focus-within:ring-ring"
+        >
+          <button
+            type="button"
+            name="pageBackground"
+            aria-label="Page colour"
+            aria-expanded={open}
+            title="Pick page colour"
+            className="flex size-4.5 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={() => setOpen(!open)}
+          >
+            <Swatch color={color} className="size-4.5 rounded-sm" />
+          </button>
+          <Field
+            label="Page hex colour"
+            value={hexLabel(color)}
+            className="h-5 flex-1 bg-transparent px-1 shadow-none focus-within:ring-0"
+            inputClassName="uppercase"
+            onCommit={(value) => {
+              const hex =
+                parseHex(value, color) ?? (parseColor(value) ? toHex(parseColor(value)!) : null);
+              if (!hex) return "Use a hex colour such as 2B2B2B";
+              commit(hex);
+            }}
+          />
+        </div>
+      </ColorPopover>
+    </Section>
+  );
+}
+
 /* ---------- Optional sections ---------- */
 function useOptional(nodeId: string | undefined, hasValue: boolean) {
   const [open, setOpen] = useState(hasValue);
@@ -1118,11 +1203,7 @@ export function PropertiesBody({
       {node ? <MaskSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <ExportSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <LayerSection doc={doc} node={node} selection={selection} /> : null}
-      {!node ? (
-        <p className="px-3 py-3 text-xs text-muted-foreground">
-          Select a layer to edit its properties.
-        </p>
-      ) : null}
+      {!node ? <PageSection doc={doc} /> : null}
     </>
   );
 }
