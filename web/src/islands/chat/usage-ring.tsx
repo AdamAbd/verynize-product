@@ -1,11 +1,17 @@
-// Context usage ring beside Send (29, 35, 51, 72): a 16px progress ring of inputTokens / contextWindow with a
-// tooltip listing tokens, cost and provider rate limits.
-import type { CSSProperties } from "react";
-import { Tooltip as TooltipPrimitive } from "radix-ui";
-import { portalContainer } from "@/lib/bridge";
+// Usage ring beside Send (29, 35, 51, 72) and its popover: the provider account's plan limits (5-hour, weekly, per
+// model; desktop/agent-usage.cjs, refreshed by rate-limit events of the chat's runs), Verynize's AI-generated layers
+// this week (no quota) and the chat's context window with a breakdown. The ring shows the most constraining value.
+import { useState, type ReactNode } from "react";
+import { ChevronRightIcon, GaugeIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { readContext, refreshAccountUsage, useAccountUsage, type AccountLimit, type ContextBreakdown } from "./agent-status";
 import { hook } from "./hooks";
-import type { ChatUsage } from "./store";
+import type { ChatState, ChatUsage } from "./store";
 
 export const formatTokens = (value?: number) => {
   if (value === undefined || !Number.isFinite(value)) return "–";
@@ -15,14 +21,22 @@ export const formatTokens = (value?: number) => {
 };
 export const formatCost = (value?: number) =>
   value === undefined || !Number.isFinite(value) ? "" : value < 0.01 && value > 0 ? "<$0.01" : `$${value.toFixed(2)}`;
-const formatReset = (at?: number) => {
-  if (!at) return "";
-  const date = new Date(at);
-  const sameDay = date.toDateString() === new Date().toDateString();
-  return sameDay
-    ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+/** "106.6K", "1.0M", "840". */
+export const compactTokens = (value?: number) => {
+  if (value === undefined || !Number.isFinite(value)) return "–";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
+  return String(Math.round(value));
 };
+/** "10:40 PM" today, "Sat 11:00 AM" within a week, else "Nov 5, 2:41 PM". */
+export function formatReset(at: number, now = Date.now()) {
+  const date = new Date(at);
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (date.toDateString() === new Date(now).toDateString()) return time;
+  if (at - now < 6 * 86_400_000 && at > now) return `${date.toLocaleDateString([], { weekday: "short" })} ${time}`;
+  return `${date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+}
+const percentLabel = (value: number) => `${Math.round(value)}% used`;
 
 /** Share of the context window in use, 0–1 (0 when the window is unknown). */
 export function contextShare(usage?: ChatUsage): number {
@@ -38,6 +52,26 @@ export function usageSummary(usage: ChatUsage): string {
   const cost = formatCost(usage.costUsd);
   if (cost) parts.push(cost);
   return parts.join(" · ");
+}
+
+// "Weekly Opus limit" (run events) and "Weekly limit · Opus" (account read) are the same window.
+const limitKey = (label: string) =>
+  label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").sort().join(" ");
+
+/** Account limits, updated by the newer rate-limit events of the chat's runs; run-only limits are appended. */
+export function mergeLimits(account: AccountLimit[] = [], live: NonNullable<ChatUsage["rateLimit"]> = []): AccountLimit[] {
+  const out = account.map((limit) => ({ ...limit }));
+  for (const event of live) {
+    const same = out.find((limit) => limitKey(limit.label) === limitKey(event.label));
+    if (same) Object.assign(same, { usedPercent: event.usedPercent, ...(event.resetsAt ? { resetsAt: event.resetsAt } : {}) });
+    else out.push({ id: "live:" + limitKey(event.label), label: event.label, usedPercent: event.usedPercent, ...(event.resetsAt ? { resetsAt: event.resetsAt } : {}) });
+  }
+  return out;
+}
+
+/** The most constraining share, 0–1: context window or any plan limit. */
+export function ringShare(usage: ChatUsage | undefined, limits: AccountLimit[]): number {
+  return Math.min(1, Math.max(contextShare(usage), ...limits.map((limit) => limit.usedPercent / 100), 0));
 }
 
 function Ring({ share }: { share: number }) {
@@ -64,68 +98,152 @@ function Ring({ share }: { share: number }) {
   );
 }
 
-const Row = ({ label, value }: { label: string; value: string }) => (
-  <div className="flex items-center justify-between gap-4">
-    <span className="text-muted-foreground">{label}</span>
-    <span className="text-foreground-2 tabular-nums">{value}</span>
-  </div>
-);
-
-export function UsageRing({ usage }: { usage?: ChatUsage }) {
-  const share = contextShare(usage);
-  const percent = Math.round(share * 100);
-  const label = usage?.contextWindow ? `Context ${percent}% used` : "Context usage";
-  const cost = formatCost(usage?.costUsd);
+function Meter({ id, label, aside, value, note, tone = "limit" }: { id: string; label: ReactNode; aside: string; value?: number; note?: string; tone?: "limit" | "context" }) {
   return (
-    <TooltipPrimitive.Root>
-      <TooltipPrimitive.Trigger asChild>
-        <button
-          type="button"
-          aria-label={label}
-          className={cn(hook.usage, "flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-muted focus-visible:bg-muted focus-visible:outline-hidden")}
+    <div data-usage-row={id} className="flex flex-col gap-1.5 py-1">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="flex min-w-0 items-center gap-1.5 truncate text-foreground">{label}</span>
+        <span className="shrink-0 text-muted-foreground tabular-nums">{aside}</span>
+      </div>
+      {value !== undefined && (
+        <Progress
+          value={value}
+          aria-label={typeof label === "string" ? label : id}
+          tone={tone === "context" ? "muted" : value >= 80 ? "destructive" : "default"}
+        />
+      )}
+      {note && <span className="text-sm text-muted-foreground tabular-nums">{note}</span>}
+    </div>
+  );
+}
+
+function ContextSection({ usage, breakdown }: { usage?: ChatUsage; breakdown: ContextBreakdown | null }) {
+  const [open, setOpen] = useState(false);
+  const max = breakdown?.maxTokens ?? usage?.contextWindow;
+  const used = breakdown?.totalTokens || usage?.inputTokens;
+  const percent = breakdown?.percentage ?? (max && used ? (used / max) * 100 : undefined);
+  const rows = breakdown?.categories.filter((c) => c.kind !== "free").length
+    ? breakdown.categories.filter((c) => c.kind !== "free").map((c) => ({ label: c.name, value: compactTokens(c.tokens) }))
+    : [
+        ...(usage?.inputTokens !== undefined ? [{ label: "Input", value: compactTokens(usage.inputTokens) }] : []),
+        ...(usage?.outputTokens !== undefined ? [{ label: "Output", value: compactTokens(usage.outputTokens) }] : []),
+        ...(formatCost(usage?.costUsd) ? [{ label: "Cost", value: formatCost(usage?.costUsd) }] : []),
+      ];
+  const note = used !== undefined ? (max ? `${compactTokens(used)} / ${compactTokens(max)} tokens` : `${compactTokens(used)} tokens`) : "No messages yet";
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} data-usage-row="context">
+      <div className="flex flex-col gap-1.5 py-1">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        {rows.length ? (
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-1 rounded-sm text-foreground-2 outline-hidden hover:text-foreground focus-visible:text-foreground"
+            >
+              Context window
+              <ChevronRightIcon className={cn("size-3 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
+            </button>
+          </CollapsibleTrigger>
+        ) : (
+          <span className="text-foreground-2">Context window</span>
+        )}
+        <span className="shrink-0 text-muted-foreground tabular-nums">{percent !== undefined ? percentLabel(percent) : "–"}</span>
+      </div>
+      <Progress value={percent ?? 0} aria-label="Context window" tone="muted" />
+      <span className="text-sm text-muted-foreground tabular-nums">{note}</span>
+      <CollapsibleContent>
+        <ul data-context-breakdown="" className="flex flex-col gap-0.5 pt-1">
+          {rows.map((row) => (
+            <li key={row.label} className="flex items-center justify-between gap-3 text-sm">
+              <span className="truncate text-muted-foreground">{row.label}</span>
+              <span className="text-foreground-2 tabular-nums">{row.value}</span>
+            </li>
+          ))}
+        </ul>
+      </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+}
+
+export function UsageRing({ state }: { state: ChatState }) {
+  const agent = state.defaults.agent === "codex" ? "codex" : "claude";
+  const usage = state.usage ?? state.messages.findLast((m) => m.usage)?.usage;
+  const { account, layers } = useAccountUsage(agent);
+  const [open, setOpen] = useState(false);
+  const [breakdown, setBreakdown] = useState<ContextBreakdown | null>(null);
+  const accountLimits = account?.status === "ready" ? account.limits : [];
+  const limits = mergeLimits(accountLimits, usage?.rateLimit);
+  const share = ringShare(usage, limits);
+  const percent = Math.round(share * 100);
+  const name = agent === "codex" ? "Codex" : "Claude";
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) return;
+        void refreshAccountUsage(agent);
+        setBreakdown(null);
+        if (state.busy && agent === "claude") void readContext(state.conversationId).then(setBreakdown);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`${name} usage ${percent}% used`}
+          data-chat-indicator="usage"
         >
           <Ring share={share} />
-        </button>
-      </TooltipPrimitive.Trigger>
-      <TooltipPrimitive.Portal container={portalContainer()}>
-        <TooltipPrimitive.Content
-          side="top"
-          align="end"
-          sideOffset={6}
-          collisionPadding={8}
-          className="z-50 flex w-56 flex-col gap-1 rounded-xl border border-card-border bg-background p-2.5 text-sm text-foreground-2 shadow-menu data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0"
-        >
-          {!usage ? (
-            <span className="text-muted-foreground">No usage yet in this chat</span>
-          ) : (
-            <>
-              <span className="text-foreground">
-                {usage.contextWindow ? `${percent}% of context used` : "Context"}
-              </span>
-              {usage.contextWindow ? (
-                <Row label="Tokens" value={`${formatTokens(usage.inputTokens)} / ${formatTokens(usage.contextWindow)}`} />
-              ) : (
-                <Row label="Input tokens" value={formatTokens(usage.inputTokens)} />
-              )}
-              {usage.outputTokens !== undefined && <Row label="Output tokens" value={formatTokens(usage.outputTokens)} />}
-              {cost && <Row label="Cost" value={cost} />}
-              {!!usage.rateLimit?.length && <div className="my-1 h-px bg-border" />}
-              {usage.rateLimit?.map((limit) => (
-                <div key={limit.label} className="flex flex-col gap-1">
-                  <Row label={limit.label} value={`${Math.round(limit.usedPercent)}%`} />
-                  <div className="h-1 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={cn("h-full w-(--bd-used) rounded-full", limit.usedPercent >= 80 ? "bg-destructive" : "bg-primary")}
-                      style={{ "--bd-used": `${Math.min(100, Math.max(0, limit.usedPercent))}%` } as CSSProperties}
-                    />
-                  </div>
-                  {limit.resetsAt && <span className="text-xs text-subtle-foreground">Resets {formatReset(limit.resetsAt)}</span>}
-                </div>
-              ))}
-            </>
-          )}
-        </TooltipPrimitive.Content>
-      </TooltipPrimitive.Portal>
-    </TooltipPrimitive.Root>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="end" sideOffset={8} collisionPadding={8} data-chat-popover="usage" className="w-80">
+        <div className="flex flex-col gap-1">
+        <div className="flex items-start justify-between gap-2 pb-1">
+          <div className="flex min-w-0 flex-col">
+            <span className="text-sm text-foreground">{name} usage</span>
+            {account?.email && <span data-usage-email="" className="truncate text-sm text-muted-foreground">{account.email}</span>}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Open Settings › Usage"
+            title="Settings › Usage"
+            onClick={() => {
+              setOpen(false);
+              window.appSettings?.open("usage");
+            }}
+          >
+            <GaugeIcon className="size-4" />
+          </Button>
+        </div>
+        {limits.map((limit) => (
+          <Meter
+            key={limit.id}
+            id={limit.id}
+            label={limit.label}
+            aside={percentLabel(limit.usedPercent)}
+            value={limit.usedPercent}
+            note={limit.resetsAt ? `Resets ${formatReset(limit.resetsAt)}` : undefined}
+          />
+        ))}
+        {!limits.length && (
+          <p data-usage-row="limits-message" className="py-1 text-sm text-muted-foreground">
+            {account?.message || (account ? "No plan limits reported." : "Checking plan limits…")}
+          </p>
+        )}
+        <Separator className="my-1.5" />
+        <Meter
+          id="layers"
+          label="Weekly AI layers"
+          aside={layers ? `${layers.thisWeek.toLocaleString()} ${layers.thisWeek === 1 ? "layer" : "layers"}` : "–"}
+          note={layers ? `Made by agents this week · Resets ${formatReset(layers.resetsAt)}` : undefined}
+        />
+        <Separator className="my-1.5" />
+        <ContextSection usage={usage} breakdown={breakdown} />
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

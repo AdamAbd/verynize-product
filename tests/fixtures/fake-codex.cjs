@@ -42,6 +42,13 @@ function completeTurn(threadId, turnId, status) {
 
 async function runTurn(threadId, turnId, text, images) {
   notify('turn/started', { threadId, turn: { id: turnId } });
+  // "indicators": MCP startup status, a 1M context window and an account rate-limit update (composer indicators).
+  if (/indicators/.test(text)) {
+    notify('mcpServer/startupStatus/updated', { threadId, name: 'verynize', status: 'ready', error: null, failureReason: null });
+    notify('mcpServer/startupStatus/updated', { threadId, name: 'rea', status: 'failed', error: 'spawn rea ENOENT', failureReason: null });
+    notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: { last: { inputTokens: 106600, outputTokens: 900, totalTokens: 107500 }, modelContextWindow: 1000000 } });
+    notify('account/rateLimits/updated', { rateLimits: { limitId: 'codex', limitName: null, primary: { usedPercent: 35, windowDurationMins: 300, resetsAt: Math.floor(Date.now() / 1000) + 3600 }, secondary: null } });
+  }
   if (/slow/.test(text)) { notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg-slow', delta: 'Thinking slowly…' }); return; }
   notify('item/reasoning/summaryTextDelta', { threadId, turnId, itemId: 'r1', delta: 'Plan the change.', summaryIndex: 0 });
   notify('item/started', { threadId, turnId, item: { type: 'commandExecution', id: 'cmd-1', command: 'ls', cwd: '/tmp', status: 'inProgress' } });
@@ -57,7 +64,7 @@ async function runTurn(threadId, turnId, text, images) {
   const reply = `Reply to ${JSON.stringify(text.slice(-300))} images=${images.length} declined=${declined}`;
   for (const part of [reply.slice(0, 9), reply.slice(9)]) notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg-1', delta: part });
   notify('item/completed', { threadId, turnId, item: { type: 'agentMessage', id: 'msg-1', text: reply } });
-  notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: { last: { inputTokens: 5, outputTokens: 7 } } });
+  if (!/indicators/.test(text)) notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: { last: { inputTokens: 5, outputTokens: 7 } } });
   completeTurn(threadId, turnId, 'completed');
 }
 
@@ -87,6 +94,7 @@ process.stdin.on('data', chunk => {
       const text = params.input.filter(i => i.type === 'text').map(i => i.text).join('\n');
       setTimeout(() => runTurn(params.threadId, turnId, text, params.input.filter(i => i.type === 'localImage')), 5);
     } else if (method === 'turn/interrupt') { send({ id, result: {} }); completeTurn(params.threadId, params.turnId, 'interrupted'); }
+    else if (method === 'mcpServerStatus/list') send({ id, result: { data: [{ name: 'verynize', runtimeStatus: 'connected', authStatus: 'unsupported', tools: {}, toolsError: null }, { name: 'rea', runtimeStatus: 'failed', authStatus: 'unsupported', tools: {}, toolsError: 'spawn rea ENOENT' }, { name: 'figma', runtimeStatus: 'authenticationRequired', authStatus: 'notLoggedIn', tools: {}, toolsError: null }], nextCursor: null } });
     else if (method === 'model/list') send({ id, result: { data: [{ id: 'fake-large', model: 'fake-large', displayName: 'Fake Large', description: 'fixture', hidden: false, supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }, { id: 'hidden', model: 'hidden', hidden: true }], nextCursor: null } });
     else if (id !== undefined) send({ id, error: { code: -32601, message: 'unknown method ' + method } });
   }
