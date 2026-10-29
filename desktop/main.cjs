@@ -13,8 +13,9 @@ const {registerGitChanges}=require('./git-changes.cjs');
 const {RepositoryRegistry,registerRepositories,createProjectFolder}=require('./repositories.cjs'); // Code workspace: repositories + per-chat worktrees
 const mcpBridge=require('./mcp-bridge.cjs'); // agent-bridge hook: live MCP server (getBridgeInfo for agent runtimes)
 const {registerAgentRuntime}=require('./agent-runtime.cjs'); // agent chat runtime (Claude Agent SDK / Codex app-server)
+const agentBehavior=require('./agent-behavior.cjs'); // Settings › Agents: follow-ups, response style, attribution, folder, branch prefix, modes, allowed rules
 const entry=path.join(__dirname,'../web/index.html');
-let primaryRuntime=null,repositories=null; // agent runtime of the latest editor window (serves ask_agent)
+let primaryRuntime=null,repositories=null,behaviorStore=null; // agent runtime of the latest editor window (serves ask_agent)
 app.setName('Verynize');
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -22,7 +23,9 @@ app.whenReady().then(() => {
   if(!process.env.VERYNIZE_PREFERENCES)process.env.VERYNIZE_PREFERENCES=path.join(app.getPath('userData'),'design-preferences.json');
   // ask_agent MCP tool: nested read-only helper run on the most recent window's agent runtime.
   const askAgent=options=>{if(!primaryRuntime)return Promise.reject(Error('The agent runtime is not ready'));return primaryRuntime.ask(options||{});};
-  repositories=new RepositoryRegistry({file:path.join(app.getPath('userData'),'repositories.json')});
+  behaviorStore=new agentBehavior.AgentBehaviorStore({file:path.join(app.getPath('userData'),'agent-behavior.json')});
+  const behaviorFolder=async()=>agentBehavior.folderOf(await behaviorStore.get());
+  repositories=new RepositoryRegistry({file:path.join(app.getPath('userData'),'repositories.json'),workspacesRoot:async()=>agentBehavior.workspacesOf(await behaviorStore.get()),branchPrefix:async()=>agentBehavior.resolveBranchPrefix(await behaviorStore.get())});
   mcpBridge.startBridge(app,{askAgent}).catch(error=>console.error('MCP bridge failed to start:',error)); // agent-bridge hook
   const createWindow = () => {
     const win = new BrowserWindow({...process.platform==='darwin'?{titleBarStyle:'hiddenInset',trafficLightPosition:{x:12,y:13}}:{},width: 1440, height: 950, minWidth: 900, minHeight: 600, backgroundColor: '#141416', webPreferences: {preload:path.join(__dirname,'preload.cjs'),nodeIntegration: false, contextIsolation: true, sandbox: true}});
@@ -47,21 +50,22 @@ app.whenReady().then(() => {
       if(agentsBusy())throw Error('Stop running agents before switching projects');
       if(!options||typeof options.name!=='string'||! /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,60}$/.test(options.name))throw Error('Use a project name with letters, numbers, dashes, or underscores');
       if(options.repository && !/^https:\/\/github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+(?:\.git)?$/.test(options.repository))throw Error('Use an HTTPS GitHub repository URL');
-      const chosen=await dialog.showOpenDialog(win,{title:'Choose parent folder',properties:['openDirectory']});if(chosen.canceled)return null;
-      const repo=await repositories.add(await createProjectFolder(chosen.filePaths[0],options));
+      const parent=await behaviorFolder();await require('node:fs/promises').mkdir(parent,{recursive:true}); // new projects go to the Verynize folder
+      const repo=await repositories.add(await createProjectFolder(parent,options));
       project=await Project.open(repo.root);return {root:project.root,name:path.basename(project.root),repoId:repo.id};
     });
     // --- Code workspace (desktop/repositories.cjs): repositories*, per-chat worktrees, setActiveRoot (repositoriesActivate) ---
-    registerRepositories(handle,win,{registry:repositories,dialog,getProject:()=>project,setProject:value=>{project=value;},Project});
+    registerRepositories(handle,win,{registry:repositories,dialog,getProject:()=>project,setProject:value=>{project=value;},Project,projectsRoot:behaviorFolder});
     handle('listFiles',()=>current().list());handle('readFile',p=>current().read(p));handle('writeFile',(p,c)=>current().write(p,c));
-    handle('gitStatus',()=>current().status());handle('createWorktree',b=>current().worktree(b));
+    handle('gitStatus',()=>current().status());handle('createWorktree',async b=>current().worktree(b,{parent:path.join(agentBehavior.workspacesOf(await behaviorStore.get()),path.basename(current().root))}));
     // Changes panel (desktop/git-changes.cjs): gitChanges, gitDiff, gitCommit, gitDiscard, gitPush, gitPullRequest, gitCreatePullRequest.
     registerGitChanges(handle,{getProject:()=>project});
     handle('readMemory',()=>current().memory());handle('writeMemory',text=>current().write('VERYNIZE.md',text));
     handle('discoverAgents',()=>agents.discover());
     // --- agent chat runtime (desktop/agent-runtime.cjs): runAgent, cancelAgent, respondAgentPermission, listAgentModels, saveAgentImage ---
     // --- also: respondAgentQuestion, steerAgent, listAgentRuns, listAllowRules, removeAllowRule, agentToolsVersion, agentTitle, designPreferences* ---
-    agentRuntime=registerAgentRuntime(handle,win,{userData:app.getPath('userData'),getProject:()=>project,resolveProject:async root=>Project.open((await repositories.resolveRoot(root)).root)});
+    agentRuntime=registerAgentRuntime(handle,win,{userData:app.getPath('userData'),getProject:()=>project,resolveProject:async root=>Project.open((await repositories.resolveRoot(root)).root),getBehavior:()=>behaviorStore.get()});
+    agentBehavior.registerAgentBehavior(handle,win,{store:behaviorStore,registry:repositories,dialog,shell,getRuntime:()=>agentRuntime,userData:app.getPath('userData')});
     primaryRuntime=agentRuntime;win.on('closed',()=>{if(primaryRuntime===agentRuntime)primaryRuntime=null;});
     // --- agent shell (desktop/agent-shell.cjs): open project for the dev server / terminal MCP tools ---
     require('./agent-shell.cjs').registerShellWindow(win,{getProject:()=>project});
