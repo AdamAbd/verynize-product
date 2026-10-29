@@ -96,6 +96,8 @@ function argumentsFor(agent, options = {}) {
   if (o.model) args.push('--model', o.model);
   if (o.effort) args.push(...(agent === 'codex' ? ['--config', `model_reasoning_effort="${o.effort}"`] : ['--effort', o.effort]));
   if (o.structured) args.push(...(agent === 'codex' ? ['--json'] : ['--output-format', 'stream-json', '--verbose', '--include-partial-messages']));
+  // Extra launch flags from Settings › Agents › Access (desktop/agent-access.cjs).
+  if (Array.isArray(options.extraArgs)) args.push(...options.extraArgs.filter(arg => typeof arg === 'string'));
   if (agent === 'codex') args.push('-');
   return args;
 }
