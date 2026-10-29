@@ -39,7 +39,7 @@ function Island() {
         aria-label="Properties"
         className={cn(
           "flex min-h-0 flex-col",
-          propertiesOpen ? "flex-1" : "mt-auto shrink-0 border-t border-divider",
+          propertiesOpen ? "flex-1" : "shrink-0 border-b border-divider",
         )}
       >
         <PanelSectionHeader

@@ -130,7 +130,7 @@ export function CodeWorkspace({ state }: { state: ChatState }) {
   return (
     <div id="code-workspace" aria-label="Code workspace" className={cn("fixed inset-0 z-30 flex bg-settings text-foreground-2", !codeMode && "hidden")}>
       {slot && createPortal(<Breadcrumb state={state} />, slot)}
-      {!sidebarCollapsed && <CodeSidebar state={state} />}
+      {codeMode && !sidebarCollapsed && <CodeSidebar state={state} />}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Row under the window title bar (breadcrumb, search and the Design/Code switch are drawn there). */}
         <div className="h-chrome shrink-0 border-b border-border" />

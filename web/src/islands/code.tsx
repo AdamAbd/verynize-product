@@ -7,9 +7,17 @@ import { useChatState } from "./chat/store";
 import { addRepository, newChat, newQuickChat, openChat, refresh, start } from "./code/controller";
 import { openMemory } from "./code/editor-state";
 import { CodeWorkspace } from "./code/workspace";
+import { DesignChatSidebar } from "./code/design-sidebar";
 import "./code/code.css";
 
-window.codeWorkspace = { addRepository, newChat: () => newChat(), newQuickChat, openChat, openMemory: () => void openMemory(), refresh };
+window.codeWorkspace = {
+  addRepository,
+  newChat: () => newChat(),
+  newQuickChat,
+  openChat,
+  openMemory: () => void openMemory(),
+  refresh,
+};
 
 function Island() {
   const state = useChatState();
@@ -17,7 +25,12 @@ function Island() {
     void start();
   }, []);
   if (!state) return null;
-  return <CodeWorkspace state={state} />;
+  return (
+    <>
+      <CodeWorkspace state={state} />
+      <DesignChatSidebar state={state} />
+    </>
+  );
 }
 
 mountIsland(

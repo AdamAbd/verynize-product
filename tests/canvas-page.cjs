@@ -25,6 +25,20 @@ const {_electron}=require(process.cwd()+'/node_modules/@playwright/test');const 
     await p.evaluate(()=>{const d=window.design.getDocument();window.design.setSelection([d.pages.find(x=>x.id===d.activePage).nodes[0].id])});
     await p.locator('#page-section').waitFor({state:'detached'});
     assert.equal(await p.locator('#insp-variables button[aria-expanded]').first().getAttribute('aria-expanded'),'false');
-    console.log('PASS page: empty new page, no frame outline, page colour with variables collapsed');
+    // Accordion: a collapsed Properties section sits right under Variables, not at the bottom of the panel.
+    await p.locator('#insp-properties button[aria-expanded]').first().click();
+    const [vars,props]=await Promise.all(['#insp-variables','#insp-properties'].map(s=>p.locator(s).boundingBox()));
+    assert.ok(Math.abs(props.y-(vars.y+vars.height))<=1,'Properties should follow Variables');
+    await p.locator('#insp-properties button[aria-expanded]').first().click();
+    // The title-bar sidebar toggle shows the repositories / chats sidebar and leaves the layers panel alone.
+    const layersBefore=await p.locator('#layer-panel').boundingBox();
+    await p.locator('#chrome-sidebar').click();
+    await p.locator('#design-chat-sidebar #code-sidebar').waitFor();
+    assert.equal(await p.evaluate(()=>document.body.classList.contains('left-collapsed')),false);
+    const sidebar=await p.locator('#design-chat-sidebar').boundingBox(),layersAfter=await p.locator('#layer-panel').boundingBox();
+    assert.ok(Math.abs(layersAfter.x-(sidebar.x+sidebar.width))<=1&&layersAfter.x>layersBefore.x,'Editor shifts right of the chat sidebar');
+    await p.locator('#chat-sidebar-close').click();
+    await p.locator('#design-chat-sidebar').waitFor({state:'detached'});
+    console.log('PASS page: empty new page, no frame outline, page colour with variables collapsed, accordion properties, chat sidebar toggle');
   }finally{await app.close();await fs.rm(profile,{recursive:true,force:true})}
 })().catch(e=>{console.error(e);process.exitCode=1});

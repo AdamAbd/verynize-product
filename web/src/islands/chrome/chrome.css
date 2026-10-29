@@ -102,6 +102,29 @@ body.bd-chrome.agent-chat-open #file-home {
   left: var(--spacing-chat) !important;
 }
 
+/* ---------- Chat sidebar (Design mode, code/design-sidebar.tsx): the repositories / chats list takes the left
+ * --spacing-code-sidebar of the window; the title bar, chat dock, editor grid and Files home shift right of it. */
+body.bd-chrome.chat-sidebar-open:not(.code-mode) [data-chrome-bar][role="banner"] {
+  margin-left: var(--spacing-code-sidebar);
+}
+body.bd-chrome.chat-sidebar-open:not(.code-mode) > main {
+  margin-left: var(--spacing-code-sidebar) !important;
+  width: calc(100% - var(--spacing-code-sidebar)) !important;
+}
+body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) > main {
+  margin-left: calc(var(--spacing-code-sidebar) + var(--spacing-chat)) !important;
+  width: calc(100% - var(--spacing-code-sidebar) - var(--spacing-chat)) !important;
+}
+body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) #agent-chat-dock {
+  left: var(--spacing-code-sidebar) !important;
+}
+body.bd-chrome.chat-sidebar-open:not(.code-mode) #file-home {
+  left: var(--spacing-code-sidebar) !important;
+}
+body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) #file-home {
+  left: calc(var(--spacing-code-sidebar) + var(--spacing-chat)) !important;
+}
+
 /* ---------- Zoom menu: `#zoom-reset` text is the live percentage (contract); show a label instead ---------- */
 [data-zoom-reset]::before {
   content: "Zoom to 100%";
