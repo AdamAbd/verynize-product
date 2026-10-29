@@ -1,6 +1,6 @@
 // Usage ring beside Send (29, 35, 51, 72) and its popover: the provider account's plan limits (5-hour, weekly, per
-// model; desktop/agent-usage.cjs, refreshed by rate-limit events of the chat's runs), Verynize's AI-generated layers
-// this week (no quota) and the chat's context window with a breakdown. The ring shows the most constraining value.
+// model; desktop/agent-usage.cjs, refreshed by rate-limit events of the chat's runs) and the chat's context window
+// with a breakdown. The ring shows the most constraining value.
 import { useState, type ReactNode } from "react";
 import { ChevronRightIcon, GaugeIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -169,7 +169,7 @@ function ContextSection({ usage, breakdown }: { usage?: ChatUsage; breakdown: Co
 export function UsageRing({ state }: { state: ChatState }) {
   const agent = state.defaults.agent === "codex" ? "codex" : "claude";
   const usage = state.usage ?? state.messages.findLast((m) => m.usage)?.usage;
-  const { account, layers } = useAccountUsage(agent);
+  const { account } = useAccountUsage(agent);
   const [open, setOpen] = useState(false);
   const [breakdown, setBreakdown] = useState<ContextBreakdown | null>(null);
   const accountLimits = account?.status === "ready" ? account.limits : [];
@@ -233,13 +233,6 @@ export function UsageRing({ state }: { state: ChatState }) {
             {account?.message || (account ? "No plan limits reported." : "Checking plan limits…")}
           </p>
         )}
-        <Separator className="my-1.5" />
-        <Meter
-          id="layers"
-          label="Weekly AI layers"
-          aside={layers ? `${layers.thisWeek.toLocaleString()} ${layers.thisWeek === 1 ? "layer" : "layers"}` : "–"}
-          note={layers ? `Made by agents this week · Resets ${formatReset(layers.resetsAt)}` : undefined}
-        />
         <Separator className="my-1.5" />
         <ContextSection usage={usage} breakdown={breakdown} />
         </div>

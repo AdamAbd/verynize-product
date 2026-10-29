@@ -1,8 +1,9 @@
 /* oxlint-disable shadcn/no-restyle -- Wonder chat density (13px text, 24px rows, chat menu surface) applied to the shared
    shadcn parts in one place per file, like the local wrappers in ./menu.tsx. */
-// Slash commands ("Runs in this chat", Wonder): typing "/" at the start of the prompt (or "+ › Commands") opens a
-// shadcn Command list above the composer, filtered as you type. ↑↓ move, Enter / Tab choose, Esc closes. Agent
-// commands and skills insert "/name " into the prompt (sending passes it to the agent, which runs it); Verynize's own
+// Slash commands ("Runs in this chat", Wonder): typing "/" at the start of a word in the prompt (or "+ › Commands")
+// opens a shadcn Command list above the composer, filtered as you type. ↑↓ move, Enter / Tab choose, Esc closes. Agent
+// commands and skills stay in the text as "/name", drawn as a badge (sending passes "/name …" to the agent, which runs
+// it); Verynize's own
 // commands run right away. Keys are read on the adopted #project-prompt in the capture phase, like the @ popover.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquareIcon } from "lucide-react";
@@ -13,14 +14,15 @@ import {
   BUILTIN_COMMANDS,
   OPEN_COMMANDS_EVENT,
   loadAgentCommands,
+  rememberCommand,
   setPrompt,
   type AgentCommand,
   type BuiltinCommand,
 } from "./composer-actions";
 import type { ChatState } from "./store";
 
-/** "/query" typed at the very start of the prompt, caret still inside the command name. */
-const TOKEN = /^\/([^\s/]*)$/;
+/** "/query" typed at the start of a word, caret still inside the command name. */
+const TOKEN = /(?:^|\s)\/([^\s/]*)$/;
 type Entry = AgentCommand & { run?: BuiltinCommand["run"] };
 
 function rank(entry: Entry, query: string) {
@@ -131,17 +133,24 @@ export function SlashCommands({ state }: { state: ChatState }) {
     };
     const choose = (entry: Entry | undefined) => {
       if (!entry) return;
-      // Text after the command token (or the whole prompt when opened from the + menu) is kept.
+      // The typed "/query" token is replaced in place; opened from the + menu (no token), the command goes first.
       const value = prompt.value;
-      const rest = value.startsWith("/") ? value.replace(/^\/\S*\s?/, "") : value;
+      const caret = prompt.selectionStart ?? value.length;
+      const found = value.slice(0, caret).match(TOKEN);
+      const start = found ? caret - found[1].length - 1 : 0;
+      const end = found ? caret + (value.slice(caret).match(/^\S*/)?.[0].length ?? 0) : 0;
+      const before = value.slice(0, start);
+      const after = value.slice(end);
       close();
       if (entry.run) {
-        setPrompt(rest);
-        entry.run(value.startsWith("/") ? rest.trim() : "");
+        const rest = found ? after.replace(/^ /, "") : after;
+        setPrompt(before + rest, start);
+        entry.run(found ? rest.trim() : "");
         return;
       }
-      const head = `/${entry.name} `;
-      setPrompt(head + rest, head.length);
+      rememberCommand(entry.name);
+      const token = `/${entry.name}${after.startsWith(" ") ? "" : " "}`;
+      setPrompt(before + token + after, start + token.length);
     };
     const onKey = (event: KeyboardEvent) => {
       const { entries: list, selected: current, open: isOpen } = live.current;

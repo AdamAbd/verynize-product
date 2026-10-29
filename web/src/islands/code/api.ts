@@ -34,6 +34,7 @@ export type DesktopApi = {
   readMemory?(): Promise<string>;
   writeMemory?(text: string): Promise<boolean>;
   gitChanges?(options: { root?: string }): Promise<{ files: ChangedFile[] }>;
+  gitBranchChanges?(options: { root?: string }): Promise<{ base: string | null; files: ChangedFile[] }>;
   previewApp?(options: { url: string }): Promise<unknown>;
 };
 

@@ -64,7 +64,7 @@ app.whenReady().then(() => {
     registerRepositories(handle,win,{registry:repositories,dialog,getProject:()=>project,setProject:value=>{project=value;},Project,projectsRoot:behaviorFolder});
     handle('listFiles',()=>current().list());handle('readFile',p=>current().read(p));handle('writeFile',(p,c)=>current().write(p,c));
     handle('gitStatus',()=>current().status());handle('createWorktree',async b=>current().worktree(b,{parent:path.join(agentBehavior.workspacesOf(await behaviorStore.get()),path.basename(current().root))}));
-    // Changes panel (desktop/git-changes.cjs): gitChanges, gitDiff, gitCommit, gitDiscard, gitPush, gitPullRequest, gitCreatePullRequest.
+    // Changes panel (desktop/git-changes.cjs): gitChanges, gitBranchChanges, gitDiff, gitCommit, gitDiscard, gitPush, gitPullRequest, gitCreatePullRequest.
     registerGitChanges(handle,{getProject:()=>project});
     handle('readMemory',()=>current().memory());handle('writeMemory',text=>current().write('VERYNIZE.md',text));
     handle('discoverAgents',()=>agents.discover());

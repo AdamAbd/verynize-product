@@ -99,10 +99,22 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     assert.equal(await fs.readFile(path.join(first.chatRoot, 'index.html'), 'utf8'), '<h1>Hello worktree</h1>\n');
     assert.equal(await fs.readFile(path.join(repo, 'index.html'), 'utf8'), '<h1>Hello</h1>\n', 'the repository checkout is untouched');
     await page.waitForFunction(() => /M$/.test(document.querySelector('#code-file-tree [data-path="index.html"]')?.textContent || ''));
+    // Filter: All files / All changes (the branch since main, commits included) / Uncommitted, with counts.
     await page.locator('#code-file-filter').click();
-    await page.getByRole('menuitemradio', { name: 'Changed files' }).click();
+    assert.deepEqual(await page.locator('[role=menuitemradio]').allInnerTexts(), ['All files', 'All changes\n1', 'Uncommitted\n1']);
+    await page.getByRole('menuitemradio', { name: 'Uncommitted' }).click();
     await page.waitForFunction(() => document.querySelectorAll('#code-file-tree [data-kind=file]').length === 1);
     await page.locator('[role=menu]').waitFor({ state: 'detached' });
+    assert.match(await page.locator('#code-file-filter').textContent(), /^Uncommitted/);
+    // A commit on the chat branch leaves Uncommitted but stays in All changes.
+    git(first.chatRoot, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-am', 'Edit hero');
+    await page.locator('[aria-label="Refresh files"]').click();
+    await page.locator('#code-files').getByText('No uncommitted changes.').waitFor();
+    await page.locator('#code-file-filter').click();
+    await page.getByRole('menuitemradio', { name: 'All changes' }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll('#code-file-tree [data-kind=file]')].map(b => b.dataset.path).join() === 'index.html');
+    await page.locator('[role=menu]').waitFor({ state: 'detached' });
+    git(first.chatRoot, 'reset', '--soft', 'HEAD~1'); // back to an uncommitted edit for the steps below
     await page.locator('#code-file-filter').click();
     await page.getByRole('menuitemradio', { name: 'All files' }).click();
     await page.getByRole('button', { name: 'Close file' }).click();

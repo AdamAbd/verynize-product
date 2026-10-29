@@ -1,21 +1,19 @@
 // Composer (29–32, 35–37, 51): context chips, the adopted #project-prompt textarea, "⌘L to focus", and the bottom
-// row — attach menu (+), model picker (.agent-config summary), access menu, review / apply icons, Stop and Send.
-import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
+// row — attach menu (+), model picker (.agent-config summary), access menu, Stop and Send. Picked agent commands and
+// skills stay in the prompt text as "/name"; a mirror behind the textarea draws them as badges.
+import { useEffect, useRef, useState, type DragEvent, type ReactNode, type Ref } from "react";
 import {
   CircleDotIcon,
-  FileIcon,
   FileTextIcon,
   ImageIcon,
-  GitPullRequestIcon,
   HandIcon,
   LockOpenIcon,
   NavigationIcon,
   PencilIcon,
-  RulerIcon,
   XIcon,
 } from "lucide-react";
 import { ClaudeMark, CodexMark, PlusIcon } from "@/components/icons";
-import { legacyClick, legacySet } from "@/lib/bridge";
+import { legacySet } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { useAdopt } from "./adopt";
 import { useChatBehavior } from "./behavior";
@@ -43,11 +41,11 @@ import { UsageRing } from "./usage-ring";
 import { AttachMenu, WorkingDirectories } from "./attach-menu";
 import { SlashCommands } from "./slash-commands";
 import { WorksWith } from "./works-with";
+import { commandEndingAt, commandFirst, moveCommandFirst, promptRuns } from "./composer-actions";
 
+// `relative` keeps the textarea (caret, selection) above the absolutely positioned mirror.
 const PROMPT_CLASS =
-  "m-0 block max-h-55 min-h-17 w-full resize-none rounded-none border-0 bg-transparent pt-2 pr-2.5 pb-1 pl-2.5 font-sans text-base leading-5.25 text-foreground shadow-none outline-hidden field-sizing-content placeholder:text-transparent focus:outline-hidden focus-visible:outline-hidden";
-const ICON_BUTTON =
-  "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground-2 data-[state=open]:bg-muted data-[state=open]:text-foreground-2";
+  "relative m-0 block max-h-55 min-h-17 w-full resize-none rounded-none border-0 bg-transparent pt-2 pr-2.5 pb-1 pl-2.5 font-sans text-base leading-5.25 text-foreground shadow-none outline-hidden field-sizing-content placeholder:text-transparent focus:outline-hidden focus-visible:outline-hidden";
 
 const Mark = ({ agent }: { agent: string }) => (agent === "claude" ? <ClaudeMark /> : <CodexMark />);
 
@@ -63,26 +61,6 @@ const AGENTS = [
   { id: "claude", label: "Claude" },
   { id: "codex", label: "Codex" },
 ];
-
-function useChecked(id: string) {
-  const read = () => !!(document.getElementById(id) as HTMLInputElement | null)?.checked;
-  const [checked, setChecked] = useState(read);
-  // Slash commands (/canvas-context, /open-file) flip the legacy checkbox directly.
-  useEffect(() => {
-    const el = document.getElementById(id);
-    const sync = () => setChecked(!!(el as HTMLInputElement | null)?.checked);
-    el?.addEventListener("change", sync);
-    return () => el?.removeEventListener("change", sync);
-  }, [id]);
-  const set = useCallback(
-    (value: boolean) => {
-      legacySet(document.getElementById(id) as HTMLInputElement | null, value);
-      setChecked(value);
-    },
-    [id],
-  );
-  return [checked, set] as const;
-}
 
 /* ---------- Model picker (30). Trigger is `.agent-config summary` (test contract). ---------- */
 function ModelMenu({ state, open, onOpenChange }: { state: ChatState; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -250,12 +228,27 @@ function Chip({
   );
 }
 
-function documentName() {
-  try {
-    return window.design?.getDocument?.().name || "Canvas";
-  } catch {
-    return "Canvas";
-  }
+/** The prompt text drawn behind the textarea (same box, font and wrapping) with picked commands as green badges. */
+function PromptMirror({ text, mirrorRef }: { text: string; mirrorRef: Ref<HTMLDivElement> }) {
+  return (
+    <div
+      ref={mirrorRef}
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 overflow-hidden pt-2 pr-2.5 pb-1 pl-2.5 font-sans text-base leading-5.25 wrap-break-word whitespace-pre-wrap text-foreground"
+    >
+      {promptRuns(text).map((run, i) =>
+        run.command ? (
+          <span key={i} data-chat-command={run.command} className="text-success">
+            {run.text}
+          </span>
+        ) : (
+          <span key={i}>{run.text}</span>
+        ),
+      )}
+      {/* A trailing newline still gets its line. */}
+      {"\u200b"}
+    </div>
+  );
 }
 
 export function Composer({ state }: { state: ChatState }) {
@@ -263,12 +256,11 @@ export function Composer({ state }: { state: ChatState }) {
   const [empty, setEmpty] = useState(true);
   const [focused, setFocused] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  const [canvasContext, setCanvasContext] = useChecked("agent-canvas-context");
-  const [docName, setDocName] = useState(documentName);
+  const [text, setText] = useState("");
+  const mirrorRef = useRef<HTMLDivElement>(null);
   const [blank, setBlank] = useState(true);
   const [dragging, setDragging] = useState(false);
   const draftTimer = useRef<number | undefined>(undefined);
-  const attached = state.projectKey !== "unattached";
   // Wonder uses one short prompt; the header's chat switcher already shows whether a repository is attached.
   const placeholder = "Describe what you want to do...";
 
@@ -279,6 +271,7 @@ export function Composer({ state }: { state: ChatState }) {
       const isEmpty = !prompt.value.trim();
       setEmpty(isEmpty);
       setBlank(!prompt.value);
+      setText(prompt.value);
     };
     // Draft persistence (debounced): survives chat switches and reloads when the workspace supports it.
     const saveDraft = () => {
@@ -293,6 +286,30 @@ export function Composer({ state }: { state: ChatState }) {
       setModelOpen(false);
     };
     const blur = () => setFocused(false);
+    // Backspace right after a command badge removes the whole command.
+    const removeCommand = (event: KeyboardEvent) => {
+      const caret = prompt.selectionStart;
+      if (event.key !== "Backspace" || event.defaultPrevented || caret !== prompt.selectionEnd) return;
+      const start = commandEndingAt(prompt.value, caret);
+      if (start < 0) return;
+      event.preventDefault();
+      legacySet(prompt, prompt.value.slice(0, start) + prompt.value.slice(caret));
+      prompt.setSelectionRange(start, start);
+    };
+    // Enter sends (the default way while a turn runs), Shift+Enter adds a line, ⌘↵ sends the other way. The @ and /
+    // lists take Enter first in the capture phase; IME composition keeps its own Enter.
+    const enterSends = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      if (prompt.value.trim()) document.getElementById("project-run")?.click();
+    };
+    const scroll = () => {
+      if (mirrorRef.current) mirrorRef.current.scrollTop = prompt.scrollTop;
+    };
+    prompt.addEventListener("keydown", removeCommand);
+    prompt.addEventListener("keydown", enterSends);
+    prompt.addEventListener("scroll", scroll);
     setFocused(document.activeElement === prompt);
     prompt.addEventListener("input", sync);
     prompt.addEventListener("focus", focus);
@@ -304,6 +321,9 @@ export function Composer({ state }: { state: ChatState }) {
       window.clearTimeout(draftTimer.current);
       prompt.removeEventListener("focus", focus);
       prompt.removeEventListener("blur", blur);
+      prompt.removeEventListener("keydown", removeCommand);
+      prompt.removeEventListener("keydown", enterSends);
+      prompt.removeEventListener("scroll", scroll);
     };
   });
   const runSlot = useAdopt("project-run", (el) => {
@@ -316,6 +336,14 @@ export function Composer({ state }: { state: ChatState }) {
     el.addEventListener("click", close);
     return () => el.removeEventListener("click", close);
   });
+  // Seen in the capture phase, before the legacy Send handler reads the prompt (⌘↵ clicks it too).
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      if ((event.target as Element | null)?.closest?.("#project-run")) moveCommandFirst();
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, []);
   const cancelSlot = useAdopt("project-cancel", (el) => {
     el.className =
       hook.stop +
@@ -329,6 +357,7 @@ export function Composer({ state }: { state: ChatState }) {
     if (!prompt) return;
     setEmpty(!prompt.value.trim());
     setBlank(!prompt.value);
+    setText(prompt.value);
     // The native placeholder is kept for assistive tech but drawn by the island (truncated, beside "⌘L to focus").
     prompt.placeholder = placeholder;
     // While a turn runs the arrow sends the follow-up the default way (Settings › Agents: Queue or Steer); ⌘↵ the other way.
@@ -347,13 +376,18 @@ export function Composer({ state }: { state: ChatState }) {
       legacySet(prompt, draft);
       setEmpty(!draft.trim());
       setBlank(false);
+      setText(draft);
     }
   }, [conversationId]);
 
+  // With a command in the text the textarea's own glyphs hide and the mirror draws them; the caret stays.
+  const hasCommand = promptRuns(text).some((run) => run.command);
   useEffect(() => {
-    const update = () => setDocName(documentName());
-    return window.design?.subscribe?.(update);
-  }, []);
+    const prompt = document.getElementById("project-prompt");
+    prompt?.classList.toggle("text-transparent", hasCommand);
+    prompt?.classList.toggle("caret-foreground", hasCommand);
+    if (hasCommand && mirrorRef.current && prompt) mirrorRef.current.scrollTop = prompt.scrollTop;
+  }, [hasCommand, text]);
 
   const ws = workspace();
   const mentions = state.mentions ?? [];
@@ -366,7 +400,7 @@ export function Composer({ state }: { state: ChatState }) {
     const prompt = document.getElementById("project-prompt") as HTMLTextAreaElement | null;
     const text = prompt?.value.trim();
     if (!prompt || !text || !sendOther) return;
-    sendOther(text);
+    sendOther(commandFirst(text));
     legacySet(prompt, "");
     ws?.setDraft?.("");
     prompt.focus();
@@ -412,7 +446,7 @@ export function Composer({ state }: { state: ChatState }) {
       <MentionPopover />
       <SlashCommands state={state} />
       <WorkingDirectories state={state} />
-      {(canvasContext || state.attachments.length > 0 || mentions.length > 0) && (
+      {(state.attachments.length > 0 || mentions.length > 0) && (
         <div className={cn(hook.mentions, "flex flex-wrap gap-1.5 px-2 pt-2 pb-1.5")}>
           {mentions.map((mention) => (
             <Chip
@@ -425,15 +459,6 @@ export function Composer({ state }: { state: ChatState }) {
               {mention.label}
             </Chip>
           ))}
-          {canvasContext && (
-            <Chip
-              label="canvas context"
-              icon={<FileIcon className="size-3.5 text-muted-foreground" />}
-              onRemove={() => setCanvasContext(false)}
-            >
-              {docName}
-            </Chip>
-          )}
           {state.attachments.map((item, index) => (
             <Chip
               key={`${index}-${item.name}`}
@@ -453,6 +478,7 @@ export function Composer({ state }: { state: ChatState }) {
         </div>
       )}
       <div className="relative">
+        {hasCommand && <PromptMirror text={text} mirrorRef={mirrorRef} />}
         <div ref={promptSlot} className="contents" />
         {blank && (
           <div
@@ -469,22 +495,6 @@ export function Composer({ state }: { state: ChatState }) {
         <ModelMenu state={state} open={modelOpen} onOpenChange={setModelOpen} />
         <AccessMenu access={state.defaults.access} />
         <span className="flex-1" />
-        {attached && (
-          <button type="button" aria-label="Review changes" title="Review changes" className={ICON_BUTTON} onClick={() => legacyClick("project-review")}>
-            <GitPullRequestIcon className="size-3.5" />
-          </button>
-        )}
-        {attached && (
-          <button
-            type="button"
-            aria-label="Apply canvas to code"
-            title="Apply canvas to code"
-            className={ICON_BUTTON}
-            onClick={() => legacyClick("project-apply-design")}
-          >
-            <RulerIcon className="size-3.5" />
-          </button>
-        )}
         <WorksWith state={state} />
         <ToolsPopover state={state} />
         <UsageRing state={state} />
