@@ -29,11 +29,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { applyOperations } from './design-store.mjs';
+import { applyOperations, BINDABLE, checkVariableValue } from './design-store.mjs';
 import { exportHTML } from './export-html.mjs';
 import {
   clone, ensureShortIds, indexPage, getPage, elementCode, runDirectives, createArtboards, duplicateElements, removeSubtree,
   describeTokens, tokenColor, checkTokenName, renameTokenRefs, unbindToken, syncTokenColors,
+  describeVariables, unbindVariable, renameVariableRefs,
 } from './design-edit.mjs';
 import { fundamentals, getDesignGuidelines, getSkill, listSkills, listArchetypes, pickArchetype, archetypeTokens, getArchetype } from './design-knowledge/index.mjs';
 import { lintArtboard } from './design-lint.mjs';
@@ -68,7 +69,7 @@ export const INSTRUCTIONS = `Verynize is a local design editor with a live canva
 ## Mandatory workflow
 1. get_design_context first: document, pages, selection, tokens, artboards and the design fundamentals.
 2. New design: get_skills {name:"new-design"} and get_design_guidelines {style, domain, brief}. Changing existing work: get_skills {name:"edit-design"}. Other jobs: get_skills lists them.
-3. Write a short brief and direction in your reply (job, audience, real content, density, viewport, named style). For a new look, apply the style's colors with apply_style_tokens (or create_design_tokens) and use them as bg-[var(--color-…)].
+3. Write a short brief and direction in your reply (job, audience, real content, density, viewport, named style). For a new look, apply the style's colors with apply_style_tokens (or create_design_tokens) and use them as bg-[var(--color-…)]. When the user asks for design tokens or variables (spacing, radius, font sizes, fonts, weights), create them with create_design_tokens (type dimension/number/fontFamily/fontWeight) so they appear in the Variables panel, and bind elements to them with bind_variables.
 4. create_artboard with a labelled skeleton (root plus every section, two levels deep), then take_screenshot.
 5. Fill one section at a time with update_elements. After each, take_screenshot of that section, read the image and the lint report, and fix what you see before moving on. Icons come from get_icons, photos from search_images.
 6. Design review: run the design-review skill on the whole artboard, apply its fixes, then take_screenshot of the whole artboard again.
@@ -113,6 +114,24 @@ const documentArg = docName.optional().describe('Saved document name. Omit to us
 const pageArg = z.string().min(1).max(200).optional().describe('Page id from get_design_context; defaults to the active page');
 const elementId = z.string().min(1).max(200).describe('Short element id such as "bok" or "bok.tem"');
 const tokenName = z.string().min(1).max(100);
+// Design tokens cover color tokens (`document.tokens`) and typed variables (`document.variables`, design-store.mjs).
+const TOKEN_TYPES = ['color', 'dimension', 'number', 'fontFamily', 'fontWeight'];
+const tokenType = z.enum(TOKEN_TYPES);
+const tokenValue = z.union([z.string().min(1).max(200), z.number().finite()]);
+const describeAllTokens = document => [...describeTokens(document), ...describeVariables(document)];
+const tokenExists = (document, name) => Object.hasOwn(document.tokens, name) || Object.hasOwn(document.variables || {}, name);
+/** Value stored for a typed variable: dimensions/numbers as numbers ("14px" -> 14), font weights as strings. */
+function variableValue(type, value, name) {
+  let out = value;
+  if (type === 'dimension' || type === 'number') {
+    const text = String(value).trim(), m = /^(-?\d*\.?\d+)(px)?$/i.exec(text);
+    if (!m || (m[2] && type === 'number')) throw new Error(`${name}: ${type} value ${JSON.stringify(value)} must be a number${type === 'dimension' ? ' of pixels (e.g. 16 or "16px")' : ''}`);
+    out = Number(m[1]);
+  } else if (type === 'fontWeight') out = String(value).trim();
+  else if (type === 'fontFamily') out = String(value).trim().replace(/^['"]|['"]$/g, '');
+  if (!checkVariableValue(type, out)) throw new Error(`${name}: invalid ${type} value ${JSON.stringify(value)}`);
+  return out;
+}
 // Codec fields (see the node model in design-edit.mjs and codec-layout.mjs). Legacy numeric
 // padding/gap/radius stay accepted; per-side/per-corner fields take precedence when present.
 const px = z.number().finite().min(0).max(100000);
@@ -309,7 +328,7 @@ function toolTable(backend, context = {}) {
         pages: state.document.pages.map(p => ({ id: p.id, name: p.name, artboards: p.nodes.filter(n => !n.parentId).length, elements: p.nodes.length })),
         hasSelection: selection.length > 0, selectedElements: selection,
         openDocuments: listing?.editor ? [listing.editor] : [], savedDocuments: listing?.documents?.map(d => d.name) || [],
-        designTokens: describeTokens(state.document),
+        designTokens: describeAllTokens(state.document),
         toolsVersion: TOOLS_VERSION,
       };
       let prefs = '';
@@ -559,38 +578,81 @@ function toolTable(backend, context = {}) {
     },
   };
   t.get_design_tokens = {
-    description: 'List design tokens (color variables) with their CSS variable names for use as bg-[var(--…)] / text-[var(--…)].',
+    description: 'List design tokens: colors and typed variables (dimension, number, fontFamily, fontWeight) with their CSS variable names. Colors are used as bg-[var(--…)] / text-[var(--…)]; bind dimension/number/font variables to element properties with bind_variables.',
     inputSchema: { document: documentArg }, annotations: { readOnlyHint: true },
-    run: async ({ document: ref }) => { const state = await readPrepared(backend, ref); return { tokens: describeTokens(state.document) }; },
+    run: async ({ document: ref }) => { const state = await readPrepared(backend, ref); return { tokens: describeAllTokens(state.document) }; },
   };
   t.create_design_tokens = {
-    description: 'Create color tokens. Names may use slashes (color/text/primary -> var(--color-text-primary)). Fails if a token exists.',
-    inputSchema: { document: documentArg, tokens: z.array(z.object({ name: tokenName, type: z.literal('color').optional(), value: z.string().min(1).max(100) })).min(1).max(200) },
+    description: 'Create design tokens (they appear in the Variables panel). type: color (default; hex/rgb value), dimension (pixels, e.g. 16 or "16px"), number (e.g. 1.5), fontFamily (e.g. "Inter") or fontWeight (e.g. "600"). Names may use slashes (color/text/primary -> var(--color-text-primary), radius/md, font/body). Fails if a token exists.',
+    inputSchema: { document: documentArg, tokens: z.array(z.object({ name: tokenName, type: tokenType.optional(), value: tokenValue })).min(1).max(200) },
     run: async ({ document: ref, tokens }) => {
-      const out = await write(backend, ref, document => { for (const token of tokens) { checkTokenName(token.name); if (Object.hasOwn(document.tokens, token.name)) throw new Error(`Token ${token.name} already exists; use update_design_tokens`); document.tokens[token.name] = tokenColor(token.value); } return { document, result: { created: tokens.map(t => t.name), tokens: describeTokens(document) } }; });
+      const out = await write(backend, ref, document => {
+        for (const token of tokens) {
+          checkTokenName(token.name);
+          if (tokenExists(document, token.name)) throw new Error(`Token ${token.name} already exists; use update_design_tokens`);
+          const type = token.type || 'color';
+          if (type === 'color') document.tokens[token.name] = tokenColor(String(token.value));
+          else document.variables = { ...document.variables, [token.name]: { type, value: variableValue(type, token.value, token.name) } };
+        }
+        return { document, result: { created: tokens.map(t => t.name), tokens: describeAllTokens(document) } };
+      });
       return { ...out.result, live: out.live, revision: out.revision };
     },
   };
   t.update_design_tokens = {
-    description: 'Change token values and/or rename tokens. Elements bound to a token follow the change.',
-    inputSchema: { document: documentArg, tokens: z.array(z.object({ name: tokenName, newName: tokenName.optional(), value: z.string().min(1).max(100).optional() })).min(1).max(200) },
+    description: 'Change token values and/or rename tokens (colors and typed variables; the type stays the same). Elements bound to a token follow the change.',
+    inputSchema: { document: documentArg, tokens: z.array(z.object({ name: tokenName, newName: tokenName.optional(), value: tokenValue.optional() })).min(1).max(200) },
     run: async ({ document: ref, tokens }) => {
       const out = await write(backend, ref, document => {
         for (const token of tokens) {
-          if (!Object.hasOwn(document.tokens, token.name)) throw new Error(`Token ${token.name} does not exist`);
-          if (token.value !== undefined) document.tokens[token.name] = tokenColor(token.value);
-          if (token.newName && token.newName !== token.name) { checkTokenName(token.newName); if (Object.hasOwn(document.tokens, token.newName)) throw new Error(`Token ${token.newName} already exists`); document.tokens[token.newName] = document.tokens[token.name]; delete document.tokens[token.name]; renameTokenRefs(document, token.name, token.newName); }
+          const isColor = Object.hasOwn(document.tokens, token.name), variable = document.variables?.[token.name];
+          if (!isColor && !variable) throw new Error(`Token ${token.name} does not exist`);
+          if (token.value !== undefined) {
+            if (isColor) document.tokens[token.name] = tokenColor(String(token.value));
+            else variable.value = variableValue(variable.type, token.value, token.name);
+          }
+          if (token.newName && token.newName !== token.name) {
+            checkTokenName(token.newName); if (tokenExists(document, token.newName)) throw new Error(`Token ${token.newName} already exists`);
+            if (isColor) { document.tokens[token.newName] = document.tokens[token.name]; delete document.tokens[token.name]; renameTokenRefs(document, token.name, token.newName); }
+            else { document.variables[token.newName] = variable; delete document.variables[token.name]; renameVariableRefs(document, token.name, token.newName); }
+          }
         }
-        return { document, result: { updated: tokens.map(t => t.newName || t.name), tokens: describeTokens(document) } };
+        return { document, result: { updated: tokens.map(t => t.newName || t.name), tokens: describeAllTokens(document) } };
       });
       return { ...out.result, live: out.live, revision: out.revision };
     },
   };
   t.delete_design_tokens = {
-    description: 'Delete tokens. Bound elements keep the current color as a plain value.',
+    description: 'Delete tokens (colors or typed variables). Bound elements keep the current value as a plain value.',
     inputSchema: { document: documentArg, names: z.array(tokenName).min(1).max(200) }, annotations: { destructiveHint: true },
     run: async ({ document: ref, names }) => {
-      const out = await write(backend, ref, document => { for (const name of names) { if (!Object.hasOwn(document.tokens, name)) throw new Error(`Token ${name} does not exist`); unbindToken(document, name); delete document.tokens[name]; } return { document, result: { deleted: names, tokens: describeTokens(document) } }; });
+      const out = await write(backend, ref, document => {
+        for (const name of names) {
+          if (Object.hasOwn(document.tokens, name)) { unbindToken(document, name); delete document.tokens[name]; }
+          else if (Object.hasOwn(document.variables || {}, name)) { unbindVariable(document, name); delete document.variables[name]; if (!Object.keys(document.variables).length) delete document.variables; }
+          else throw new Error(`Token ${name} does not exist`);
+        }
+        return { document, result: { deleted: names, tokens: describeAllTokens(document) } };
+      });
+      return { ...out.result, live: out.live, revision: out.revision };
+    },
+  };
+  t.bind_variables = {
+    description: `Bind element properties to dimension/number/fontFamily/fontWeight tokens so they follow the token (shown as bound in the inspector). Properties: ${Object.entries(BINDABLE).map(([k, types]) => `${k} (${types.join('/')})`).join(', ')}. Set token to null to unbind (the element keeps its current value). Color tokens are applied with bg-[var(--…)] / text-[var(--…)] classes instead.`,
+    inputSchema: { document: documentArg, pageId: pageArg, bindings: z.array(z.object({ id: elementId, property: z.enum(Object.keys(BINDABLE)), token: tokenName.nullable() })).min(1).max(500) },
+    run: async ({ document: ref, pageId, bindings }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId), index = indexPage(page);
+        for (const { id, property, token } of bindings) {
+          const node = index.require(id);
+          if (token === null) { if (node.bindings) { delete node.bindings[property]; if (!Object.keys(node.bindings).length) delete node.bindings; } continue; }
+          const variable = document.variables?.[token];
+          if (!variable) throw new Error(Object.hasOwn(document.tokens, token) ? `${token} is a color token; use bg-[var(--…)] / text-[var(--…)] classes for colors` : `Token ${token} does not exist; create it with create_design_tokens`);
+          if (!BINDABLE[property].includes(variable.type)) throw new Error(`${property} takes a ${BINDABLE[property].join(' or ')} token; ${token} is ${variable.type}`);
+          node.bindings = { ...node.bindings, [property]: token };
+        }
+        return { document, result: { bound: bindings.filter(b => b.token !== null).length, unbound: bindings.filter(b => b.token === null).length } };
+      });
       return { ...out.result, live: out.live, revision: out.revision };
     },
   };

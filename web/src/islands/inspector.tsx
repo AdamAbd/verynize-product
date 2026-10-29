@@ -9,6 +9,7 @@ import { detachLegacyForm, setupInspector } from "./inspector/legacy";
 import { primaryNode } from "./inspector/model";
 import { PropertiesBody } from "./inspector/properties";
 import { PanelSectionHeader, VariablesSection } from "./inspector/variables";
+import { IconsSection } from "./inspector/icons";
 import "./inspector/inspector.css";
 
 function Island() {
@@ -19,8 +20,11 @@ function Island() {
   const selected = !!node;
   // Variables start collapsed and Properties expanded; with nothing selected Properties shows the page settings.
   // The user can still toggle either; the automatic state is re-applied when the selection empties or fills.
+  // Accordion (Wonder): every open section shares the panel height and scrolls inside, so collapsed sections below an
+  // open one sit at the bottom of the panel; with nothing open they stack under each other.
   const [variablesOpen, setVariablesOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
+  const [iconsOpen, setIconsOpen] = useState(false);
   useEffect(() => {
     setVariablesOpen(false);
     setPropertiesOpen(true);
@@ -29,17 +33,20 @@ function Island() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-xs text-foreground-2">
       <PanelHeader />
-      <VariablesSection
-        open={variablesOpen}
-        onToggle={() => setVariablesOpen(!variablesOpen)}
-        grow={!propertiesOpen}
+      <VariablesSection open={variablesOpen} onToggle={() => setVariablesOpen(!variablesOpen)} />
+      <IconsSection
+        doc={doc}
+        node={node}
+        open={iconsOpen}
+        onToggle={() => setIconsOpen(!iconsOpen)}
+        className={iconsOpen ? "flex-1" : "shrink-0"}
       />
       <section
         id="insp-properties"
         aria-label="Properties"
         className={cn(
-          "flex min-h-0 flex-col",
-          propertiesOpen ? "flex-1" : "shrink-0 border-b border-divider",
+          "flex min-h-0 flex-col border-b border-divider",
+          propertiesOpen ? "flex-1" : "shrink-0",
         )}
       >
         <PanelSectionHeader

@@ -64,8 +64,7 @@ body.bd-chrome > main > #properties {
   border-left: 1px solid var(--edge) !important;
 }
 body.bd-chrome.left-collapsed > main > #layer-panel,
-body.bd-chrome.right-collapsed > main > #properties,
-body.bd-chrome.agent-chat-open > main > #layer-panel {
+body.bd-chrome.right-collapsed > main > #properties {
   visibility: hidden !important;
   overflow: hidden !important;
   border: 0 !important;
@@ -76,14 +75,15 @@ body.bd-chrome > main > #workspace {
   background: var(--canvas);
 }
 
-/* ---------- Chat open (29): dock 499px on the left, full height; the editor grid shifts right ---------- */
+/* ---------- Chat open (29): dock 499px on the left, full height; the editor grid shifts right ----------
+ * The layers panel follows `left-collapsed` only, so it can sit beside the dock (chrome.tsx collapses it when the
+ * chat opens and restores it when the chat closes). Legacy `body.agent-chat-open #layer-panel{display:none}` is undone. */
 body.bd-chrome.agent-chat-open > main {
   margin-left: 499px !important;
   width: calc(100% - 499px) !important;
-  grid-template-columns: 0 minmax(0, 1fr) 281px !important;
 }
-body.bd-chrome.agent-chat-open.right-collapsed > main {
-  grid-template-columns: 0 minmax(0, 1fr) 0 !important;
+body.bd-chrome.agent-chat-open > main > #layer-panel {
+  display: block !important;
 }
 body.bd-chrome.agent-chat-open #agent-chat-dock {
   top: 0 !important;

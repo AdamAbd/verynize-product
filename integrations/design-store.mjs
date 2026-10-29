@@ -32,6 +32,17 @@ function validateVariables(document) {
     if (!variable || typeof variable !== 'object' || !VARIABLE_TYPES.includes(variable.type) || !checkVariableValue(variable.type, variable.value)) throw new Error(`Invalid variable ${name}`);
   }
 }
+function validateIcons(document) {
+  if (document.icons === undefined) return;
+  if (!Array.isArray(document.icons) || document.icons.length > 500) throw new Error('icons must be an array of at most 500 icons');
+  const ids = new Set();
+  for (const icon of document.icons) {
+    if (!icon || typeof icon.id !== 'string' || !icon.id || ids.has(icon.id)) throw new Error('Icons need unique ids');
+    ids.add(icon.id);
+    if (typeof icon.name !== 'string' || !icon.name.trim() || icon.name.length > 100) throw new Error('Invalid icon name');
+    if (typeof icon.src !== 'string' || icon.src.length > 200000 || !/^data:image\/svg\+xml;base64,/.test(icon.src)) throw new Error('Icon source must be an embedded SVG');
+  }
+}
 function validateBindings(bindings) {
   if (bindings === undefined) return;
   if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings)) throw new Error('Invalid node bindings');
@@ -43,6 +54,7 @@ export function validateDocument(document) {
   if(!document.tokens || Array.isArray(document.tokens) || typeof document.tokens!=='object') throw new Error('tokens must be an object');
   for(const [key,value] of Object.entries(document.tokens)) { requireString(key,'Token name'); requireString(value,'Token value',1000); if(!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value))throw new Error('Token values must be six- or eight-digit hex colors'); if(['__proto__','prototype','constructor'].includes(key)) throw new Error('Reserved token name'); }
   validateVariables(document);
+  validateIcons(document);
   const ids=new Set(); let total=0;
   for(const page of document.pages) {
     requireString(page.id,'Page id'); requireString(page.name,'Page name');

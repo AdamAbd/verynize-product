@@ -13,7 +13,7 @@ import { connectBridge, readBridgeFile, startHttpServer, writeBridgeFile } from 
 
 // Bridge-only shell tools (integrations/shell-tools.mjs): listed everywhere, usable only through the desktop app.
 const SHELL_TOOLS = ['get_dev_server', 'start_dev_server', 'stop_dev_server', 'configure_dev_server', 'preview_open', 'preview_snapshot', 'preview_screenshot', 'preview_click', 'preview_type', 'preview_scroll', 'preview_console', 'capture_preview_to_canvas', 'run_terminal_command', 'read_terminal', 'execute_action'];
-const EXPECTED_TOOLS = ['get_design_context', 'get_artboards', 'get_element_tree', 'get_element_code', 'find_elements', 'take_screenshot', 'create_artboard', 'update_elements', 'duplicate_elements', 'delete_elements', 'rename_elements', 'finish_artboard', 'get_design_guidelines', 'get_skills', 'get_icons', 'search_images', 'apply_style_tokens', 'get_design_tokens', 'create_design_tokens', 'update_design_tokens', 'delete_design_tokens', 'list_documents', 'open_document', 'create_document', 'create_page', 'rename_page', 'read_document', 'apply_operations', 'save_design_preference', 'list_design_preferences', 'update_design_preference', 'delete_design_preference', 'ask_agent', 'export_document', ...SHELL_TOOLS];
+const EXPECTED_TOOLS = ['get_design_context', 'get_artboards', 'get_element_tree', 'get_element_code', 'find_elements', 'take_screenshot', 'create_artboard', 'update_elements', 'duplicate_elements', 'delete_elements', 'rename_elements', 'finish_artboard', 'get_design_guidelines', 'get_skills', 'get_icons', 'search_images', 'apply_style_tokens', 'get_design_tokens', 'create_design_tokens', 'update_design_tokens', 'delete_design_tokens', 'bind_variables', 'list_documents', 'open_document', 'create_document', 'create_page', 'rename_page', 'read_document', 'apply_operations', 'save_design_preference', 'list_design_preferences', 'update_design_preference', 'delete_design_preference', 'ask_agent', 'export_document', ...SHELL_TOOLS];
 const SERVER = path.resolve('integrations/mcp-server.mjs');
 
 async function tempDir(t, prefix) { const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix)); t.after(() => fs.rm(dir, { recursive: true, force: true })); return dir; }
@@ -90,6 +90,44 @@ test('real stdio MCP session (store fallback) exposes the full tool set and edit
   assert.equal((await call(client, 'get_element_code', { document: 'home', ids: [] })).isError, true);
   assert.match((await call(client, 'open_document', { name: 'home' })).content[0].text, /needs the Verynize desktop app/);
   assert.match((await call(client, 'update_elements', { edit: `{/* insert as last child of ${heroId} */}<div>{items.map(x => x)}</div>` })).content[0].text, /no JavaScript|Only string/);
+});
+
+test('agents create, update, bind and delete typed variables through the token tools', async t => {
+  const root = await tempDir(t, 'verynize-mcp-vars-');
+  const client = await stdioClient(t, ['--root', root]);
+  json(await call(client, 'create_document', { name: 'tokens', title: 'Tokens' }));
+  const created = json(await call(client, 'create_design_tokens', { tokens: [
+    { name: 'color/brand', value: '#2348c4' },
+    { name: 'radius/md', type: 'dimension', value: '14px' },
+    { name: 'leading/body', type: 'number', value: 1.5 },
+    { name: 'font/display', type: 'fontFamily', value: "'Instrument Serif'" },
+    { name: 'weight/strong', type: 'fontWeight', value: 600 },
+  ] }));
+  assert.deepEqual(created.tokens.map(t => [t.name, t.type, t.value]), [
+    ['color/brand', 'color', '#2348c4'], ['radius/md', 'dimension', 14], ['leading/body', 'number', 1.5],
+    ['font/display', 'fontFamily', 'Instrument Serif'], ['weight/strong', 'fontWeight', '600'],
+  ]);
+  assert.equal((await call(client, 'create_design_tokens', { tokens: [{ name: 'gap/x', type: 'dimension', value: '2rem' }] })).isError, true);
+  assert.equal((await call(client, 'create_design_tokens', { tokens: [{ name: 'radius/md', type: 'dimension', value: 4 }] })).isError, true);
+
+  const artboard = json(await call(client, 'create_artboard', { code: '<div className="w-[400px] h-[200px] bg-white"><p className="text-black">Hi</p></div>' }));
+  const card = artboard.trees[0].id;
+  json(await call(client, 'bind_variables', { bindings: [{ id: card, property: 'radius', token: 'radius/md' }] }));
+  assert.equal((await call(client, 'bind_variables', { bindings: [{ id: card, property: 'fontFamily', token: 'radius/md' }] })).isError, true, 'type mismatch is rejected');
+  assert.equal((await call(client, 'bind_variables', { bindings: [{ id: card, property: 'radius', token: 'color/brand' }] })).isError, true, 'colors are not bindable');
+  const nodeOf = async () => { const d = json(await call(client, 'read_document', {})).document; return d.pages[0].nodes.find(n => !n.parentId); };
+  let node = await nodeOf();
+  assert.deepEqual([node.bindings, node.radius], [{ radius: 'radius/md' }, 14]);
+
+  json(await call(client, 'update_design_tokens', { tokens: [{ name: 'radius/md', newName: 'radius/card', value: 20 }] }));
+  node = await nodeOf();
+  assert.deepEqual([node.bindings, node.radius], [{ radius: 'radius/card' }, 20], 'bound elements follow value and rename');
+  const listed = json(await call(client, 'get_design_tokens', {})).tokens;
+  assert.ok(listed.some(t => t.name === 'radius/card' && t.cssVar === 'var(--radius-card)'));
+
+  json(await call(client, 'delete_design_tokens', { names: ['radius/card'] }));
+  node = await nodeOf();
+  assert.deepEqual([node.bindings, node.radius], [undefined, 20], 'deleting unbinds and keeps the value');
 });
 
 test('loopback HTTP bridge requires the bearer token and refuses browser origins', async t => {
