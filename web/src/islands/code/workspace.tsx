@@ -137,7 +137,7 @@ export function CodeWorkspace({ state }: { state: ChatState }) {
         <div className="h-chrome shrink-0 border-b border-border" />
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            <Toolbar state={state} panelOpen={panelOpen} onTogglePanel={togglePanel} />
+            {codeMode && <Toolbar state={state} panelOpen={panelOpen} onTogglePanel={togglePanel} />}
             {!file && <ChatTabs state={state} />}
             {file && <FileEditor file={file} />}
             <div ref={chatHost} id="code-chat-host" className={cn("flex min-h-0 flex-1 flex-col", file && "hidden")} />

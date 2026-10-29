@@ -155,10 +155,55 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     await page.locator(`[data-chat-id="${first.conversationId}"]`).click();
     await page.locator(`#code-file-tree[data-root="${first.chatRoot}"]`).waitFor();
 
-    // Start preview goes to the dev server of the chat's folder (this package.json has no dev script).
+    // First preview requests the LLM setup flow; manual configuration remains available.
+    await page.addInitScript(() => window.addEventListener('bd:setup-preview', event => { event.stopImmediatePropagation(); window.previewSetupRequested = true; }, {capture: true, once: true}));
+    await page.reload();
+    await page.locator(`#code-file-tree[data-root="${first.chatRoot}"]`).waitFor();
     await page.locator('#code-start-preview').click();
-    await page.waitForFunction(() => /No dev server command found/.test(document.getElementById('project-status').textContent));
+    assert.equal(await page.evaluate(() => window.previewSetupRequested), true);
+    await page.locator('#code-preview-menu').click();
+    await page.locator('#code-configure-preview').click();
+    await page.locator('#preview-run-command').waitFor();
+    await page.getByRole('button', {name: 'Save', exact: true}).click();
+    await page.getByRole('status').filter({hasText: 'Enter a run command.'}).waitFor();
+    await page.locator('#preview-run-command').fill('npm run dev');
+    await page.locator('#preview-port').fill('5173');
+    await page.getByRole('button', {name: 'Save', exact: true}).click();
+    await page.locator('#preview-run-command').waitFor({state: 'hidden'});
+    const previewConfig = await page.evaluate(() => window.desktop.devServer.status());
+    assert.deepEqual(previewConfig.config.command, ['npm', 'run', 'dev']);
+    assert.equal(previewConfig.config.url, 'http://localhost:5173/');
     assert.equal((await page.evaluate(() => window.desktop.devServer.status())).root, first.chatRoot);
+
+    // A real MCP proposal remains pending until the user accepts its inline card.
+    const {Client} = await import('@modelcontextprotocol/sdk/client/index.js');
+    const {StreamableHTTPClientTransport} = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+    const bridgeInfo = JSON.parse(await fs.readFile(path.join(root, 'profile', 'mcp.json'), 'utf8'));
+    const previewClient = new Client({name:'preview-proposal-test',version:'1'});
+    await previewClient.connect(new StreamableHTTPClientTransport(new URL(bridgeInfo.url), {requestInit:{headers:{Authorization:`Bearer ${bridgeInfo.token}`, 'x-verynize-access':'full'}}}));
+    try {
+      const result = await previewClient.callTool({name:'propose_preview',arguments:{command:['node','-e','process.exit(7)'],port:5173,chatId:first.conversationId,name:'Fixture'}});
+      assert.ok(!result.isError, JSON.stringify(result));
+      await page.locator('#preview-proposal').waitFor();
+      const beforeAccept = await page.evaluate(() => window.desktop.devServer.status());
+      assert.deepEqual(beforeAccept.config.command, ['npm','run','dev'], 'proposal does not overwrite accepted configuration');
+      await page.reload();
+      await page.locator('#preview-proposal').waitFor();
+      assert.match(await page.locator('#preview-proposal').textContent(), /Proposed Preview configuration/);
+      await page.locator('#preview-proposal').getByRole('button',{name:'Edit',exact:true}).click();
+      await page.getByRole('textbox',{name:'Preview Port',exact:true}).fill('0');
+      await page.getByRole('button',{name:'Save & start preview',exact:true}).click();
+      await page.locator('#preview-proposal [role=status]').filter({hasText:'Port must be between'}).waitFor();
+      await page.getByRole('textbox',{name:'Preview Port',exact:true}).fill('5173');
+      await page.getByRole('button',{name:'Save & start preview',exact:true}).click();
+      await page.locator('#preview-proposal [role=status]').waitFor();
+      await page.waitForFunction(() => /exited|failed|exit/i.test(document.querySelector('#preview-proposal [role=status]')?.textContent || ''));
+      assert.equal(await page.locator('#preview-proposal').isVisible(), true, 'failed startup preserves proposal for correction');
+      assert.equal(await page.evaluate(() => window.design.getDocument().pages.some(p => p.nodes.some(n => n.type === 'frame' && n.preview?.root === window.agentWorkspace.getState().activeRoot))), true, 'acceptance creates persistent canvas preview');
+      await page.getByRole('button',{name:'Dismiss preview proposal'}).click();
+      await page.locator('#preview-proposal').waitFor({state:'hidden'});
+      await page.evaluate(() => window.agentWorkspace.setCodeMode(true));
+    } finally { await previewClient.close(); }
 
     // 7b. Preferences › Advanced: line changes per worktree in the sidebar, and chat tabs sharing one worktree.
     assert.equal(await page.locator('[data-line-changes]').count(), 0, 'line changes are off by default');

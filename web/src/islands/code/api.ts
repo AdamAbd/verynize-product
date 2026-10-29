@@ -5,14 +5,16 @@ import { workspace } from "../chat/store";
 export { workspace };
 export type Repository = { id: string; name: string; root: string; addedAt: number; git?: boolean };
 export type Worktree = { path: string; branch: string | null; shared: boolean };
+export type PreviewProposal = {saved?: boolean; id: string; root: string; command: string[]; setup?: string[]; port: number; chatId?: string | null; name?: string | null};
 export type DevServerStatus = {
+  proposal?: PreviewProposal | null;
   state: "stopped" | "starting" | "running" | "exited" | "failed";
   root: string | null;
   url?: string | null;
   error?: string;
   tail?: string;
   detected?: { command: string[] } | null;
-  config?: { command: string[] } | null;
+  config?: { command: string[]; setup?: string[]; url?: string } | null;
 };
 export type ProjectFile = { path: string; size: number };
 export type ChangedFile = { path: string; status: string };
@@ -27,7 +29,7 @@ export type DesktopApi = {
     removeChatWorktree(options: { repoId: string; chatId: string; force?: boolean }): Promise<boolean>;
     activate(root: string | null): Promise<unknown>;
   };
-  devServer?: { status(): Promise<DevServerStatus>; start(): Promise<DevServerStatus>; stop(): Promise<DevServerStatus> };
+  devServer?: { dismissProposal(options: {root: string; saved?: boolean}): Promise<unknown>; configure(options: {root?: string; command: string[]; setup?: string[]; url?: string}): Promise<DevServerStatus>; setup(options?: {root?: string}): Promise<{exitCode: number; output?: string; setup?: string[]; recovery?: string}>; status(options?: {root?: string}): Promise<DevServerStatus>; start(options?: {root?: string}): Promise<DevServerStatus>; stop(options?: {root?: string}): Promise<DevServerStatus> };
   listFiles?(): Promise<ProjectFile[]>;
   readFile?(path: string): Promise<string>;
   writeFile?(path: string, text: string): Promise<boolean>;

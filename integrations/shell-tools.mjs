@@ -9,10 +9,10 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
-export const SHELL_TOOL_NAMES = ['get_dev_server', 'start_dev_server', 'stop_dev_server', 'configure_dev_server', 'preview_open', 'preview_snapshot', 'preview_screenshot', 'preview_click', 'preview_type', 'preview_scroll', 'preview_console', 'capture_preview_to_canvas', 'run_terminal_command', 'read_terminal', 'execute_action'];
+export const SHELL_TOOL_NAMES = ['get_dev_server', 'start_dev_server', 'stop_dev_server', 'configure_dev_server', 'propose_preview', 'preview_open', 'preview_snapshot', 'preview_screenshot', 'preview_click', 'preview_type', 'preview_scroll', 'preview_console', 'capture_preview_to_canvas', 'run_terminal_command', 'read_terminal', 'execute_action'];
 
 export const SHELL_INSTRUCTIONS = `## Running app and editor actions (desktop app only)
-With a project folder open in Verynize: get_dev_server reports its dev server; start_dev_server runs it (the package.json dev/start script, or a command saved with configure_dev_server) and opens it in the preview pane. Inspect the running app with preview_snapshot (page outline with CSS selectors for controls), preview_screenshot and preview_console; drive it with preview_click, preview_type and preview_scroll; capture_preview_to_canvas turns the visible page into editable layers. run_terminal_command runs one argument array in the project folder (no shell; use background:true for long-running processes) and read_terminal reads dev server or background output. Starting servers and running commands may need the user's approval; if the user declines, do not retry unchanged. execute_action runs an editor command (align, distribute, frame selection, auto layout, z-order, zoom to fit…) on the given element ids; call it without id to list actions. These tools need the desktop app.`;
+When asked to set up preview, inspect the repository scripts and package manager, then call propose_preview with setup/run argv and port. It creates a review card in chat; do not configure or start the server until the user accepts the card. With a project folder open in Verynize: get_dev_server reports its dev server; start_dev_server runs it (the package.json dev/start script, or a command saved with configure_dev_server) and opens it in the preview pane. Inspect the running app with preview_snapshot (page outline with CSS selectors for controls), preview_screenshot and preview_console; drive it with preview_click, preview_type and preview_scroll; capture_preview_to_canvas turns the visible page into editable layers. run_terminal_command runs one argument array in the project folder (no shell; use background:true for long-running processes) and read_terminal reads dev server or background output. Starting servers and running commands may need the user's approval; if the user declines, do not retry unchanged. execute_action runs an editor command (align, distribute, frame selection, auto layout, z-order, zoom to fit…) on the given element ids; call it without id to list actions. These tools need the desktop app.`;
 
 const argv = z.array(z.string().max(4096)).min(1).max(64).describe('Program and arguments as an array, e.g. ["npm","run","build"]. No shell: pipes, globs and && are not interpreted.');
 const localUrl = z.string().max(2000).regex(/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i, 'Use a localhost URL such as http://localhost:3000');
@@ -49,6 +49,11 @@ export function shellToolTable(backend, context = {}, helpers) {
     description: 'Save the dev server command for the open project (used by start_dev_server from now on), or pass command:null to forget it and fall back to package.json detection. May ask the user to approve.',
     inputSchema: { command: argv.nullable(), url: localUrl.optional() },
     run: args => call('configure_dev_server', 'devConfigure', args),
+  };
+  t.propose_preview = {
+    description: 'Propose preview setup for user review in the active chat. Does not execute commands or change saved configuration. Inspect repository scripts first, then supply setup and run command arrays and the listening port. The user can edit, save and start the proposal in the chat card.',
+    inputSchema: { command: argv, setup: argv.optional(), port: z.number().int().min(1).max(65535), chatId: z.string().max(200).optional(), name: z.string().max(200).optional() },
+    run: args => call('propose_preview', 'devPropose', args),
   };
   t.preview_open = {
     description: 'Open a localhost URL in Verynize\'s running-app preview pane and wait for it to load. Without url: show the current preview again, or the running dev server.',

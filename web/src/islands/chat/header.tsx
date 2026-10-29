@@ -1,10 +1,6 @@
 // Dock header (29, 33, 34): project / chat switcher on the left, "Start preview" split button on the right.
 import {
-  CameraIcon,
-  SparklesIcon,
-  ChevronDownIcon,
   ChevronsUpDownIcon,
-  FileDownIcon,
   FolderIcon,
   FolderOpenIcon,
   GitBranchIcon,
@@ -12,7 +8,6 @@ import {
   LaptopIcon,
   MessageSquareIcon,
   ChevronLeftIcon,
-  PlayIcon,
 } from "lucide-react";
 import { PanelLeftIcon, PlusIcon } from "@/components/icons";
 import { useBodyClass } from "@/lib/bridge";
@@ -30,7 +25,7 @@ import {
 } from "./menu";
 import { ChangesButton } from "./changes-panel";
 import { ChatHeaderButton, ChatIconButton } from "./controls";
-import { presetImplementPrompt } from "./changes";
+import { PreviewButton } from "../code/topbar";
 import { hook } from "./hooks";
 import { ChatTip } from "./tip";
 import { workspace, type ChatState } from "./store";
@@ -164,58 +159,6 @@ function Switcher({ state }: { state: ChatState }) {
   );
 }
 
-function PreviewButton() {
-  // Split button (29 "Start preview ⌄"): two header buttons and a divider inside one bordered group.
-  return (
-    <div role="group" aria-label="Preview" className="flex h-7 shrink-0 items-stretch overflow-hidden rounded-md border border-card-border bg-background">
-      <ChatHeaderButton segment="text" onClick={() => workspace()?.actions?.livePreview?.()}>
-        <PlayIcon className="size-3 fill-current text-muted-foreground" />
-        Start preview
-      </ChatHeaderButton>
-      {/* Divider in the group's own edge colour (the shared Separator uses the lighter panel border). */}
-      <span aria-hidden="true" className="w-px shrink-0 bg-card-border" />
-      <ChatMenu modal={false}>
-        <ChatMenuTrigger asChild>
-          <ChatHeaderButton segment="icon" aria-label="Preview options">
-            <ChevronDownIcon className="size-3 text-muted-foreground" />
-          </ChatHeaderButton>
-        </ChatMenuTrigger>
-        <ChatMenuContent align="end" className="w-52">
-          <ChatMenuItem onSelect={() => workspace()?.actions?.livePreview?.()}>
-            <PlayIcon />
-            Start preview…
-          </ChatMenuItem>
-          <ChatMenuItem onSelect={() => workspace()?.actions?.captureApp?.()}>
-            <CameraIcon />
-            Capture app to canvas
-          </ChatMenuItem>
-          <ChatMenuItem onSelect={() => workspace()?.actions?.exportPDF?.()}>
-            <FileDownIcon />
-            Export PDF
-          </ChatMenuItem>
-          <ChatMenuItem onSelect={presetImplementPrompt}>
-            <SparklesIcon />
-            Implement selection in code
-          </ChatMenuItem>
-          <ChatMenuSeparator />
-          <ChatMenuItem onSelect={() => workspace()?.actions?.gitStatus?.()}>
-            <GitBranchIcon />
-            Git status
-          </ChatMenuItem>
-          <ChatMenuItem onSelect={() => workspace()?.actions?.createWorktree?.()}>
-            <GitForkIcon />
-            Create worktree…
-          </ChatMenuItem>
-          <ChatMenuItem onSelect={() => workspace()?.openProject()}>
-            <FolderOpenIcon />
-            Open in Code workspace
-          </ChatMenuItem>
-        </ChatMenuContent>
-      </ChatMenu>
-    </div>
-  );
-}
-
 export function DockHeader({ state }: { state: ChatState }) {
   const attached = state.projectKey !== "unattached";
   // With the repositories / chats sidebar open (code/design-sidebar.tsx) the dock sits right of it: no traffic-light inset.
@@ -250,7 +193,7 @@ export function DockHeader({ state }: { state: ChatState }) {
         <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border bg-settings pr-2 pl-1.5">
           <ChangesButton state={state} />
           <span className="flex-1" />
-          <PreviewButton />
+          <PreviewButton state={state} idPrefix="chat" />
         </div>
       )}
     </>

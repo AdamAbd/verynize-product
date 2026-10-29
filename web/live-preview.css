@@ -1,1 +1,19 @@
-#workspace{position:relative}#live-preview[hidden]{display:none!important}#live-preview{position:absolute;inset:12px 12px 12px;z-index:12;background:#282828;display:flex;flex-direction:column;min-width:0}.live-preview-bar{display:flex;align-items:center;gap:5px;padding:7px 0 12px}.live-preview-bar button{padding:6px 8px;font-size:11px;white-space:nowrap}.live-preview-bar input{margin:0;min-width:50px;flex:1;font-size:11px;background:#202020}.live-preview-bar select{margin:0;width:125px;font-size:11px;padding:7px}.live-frame-wrap{flex:1;min-height:0;overflow:auto;display:flex;justify-content:center;background:repeating-conic-gradient(#303030 0% 25%,#333 0% 50%) 50%/12px 12px;border:1px solid #393939;border-radius:6px}#live-frame{height:100%;width:100%;max-width:100%;min-width:250px;flex-shrink:0;background:white;border:0}#live-status{font-size:11px;color:#999;line-height:1.5;margin:10px 0 0}.live-preview-open #canvas-wrap,.live-preview-open #canvas-toolbar,.live-preview-open #workspace>footer,.live-preview-open .canvas-title{visibility:hidden}#show-live-preview img{width:16px;height:16px;filter:invert(70%)}html[data-ui-theme=light] #live-preview{background:#eee}html[data-ui-theme=light] .live-preview-bar input{background:white;color:#222}@media(max-width:1100px){.live-preview-bar{flex-wrap:wrap}.live-preview-bar input{min-width:130px}.live-preview-bar select{width:110px}}
+.canvas-preview{isolation:isolate;background:var(--background,#191919)!important;color:var(--foreground,#ddd);box-shadow:0 10px 24px #0005;border:1px solid var(--border,#404040);border-radius:8px;overflow:visible!important;font:13px Inter,system-ui,sans-serif}
+.preview-breadcrumb{position:absolute;bottom:calc(100% + 8px);left:8px;display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;color:var(--muted-foreground,#999)}
+.preview-local{font-size:10px;border-radius:4px;background:var(--muted,#333);padding:2px 5px}
+.preview-surface{height:100%;display:flex;flex-direction:column;overflow:hidden;border-radius:8px}
+.live-preview-bar{height:38px;min-height:38px;display:flex;align-items:center;gap:4px;padding:4px 6px;border-bottom:1px solid var(--border,#333);background:var(--background,#202020)}
+.live-preview-bar button,.preview-context button,.preview-setup-card button,.preview-edit button{font:inherit;color:inherit;background:var(--muted,#282828);border:1px solid var(--border,#383838);border-radius:5px;padding:4px 8px;white-space:nowrap;cursor:pointer}
+.live-preview-bar input{flex:1;min-width:50px;margin:0;padding:4px 8px;border:0;background:transparent;color:inherit;font:inherit}
+.live-preview-bar [data-part=state]{white-space:nowrap;font-size:12px}
+.live-frame-wrap{position:relative;flex:1;min-height:0;background:var(--background,#191919)}
+.live-frame-wrap iframe{display:block;width:100%;height:100%;border:0;background:white}
+.live-frame-wrap iframe[hidden],.preview-placeholder[hidden],.preview-edit[hidden]{display:none}
+.preview-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.preview-setup-card{width:340px;border:1px solid var(--border,#333);border-radius:8px;padding:16px;background:var(--background,#1c1c1c);font-size:12px}
+.preview-setup-card strong,.preview-setup-card small{display:block;margin-bottom:6px}.preview-setup-card p{color:var(--muted-foreground,#999);white-space:pre-wrap;max-height:180px;overflow:auto}.preview-setup-card button{display:block;margin-left:auto}
+.preview-edit{position:absolute;top:48px;right:12px;width:280px;background:var(--background,#202020);border:1px solid var(--border,#444);border-radius:8px;padding:12px;z-index:3;box-shadow:0 8px 24px #0005}
+.preview-edit label{display:block;margin-bottom:8px}.preview-edit input{display:block;width:100%;margin-top:4px;background:var(--input,#292929);color:inherit}.preview-edit [role=status]{font-size:11px;white-space:normal}
+.canvas-preview button:focus-visible,.canvas-preview input:focus-visible{outline:2px solid var(--ring,#ad46e6);outline-offset:2px}
+#workspace:has(.canvas-preview.selected) #selection-name{display:none}
+.canvas-preview .preview-breadcrumb{color:var(--shell-muted,#999)}

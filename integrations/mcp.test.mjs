@@ -12,7 +12,7 @@ import { createPreferenceStore } from './preferences.mjs';
 import { connectBridge, readBridgeFile, startHttpServer, writeBridgeFile } from './mcp-http.mjs';
 
 // Bridge-only shell tools (integrations/shell-tools.mjs): listed everywhere, usable only through the desktop app.
-const SHELL_TOOLS = ['get_dev_server', 'start_dev_server', 'stop_dev_server', 'configure_dev_server', 'preview_open', 'preview_snapshot', 'preview_screenshot', 'preview_click', 'preview_type', 'preview_scroll', 'preview_console', 'capture_preview_to_canvas', 'run_terminal_command', 'read_terminal', 'execute_action'];
+const SHELL_TOOLS = ['get_dev_server', 'start_dev_server', 'stop_dev_server', 'configure_dev_server', 'propose_preview', 'preview_open', 'preview_snapshot', 'preview_screenshot', 'preview_click', 'preview_type', 'preview_scroll', 'preview_console', 'capture_preview_to_canvas', 'run_terminal_command', 'read_terminal', 'execute_action'];
 const EXPECTED_TOOLS = ['get_design_context', 'get_artboards', 'get_element_tree', 'get_element_code', 'find_elements', 'take_screenshot', 'create_artboard', 'update_elements', 'duplicate_elements', 'delete_elements', 'rename_elements', 'finish_artboard', 'get_design_guidelines', 'get_skills', 'get_icons', 'search_images', 'apply_style_tokens', 'get_design_tokens', 'create_design_tokens', 'update_design_tokens', 'delete_design_tokens', 'bind_variables', 'list_documents', 'open_document', 'create_document', 'create_page', 'rename_page', 'read_document', 'apply_operations', 'save_design_preference', 'list_design_preferences', 'update_design_preference', 'delete_design_preference', 'ask_agent', 'export_document', ...SHELL_TOOLS];
 const SERVER = path.resolve('integrations/mcp-server.mjs');
 
@@ -342,7 +342,7 @@ test('shell tools: stdio file mode answers "needs the desktop app"; a bridge she
   assert.match(INSTRUCTIONS, /Running app and editor actions \(desktop app only\)/);
   const root = await tempDir(t, 'verynize-shell-');
   const client = await stdioClient(t, ['--root', root]);
-  const samples = { get_dev_server: {}, start_dev_server: {}, stop_dev_server: {}, configure_dev_server: { command: ['npm', 'run', 'dev'] }, preview_open: { url: 'http://localhost:3000' }, preview_snapshot: {}, preview_screenshot: {}, preview_click: { selector: 'button' }, preview_type: { text: 'hi', selector: 'input' }, preview_scroll: { deltaY: 200 }, preview_console: {}, capture_preview_to_canvas: {}, run_terminal_command: { argv: ['ls'] }, read_terminal: {}, execute_action: {} };
+  const samples = { get_dev_server: {}, start_dev_server: {}, stop_dev_server: {}, configure_dev_server: { command: ['npm', 'run', 'dev'] }, propose_preview: { command: ['npm', 'run', 'dev'], port: 5173 }, preview_open: { url: 'http://localhost:3000' }, preview_snapshot: {}, preview_screenshot: {}, preview_click: { selector: 'button' }, preview_type: { text: 'hi', selector: 'input' }, preview_scroll: { deltaY: 200 }, preview_console: {}, capture_preview_to_canvas: {}, run_terminal_command: { argv: ['ls'] }, read_terminal: {}, execute_action: {} };
   for (const name of SHELL_TOOLS) {
     const result = await call(client, name, samples[name]);
     assert.equal(result.isError, true, name);

@@ -1,6 +1,6 @@
 // Code workspace top bars: the breadcrumb + chat switcher (rendered into the window title bar) and the toolbar
 // row with the status line, "Start preview" split button and the right-panel toggle.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CameraIcon,
   ChevronDownIcon,
@@ -24,6 +24,7 @@ import { ChatMenu, ChatMenuContent, ChatMenuItem, ChatMenuLabel, ChatMenuSeparat
 import type { ChatState } from "../chat/store";
 import { desktop, errorMessage, setStatus, workspace, type DevServerStatus } from "./api";
 import { newChat, openChat, QUICK, repositoryByKey, useRepositories } from "./controller";
+import { PreviewConfiguration } from "./preview-configuration";
 import { markStep } from "./next-steps";
 
 const iconButton =
@@ -90,7 +91,7 @@ function useDevServer(root: string | null | undefined) {
     let live = true;
     const poll = () =>
       api
-        .status()
+        .status({root})
         .then((s) => live && s.root === root && setDevStatus(s))
         .catch(() => {});
     void poll();
@@ -100,7 +101,7 @@ function useDevServer(root: string | null | undefined) {
       window.clearInterval(timer);
     };
   }, [root]);
-  const run = async (fn: () => Promise<DevServerStatus>) => {
+  const run = async (fn: () => Promise<DevServerStatus>, propagate = false) => {
     setBusy(true);
     try {
       const next = await fn();
@@ -108,6 +109,7 @@ function useDevServer(root: string | null | undefined) {
       return next;
     } catch (error) {
       setStatus(errorMessage(error));
+      if (propagate) throw error;
       return null;
     } finally {
       setBusy(false);
@@ -116,63 +118,86 @@ function useDevServer(root: string | null | undefined) {
   return { status, busy, run };
 }
 
-const showPreview = (url: string, separate: boolean) => {
+const showPreview = (url: string, separate: boolean, state: ChatState) => {
   if (!separate && window.livePreview) {
-    workspace()?.setCodeMode?.(false);
-    window.livePreview.show(url);
+    workspace()?.openChat?.();
+    window.livePreview.show(url, {root: state.activeRoot || undefined, name: `${state.projectName} › ${state.conversations.find(c => c.id === state.conversationId)?.title || "App"}`, chatId: state.conversationId || undefined});
   } else void desktop()?.previewApp?.({ url });
 };
 
-function PreviewButton({ state }: { state: ChatState }) {
+export function PreviewButton({ state, idPrefix = "code" }: { state: ChatState; idPrefix?: string }) {
   const root = state.activeRoot;
+  const currentRoot = useRef(root);
+  currentRoot.current = root;
+  const [configure, setConfigure] = useState(false);
   const { status, busy, run } = useDevServer(root);
+  const pending = useRef<{root: string; separate: boolean} | null>(null);
+  useEffect(() => {
+    if (pending.current?.root !== root) pending.current = null;
+    if (pending.current && status && status.root === root && status.state === "running" && status.url) {
+      showPreview(status.url, pending.current.separate, state);
+      pending.current = null;
+    }
+  }, [root, status, state]);
   const api = desktop()?.devServer;
-  const running = status?.state === "running" || status?.state === "starting";
+  const running = status?.root === root && (status?.state === "running" || status?.state === "starting");
   const actions = workspace()?.actions;
-  const start = async (separate = false) => {
+  const start = async (separate = false, configured = false) => {
+    if (!configured && root && !status?.config && !running) { window.dispatchEvent(new CustomEvent("bd:setup-preview")); return; }
     if (!api || !root) {
       actions?.livePreview?.();
       return;
     }
     if (running && status?.url) {
-      showPreview(status.url, separate);
+      showPreview(status.url, separate, state);
       return;
     }
     setStatus("Starting the dev server…");
-    const next = await run(() => api.start());
-    if (!next) return;
+    const next = await run(() => api.start({root}), configured);
+    if (currentRoot.current !== root || !next || next.root !== root) return;
     if (next.url && next.state === "running") {
       markStep("published");
       setStatus(`Preview running at ${next.url}`);
-      showPreview(next.url, separate);
-    } else if (next.state === "starting") setStatus("The dev server is starting; its address will open when ready");
-    else setStatus(next.error || `The dev server ${next.state}${next.tail ? `: ${next.tail.split("\n").slice(-2).join(" ")}` : ""}`);
+      showPreview(next.url, separate, state);
+    } else if (next.state === "starting") { pending.current = {root, separate}; setStatus("The dev server is starting; its address will open when ready"); }
+    else {
+      const message = next.error || `The dev server ${next.state}${next.tail ? `: ${next.tail.split("\n").slice(-2).join(" ")}` : ""}`;
+      setStatus(message);
+      if (configured) throw new Error(message);
+    }
   };
   const segment =
     "flex h-6.5 items-center text-sm text-foreground-2 outline-none hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-muted disabled:opacity-60";
-  const label = busy ? "Starting…" : status?.state === "running" ? "Open preview" : status?.state === "starting" ? "Starting…" : "Start preview";
+  const label = busy ? "Starting…" : running ? "Stop preview" : "Start preview";
+  const toggle = () => running && api ? void run(() => api.stop({root: root || undefined})) : void start();
   return (
     <div className="flex shrink-0 items-center rounded-md border border-card-border bg-settings">
-      <button type="button" id="code-start-preview" disabled={busy} className={cn(segment, "gap-2 rounded-l-md pr-2.5 pl-2")} onClick={() => void start()}>
+      {configure && root && <PreviewConfiguration key={root} root={root} status={status} onClose={() => setConfigure(false)} onStart={() => start(false, true)} />}
+      <button type="button" id={`${idPrefix}-start-preview`} disabled={busy} className={cn(segment, "gap-2 rounded-l-md pr-2.5 pl-2")} onClick={toggle}>
         {busy ? (
           <LoaderCircleIcon className="size-3 animate-spin text-muted-foreground motion-reduce:animate-none" />
         ) : (
-          <PlayIcon className={cn("size-3 fill-current", status?.state === "running" ? "text-success" : "text-muted-foreground")} />
+          running ? <SquareIcon className="size-3 text-muted-foreground" /> : <PlayIcon className="size-3 fill-current text-muted-foreground" />
         )}
         {label}
       </button>
       <span className="h-6.5 w-px bg-card-border" />
       <ChatMenu modal={false}>
-        <ChatMenuTrigger id="code-preview-menu" aria-label="Preview options" className={cn(segment, "w-5.5 justify-center rounded-r-md")}>
+        <ChatMenuTrigger id={`${idPrefix}-preview-menu`} aria-label="Preview options" className={cn(segment, "w-5.5 justify-center rounded-r-md")}>
           <ChevronDownIcon className="size-3 text-muted-foreground" />
         </ChatMenuTrigger>
         <ChatMenuContent align="end" className="w-56">
+          <ChatMenuItem disabled={!root || state.busy} onSelect={() => window.dispatchEvent(new CustomEvent("bd:setup-preview"))}><SparklesIcon />Set up the Preview</ChatMenuItem>
+          <ChatMenuItem id={`${idPrefix}-configure-preview`} disabled={!root || busy || running} onSelect={() => setConfigure(true)}>
+            <MonitorPlayIcon />
+            Preview configuration…
+          </ChatMenuItem>
           <ChatMenuItem onSelect={() => void start(true)} disabled={!root}>
             <ExternalLinkIcon />
             Preview in a separate window
           </ChatMenuItem>
           {running && (
-            <ChatMenuItem id="code-stop-preview" onSelect={() => api && void run(() => api.stop())}>
+            <ChatMenuItem id={`${idPrefix}-stop-preview`} onSelect={() => api && void run(() => api.stop({root: root || undefined}))}>
               <SquareIcon />
               Stop dev server
             </ChatMenuItem>

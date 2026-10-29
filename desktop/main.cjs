@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, dialog, Notification, shell } = require('electron');
+const { app, BrowserWindow, session, dialog, Notification, shell, screen } = require('electron');
 const path = require('node:path');
 const {pathToFileURL}=require('node:url');
 const {Project}=require('./projects.cjs');
@@ -29,7 +29,11 @@ app.whenReady().then(() => {
   repositories=new RepositoryRegistry({file:path.join(app.getPath('userData'),'repositories.json'),workspacesRoot:async()=>agentBehavior.workspacesOf(await behaviorStore.get()),branchPrefix:async()=>agentBehavior.resolveBranchPrefix(await behaviorStore.get())});
   mcpBridge.startBridge(app,{askAgent}).catch(error=>console.error('MCP bridge failed to start:',error)); // agent-bridge hook
   const createWindow = () => {
-    const win = new BrowserWindow({...process.platform==='darwin'?{titleBarStyle:'hiddenInset',trafficLightPosition:{x:12,y:13}}:{},width: 1440, height: 950, minWidth: 900, minHeight: 600, backgroundColor: '#141416', webPreferences: {preload:path.join(__dirname,'preload.cjs'),nodeIntegration: false, contextIsolation: true, sandbox: true}});
+    // Keep normal/restored bounds inside the display; an oversized initial window is clamped
+    // by macOS but retains off-screen restore bounds, making zoom/resize inconsistent.
+    const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+    const width = Math.min(1440, workArea.width), height = Math.min(950, workArea.height);
+    const win = new BrowserWindow({...process.platform==='darwin'?{titleBarStyle:'hiddenInset',trafficLightPosition:{x:12,y:13}}:{},x: workArea.x + Math.round((workArea.width - width) / 2), y: workArea.y + Math.round((workArea.height - height) / 2), width, height, minWidth: Math.min(900, workArea.width), minHeight: Math.min(600, workArea.height), backgroundColor: '#141416', webPreferences: {preload:path.join(__dirname,'preload.cjs'),nodeIntegration: false, contextIsolation: true, sandbox: true}});
     let project=null,agentRuntime=null;const agentsBusy=()=>agentRuntime?.active()>0;
     const current=()=>{if(!project)throw Error('Open a project folder first');return project;};
     const handle=(name,fn)=>win.webContents.ipc.handle('desktop:'+name,(event,...args)=>{
@@ -82,7 +86,7 @@ app.whenReady().then(() => {
     require('./agent-live-status.cjs').registerAgentLiveStatus(handle,{getRuntime:()=>agentRuntime});
     // --- agent shell (desktop/agent-shell.cjs): open project for the dev server / terminal MCP tools ---
     require('./agent-shell.cjs').registerShellWindow(win,{getProject:()=>project});
-    require('./agent-shell.cjs').registerDevServerIPC(handle,{getProject:()=>project}); // devServerStatus/Start/Stop for the Start preview button
+    require('./agent-shell.cjs').registerDevServerIPC(handle,{getProject:()=>project,resolveRoot:root=>repositories.resolveRoot(root)}); // devServerStatus/Start/Stop for the Start preview button
     // --- end agent shell ---
     // --- integrated terminal (desktop/terminal.cjs): terminalCreate, terminalWrite, terminalResize, terminalKill ---
     // PTY shells for the code-mode terminal panel; output arrives as desktop:terminal-data / desktop:terminal-exit.
