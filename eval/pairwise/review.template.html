@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blind design review</title>
+<style>
+  :root { color-scheme: light; --ink:#18181b; --muted:#71717a; --line:#e4e4e7; --bg:#fafafa; --accent:#18181b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 14px/1.45 -apple-system, system-ui, sans-serif; color:var(--ink); background:var(--bg); }
+  header { position:sticky; top:0; z-index:2; display:flex; gap:16px; align-items:center; padding:10px 20px; background:#fff; border-bottom:1px solid var(--line); }
+  header .grow { flex:1; min-width:0; }
+  header .brief { font-weight:600; }
+  header .prompt { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+  header .prompt.open { white-space:normal; }
+  .progress { font-variant-numeric: tabular-nums; color:var(--muted); }
+  input#reviewer { border:1px solid var(--line); border-radius:6px; padding:5px 8px; width:140px; }
+  button { font:inherit; border:1px solid var(--line); background:#fff; border-radius:6px; padding:6px 10px; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  main { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:16px 20px 90px; }
+  figure { margin:0; background:#fff; border:2px solid var(--line); border-radius:10px; overflow:auto; max-height:calc(100vh - 170px); }
+  figure.chosen { border-color:#16a34a; }
+  figcaption { position:sticky; top:0; background:#fff; padding:6px 10px; font-weight:600; border-bottom:1px solid var(--line); }
+  figure img { display:block; width:100%; height:auto; }
+  body.actual figure img { width:auto; max-width:none; }
+  footer { position:fixed; bottom:0; left:0; right:0; display:flex; gap:10px; justify-content:center; align-items:center; padding:12px; background:#fff; border-top:1px solid var(--line); }
+  kbd { font: 11px ui-monospace, monospace; border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:1px 5px; background:var(--bg); }
+  .done { padding:60px; text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <div class="grow">
+    <div class="brief" id="brief"></div>
+    <div class="prompt" id="prompt" title="click to expand"></div>
+  </div>
+  <span class="progress" id="progress"></span>
+  <input id="reviewer" placeholder="Your initials">
+  <button id="export">Export votes JSON</button>
+</header>
+<main id="stage">
+  <figure id="figA"><figcaption>A</figcaption><img id="imgA" alt="Design A"></figure>
+  <figure id="figB"><figcaption>B</figcaption><img id="imgB" alt="Design B"></figure>
+</main>
+<footer>
+  <button class="primary" data-choice="A">A is better <kbd>A</kbd> <kbd>&larr;</kbd></button>
+  <button data-choice="tie">Tie <kbd>T</kbd> <kbd>&darr;</kbd></button>
+  <button class="primary" data-choice="B">B is better <kbd>B</kbd> <kbd>&rarr;</kbd></button>
+  <button id="back">Back <kbd>U</kbd></button>
+  <button id="zoom">Fit / 100% <kbd>Z</kbd></button>
+</footer>
+<script>
+const PAGE = /*__PAGE__*/null;
+const IMAGES = /*__IMAGES__*/null;
+const KEY = 'bd-pairwise-' + PAGE.session;
+const saved = JSON.parse(localStorage.getItem(KEY) || '{"votes":{},"reviewer":""}');
+const $ = id => document.getElementById(id);
+$('reviewer').value = saved.reviewer || '';
+$('reviewer').addEventListener('input', e => { saved.reviewer = e.target.value.trim(); persist(); });
+let index = PAGE.pairs.findIndex(p => !saved.votes[p.id]); if (index < 0) index = PAGE.pairs.length;
+let shownAt = performance.now();
+function persist() { localStorage.setItem(KEY, JSON.stringify(saved)); }
+function render() {
+  const total = PAGE.pairs.length, done = Object.keys(saved.votes).length;
+  $('progress').textContent = `${Math.min(index + 1, total)} / ${total} (${done} voted)`;
+  if (index >= total) {
+    $('stage').innerHTML = `<div class="done" style="grid-column:1/-1"><h2>All ${total} pairs reviewed</h2><p>Click <b>Export votes JSON</b> and send the file to the eval owner.</p></div>`;
+    $('brief').textContent = 'Done'; $('prompt').textContent = ''; return;
+  }
+  const p = PAGE.pairs[index], b = PAGE.briefs[p.brief];
+  $('brief').textContent = `${b.title} (${b.track})`;
+  $('prompt').textContent = b.prompt;
+  $('imgA').src = IMAGES[p.left]; $('imgB').src = IMAGES[p.right];
+  const v = saved.votes[p.id]?.choice;
+  $('figA').classList.toggle('chosen', v === 'A'); $('figB').classList.toggle('chosen', v === 'B');
+  $('figA').scrollTop = $('figB').scrollTop = 0;
+  shownAt = performance.now();
+}
+function vote(choice) {
+  if (index >= PAGE.pairs.length) return;
+  if (!saved.reviewer) { $('reviewer').focus(); $('reviewer').placeholder = 'Enter initials first'; return; }
+  const p = PAGE.pairs[index];
+  saved.votes[p.id] = { choice, ms: Math.round(performance.now() - shownAt), at: new Date().toISOString() };
+  persist(); index++; render();
+}
+function exportVotes() {
+  const out = { session: PAGE.session, reviewer: saved.reviewer || 'anon', exported: new Date().toISOString(),
+    votes: PAGE.pairs.filter(p => saved.votes[p.id]).map(p => ({ pairId: p.id, left: p.left, right: p.right, choice: saved.votes[p.id].choice, ms: saved.votes[p.id].ms })) };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }));
+  a.download = `votes-${PAGE.session}-${out.reviewer.replace(/[^a-z0-9_-]/gi, '') || 'anon'}.json`; a.click();
+}
+document.querySelectorAll('[data-choice]').forEach(b => b.addEventListener('click', () => vote(b.dataset.choice)));
+$('back').onclick = () => { if (index > 0) { index--; render(); } };
+$('zoom').onclick = () => document.body.classList.toggle('actual');
+$('export').onclick = exportVotes;
+$('prompt').onclick = e => e.target.classList.toggle('open');
+// Scroll both panes together so reviewers compare the same region.
+let syncing = false;
+for (const [a, b] of [['figA', 'figB'], ['figB', 'figA']]) $(a).addEventListener('scroll', () => { if (syncing) return; syncing = true; const fa = $(a), fb = $(b); fb.scrollTop = fa.scrollTop / Math.max(1, fa.scrollHeight - fa.clientHeight) * (fb.scrollHeight - fb.clientHeight); requestAnimationFrame(() => { syncing = false; }); });
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  const k = e.key.toLowerCase();
+  if (k === 'a' || k === 'arrowleft') vote('A');
+  else if (k === 'b' || k === 'arrowright') vote('B');
+  else if (k === 't' || k === 'arrowdown') vote('tie');
+  else if (k === 'u' || k === 'backspace') { e.preventDefault(); $('back').click(); }
+  else if (k === 'z') $('zoom').click();
+  else return;
+  e.preventDefault();
+});
+render();
+</script>
+</body>
+</html>

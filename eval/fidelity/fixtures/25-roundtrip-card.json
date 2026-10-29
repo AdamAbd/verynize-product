@@ -1,0 +1,10 @@
+{ "title": "serialize -> parse -> serialize is a fixed point and keeps layout semantics",
+  "covers": ["round-trip", "serializer"],
+  "roundTrip": true,
+  "expect": [
+    { "serializedNot": "absolute left-\\[", "why": "flow children must serialize as flex/hug/fill, not absolute coordinates" },
+    { "node": "Plan card", "prop": "padding", "eq": { "top": 24, "right": 24, "bottom": 32, "left": 24 } },
+    { "node": "Plan card", "prop": "radius", "eq": { "tl": 16, "tr": 0, "br": 16, "bl": 16 } },
+    { "node": "F1", "prop": "ink", "color": "tw:zinc-900" },
+    { "node": "Plan CTA", "prop": "sizing", "eq": { "w": "fill" } }
+  ] }

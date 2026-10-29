@@ -1,0 +1,11 @@
+{ "title": "Tailwind palette colors resolve (bg, text, border)",
+  "covers": ["color"],
+  "expect": [
+    { "node": "Surface", "prop": "fill", "color": "tw:slate-900" },
+    { "node": "Surface", "prop": "strokeColor", "color": "tw:zinc-700" },
+    { "node": "Surface", "prop": "strokeWidth", "eq": 1 },
+    { "node": "Muted", "prop": "ink", "color": "tw:gray-400" },
+    { "node": "Accent", "prop": "fill", "color": "tw:emerald-500" },
+    { "noWarnAbout": ["bg-slate-900", "text-gray-400", "border-zinc-700", "bg-emerald-500"] },
+    { "rendered": "Muted", "prop": "color", "color": "tw:gray-400" }
+  ] }

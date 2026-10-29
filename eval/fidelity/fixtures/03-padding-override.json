@@ -1,0 +1,6 @@
+{ "title": "p-4 pl-8 pb-0: side utilities override the shorthand",
+  "covers": ["padding"],
+  "expect": [
+    { "node": "Card", "prop": "padding", "eq": { "top": 16, "right": 16, "bottom": 0, "left": 32 } },
+    { "rendered": "Copy", "relTo": "Card", "eq": { "x": 32, "y": 16 }, "tol": 1 }
+  ] }

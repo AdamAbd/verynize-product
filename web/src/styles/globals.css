@@ -1,0 +1,298 @@
+/*
+ * Design tokens for every React island. Values are measured from design/wonder/*.png
+ * (1440 × 870 CSS px captured at 2×). Keep component styling on these tokens; @shadcn/lint
+ * rejects raw colours and arbitrary values in island code.
+ *
+ * Preflight is intentionally not imported: legacy stylesheets still style the rest of the app.
+ * Utilities are `important` so they win over unlayered legacy rules; `[data-bd]` scopes the reset.
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) important;
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(html:not([data-ui-theme="light"]) *));
+@custom-variant light (&:where(html[data-ui-theme="light"] *));
+
+:root {
+  /* Surfaces */
+  --background: #1c1c1c; /* panels, chrome, home */
+  --canvas: #2b2b2b; /* canvas backdrop */
+  --settings: #1a1a1a; /* settings main area */
+  --card: #222222; /* file cards, settings cards, composer */
+  --popover: #222222; /* menus, popovers */
+  --input: #2b2b2b; /* fields, segmented controls, file tab */
+  --secondary: #2b2b2b;
+  --muted: #262626; /* segmented track, hover */
+  --accent: #363636; /* active segment / menu highlight */
+  --row: #2f2f2f; /* active page row, selected nav */
+  --selection: #432752; /* selected layer row */
+
+  /* Lines */
+  --border: #262626; /* section separators, card edges */
+  --divider: #282828; /* chrome / panel header bottom lines */
+  --edge: #363636; /* vertical panel edges, toolbar outline */
+  --card-border: #2e2e2e;
+
+  /* Text */
+  --foreground: #e8e8e8;
+  --foreground-2: #d4d4d4;
+  --foreground-3: #a8a8a8;
+  --muted-foreground: #909090;
+  --subtle-foreground: #707070;
+
+  /* Brand */
+  --primary: #a245d3;
+  --primary-hover: #ae55dd;
+  --primary-foreground: #ffffff;
+  --primary-text: #c468f7; /* frame labels, upgrade text */
+  --primary-tint: #29202e; /* upgrade button background */
+  --ring: #a245d3;
+  --destructive: #ff6b6b;
+
+  --radius: 6px;
+}
+
+html[data-ui-theme="light"] {
+  --background: #f7f7f7;
+  --canvas: #ececec;
+  --settings: #f4f4f4;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --input: #ececec;
+  --secondary: #ececec;
+  --muted: #f0f0f0;
+  --accent: #e2e2e2;
+  --row: #e8e8e8;
+  --selection: #ecdaf6;
+  --border: #e6e6e6;
+  --divider: #e2e2e2;
+  --edge: #dcdcdc;
+  --card-border: #e2e2e2;
+  --foreground: #1c1c1c;
+  --foreground-2: #2b2b2b;
+  --foreground-3: #555555;
+  --muted-foreground: #6b6b6b;
+  --subtle-foreground: #8a8a8a;
+  --primary-text: #8f2fc0;
+  --primary-tint: #f3e8fa;
+}
+
+@theme inline {
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Type scale observed in Wonder: 11 / 12 (editor) / 13 (home, settings) / 14 (chat) / 16 (breadcrumb) / 18 (settings title) */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 14px;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 22px;
+  --text-xl: 18px;
+  --text-xl--line-height: 24px;
+
+  --color-background: var(--background);
+  --color-canvas: var(--canvas);
+  --color-settings: var(--settings);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--foreground);
+  --color-input: var(--input);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground-2);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--foreground);
+  --color-row: var(--row);
+  --color-selection: var(--selection);
+  --color-border: var(--border);
+  --color-divider: var(--divider);
+  --color-edge: var(--edge);
+  --color-card-border: var(--card-border);
+  --color-foreground: var(--foreground);
+  --color-foreground-2: var(--foreground-2);
+  --color-foreground-3: var(--foreground-3);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-text: var(--primary-text);
+  --color-primary-tint: var(--primary-tint);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  --radius-3xl: 14px;
+
+  /* Fixed shell dimensions */
+  --spacing-chrome: 40px; /* window chrome height */
+  --spacing-panel: 280px; /* left / right panel width */
+  --spacing-chat: 499px; /* chat dock width */
+  --spacing-traffic: 80px; /* macOS traffic-light inset */
+
+  --shadow-menu: 0 12px 32px rgb(0 0 0 / 0.4);
+  --shadow-toolbar: 0 6px 24px rgb(0 0 0 / 0.3);
+}
+
+/* Scoped reset for island roots and their portals (legacy CSS keeps owning everything else). */
+[data-bd],
+[data-bd] *,
+[data-bd] ::before,
+[data-bd] ::after {
+  box-sizing: border-box;
+  border: 0 solid;
+}
+[data-bd] {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--foreground-2);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+[data-bd] :is(button, input, select, textarea, optgroup) {
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  min-width: 0;
+  min-height: 0;
+  width: auto;
+  height: auto;
+  outline: none;
+  appearance: none;
+  -webkit-app-region: no-drag;
+}
+[data-bd] :is(button, [role="button"]) {
+  cursor: default;
+}
+[data-bd] :is(h1, h2, h3, h4, p, ul, ol, figure) {
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+[data-bd] :is(img, svg, video, canvas) {
+  display: block;
+  max-width: 100%;
+}
+[data-bd] :is(input, textarea)::placeholder {
+  color: var(--subtle-foreground);
+  opacity: 1;
+}
+[data-bd] input[type="number"]::-webkit-inner-spin-button,
+[data-bd] input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+[data-bd] :focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 1px;
+}
+[data-bd] [hidden]:not([hidden="until-found"]) {
+  display: none !important;
+}
+
+/* Legacy elements replaced by an island (see hideLegacy in lib/bridge.ts). */
+[data-bd-hidden="true"] {
+  display: none !important;
+}
+#bd-legacy-dock {
+  display: none !important;
+}
+#bd-portal {
+  position: relative;
+  z-index: 1000;
+}
+
+/*
+ * Island-specific tokens. Each workstream edits ONLY its own block below (re-read the file before editing;
+ * other workstreams edit their blocks concurrently). Shared tokens above are owned by the integrator.
+ */
+@theme inline {
+  /* <chrome-tokens> */
+  /* Measured from design/wonder 03/19/22/29 (dark values in comments; mixes follow the light theme too). */
+  --color-tab-edge: color-mix(in srgb, var(--foreground) 3%, var(--input)); /* #313131 active tab ring */
+  --color-toolbar-edge: color-mix(in srgb, var(--foreground) 11%, var(--background)); /* #333333 toolbar + pill outline */
+  --color-toolbar-divider: color-mix(in srgb, var(--foreground) 10%, var(--background)); /* #303030 */
+  --color-menu-edge: color-mix(in srgb, var(--foreground) 10.5%, var(--background)); /* #323232 */
+  --color-help: color-mix(in srgb, var(--background) 94%, black); /* #181818 help button */
+  --text-0: 0px; /* zoom-reset item: live % stays in textContent, visible label is a ::before */
+  --spacing-page-pill: 262px;
+  --spacing-view-menu: 256px;
+  --spacing-app-menu: 248px;
+  --spacing-tab-name: 220px;
+  /* </chrome-tokens> */
+  /* <sidebar-tokens> */
+  /* </sidebar-tokens> */
+  /* <inspector-tokens> */
+  /* Fields in 22/25/43: 0.5px lighter top edge, 0.5px dark drop below. */
+  --shadow-field: inset 0 0.5px 0 rgb(255 255 255 / 0.05), 0 0.5px 0 rgb(0 0 0 / 0.35);
+  /* </inspector-tokens> */
+  /* <home-tokens> */
+  /* </home-tokens> */
+  /* <chat-tokens> */
+  --color-chat-chip: color-mix(in srgb, var(--foreground-2) 89%, var(--card)); /* composer chips #c0c0c0 */
+  --color-chat-claude: #d97757; /* Claude provider mark (30) */
+  --color-chat-codex: #7c7cf2; /* Codex provider mark (30) */
+  --color-chat-chip-bg: color-mix(in srgb, var(--foreground) 8%, var(--card)); /* context chip fill #333 (51) */
+  --color-chat-chip-border: color-mix(in srgb, var(--foreground) 18%, var(--card)); /* context chip edge #454545 (51) */
+  /* </chat-tokens> */
+  /* <settings-tokens> */
+  --spacing-settings-nav: 256px; /* settings navigation column */
+  --spacing-settings-main: 704px; /* settings content column */
+  --color-preview-light: #ececec; /* theme preview tiles (fixed, independent of the active theme) */
+  --color-preview-light-card: #ffffff;
+  --color-preview-light-bar: #d6d6d6;
+  --color-preview-dark: #393939;
+  --color-preview-dark-card: #1c1c1c;
+  --color-preview-dark-bar: #5c5c5c;
+  --color-brand-claude: #d97757; /* agent marks */
+  --color-brand-codex: #7c83f7;
+  --color-success: #3fb950;
+  /* </settings-tokens> */
+}
+
+/*
+ * The app shell is exactly one viewport tall and never scrolls as a document. Legacy rules such as
+ * `input{display:block}` in style.css overrode the `hidden` attribute on the file pickers (#asset-file,
+ * #project-file, #chat-image-file), which made the page 90px taller than the window: focusing a menu could then
+ * scroll the whole app up, hiding the title bar and revealing "Choose File / No file chosen" at the bottom.
+ */
+input[type="file"][hidden] {
+  display: none !important;
+}
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+/*
+ * Icons: Wonder draws every outline icon with a 1px line, whatever the icon size (measured on 11/22: 2 device px at
+ * 2×). Lucide icons (`svg.lucide`) and our own glyphs (`svg[data-icon]`, web/src/components/icons.tsx) therefore use a
+ * non-scaling 1px stroke; sizes come from the role scale documented in components/icons.tsx.
+ * `data-icon-weight="bold"` is reserved for tiny check/close marks inside 16px controls.
+ */
+[data-bd] svg:is(.lucide, [data-icon]) {
+  stroke-width: 1px;
+}
+[data-bd] svg:is(.lucide, [data-icon]) :is(path, line, polyline, polygon, rect, circle, ellipse) {
+  vector-effect: non-scaling-stroke;
+}
+[data-bd] svg[data-icon-weight="bold"] {
+  stroke-width: 1.75px;
+}

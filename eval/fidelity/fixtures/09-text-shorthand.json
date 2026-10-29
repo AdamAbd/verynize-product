@@ -1,0 +1,11 @@
+{ "title": "text-sm/6, text-5xl/tight and leading-7",
+  "covers": ["typography"],
+  "expect": [
+    { "node": "Display", "prop": "fontSize", "eq": 48 },
+    { "node": "Display", "prop": "lineHeightPx", "eq": 60, "tol": 0.5 },
+    { "node": "Display", "prop": "letterSpacingPx", "eq": -1.2, "tol": 0.05 },
+    { "node": "Body", "prop": "fontSize", "eq": 14 },
+    { "node": "Body", "prop": "lineHeightPx", "eq": 24, "tol": 0.5 },
+    { "node": "Leading", "prop": "lineHeightPx", "eq": 28, "tol": 0.5 },
+    { "noWarnAbout": ["text-sm/6", "text-5xl/tight", "leading-7"] }
+  ] }

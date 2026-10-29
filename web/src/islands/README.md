@@ -1,0 +1,100 @@
+# React islands — working contract
+
+The renderer is migrating from vanilla DOM (`web/*.js`, `web/*.css`) to React 19 + Tailwind CSS v4 + shadcn/ui (Radix) + `cn()`.
+Each UI area is an **island**: `web/src/islands/<area>.tsx` (entry) + `web/src/islands/<area>/**` (code), bundled together by `web/src/ui.tsx`
+into `web/dist/ui.{js,css}` (classic IIFE, one React copy) and loaded by `web/index.html` after all legacy scripts.
+
+Visual target: the Wonder app, captured in `design/wonder/*.png` (2880×1740 = 1440×870 CSS px at 2×; crop and
+measure with Python/PIL — divide pixel coordinates by 2). `design-qa.md` lists measured values from an earlier pass.
+
+## Areas and ownership (edit only your own files)
+
+| Area | Entry | Owns (visual + behaviour) | Main references |
+|---|---|---|---|
+| chrome | `chrome.tsx` | window chrome/tab bar (`header.app-chrome`), main grid + panel collapse state (`left-collapsed`, `right-collapsed` body classes), canvas overlays in `#workspace` (bottom toolbar, page pill when sidebar hidden, `?` help, zoom readout + zoom menu, view/layout menu), main app menu (undo/redo/file/insert/page/settings commands) | 03, 11, 19, 20, 22, extra/15 |
+| sidebar | `sidebar.tsx` | contents of `aside#layer-panel`: file header (logo/app-menu trigger is rendered by sidebar but must call the chrome menu — see "Cross-island"), Pages list, Layers tree (rows, lock/hide toggles, expand carets, rename, search) | 11, 12, 84–88, extra/86 |
+| inspector | `inspector.tsx` | contents of `aside#properties`: header (panel toggle, presence avatar, Share), Variables (list, search, create menu), Properties/inspector sections (Position, Layout, Appearance, Typography, Fill, Border, Shadow, Mask, Export, layer actions), color picker, font family/weight pickers, shader settings | 22, 23, 25–27, 41–43, 45–46, 55–56 |
+| home | `home.tsx` | `#file-home`: workspace switcher (07), filters, grid/list, file cards + actions (rename 18, duplicate, move, archive/restore), new file/folder | 03–07, 17, 18, extra/87 |
+| chat | `chat.tsx` | `#agent-chat-dock` and the agent section of `#project-dialog`: transcript, composer, model picker (30), access (31), attach menu (32), repository switcher (33), quick chats (34–35), running state (36–37, 51) | 29–37, 51, 80–83 |
+| settings | `settings.tsx` | `#settings-screen` (all pages) and the remaining dialogs: share/cloud (13), export flow (45–50 save/success), templates, saved views, generate illustration, Figma import, text prompt (`#text-prompt`), preview modal (`#modal`) | 13, 45–50, 61–79 |
+
+Shared files are owned by the integrator — **do not edit**: `web/src/lib/*`, `web/src/components/ui/*` (existing files),
+`web/src/styles/globals.css` (except your own `<area>-tokens` block at the bottom), `web/index.html`, `vite*.config.ts`,
+`package.json`, legacy `web/*.js|css` except where your brief explicitly allows, other islands' folders.
+You may add **new** shadcn components with `npx shadcn@latest add <name> --yes` (never `--overwrite`); after adding, fix
+the import to `@/lib/utils`, pass `container={portalContainer()}` to every Portal, and apply the density used in
+`button.tsx`/`dropdown-menu.tsx` (12px text, 24–28px controls). Need a different look for an existing shadcn component?
+Build a local component in your island folder (wrapping Radix primitives from `radix-ui`) instead of editing the shared one.
+
+## How islands talk to the legacy app (`web/src/lib/bridge.ts`)
+
+- `useDesign()`, `useSelection()`, `activePage(doc)` — React views of `window.design` (re-render after every legacy `render()`).
+- `window.design.updateNodes(ids, patch)` — validated, undoable node edits (one undo step). `setActivePage(id)`,
+  `setSelection(ids)`, `canUndo()/canRedo()`, camera/tool/command APIs are on `window.design` too.
+- Legacy controls keep their handlers. To replace one with an island control **that tests can click by id**:
+  `takeOver("rectangle")` renames the legacy element to `legacy-rectangle` and parks it in a hidden dock; render your
+  own element with `id="rectangle"` and call `legacyClick("rectangle")` (or `legacySet(el, value)` for inputs).
+- `hideLegacy(el)` hides legacy/parity DOM you replace without deleting it (other code may still reference it).
+- `useBodyClass("left-collapsed")`, `useWindowEvent(...)`, `portalContainer()`.
+- Other globals: `window.agentWorkspace`, `window.fileLibrary`, `window.appSettings`, `window.appPreferences`, `window.askText`.
+
+The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; islands are the only shell UI.
+
+## Cross-island contracts
+
+- **Layout state** lives in `body` classes: `left-collapsed`, `right-collapsed` (any island may toggle them; the chrome
+  island owns the grid CSS that reacts to them), plus legacy `agent-chat-open`, `files-view`, `settings-open`.
+- **Main menu**: the chrome island owns the app menu. Anyone opens it with
+  `window.dispatchEvent(new CustomEvent("bd:open-app-menu", { detail: { anchor: buttonElement } }))`. Every visible
+  trigger button must have class `app-menu-trigger` (tests click `.app-menu-trigger:visible` then a command id such as
+  `#rectangle`, `#undo`, `#save-project`, `#shell-settings`, `#rename-page`, `#import-tokens`, `#icon-kind`).
+  Commands must stay reachable by those ids inside the opened menu.
+- **Zoom menu**: tests click `#zoom-menu-button` then `#zoom-in`, `#zoom-out`, `#zoom-fit`, `#zoom-reset`, `#snap`,
+  `#saved-views-open` (chrome island). `#zoom-reset` text must keep the zoom percentage (tests parse it).
+- **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask]`, `[name=layout]`,
+  `[name=wMode]`, `[name=shaderPreset]`, `[name=shaderSpeed]`, `[name=shaderIntensity]`, `[name=animated]`,
+  `[name=color]`, `.insp-display [data-layout=flex]`, `#mask-section .insp-add`, `#shader-settings summary`,
+  `#choose-shader`, `#range-bold`, `#precision-right`, `#color-value`, `#color-dialog` … — grep `tests/` for the full list.
+  Field names must be unique in the document (Playwright strict mode), so the legacy `#inspector` form may not keep
+  same-named inputs in the DOM at the same time.
+- **Plain CSS**: if you must restyle legacy DOM you cannot render yourself (e.g. the `main` grid, `#canvas-wrap`
+  overlays, legacy `<dialog>`s), put plain CSS that uses `var(--token)` in `web/src/islands/<area>/<area>.css` and
+  import it from your entry. Never restyle another area's DOM.
+
+## Icons
+
+- Use `lucide-react` or the shared glyphs in `web/src/components/icons.tsx` (logo, `PanelLeftIcon`/`PanelRightIcon`,
+  layout icons, `ShaderIcon`, stack icons). Never define icon SVGs inside an island; add missing glyphs to that file.
+- Stroke: every outline icon renders a 1px non-scaling stroke (enforced in `globals.css`); don't pass `strokeWidth`,
+  `absoluteStrokeWidth` or `size={…}` props. Use `data-icon-weight="bold"` only for tiny check/close marks in 16px controls.
+- Size by role, with Tailwind size classes: `size-3` disclosure chevrons · `size-3.5` icons in menus, chips, field
+  prefixes and inline status · `size-4` icon buttons (title bar, panel headers, section tools, row icons, hover
+  actions) · `size-5` floating canvas toolbar. Same concept → same glyph everywhere (e.g. shader = `ShaderIcon` in the
+  toolbar, layer rows and menus; panel toggles = `PanelLeftIcon`/`PanelRightIcon`).
+
+## Rules
+
+- Tailwind utilities only, on tokens from `globals.css` (`bg-background`, `bg-input`, `text-muted-foreground`,
+  `border-edge`, `text-xs` = 12px, `text-sm` = 13px, `h-6` = 24px fields…). `npm run lint:ui` (= `vp lint web/src`, with
+  `@shadcn/lint`) must report **0 errors** for your files; fix warnings where reasonable. `npm run typecheck:ui` must pass.
+- Use shadcn/Radix primitives for menus, popovers, dialogs, selects, tooltips, toggle groups → keyboard navigation,
+  Escape, focus return and ARIA come for free. Icons: `lucide-react` (`strokeWidth={1.5}`, 14–20px as measured).
+- Keep the canvas imperative: never render canvas layers in React, never subscribe React to pointer-move.
+- Keep test contracts: existing tests in `tests/*.cjs|mjs` click ids/selectors and `[name=…]` fields. Grep the tests
+  for every selector in your area. Preserve them on visible island elements (via `takeOver`) or update the test to the
+  new interaction **only** when the old element genuinely no longer exists, keeping the assertion's intent.
+- Accessibility: every icon-only button needs `aria-label`; menus/popovers via Radix; visible focus rings.
+- Light theme: tokens already switch on `html[data-ui-theme=light]`; don't hard-code dark values.
+
+## Build & check
+
+```sh
+npm run build:ui                      # combined bundle → web/dist/ui.{js,css} (what the app loads)
+node scripts/build-ui.cjs <area>      # one island alone → web/dist/<area>.{js,css}, for isolated development
+npm run lint:ui && npm run typecheck:ui
+node tests/<relevant>.cjs              # Playwright + Electron; each run uses its own temp profile
+node /tmp/bd-shots/shoot.cjs <names>   # 2× screenshots → /tmp/bd-shots/<name>.png (see that script for names)
+```
+
+Several workstreams build and test concurrently. Only build your own island. If a test fails in an area you don't
+own, note it and move on — don't fix other areas. Keep your code compiling at every step.

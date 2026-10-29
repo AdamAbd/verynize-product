@@ -1,0 +1,42 @@
+{
+  "id": "04-commerce-product",
+  "version": 1,
+  "track": "original",
+  "title": "Commerce product page",
+  "viewport": { "width": 1440, "height": 1800, "capture": "fullPage", "minHeight": 1200 },
+  "prompt": "Design a product detail page for \"Kettle & Kiln\", an online store selling small-batch ceramic tableware. Desktop, 1440px wide, full page. Product: \"Tidal Stoneware Mug, 12 oz\", price $38, rated 4.8 from 214 reviews, available in three glazes (Sea Salt, Iron Oxide, Moss) with Sea Salt selected, quantity stepper, \"Add to cart\" primary button and \"Add to wishlist\" secondary action, a stock note \"Only 7 left in Sea Salt\", shipping note \"Free shipping over $75\". Include a product image gallery (one large image plus at least 3 thumbnails), breadcrumb, an accordion or tabs with Details, Care and Shipping (Details open: handmade in Portland, dishwasher safe, 350 ml), three customer reviews, and a \"Pairs well with\" row of 4 related products with prices.",
+  "requiredContent": [
+    "Store name Kettle & Kiln",
+    "Breadcrumb",
+    "Product name Tidal Stoneware Mug, 12 oz",
+    "Price $38",
+    "Rating 4.8 and 214 reviews",
+    "Glaze options Sea Salt (selected), Iron Oxide, Moss",
+    "Quantity stepper",
+    "Add to cart button and Add to wishlist action",
+    "Stock note Only 7 left in Sea Salt and Free shipping over $75",
+    "Gallery: large image and >= 3 thumbnails",
+    "Details/Care/Shipping with Details open",
+    "Three customer reviews",
+    "Pairs well with: 4 related products with prices"
+  ],
+  "constraints": ["1440px wide, full-page capture", "English copy", "Realistic product photography or convincing product renders"],
+  "assetsAllowed": { "icons": true, "photos": true, "generatedImages": true, "avatars": true, "customFonts": true },
+  "inputs": [],
+  "budget": { "maxMinutes": 20, "followUpTurns": 0 },
+  "checklist": [
+    { "id": "c01", "text": "Product name, price $38 and the 4.8 / 214 reviews rating are visible above the fold in the purchase column." },
+    { "id": "c02", "text": "\"Add to cart\" is the single most prominent button on the page." },
+    { "id": "c03", "text": "Three glaze options are shown as swatches or chips, Sea Salt is visibly selected." },
+    { "id": "c04", "text": "The gallery has one large image and at least three thumbnails showing the product (real or convincing imagery).", "critical": true },
+    { "id": "c05", "text": "A quantity stepper with minus/plus controls and a value is present." },
+    { "id": "c06", "text": "Stock note and free-shipping note are present and visually secondary to price." },
+    { "id": "c07", "text": "Details, Care and Shipping are present as tabs or accordion with Details expanded showing the three stated facts." },
+    { "id": "c08", "text": "Exactly three reviews with reviewer name, rating and text." },
+    { "id": "c09", "text": "\"Pairs well with\" shows four products with image, name and price aligned on a consistent grid." },
+    { "id": "c10", "text": "Image column and purchase column tops are aligned and the two-column layout uses a consistent gutter." },
+    { "id": "c11", "text": "No text is clipped, overlapping, or overflowing.", "critical": true },
+    { "id": "c12", "text": "No placeholder text, broken image icons or empty gray image boxes.", "critical": true },
+    { "id": "c13", "text": "Breadcrumb is present and visually subdued." }
+  ]
+}

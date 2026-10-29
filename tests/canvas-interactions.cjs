@@ -1,0 +1,237 @@
+// Canvas parity: camera, tools, selection, smart guides, clipboard, structure commands, sizing modes.
+const {_electron} = require('@playwright/test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
+
+(async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'canvas-interactions-')), env = {...process.env};
+  delete env.ELECTRON_RUN_AS_NODE;
+  const app = await _electron.launch({env, args: ['.', `--user-data-dir=${dir}`], timeout: 20000});
+  try {
+    const page = await app.firstWindow({timeout: 20000});
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.waitForSelector('#canvas .layer');
+    const near = (actual, expected, tolerance = 1.5, label = '') => assert.ok(Math.abs(actual - expected) <= tolerance, `${label} ${actual} ~= ${expected}`);
+    const doc = () => page.evaluate(() => window.design.getDocument());
+    const nodesOf = async () => (await doc()).pages[0].nodes;
+    const node = async id => (await nodesOf()).find(n => n.id === id);
+    const selection = () => page.evaluate(() => window.design.getSelection().toSorted());
+    async function seed(nodes, camera = [100, 100, 1]) {
+      await page.evaluate(([nodes, camera]) => {
+        const d = window.design.getDocument();
+        d.pages = [{id: d.pages[0].id, name: 'Desktop', nodes}]; d.activePage = d.pages[0].id;
+        window.design.setDocument(d); window.design.setSelection([]); window.design.setTool('move');
+        window.design.setCamera(...camera);
+      }, [nodes, camera]);
+    }
+    // World coordinates to client coordinates through the live camera.
+    async function screen(x, y) {
+      return page.evaluate(([x, y]) => {
+        const r = document.querySelector('#canvas-wrap').getBoundingClientRect(), c = window.design.getCamera();
+        return {x: r.left + c.x + x * c.zoom, y: r.top + c.y + y * c.zoom};
+      }, [x, y]);
+    }
+    async function drag(from, to, {steps = 8, before, during} = {}) {
+      const a = await screen(...from), b = await screen(...to);
+      await page.mouse.move(a.x, a.y); if (before) await before(); await page.mouse.down();
+      await page.mouse.move(b.x, b.y, {steps});
+      const seen = during ? await during() : undefined;
+      await page.mouse.up();
+      return seen;
+    }
+    const click = async (x, y, {modifiers = [], ...options} = {}) => { const p = await screen(x, y); for (const m of modifiers) await page.keyboard.down(m); await page.mouse.click(p.x, p.y, options); for (const m of modifiers) await page.keyboard.up(m); };
+    const rect = (id, x, y, w = 100, h = 80, extra = {}) => ({id, name: id, type: 'rectangle', x, y, w, h, color: '#8844cc', ...extra});
+
+    // ---- 1. Infinite canvas camera ----
+    await seed([rect('a', 0, 0), rect('far', 3000, -2000)]);
+    assert.equal(await page.locator('#canvas [data-id=far]').evaluate(e => e.style.left), '3000px', 'existing coordinates are preserved');
+    const pivot = await screen(50, 40);
+    await page.mouse.move(pivot.x, pivot.y);
+    const before = await page.evaluate(([x, y]) => window.design.screenToWorld(x, y), [pivot.x, pivot.y]);
+    await page.keyboard.down('Control'); await page.mouse.wheel(0, -120); await page.keyboard.up('Control');
+    const afterZoom = await page.evaluate(([x, y]) => window.design.screenToWorld(x, y), [pivot.x, pivot.y]);
+    assert.ok((await page.evaluate(() => window.design.getCamera().zoom)) > 1, 'ctrl+wheel zooms in');
+    near(afterZoom.x, before.x, 0.5, 'cursor-anchored x'); near(afterZoom.y, before.y, 0.5, 'cursor-anchored y');
+    await page.evaluate(() => window.design.setCamera(100, 100, 1));
+    await page.mouse.wheel(40, 60);
+    const panned = await page.evaluate(() => window.design.getCamera());
+    near(panned.x, 60, 0.5, 'wheel pans x'); near(panned.y, 40, 0.5, 'wheel pans y');
+    await page.evaluate(() => window.design.setCamera(100, 100, 0.8));
+    await page.keyboard.press('Meta+Equal');
+    assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 1, '⌘+ steps to the next zoom stop');
+    await page.keyboard.press('Meta+Equal');
+    assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 2);
+    await page.keyboard.press('Meta+Minus'); await page.keyboard.press('Meta+Minus');
+    assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 0.5);
+    await page.keyboard.press('Meta+Digit0');
+    assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 1);
+    await page.keyboard.press('Shift+Digit1');
+    const fitted = await page.evaluate(() => ({far: document.querySelector('#canvas [data-id=far]').getBoundingClientRect().toJSON(), a: document.querySelector('#canvas [data-id=a]').getBoundingClientRect().toJSON(), wrap: document.querySelector('#canvas-wrap').getBoundingClientRect().toJSON()}));
+    for (const r of [fitted.far, fitted.a]) assert.ok(r.left >= fitted.wrap.left && r.right <= fitted.wrap.right && r.top >= fitted.wrap.top && r.bottom <= fitted.wrap.bottom, '⇧1 fits all content');
+    await page.evaluate(() => { window.design.setCamera(-5000, -5000, 1); document.querySelector('#canvas [data-id=a]').scrollIntoView({block: 'center'}); });
+    const revealed = await page.evaluate(() => ({a: document.querySelector('#canvas [data-id=a]').getBoundingClientRect().toJSON(), wrap: document.querySelector('#canvas-wrap').getBoundingClientRect().toJSON()}));
+    assert.ok(revealed.a.left >= revealed.wrap.left && revealed.a.right <= revealed.wrap.right && revealed.a.top >= revealed.wrap.top, 'scrollIntoView on a layer pans the camera to it');
+    // Space-drag and the H tool pan.
+    await page.evaluate(() => window.design.setCamera(100, 100, 1));
+    await page.keyboard.down('Space'); await drag([400, 400], [450, 430]); await page.keyboard.up('Space');
+    let cam = await page.evaluate(() => window.design.getCamera()); near(cam.x, 150, 1, 'space pan x'); near(cam.y, 130, 1, 'space pan y');
+    assert.deepEqual((await node('a')).x, 0, 'space-drag does not move layers');
+    await page.keyboard.press('h'); assert.equal(await page.evaluate(() => window.design.getTool()), 'hand');
+    await drag([10, 10], [-20, 0]);
+    cam = await page.evaluate(() => window.design.getCamera()); near(cam.x, 120, 1, 'hand pan'); assert.equal((await node('a')).x, 0);
+    await page.keyboard.press('Escape'); assert.equal(await page.evaluate(() => window.design.getTool()), 'move');
+
+    // ---- 2. Tools: draw-to-create, parenting, presets ----
+    await seed([{id: 'board', name: 'Board', type: 'frame', x: 0, y: 0, w: 400, h: 300, color: '#ffffff', layout: 'free'}]);
+    await page.keyboard.press('f'); assert.equal(await page.evaluate(() => window.design.getTool()), 'frame');
+    assert.equal(await page.locator('#frame-presets').isVisible(), true, 'frame presets are offered');
+    await drag([500, 20], [700, 170]);
+    let list = await nodesOf(), drawn = list.at(-1);
+    assert.equal(drawn.type, 'frame'); near(drawn.x, 500); near(drawn.y, 20); near(drawn.w, 200); near(drawn.h, 150);
+    assert.equal(drawn.parentId, null);
+    assert.equal(await page.evaluate(() => window.design.getTool()), 'move', 'tool returns to move after drawing');
+    await page.keyboard.press('r'); await drag([50, 60], [150, 120]);
+    drawn = (await nodesOf()).at(-1);
+    assert.equal(drawn.type, 'rectangle'); assert.equal(drawn.parentId, 'board', 'drawing inside a frame parents to it'); near(drawn.x, 50); near(drawn.y, 60); near(drawn.w, 100);
+    await page.keyboard.press('t'); await click(520, 400);
+    drawn = (await nodesOf()).at(-1); assert.equal(drawn.type, 'text'); near(drawn.x, 520); near(drawn.y, 400);
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press('f'); await page.locator('#frame-presets [data-preset="iPhone 17"]').click();
+    drawn = (await nodesOf()).at(-1); assert.equal(drawn.w, 402); assert.equal(drawn.h, 874); assert.equal(drawn.name, 'iPhone 17');
+
+    // ---- 3. Marquee, shift toggle, drill-in, keyboard navigation ----
+    await seed([rect('m1', 0, 0), rect('m2', 150, 0), rect('m3', 300, 0),
+      {id: 'group', name: 'Group', type: 'frame', x: 0, y: 200, w: 300, h: 150, color: '#ffffff', layout: 'free'},
+      rect('c1', 10, 10, 50, 50, {parentId: 'group'}), rect('c2', 100, 10, 50, 50, {parentId: 'group'})]);
+    await drag([-20, -20], [200, 50]);
+    assert.deepEqual(await selection(), ['m1', 'm2'], 'marquee selects intersecting top-level layers');
+    await click(320, 20, {modifiers: ['Shift']});
+    assert.deepEqual(await selection(), ['m1', 'm2', 'm3'], 'shift-click adds');
+    await click(170, 20, {modifiers: ['Shift']});
+    assert.deepEqual(await selection(), ['m1', 'm3'], 'shift-click toggles off');
+    await click(600, 600); assert.deepEqual(await selection(), [], 'empty click clears');
+    await page.evaluate(() => window.appPreferences.set({selection: 'classic'}));
+    await click(30, 230); assert.deepEqual(await selection(), ['group'], 'classic click picks the outermost frame');
+    await page.mouse.dblclick((await screen(30, 230)).x, (await screen(30, 230)).y);
+    assert.deepEqual(await selection(), ['c1'], 'double-click drills into the child');
+    await click(120, 230); assert.deepEqual(await selection(), ['c2'], 'siblings stay directly selectable inside the drilled frame');
+    await page.keyboard.press('Shift+Enter'); assert.deepEqual(await selection(), ['group'], 'shift+enter selects parent');
+    await page.keyboard.press('Enter'); assert.deepEqual(await selection(), ['c1', 'c2'], 'enter selects children');
+    await page.evaluate(() => window.design.setSelection(['c1']));
+    await page.keyboard.press('Tab'); assert.deepEqual(await selection(), ['c2'], 'tab cycles siblings');
+    await page.keyboard.press('Escape'); assert.deepEqual(await selection(), [], 'escape deselects');
+    await page.evaluate(() => window.appPreferences.set({selection: 'deep'}));
+
+    // ---- 4. Smart guides, equal spacing and Alt distances ----
+    await seed([rect('s1', 0, 0), rect('s2', 500, 200), rect('g1', 0, 400), rect('g2', 150, 400), rect('mover', 530, 520)]);
+    await click(580, 560);
+    const guidesSeen = await drag([580, 560], [580 - 27, 560 - 117], {steps: 10, during: () => page.locator('#canvas-overlay').getAttribute('data-guides')});
+    let mover = await node('mover');
+    assert.equal(mover.x, 500, 'left edge snaps to sibling left edge'); assert.equal(mover.y, 400, 'top edge snaps to sibling top');
+    assert.ok(Number(guidesSeen) > 0, 'alignment guides are drawn while dragging');
+    assert.equal(await page.locator('#canvas-overlay').getAttribute('data-guides'), '0', 'guides clear on release');
+    // g1 [0,100] g2 [150,250]: gap 50 → mover snaps to x=300 at equal spacing.
+    await page.evaluate(() => window.design.setCamera(100, 100, 1));
+    await page.evaluate(() => { const d = window.design.getDocument(); const m = d.pages[0].nodes.find(n => n.id === 'mover'); m.x = 320; m.y = 600; window.design.setDocument(d); window.design.setSelection(['mover']); });
+    const spacingSeen = await drag([370, 640], [353, 440], {steps: 10, during: () => page.locator('#canvas-overlay .guide-label').allTextContents()});
+    mover = await node('mover'); assert.equal(mover.x, 300, 'equal-gap snapping'); assert.ok(spacingSeen.includes('50'), 'gap value is labeled');
+    await page.evaluate(() => window.design.setSelection(['s1']));
+    const target = await screen(520, 220);
+    await page.keyboard.down('Alt'); await page.mouse.move(target.x, target.y); await page.mouse.move(target.x + 2, target.y + 2);
+    const distances = await page.locator('#canvas-overlay .guide-label').allTextContents();
+    await page.keyboard.up('Alt');
+    assert.ok(distances.includes('400') && distances.includes('120'), 'alt-hover shows horizontal and vertical distances: ' + distances);
+
+    // ---- 5. Clipboard ----
+    await seed([rect('p1', 0, 0, 100, 80, {color: '#ff0000', radius: 9}), rect('p2', 200, 0, 100, 80, {color: '#00ff00'})]);
+    await page.evaluate(() => window.design.setSelection(['p1']));
+    await page.keyboard.press('Meta+KeyC'); await page.keyboard.press('Meta+KeyV');
+    await page.waitForFunction(() => window.design.getDocument().pages[0].nodes.length === 3);
+    let pasted = (await nodesOf()).at(-1);
+    assert.notEqual(pasted.id, 'p1'); assert.equal(pasted.x, 0); assert.equal(pasted.color, '#ff0000');
+    assert.deepEqual(await selection(), [pasted.id], 'pasted layer is selected');
+    await page.keyboard.press('Meta+KeyX');
+    assert.equal((await nodesOf()).length, 2, 'cut removes');
+    await page.keyboard.press('Meta+Shift+KeyV');
+    await page.waitForFunction(() => window.design.getDocument().pages[0].nodes.length === 3);
+    pasted = (await nodesOf()).at(-1); assert.equal(pasted.x, 0); assert.equal(pasted.y, 0, 'paste in place keeps position');
+    await page.evaluate(() => window.design.setSelection(['p1']));
+    await page.keyboard.press('Meta+Alt+KeyC');
+    await page.evaluate(() => window.design.setSelection(['p2']));
+    await page.keyboard.press('Meta+Alt+KeyV');
+    const styled = await node('p2'); assert.equal(styled.color, '#ff0000'); assert.equal(styled.radius, 9); assert.equal(styled.x, 200, 'paste style leaves geometry');
+    await page.keyboard.press('Meta+KeyD'); assert.equal((await nodesOf()).length, 4, '⌘D duplicates');
+    await page.keyboard.press('Meta+KeyZ'); assert.equal((await nodesOf()).length, 3, 'undo reverts duplicate');
+
+    // ---- 6. Frame/unframe, auto layout, lock/hide, z-order ----
+    await seed([rect('f1', 100, 100, 100, 50), rect('f2', 260, 100, 100, 50), rect('f3', 420, 100, 100, 50)]);
+    await page.evaluate(() => window.design.setSelection(['f1', 'f2']));
+    await page.keyboard.press('Meta+KeyG');
+    list = await nodesOf();
+    const frame = list.find(n => n.type === 'frame');
+    assert.deepEqual([frame.x, frame.y, frame.w, frame.h], [100, 100, 260, 50]);
+    assert.equal((await node('f1')).parentId, frame.id); assert.equal((await node('f2')).x, 160);
+    assert.deepEqual(await selection(), [frame.id]);
+    const f1Box = await page.locator('#canvas [data-id=f1]').boundingBox();
+    await page.keyboard.press('Shift+KeyA');
+    let auto = await node(frame.id);
+    assert.equal(auto.layout, 'flex'); assert.equal(auto.direction, 'row'); assert.equal(auto.gap, 60); assert.equal(auto.wMode, 'hug');
+    assert.equal(auto.w, 260, 'hugging frame measures its content');
+    const autoBox = await page.locator('#canvas [data-id=f1]').boundingBox();
+    near(autoBox.x, f1Box.x, 1, 'auto layout keeps children in place');
+    await page.keyboard.press('Meta+Shift+KeyG');
+    list = await nodesOf();
+    assert.equal(list.some(n => n.type === 'frame'), false, 'unframe removes the frame');
+    assert.equal((await node('f2')).parentId, null); assert.equal((await node('f2')).x, 260, 'unframe restores page coordinates');
+    await page.evaluate(() => window.design.setSelection(['f1']));
+    await page.keyboard.press('Meta+BracketRight');
+    assert.deepEqual((await nodesOf()).map(n => n.id), ['f2', 'f1', 'f3'], 'bring forward');
+    await page.keyboard.press('Meta+Alt+BracketRight');
+    assert.deepEqual((await nodesOf()).map(n => n.id), ['f2', 'f3', 'f1'], 'bring to front');
+    await page.keyboard.press('Meta+Alt+BracketLeft');
+    assert.deepEqual((await nodesOf()).map(n => n.id), ['f1', 'f2', 'f3'], 'send to back');
+    await page.keyboard.press('Meta+Shift+KeyL'); assert.equal((await node('f1')).locked, true);
+    await drag([150, 125], [150, 300]); assert.equal((await node('f1')).y, 100, 'locked layers do not move on canvas');
+    await page.evaluate(() => window.design.setSelection(['f1']));
+    await page.keyboard.press('Meta+Shift+KeyL'); assert.equal((await node('f1')).locked, undefined);
+    await page.keyboard.press('Meta+Shift+KeyH'); assert.equal((await node('f1')).hidden, true);
+    assert.equal(await page.locator('#canvas [data-id=f1]').evaluate(e => getComputedStyle(e).display), 'none');
+    assert.equal(await page.locator('.layer-row.is-hidden').count(), 1, 'hidden layer is dimmed in the layer list');
+    await page.locator('.layer-row.is-hidden [data-toggle=hidden]').click();
+    assert.equal((await node('f1')).hidden, undefined, 'layer row eye toggles visibility');
+
+    // ---- 7. Sizing modes ----
+    await seed([{id: 'stack', name: 'Stack', type: 'frame', x: 0, y: 0, w: 400, h: 200, color: '#ffffff', layout: 'flex', direction: 'row', padding: 10, gap: 10},
+      rect('fixed', 0, 0, 100, 50, {parentId: 'stack'}), rect('grow', 0, 0, 100, 50, {parentId: 'stack'}),
+      {id: 'label', name: 'Label', type: 'text', x: 0, y: 300, w: 400, h: 60, text: 'Hug', fontSize: 20, color: '#222222'}]);
+    await page.evaluate(() => window.design.setSelection(['grow']));
+    const options = await page.locator('[name=wMode] option').evaluateAll(list => list.map(o => [o.value, o.disabled]));
+    assert.deepEqual(options, [['fixed', false], ['hug', true], ['fill', false]], 'Fill offered inside flex parent; Hug not for rectangles');
+    await page.locator('[name=wMode]').selectOption('fill');
+    assert.equal((await node('grow')).w, 400 - 20 - 10 - 100, 'Fill takes the remaining main-axis space');
+    assert.match(await page.locator('#selection-measure').textContent(), /270 Fill × 50/);
+    await page.evaluate(() => window.design.setSelection(['label']));
+    assert.deepEqual(await page.locator('[name=wMode] option').evaluateAll(list => list.map(o => o.disabled)), [false, false, true], 'top-level text can hug, not fill');
+    await page.locator('[name=wMode]').selectOption('hug');
+    assert.ok((await node('label')).w < 100, 'hugging text shrinks to its content');
+    await page.locator('[name=w]').fill('300'); await page.locator('[name=w]').press('Tab');
+    assert.equal((await node('label')).wMode, 'fixed', 'typing a width returns to Fixed');
+
+    // Command registry is exposed for tooling and context menus.
+    const commands = await page.evaluate(() => window.design.commands());
+    for (const id of ['edit.copy', 'edit.pasteStyle', 'transform.frame', 'view.fit', 'tool.frame']) assert.ok(commands.some(c => c.id === id), id);
+    await page.evaluate(() => window.design.setSelection(['label']));
+    const labelBox = await page.locator('#canvas [data-id=label]').boundingBox();
+    await page.mouse.click(labelBox.x + 5, labelBox.y + 5, {button: 'right'});
+    assert.ok(await page.locator('#canvas-menu [data-command="transform.frame"]').isVisible(), 'context menu lists commands');
+    await page.locator('#canvas-menu [data-command="transform.frame"]').click();
+    assert.equal((await node('label')).parentId !== null, true, 'context menu runs commands');
+
+    // Documents and saved views stay compatible after reload.
+    await page.reload(); await page.waitForSelector('#canvas .layer');
+    assert.ok((await nodesOf()).some(n => n.id === 'label'));
+    assert.deepEqual(errors, []);
+    console.log('PASS canvas interactions: cursor-anchored zoom, stops, fit, space/H pan, draw tools + presets, marquee, shift toggle, drill-in, Enter/Tab navigation, edge + equal-gap snapping with guides, Alt distances, clipboard + style, frame/unframe, auto layout, z-order, lock/hide, Fill/Hug sizing, context menu');
+  } finally { await app.close(); await fs.rm(dir, {recursive: true, force: true}); }
+})().catch(e => { console.error(e); process.exitCode = 1; });

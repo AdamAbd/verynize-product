@@ -1,0 +1,5 @@
+{ "title": "single-corner overrides on top of a uniform radius",
+  "covers": ["radius"],
+  "expect": [
+    { "node": "Bubble", "prop": "radius", "eq": { "tl": 24, "tr": 16, "br": 4, "bl": 16 } }
+  ] }

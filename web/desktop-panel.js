@@ -1,0 +1,443 @@
+(() => {
+  const host = document.createElement('section');
+  host.id = 'desktop-panel';
+  host.innerHTML = `<button id="project-toggle" title="Projects and local agents">⌘ Project & agents</button><dialog id="project-dialog"><header><strong>Project workspace</strong><span id="project-name">No folder selected</span><button id="project-close">Close</button></header><nav><button id="project-open">Open folder</button><button id="project-new">New project</button><button id="project-clone">Clone GitHub</button><button id="design-open">Open design</button><button id="design-save">Save design</button><button id="design-save-as">Save design as…</button><button id="project-refresh">Refresh</button><button id="project-git">Git status</button><button id="project-worktree">Create worktree</button><button id="project-memory">Project memory</button><button id="project-preview">Live preview</button><button id="project-capture">Capture app</button><button id="project-pdf">Export PDF</button></nav><div class="project-grid"><section><input id="project-search" placeholder="Filter files" aria-label="Filter files"><div id="project-files"></div></section><section class="project-editor"><div><strong id="project-path">Choose a file</strong><button id="project-save">Save file</button></div><textarea id="project-source" spellcheck="false" aria-label="Project file editor"></textarea></section><section class="project-agent"><div class="chat-heading"><strong>Chats</strong><button id="chat-new" title="New quick chat">＋</button><button id="chat-dock" title="Dock chat">◧</button></div><select id="chat-history" aria-label="Conversation history"></select><p id="chat-session" class="chat-session"></p><div id="chat-messages" aria-live="polite"></div><div id="chat-queue"></div><details class="agent-config"><summary id="agent-config-label">Model & access</summary><select id="project-agent" aria-label="Local agent"><option value="codex">Codex</option><option value="claude">Claude</option></select><input id="agent-model" aria-label="Model" placeholder="Agent default model" list="agent-model-list" autocomplete="off"><datalist id="agent-model-list"></datalist><div class="agent-options"><select id="agent-access" aria-label="Agent access"><option value="ask">Ask · approve each action</option><option value="edit">Edit · auto-approve file edits</option><option value="auto">Auto · reviewer approves</option><option value="full">Full · never ask</option></select><select id="agent-effort" aria-label="Reasoning effort"><option value="">Default effort</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></div><p id="project-agent-status">Checking installed tools…</p></details><textarea id="project-prompt" aria-label="Agent task" placeholder="Ask about this design or describe a change… (paste images here)"></textarea><div id="chat-attachments"></div><div class="chat-attachment-actions"><button id="chat-attach-file">＋ Open file</button><button id="chat-attach-canvas">◇ Canvas</button><button id="chat-attach-image">▣ Image</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden></div><label><input type="checkbox" id="agent-canvas-context" checked> Send canvas context (document, page, selection ids)</label><label><input type="checkbox" id="project-context"> Include the open file in the prompt</label><div><button id="project-run">Send</button><button id="project-cancel" disabled>Stop</button><button id="project-review">Review changes</button><button id="project-apply-design">Apply canvas</button></div><p class="project-note">Runs with your installed Claude Code or Codex account. Chats without a project run in a private scratch folder.</p><details class="agent-log"><summary>Execution log</summary><pre id="project-output" aria-label="Agent output"></pre></details></section></div><p id="project-status" role="status"></p></dialog>`;
+  document.body.append(host);
+  const $ = id => document.getElementById(id), api = window.desktop;
+  let files = [], activePath = null, memory = false, dirty = false;
+  const status = text => { $('project-status').textContent = text; };
+  // Chat state. A conversation keeps the provider session id so follow-ups resume the same session.
+  // Runs are tracked per conversation (the runtime allows several at once): `active` maps chatId -> run entry,
+  // `runs` maps runId -> entry so events reach the conversation that started them even after the user switches away.
+  let projectKey='unattached',conversations=[],conversation=null,attachments=[],frame=0,inflight=0,drafts={};
+  const active=new Map(),runs=new Map(),queues=new Map(),orphans=[],taskOf=new WeakMap(),checkpoints=new Map();
+  const entryOf=chat=>chat?active.get(chat.id)||null:null,isRunning=chat=>!!entryOf(chat);
+  const queueOf=chat=>{if(!chat)return [];let q=queues.get(chat.id);if(!q)queues.set(chat.id,q=[]);return q;};
+  // External renderers (the React chat island) subscribe here; while one is subscribed the legacy transcript DOM is not rendered.
+  const subscribers=new Set();let version=0,snapshot=null;const notify=()=>{version++;for(const fn of subscribers)fn();};
+  const ACCESS=['ask','edit','auto','full'],ACCESS_LABEL={ask:'Ask',edit:'Edit',auto:'Auto',full:'Full access'},LEGACY_ACCESS={'read-only':'ask','workspace-write':'edit'};
+  const normalizeAccess=value=>LEGACY_ACCESS[value]||(ACCESS.includes(value)?value:'edit');
+  let defaults={agent:'codex',model:'',access:'edit',effort:'',instructions:''};
+  try{defaults={...defaults,...JSON.parse(localStorage.getItem('better-agent-defaults')||'{}')}}catch{}
+  defaults.access=normalizeAccess(defaults.access);
+  const stats={runs:0,completed:0,failed:0};try{Object.assign(stats,JSON.parse(localStorage.getItem('better-agent-usage')||'{}'))}catch{}
+  const chatsKey=key=>'better-agent-chats:'+key;
+  const persist=()=>{try{localStorage.setItem(chatsKey(projectKey),JSON.stringify(conversations.slice(-30)));localStorage.setItem('better-agent-usage',JSON.stringify(stats));}catch{status('Chat storage full; export or clear older conversations.')}window.dispatchEvent(new Event('agent-usage-changed'));};
+  // A run can outlive a project switch: its conversation is then written into the other project's saved list.
+  const persistChat=entry=>{if(!entry||entry.key===projectKey){persist();return;}try{const saved=JSON.parse(localStorage.getItem(chatsKey(entry.key))||'[]'),list=Array.isArray(saved)?saved:[],i=list.findIndex(c=>c?.id===entry.chat.id);if(i>=0)list[i]=entry.chat;else list.push(entry.chat);localStorage.setItem(chatsKey(entry.key),JSON.stringify(list.slice(-30)));localStorage.setItem('better-agent-usage',JSON.stringify(stats));}catch{}window.dispatchEvent(new Event('agent-usage-changed'));};
+  // Composer drafts, per conversation and project.
+  const loadDrafts=()=>{try{const saved=JSON.parse(localStorage.getItem('better-agent-drafts:'+projectKey)||'{}');drafts=saved&&typeof saved==='object'?saved:{};}catch{drafts={}}};
+  const setDraft=(text,chat=conversation)=>{if(!chat)return;text=String(text||'');if(text.trim())drafts[chat.id]=text.slice(0,20000);else delete drafts[chat.id];try{localStorage.setItem('better-agent-drafts:'+projectKey,JSON.stringify(drafts))}catch{}};
+  const currentDefaults=()=>({agent:$('project-agent').value,model:$('agent-model').value.trim(),access:$('agent-access').value,effort:$('agent-effort').value,instructions:defaults.instructions||''});
+  const setDefaults=value=>{defaults={...defaults,...value};defaults.access=normalizeAccess(defaults.access);$('project-agent').value=defaults.agent;$('agent-model').value=defaults.model;$('agent-access').value=defaults.access;$('agent-effort').value=defaults.effort;$('agent-config-label').textContent=(defaults.model||defaults.agent+' default')+' · '+ACCESS_LABEL[defaults.access];try{localStorage.setItem('better-agent-defaults',JSON.stringify(defaults))}catch{}notify();};
+  const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
+  const pretty=value=>{if(typeof value==='string')return value;try{return JSON.stringify(value,null,2)}catch{return String(value)}};
+  const clip=(text,n)=>{text=String(text??'');return text.length>n?text.slice(0,n)+'…':text;};
+  const tail=(text,n)=>text.length>n?'…'+text.slice(-n):text;
+  const SUGGESTIONS=[
+    {title:'Revenue dashboard',prompt:'Design a revenue dashboard for a subscription coffee roaster: MRR trend, churn by plan, top cities and a cohort retention grid.'},
+    {title:'Product landing page',prompt:'Create a landing page for a privacy-first note-taking app with a hero, three feature rows, customer quotes and a pricing section with a monthly/yearly toggle.'},
+    {title:'Mobile onboarding',prompt:'Design a three-screen mobile onboarding flow (390×844) for a plant-care app that sets up watering reminders.'},
+    {title:'Settings page',prompt:'Lay out a settings page for a team chat app with sidebar sections for profile, notifications, security and billing.'},
+    {title:'Editorial article',prompt:'Design a long-form editorial article page about urban cycling with a large serif headline, pull quotes and an inline photo essay.'},
+    {title:'Orders data table',prompt:'Build an orders table for an e-commerce admin with search, status filters, status badges, bulk actions and pagination.'},
+  ];
+
+  // ---------- Canvas elements: short ids (same scheme as integrations/design-edit.mjs ensureShortIds), mentions, links ----------
+  const CONS='bcdfghjklmnprstvwz',VOWELS='aeiou',LETTERS='abcdefghijklmnopqrstuvwxyz',SHORT=/^[a-z]{3,4}$/;
+  const fnv=text=>{let h=0x811c9dc5;for(let i=0;i<text.length;i++){h^=text.charCodeAt(i);h=Math.imul(h,0x01000193)>>>0;}return h;};
+  const codeFor=(id,attempt)=>{const h=fnv(id+':'+attempt);if(attempt<6)return CONS[h%18]+VOWELS[Math.floor(h/18)%5]+CONS[Math.floor(h/90)%18];return [0,1,2,...(attempt<40?[]:[3])].map(k=>LETTERS[Math.floor(h/26**k)%26]).join('');};
+  const indexPage=page=>{
+    const byId=new Map(),code=new Map(),used=new Set();
+    for(const node of page.nodes){byId.set(node.id,node);let c=typeof node.shortId==='string'&&SHORT.test(node.shortId)&&!used.has(node.shortId)?node.shortId:null;if(!c){let attempt=0;do c=codeFor(node.id,attempt++);while(used.has(c));}used.add(c);code.set(node.id,c);}
+    const rootOf=node=>{let current=node;const seen=new Set();while(current.parentId&&byId.has(current.parentId)&&!seen.has(current.id)){seen.add(current.id);current=byId.get(current.parentId);}return current;};
+    const shortOf=node=>node.parentId?code.get(rootOf(node).id)+'.'+code.get(node.id):code.get(node.id);
+    const resolve=ref=>{if(byId.has(ref))return byId.get(ref);const own=ref.includes('.')?ref.slice(ref.lastIndexOf('.')+1):ref;const node=page.nodes.find(n=>code.get(n.id)===own);if(!node)return null;if(ref.includes('.')&&code.get(rootOf(node).id)!==ref.slice(0,ref.indexOf('.')))return null;return node;};
+    return {byId,shortOf,resolve};
+  };
+  const labelOf=node=>(typeof node.name==='string'&&node.name.trim())||(typeof node.text==='string'&&node.text.trim().slice(0,40))||node.type||'Element';
+  const mentionOf=(node,page,index)=>({id:node.id,label:labelOf(node),pageId:page.id,type:node.type,shortId:index.shortOf(node)});
+  let selectionMentions=[],selectionKey=null,manualMentions=[];const dismissed=new Set();
+  const syncSelection=()=>{
+    const design=window.design;if(!design?.getSelection)return;let ids;try{ids=design.getSelection();}catch{return;}
+    const key=ids.join(',');if(key===selectionKey)return;selectionKey=key;dismissed.clear();selectionMentions=[];
+    if(ids.length)try{const doc=design.getDocument(),page=doc.pages.find(p=>p.id===doc.activePage);if(page){const index=indexPage(page);for(const id of ids.slice(0,20)){const node=index.byId.get(id);if(node)selectionMentions.push(mentionOf(node,page,index));}}}catch{}
+    notify();
+  };
+  const watchDesign=(tries=0)=>{if(window.design?.subscribe){window.design.subscribe(()=>syncSelection());syncSelection();return;}if(tries<200)setTimeout(()=>watchDesign(tries+1),100);};
+  const currentMentions=()=>{const out=[],seen=new Set();for(const m of [...selectionMentions.filter(m=>!dismissed.has(m.id)),...manualMentions])if(!seen.has(m.id)){seen.add(m.id);out.push(m);}return out;};
+  const addMention=mention=>{if(!mention||typeof mention.id!=='string')return;dismissed.delete(mention.id);if(!currentMentions().some(m=>m.id===mention.id)){if(manualMentions.length>=20)return;manualMentions.push({id:mention.id,label:String(mention.label||mention.id).slice(0,80),pageId:String(mention.pageId||''),...(mention.type?{type:mention.type}:{}),...(mention.shortId?{shortId:mention.shortId}:{})});}notify();};
+  const removeMention=id=>{manualMentions=manualMentions.filter(m=>m.id!==id);if(selectionMentions.some(m=>m.id===id))dismissed.add(id);notify();};
+  // @ popover search over the open document (active page first) by name, text, short id or id.
+  const searchElements=query=>{
+    try{
+      const doc=window.design?.getDocument?.();if(!doc)return [];const q=String(query||'').trim().toLowerCase(),out=[];
+      for(const page of [...doc.pages.filter(p=>p.id===doc.activePage),...doc.pages.filter(p=>p.id!==doc.activePage)]){
+        const index=indexPage(page);
+        const ordered=q?page.nodes:[...page.nodes.filter(n=>!n.parentId),...page.nodes.filter(n=>n.parentId)];
+        for(const node of ordered){if(out.length>=20)return out;const hay=[node.name,node.text,index.shortOf(node),node.id].filter(v=>typeof v==='string').join(' ').toLowerCase();if(!q||hay.includes(q))out.push(mentionOf(node,page,index));}
+        if(!q)break;
+      }
+      return out;
+    }catch{return [];}
+  };
+  // betterdesign://node/<document>/<pageId>/<shortId or id> (finish_artboard designLink) -> select and zoom the element.
+  const openLink=url=>{
+    const match=/^betterdesign:\/\/node\/(?:([^/]*)\/)?([^/]+)\/([^/?#]+)/.exec(String(url||''));const design=window.design;if(!match||!design?.getDocument)return false;
+    try{
+      const pageId=decodeURIComponent(match[2]),ref=decodeURIComponent(match[3]),doc=design.getDocument();
+      for(const page of [...doc.pages.filter(p=>p.id===pageId),...doc.pages.filter(p=>p.id!==pageId)]){
+        const node=indexPage(page).resolve(ref);if(!node)continue;
+        if(doc.activePage!==page.id)design.setActivePage?.(page.id);
+        design.setSelection?.([node.id]);
+        requestAnimationFrame(()=>{try{design.runCommand?.('view.selection')}catch{}});
+        return true;
+      }
+      status('That element is no longer on the canvas');
+    }catch{}
+    return false;
+  };
+
+  // ---------- Checkpoints (document snapshots before each user turn, for rewind) ----------
+  const takeCheckpoint=chat=>{try{const doc=window.design?.getDocument?.();if(!doc)return undefined;const id=crypto.randomUUID();checkpoints.set(id,{chatId:chat.id,fileId:window.fileLibrary?.currentId||'',doc});const mine=[...checkpoints].filter(([,c])=>c.chatId===chat.id);if(mine.length>20)checkpoints.delete(mine[0][0]);if(checkpoints.size>60)checkpoints.delete(checkpoints.keys().next().value);return id;}catch{return undefined;}};
+
+  // ---------- Seed: compact transcript summary for a fresh provider session ----------
+  const LINK_RE=/betterdesign:\/\/node\/[^\s"'<>)\]]+/g;
+  const buildSeed=(messages,turns=10)=>{
+    const starts=[];messages.forEach((m,i)=>{if(m.role==='user')starts.push(i);});
+    const from=starts.length>turns?starts[starts.length-turns]:0,lines=[],links=new Set(),artboards=new Set();
+    for(const m of messages.slice(from)){
+      if(m.role==='user'){lines.push('User: '+clip(m.text,1500)+(m.mentions?.length?` [referenced elements: ${m.mentions.map(x=>`${x.label} (${x.shortId||x.id}, page ${x.pageId})`).join(', ')}]`:''));continue;}
+      const tools=[];
+      for(const p of m.parts||[]){
+        if(p.kind==='tool'){const input=pretty(p.input||{}),result=p.result===undefined?'':pretty(p.result);tools.push((p.title||p.name)+(p.state==='error'?' (failed)':'')+(result?': '+clip(result.replace(/\s+/g,' '),160):''));for(const l of (input+' '+result).match(LINK_RE)||[])links.add(l);for(const a of input.matchAll(/"(?:artboardId|artboard)"\s*:\s*"([^"]+)"/g))artboards.add(a[1]);}
+        else if(p.kind==='question'&&p.answers)tools.push('asked the user: '+(p.questions||[]).map(q=>`${clip(q.question,120)} → ${p.answers[q.id]||'no answer'}`).join('; '));
+      }
+      for(const l of String(m.text||'').match(LINK_RE)||[])links.add(l);
+      lines.push('Assistant'+(m.state&&m.state!=='complete'?` (${m.state})`:'')+': '+clip(m.text||'',2000)+(tools.length?'\n  Tools: '+tools.slice(-12).join(' | '):''));
+    }
+    if(!lines.length)return '';
+    const body=tail(lines.join('\n'),14000);
+    return ['Summary of the earlier conversation in this chat. The previous agent session is not available, so continue from this summary and re-read the canvas with the tools before editing.',body,links.size?'Artboard links referenced: '+[...links].slice(-20).join(', '):'',artboards.size?'Artboard ids referenced: '+[...artboards].slice(-20).join(', '):''].filter(Boolean).join('\n');
+  };
+
+  // ---------- Legacy transcript DOM (used only while no React island is subscribed) ----------
+  const answerPermission=(part,allow,always)=>{if(part.state!=='pending')return;part.state=allow?'allowed':'denied';if(always&&allow)part.always=true;api.respondAgentPermission?.({requestId:part.requestId,allow,...(always?{always:true}:{})}).catch(e=>status(e.message));notify();scheduleReply();};
+  const renderPart=part=>{
+    if(part.kind==='text')return el('div','chat-message-content',part.text);
+    if(part.kind==='thinking'){const box=el('details','chat-thinking');box.append(el('summary',null,'Thinking'),el('div',null,part.text));return box;}
+    if(part.kind==='tool'){
+      const card=el('details','chat-tool '+(part.state||'running'));card.open=!!part.open;card.ontoggle=()=>{part.open=card.open;};
+      const summary=el('summary');summary.append(el('span','chat-tool-state',part.state==='error'?'✕':part.state==='done'?'✓':part.state==='interrupted'?'■':'…'),el('span','chat-tool-title',part.title||part.name));card.append(summary);
+      const body=el('div','chat-tool-body');body.append(el('small',null,'Input'),el('pre',null,!part.hasInput&&part.partialInput?part.partialInput:pretty(part.input||{})));
+      if(part.result!==undefined)body.append(el('small',null,part.state==='error'?'Error':'Result'),el('pre',null,part.result||'(empty)'));
+      card.append(body);return card;
+    }
+    if(part.kind==='permission'){
+      const card=el('div','chat-permission '+part.state);card.append(el('strong',null,'Allow '+(part.title||part.toolName)+'?'),el('pre',null,pretty(part.input).slice(0,2000)));
+      if(part.state==='pending'){const allow=el('button','chat-permission-allow','Allow'),deny=el('button','chat-permission-deny','Deny');allow.onclick=()=>answerPermission(part,true);deny.onclick=()=>answerPermission(part,false);card.append(allow,deny);}
+      else card.append(el('small',null,{allowed:'Allowed',denied:'Denied',expired:'Expired'}[part.state]||part.state));
+      return card;
+    }
+    if(part.kind==='question'){const card=el('div','chat-question '+(part.state||''));for(const q of part.questions||[])card.append(el('p',null,q.question+(part.answers?' → '+(part.answers[q.id]||'No answer'):'')));return card;}
+    if(part.kind==='error')return el('div','chat-error',part.text);
+    return el('div');
+  };
+  const renderMessage=(message,index)=>{
+    const card=el('article','chat-message '+message.role);
+    card.append(el('small',null,message.role==='user'?'You':(message.agent||'Assistant')+(message.model?' · '+message.model:'')+(message.state&&message.state!=='complete'?' · '+message.state:'')));
+    if(message.role==='assistant'&&Array.isArray(message.parts)&&message.parts.length)for(const part of message.parts)card.append(renderPart(part));
+    else card.append(el('div','chat-message-content',message.text||(message.state==='running'?'Working…':'')));
+    if(message.images?.length)card.append(el('small','chat-images','Images: '+message.images.join(', ')));
+    if(!isRunning(conversation)){const restore=el('button',null,'Continue from here');restore.title='Fork the saved transcript here; files are not reverted';restore.onclick=()=>forkAt(index);card.append(restore);}
+    return card;
+  };
+  const cloneMessage=m=>JSON.parse(JSON.stringify(m));
+  const sessionLabel=()=>{const s=$('chat-session');if(!s)return;s.textContent=conversation?.sessionId?`Continues ${conversation.sessionAgent||'agent'} session ${conversation.sessionId.slice(0,8)}…`:projectKey==='unattached'?'Quick chat · private scratch folder':'New session in this project';};
+  const renderHistory=()=>{
+    const list=$('chat-history');list.replaceChildren();for(const chat of conversations.toReversed()){const option=document.createElement('option');option.value=chat.id;option.textContent=(active.has(chat.id)?'● ':'')+chat.title;list.append(option);}list.value=conversation?.id||'';
+    if(!subscribers.size){const messages=$('chat-messages');messages.replaceChildren();for(const [index,message] of (conversation?.messages||[]).entries())messages.append(renderMessage(message,index));messages.scrollTop=messages.scrollHeight;}
+    const queued=queues.get(conversation?.id)?.length||0;$('chat-queue').textContent=queued?queued+' tasks queued':'';
+    const running=isRunning(conversation);$('project-run').textContent=running?'Queue':'Send';$('project-cancel').disabled=!running;
+    sessionLabel();notify();
+  };
+  // Streaming updates re-render at most once per frame.
+  const scheduleReply=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;if(subscribers.size)notify();else renderHistory();});};
+  const switchTo=chat=>{const prompt=$('project-prompt');if(conversation&&conversation!==chat)setDraft(prompt.value,conversation);const changed=conversation!==chat;conversation=chat;if(changed){prompt.value=drafts[chat?.id]||'';prompt.dispatchEvent(new Event('input',{bubbles:true}));}renderHistory();};
+  const newChat=()=>{const chat={id:crypto.randomUUID(),title:projectKey==='unattached'?'New quick chat':'New chat',messages:[],created:Date.now()};conversations.push(chat);persist();switchTo(chat);return chat;};
+  const forkAt=index=>{if(!conversation||isRunning(conversation))return;const copied=conversation.messages.slice(0,index+1).map(cloneMessage);const chat={id:crypto.randomUUID(),title:conversation.title+' · branch',messages:copied,created:Date.now()};conversations.push(chat);persist();switchTo(chat);status('Transcript branch created. It starts a new agent session; project files were not reverted.');};
+  const restoreMessage=m=>{const copy={...m,state:m.state==='running'?'interrupted':m.state};if(Array.isArray(m.parts))copy.parts=m.parts.filter(p=>p&&typeof p==='object').map(p=>p.kind==='tool'&&p.state==='running'?{...p,state:'interrupted'}:(p.kind==='permission'||p.kind==='question')&&p.state==='pending'?{...p,state:'expired'}:p);return copy;};
+  const loadChats=root=>{
+    if(conversation)setDraft($('project-prompt').value,conversation);
+    projectKey=root;loadDrafts();
+    try{const saved=JSON.parse(localStorage.getItem(chatsKey(root))||'[]');conversations=Array.isArray(saved)?saved.filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string'&&Array.isArray(c.messages)).slice(-30).map(c=>({...c,sessionId:typeof c.sessionId==='string'?c.sessionId:null,messages:c.messages.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.text==='string').map(restoreMessage)})):[]}catch{conversations=[]}
+    // Conversations still running keep their live objects.
+    for(const entry of active.values())if(entry.key===root){const i=conversations.findIndex(c=>c.id===entry.chat.id);if(i>=0)conversations[i]=entry.chat;else conversations.push(entry.chat);}
+    conversation=null;const last=conversations.at(-1);if(last)switchTo(last);else newChat();
+  };
+  const agentSection=host.querySelector('.project-agent'),grid=host.querySelector('.project-grid');
+  const dock=document.createElement('aside');dock.id='agent-chat-dock';dock.innerHTML='<div class="chat-dock-bar"><strong>Chat</strong><button id="chat-project-files">Project files</button><button id="chat-hide">×</button></div>';document.body.append(dock);
+  const openChat=()=>{if($('project-dialog').open)$('project-dialog').close();dock.append(agentSection);document.body.classList.add('agent-chat-open');requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));};
+  const openProject=()=>{grid.append(agentSection);document.body.classList.remove('agent-chat-open');requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));$('project-dialog').showModal();};
+  const queueView=q=>q.map(t=>({id:t.id,text:t.displayPrompt||t.prompt,...(t.images.length?{images:t.images.map(i=>i.name)}:{}),...(t.mentions?.length?{mentions:t.mentions}:{}),at:t.at}));
+  window.agentWorkspace={closeChat:()=>{document.body.classList.remove('agent-chat-open');requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));},openChat,openProject,getDefaults:currentDefaults,setDefaults,getUsage:()=>({...stats,queued:[...queues.values()].reduce((n,q)=>n+q.length,0)}),getHistory:()=>JSON.parse(JSON.stringify(conversations)),isBusy:()=>active.size>0,stop:()=>$('project-cancel').click(),activeRunId:()=>entryOf(conversation)?.runId||null};
+  // Read/subscribe API for the React chat island (web/src/islands/chat). Snapshots are immutable copies, rebuilt once per change.
+  const buildSnapshot=()=>{const q=queues.get(conversation?.id)||[];return {version,projectKey,projectName:$('project-name').textContent,busy:isRunning(conversation),queued:q.length,session:$('chat-session')?.textContent||'',conversationId:conversation?.id||null,conversations:conversations.map(c=>({id:c.id,title:c.title,created:c.created,count:c.messages.length,...(active.has(c.id)?{busy:true}:{})})).reverse(),messages:(conversation?.messages||[]).map(m=>({...m,parts:Array.isArray(m.parts)?m.parts.map(p=>({...p,...(p.answers?{answers:{...p.answers}}:{})})):undefined})),attachments:attachments.map(a=>({kind:a.kind,name:a.name,...(a.url?{url:a.url}:{})})),defaults:currentDefaults(),queue:queueView(q),busyChats:[...active.keys()],...(conversation?.usage?{usage:{...conversation.usage}}:{}),mentions:currentMentions(),draft:drafts[conversation?.id]||'',suggestions:conversation?.messages.length?[]:SUGGESTIONS};};
+  Object.assign(window.agentWorkspace,{
+    subscribe:fn=>{subscribers.add(fn);if(subscribers.size===1)$('chat-messages').replaceChildren();return()=>{subscribers.delete(fn);if(!subscribers.size)renderHistory();};},
+    getState:()=>{if(!snapshot||snapshot.version!==version)snapshot=buildSnapshot();return snapshot;},
+    newChat:()=>{newChat();},
+    selectChat:id=>{const next=conversations.find(c=>c.id===id);if(!next)return false;switchTo(next);return true;},
+    forkAt:index=>forkAt(index),
+    answerPermission:(messageIndex,partIndex,allow,always)=>{const part=conversation?.messages[messageIndex]?.parts?.[partIndex];if(part?.kind==='permission')answerPermission(part,allow,!!always);},
+    setPartOpen:(messageIndex,partIndex,open)=>{const part=conversation?.messages[messageIndex]?.parts?.[partIndex];if(part&&part.open!==open){part.open=open;notify();}},
+    removeAttachment:index=>{attachments.splice(index,1);renderAttachments();},
+    openLink,searchElements,addMention,removeMention,
+    setDraft:text=>{text=String(text??'');setDraft(text);const prompt=$('project-prompt');if(prompt.value!==text)prompt.value=text;notify();},
+  });
+  $('chat-hide').onclick=()=>{document.body.classList.remove('agent-chat-open');requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));};$('chat-project-files').onclick=openProject;$('chat-dock').onclick=openChat;$('chat-new').onclick=()=>newChat();
+  $('chat-history').onchange=()=>{const next=conversations.find(c=>c.id===$('chat-history').value);if(next)switchTo(next);};
+  ['project-agent','agent-model','agent-access','agent-effort'].forEach(id=>$(id).onchange=()=>{setDefaults(currentDefaults());if(id==='project-agent')loadModels();});
+  setDefaults(defaults);
+  watchDesign();
+  { let timer=0; $('project-prompt').addEventListener('input',()=>{clearTimeout(timer);const chat=conversation,value=$('project-prompt').value;timer=setTimeout(()=>setDraft(value,chat),250);}); }
+
+  const action = fn => async () => { try { await fn(); } catch (e) { status(e.message || String(e)); } };
+  const canDiscard = () => !dirty || window.confirm('Discard unsaved file edits?');
+  const renderFiles = () => {
+    $('project-files').replaceChildren();
+    for (const file of files.filter(f => f.path.toLowerCase().includes($('project-search').value.toLowerCase()))) {
+      const button = document.createElement('button'); button.textContent = file.path;
+      button.onclick = action(async () => { if (!canDiscard()) return; $('project-source').value = await api.readFile(file.path); activePath=file.path; memory=false; dirty=false; $('project-path').textContent=file.path; });
+      $('project-files').append(button);
+    }
+  };
+  const refresh = async () => { files = await api.listFiles(); renderFiles(); status(`${files.length} project files`); };
+  $('project-toggle').onclick = openProject;
+  $('project-close').onclick = () => $('project-dialog').close();
+  if (!api) {
+    $('project-agent-status').textContent = 'Open the desktop app to use project files and local agents.';
+    host.querySelectorAll('button:not(#project-toggle):not(#project-close),input,textarea,select').forEach(e => e.disabled=true);
+    return;
+  }
+  $('project-open').onclick = action(async () => {
+    if (!canDiscard()) return;
+    const project = await api.openProject(); if (!project) return;
+    $('project-name').textContent=project.name;loadChats(project.root); activePath=null; memory=false;dirty=false;$('project-source').value='';$('project-path').textContent='Choose a file'; await refresh();
+  });
+  const createProject=async clone=>{if(!canDiscard())return;const name=await window.askText('Project folder name','my-project');if(!name)return;const repository=clone?await window.askText('HTTPS GitHub repository URL','https://github.com/'):null;if(clone&&!repository)return;status(clone?'Cloning repository…':'Creating project…');const project=await api.createProject({name,repository});if(project){$('project-name').textContent=project.name;loadChats(project.root);activePath=null;memory=false;dirty=false;$('project-source').value='';$('project-path').textContent='Choose a file';await refresh();}};
+  $('project-new').onclick=action(()=>createProject(false));$('project-clone').onclick=action(()=>createProject(true));
+  $('design-open').onclick=action(async()=>{const result=await api.designOpen();if(result){if(window.fileLibrary?.openNative)await window.fileLibrary.openNative(result);else {await window.documentLifecycle?.prepareSwitch({preserveNative:true});window.design.setDocument(result.document);}status('Opened '+result.path);}});
+  const saveDesign=async saveAs=>{const fileId=window.fileLibrary?.currentId;const result=await api.designSave({document:window.design.getDocument(),saveAs});if(result&&!result.detached&&fileId===window.fileLibrary?.currentId){window.fileLibrary?.setNativePath?.(result.path);status('Saved '+result.path+' · MCP can edit this file');}};
+  $('design-save').onclick=action(()=>saveDesign(false));$('design-save-as').onclick=action(()=>saveDesign(true));
+  document.getElementById('save-project').onclick=action(()=>saveDesign(false));
+  document.getElementById('open-project').onclick=$('design-open').onclick;
+  api.onDesignFileChanged(event=>{const active=window.fileLibrary?.list().find(file=>file.id===window.fileLibrary.currentId);if(active&&!active.nativePath)return;if(active?.nativePath&&active.nativePath!==event.path)return;if(event.error){status(event.error);return;}status('Design changed on disk: '+event.path);if(window.confirm('The design file changed outside the editor. Load its latest version?'))api.designReload().then(result=>{window.design.setDocument(result.document);status('Loaded external design changes');}).catch(e=>status(e.message));});
+  $('project-refresh').onclick=action(refresh);
+  $('project-search').oninput=renderFiles;
+  $('project-source').oninput=()=>{dirty=true;status('Unsaved changes');};
+  $('project-save').onclick=action(async()=>{if(memory)await api.writeMemory($('project-source').value);else if(activePath)await api.writeFile(activePath,$('project-source').value);else throw Error('Open a file first.');dirty=false;status('Saved');});
+  $('project-memory').onclick=action(async()=>{if(!canDiscard())return;$('project-source').value=await api.readMemory();activePath=null;memory=true;dirty=false;$('project-path').textContent='Project memory';});
+  $('project-git').onclick=action(async()=>{status(await api.gitStatus() || 'Working tree clean');});
+  $('project-preview').onclick=action(async()=>{const url=await window.askText('Local app URL','http://localhost:3000');if(url){if(window.livePreview)window.livePreview.show(url);else await api.previewApp({url});}});
+  $('project-capture').onclick=action(async()=>{const url=await window.askText('Local app URL to capture','http://localhost:3000');if(!url)return;const bounds=await window.askText('Optional region x,y,width,height (blank for full viewport)','');if(bounds===null)return;let region;if(bounds.trim()){const parts=bounds.split(',').map(Number);if(parts.length!==4||parts.some(n=>!Number.isFinite(n)))throw Error('Use four comma-separated numbers');region={x:parts[0],y:parts[1],width:parts[2],height:parts[3]};}status('Capturing visible app elements…');const result=await api.previewApp({url,capture:true,region});if(result.document){const doc=window.design.getDocument(),source=result.document.pages[0].nodes,ids=new Map(source.map(n=>[n.id,crypto.randomUUID()]));doc.pages.find(p=>p.id===doc.activePage).nodes.push(...source.map(n=>({...n,id:ids.get(n.id),parentId:n.parentId?ids.get(n.parentId):null})));window.design.setDocument(doc);}else window.design.importHTML(result.html);status('Captured app region.'+(result.warnings?.length?' '+result.warnings.join(' '):''));});
+  $('project-pdf').onclick=action(async()=>{if(!window.design)throw Error('Canvas is loading');status(await api.exportPDF(window.design.exportPrintHTML())?'PDF saved':'PDF export canceled');});
+  $('project-worktree').onclick=action(async()=>{const branch=await window.askText('New branch name','design/new-idea');if(!branch)return;const result=await api.createWorktree(branch);status(`Created ${result.branch} at ${result.path}`);});
+  const output = text => {const el=$('project-output');el.textContent=(el.textContent+text).slice(-150000);el.scrollTop=el.scrollHeight;};
+  const style=document.createElement('style');style.textContent='.chat-session{margin:4px 0;font-size:11px;color:#8d8d9c}.chat-tool,.chat-thinking{margin:6px 0;border:1px solid #3a3a44;border-radius:6px;background:#1d1d23;font-size:11px}.chat-tool summary,.chat-thinking summary{cursor:pointer;padding:5px 8px;display:flex;gap:6px;align-items:center;color:#c9c9d6}.chat-tool-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chat-tool.error .chat-tool-state{color:#ff7a7a}.chat-tool.done .chat-tool-state{color:#6fd39a}.chat-tool-body{padding:0 8px 8px}.chat-tool-body pre,.chat-permission pre{max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#111116;padding:6px;border-radius:4px;margin:4px 0}.chat-thinking>div{padding:0 8px 8px;color:#9d9daa;white-space:pre-wrap}.chat-permission{border:1px solid #8a6d2a;background:#2a2416;border-radius:6px;padding:8px;margin:6px 0;font-size:12px}.chat-permission button{margin-right:6px}.chat-permission.allowed{border-color:#2f6b47}.chat-permission.denied,.chat-permission.expired{opacity:.7}.chat-error{color:#ff8f8f;white-space:pre-wrap;font-size:12px;margin:6px 0}.chat-message-content{white-space:pre-wrap}';document.head.append(style);
+  const ATTACH_ICON={image:'▣ ',file:'▤ ',folder:'▥ ',figma:'◆ ',chat:'◎ '};
+  const renderAttachments=()=>{$('chat-attachments').replaceChildren();attachments.forEach((item,i)=>{const button=document.createElement('button');button.textContent=(ATTACH_ICON[item.kind]||'')+item.name+' ×';button.onclick=()=>{attachments.splice(i,1);renderAttachments();};$('chat-attachments').append(button);});notify();};
+  $('chat-attach-file').onclick=()=>{if(!activePath){status('Open a project file first');return;}attachments.push({kind:'text',name:activePath,text:$('project-source').value.slice(0,16000)});renderAttachments();};
+  $('chat-attach-canvas').onclick=()=>{attachments.push({kind:'text',name:'Canvas',text:JSON.stringify(window.design.getDocument()).slice(0,20000)});renderAttachments();};
+  // Images are saved under userData/agent-attachments/<chat> by the main process; only their paths are sent.
+  const attachImage=async blob=>{if(!conversation)newChat();if(attachments.filter(a=>a.kind==='image').length>=10)throw Error('Attach up to 10 images');if(blob.size>8*1024*1024)throw Error('Images must be under 8 MB');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob);});const saved=await api.saveAgentImage({chatId:conversation.id,name:blob.name||'pasted image',data});attachments.push({kind:'image',name:saved.name,path:saved.path});renderAttachments();status('Image attached');};
+  $('chat-attach-image').onclick=()=>$('chat-image-file').click();
+  $('chat-image-file').onchange=action(async()=>{for(const file of $('chat-image-file').files)await attachImage(file);$('chat-image-file').value='';});
+  $('project-prompt').addEventListener('paste',event=>{const images=[...(event.clipboardData?.items||[])].filter(item=>item.kind==='file'&&item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);if(!images.length)return;event.preventDefault();action(async()=>{for(const image of images)await attachImage(image);})();});
+  // Text files are inlined (≤5 files, ≤200 KB each); a folder is attached as its file tree (≤300 entries).
+  const MAX_FILE_BYTES=200*1024,MAX_FILES=5,MAX_INLINE=60000,MAX_PROMPT=190000;
+  const attachText=(name,text,size)=>{if(attachments.filter(a=>a.kind==='file').length>=MAX_FILES)throw Error('Attach up to 5 files');if((size??text.length)>MAX_FILE_BYTES)throw Error(name+' is over 200 KB');if(text.slice(0,4096).includes('\u0000'))throw Error(name+' is not a text file');attachments.push({kind:'file',name,text:text.length>MAX_INLINE?text.slice(0,MAX_INLINE)+'\n… (truncated)':text});};
+  const attachTree=(name,paths)=>{const list=[...new Set(paths)].filter(p=>!/(^|\/)(node_modules|\.git)(\/|$)/.test(p)).sort();attachments.push({kind:'folder',name,text:list.slice(0,300).join('\n')+(list.length>300?`\n… ${list.length-300} more entries`:'')});};
+  const attachFiles=async input=>{
+    if(input&&typeof input.length==='number'){for(const file of input){if(file.type?.startsWith('image/'))await attachImage(file);else attachText(file.name,await file.text(),file.size);}renderAttachments();return;}
+    const folder=!!input?.folder,picker=api.pickAgentFiles||api.pickFiles||api.openFiles;
+    if(picker){
+      const picked=await picker({folder,multiple:true});const items=Array.isArray(picked)?picked:picked?.files||(picked?[picked]:[]);
+      for(const item of items){if(!item)continue;const name=item.name||item.path||'file';if(Array.isArray(item.entries)||Array.isArray(item.tree))attachTree(name,item.entries||item.tree);else if(typeof item.text==='string')attachText(item.path||name,item.text,item.size);}
+      renderAttachments();return;
+    }
+    const picker2=document.createElement('input');picker2.type='file';picker2.multiple=true;if(folder)picker2.webkitdirectory=true;
+    const chosen=await new Promise(resolve=>{picker2.onchange=()=>resolve([...picker2.files]);picker2.oncancel=()=>resolve([]);picker2.click();});
+    if(!chosen.length)return;
+    if(folder){attachTree(chosen[0].webkitRelativePath.split('/')[0]||'Folder',chosen.map(f=>f.webkitRelativePath||f.name));renderAttachments();return;}
+    for(const file of chosen){if(file.type.startsWith('image/'))await attachImage(file);else attachText(file.name,await file.text(),file.size);}
+    renderAttachments();
+  };
+  const attachFigma=url=>{url=String(url||'').trim();if(!/^https:\/\/([\w-]+\.)?figma\.com\/(file|design|proto|board)\//.test(url))throw Error('Paste a figma.com file or design link');const title=decodeURIComponent(/\/(?:file|design|proto|board)\/[^/]+\/([^/?#]+)/.exec(url)?.[1]||'Figma file').replace(/-/g,' ');attachments.push({kind:'figma',name:'Figma · '+title.slice(0,60),url});renderAttachments();};
+  const linkChat=id=>{const other=conversations.find(c=>c.id===id);if(!other||other===conversation)throw Error('Choose another chat');const text=buildSeed(other.messages);if(!text)throw Error('That chat is empty');attachments.push({kind:'chat',name:'Chat · '+other.title.slice(0,60),text,chatId:id});renderAttachments();};
+  const escapeAttr=text=>String(text).replace(/[&"<>]/g,c=>({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'})[c]);
+  const attachmentBlock=a=>a.kind==='file'?`<attached-file path="${escapeAttr(a.name)}">\n${a.text}\n</attached-file>`:a.kind==='folder'?`<attached-folder path="${escapeAttr(a.name)}">\n${a.text}\n</attached-folder>`:a.kind==='figma'?`<figma-link url="${escapeAttr(a.url)}">The user linked this Figma file. You cannot open Figma links yourself. If you need its contents, ask the user to bring it onto the canvas with Import Figma, then read it with the canvas tools.</figma-link>`:a.kind==='chat'?`<linked-chat title="${escapeAttr(a.name)}">\n${a.text}\n</linked-chat>`:'Attachment '+a.name+':\n'+a.text;
+  // Ids only: the agent reads content through the canvas MCP tools.
+  const canvasContext=()=>{try{const design=window.design;if(!design?.getDocument)return {};const doc=design.getDocument(),page=doc.pages?.find(p=>p.id===doc.activePage),library=window.fileLibrary,file=library?.list?.().find(f=>f.id===library.currentId);return {documentName:doc.name||file?.name||'',documentId:library?.currentId||'',documentPath:file?.nativePath||'',pageId:doc.activePage||'',pageName:page?.name||'',selection:design.getSelection?.()||[]};}catch{return {};}};
+  // A task captures the composer (text, attachments, mentions); canvas context is read when it actually runs.
+  const composeTask=displayPrompt=>{
+    let prompt=displayPrompt;if($('project-context').checked&&activePath)prompt+=`\n\nOpen file ${activePath}:\n${$('project-source').value.slice(0,16000)}`;
+    for(const attachment of attachments.filter(a=>a.kind!=='image'))prompt+='\n\n'+attachmentBlock(attachment);
+    if(prompt.length>MAX_PROMPT)throw Error('Attachments exceed 190,000 characters; remove an attachment');
+    const task={...currentDefaults(),id:crypto.randomUUID(),at:Date.now(),prompt,displayPrompt,images:attachments.filter(a=>a.kind==='image'),mentions:currentMentions(),withCanvas:$('agent-canvas-context').checked};
+    attachments=[];manualMentions=[];renderAttachments();return task;
+  };
+  const enqueue=(chat,task)=>{const q=queueOf(chat);if(q.length>=10)throw Error('Queue is full');q.push(task);renderHistory();status(`${q.length} queued ${q.length===1?'task':'tasks'}`);};
+  let versionRequest=null;
+  const toolsVersion=()=>versionRequest||(versionRequest=api.agentToolsVersion?Promise.resolve().then(()=>api.agentToolsVersion()).then(v=>typeof v==='string'?v:v?String(v):'').catch(()=>{versionRequest=null;return '';}):Promise.resolve(''));
+  const normalizeQuestions=list=>(Array.isArray(list)?list:[]).slice(0,10).map((q,i)=>({id:String(q?.id??'q'+(i+1)),question:String(q?.question??''),...(q?.header?{header:String(q.header)}:{}),...(Array.isArray(q?.options)?{options:q.options.map(o=>typeof o==='string'?{label:o}:{label:String(o?.label??''),...(o?.description?{description:String(o.description)}:{})})}:{}),...(q?.multiSelect?{multiSelect:true}:{})}));
+  const num=(...values)=>{for(const v of values)if(Number.isFinite(v))return v;return undefined;};
+  const normalizeUsage=(event,previous={})=>{
+    const u={...(event.usage&&typeof event.usage==='object'?event.usage:{}),...event};
+    const input=num(u.inputTokens,u.input_tokens),cached=(num(u.cache_read_input_tokens)||0)+(num(u.cache_creation_input_tokens)||0);
+    const next={...previous};const set=(k,v)=>{if(v!==undefined)next[k]=v;};
+    set('inputTokens',input===undefined?undefined:input+cached);set('outputTokens',num(u.outputTokens,u.output_tokens));set('contextWindow',num(u.contextWindow,u.modelContextWindow,u.model_context_window));set('costUsd',num(u.costUsd,u.total_cost_usd));
+    if(Array.isArray(u.rateLimit))next.rateLimit=u.rateLimit;
+    return next;
+  };
+  const finalizeReply=(reply,event,last)=>{if(reply.state==='running'){reply.end=Date.now();reply.state=event.stopped?'stopped':event.code===0?'complete':'failed';}for(const part of reply.parts||[]){if(part.kind==='tool'&&part.state==='running')part.state=event.code===0?'done':'interrupted';if((part.kind==='permission'||part.kind==='question')&&part.state==='pending')part.state='expired';}if(last&&!reply.text&&!(reply.parts||[]).length)reply.text=event.stopped?'Stopped.':'No response.';};
+  const autoTitle=(entry,chat)=>{if(chat.autoTitled)return;chat.autoTitled=true;if(!api.agentTitle)return;const first=chat.messages.find(m=>m.role==='user');if(!first)return;Promise.resolve(api.agentTitle({agent:entry.task.agent,text:first.text.slice(0,2000)})).then(result=>{if(result?.source==='heuristic')return;let title=typeof result==='string'?result:result?.title;title=typeof title==='string'?title.trim().replace(/^["']|["']$/g,''):'';if(!title)return;chat.title=title.slice(0,80);persistChat(entry);renderHistory();}).catch(()=>{});};
+  const finishRun=(entry,event)=>{
+    const chat=entry.chat;active.delete(chat.id);if(entry.runId)runs.delete(entry.runId);
+    entry.replies.forEach((reply,i)=>finalizeReply(reply,event,i===entry.replies.length-1));
+    if(event.sessionId){chat.sessionId=event.sessionId;chat.sessionAgent=entry.task.agent;chat.sessionKey=entry.key;chat.toolsVersion=entry.version;}
+    if(event.code===0||event.stopped)stats.completed++;else stats.failed++;
+    output(`\n[${event.stopped?'stopped':'exit '+event.code}]\n`);persistChat(entry);renderHistory();if(projectKey!=='unattached'&&entry.key===projectKey)refresh().catch(()=>{});
+    status(chat!==conversation?`“${chat.title}” ${event.stopped?'stopped':event.code===0?'finished':'failed'}`:event.stopped?'Stopped':event.code===0?'Done':'The agent reported an error');
+    if(event.code===0)autoTitle(entry,chat);
+    // Stop keeps the queue (paused); "send now" stops the run and starts the chosen task.
+    const q=queueOf(chat);let next=null;
+    if(entry.nextTaskId){const i=q.findIndex(t=>t.id===entry.nextTaskId);if(i>=0)next=q.splice(i,1)[0];}
+    else if(!entry.userStopped&&entry.key===projectKey)next=q.shift();
+    if(next)runTask(next,chat);else renderHistory();
+  };
+  const lastPart=(reply,kind)=>{let part=reply.parts.at(-1);if(!part||part.kind!==kind){part={kind,text:'',at:Date.now()};reply.parts.push(part);}return part;};
+  const toolPart=(entry,id)=>{for(const reply of entry.replies.toReversed()){const part=reply.parts?.find(p=>p.kind==='tool'&&p.id===id);if(part)return part;}return null;};
+  const handleEvent=event=>{
+    const entry=runs.get(event.id);
+    if(!entry){if(inflight>0&&event.id){orphans.push(event);if(orphans.length>2000)orphans.shift();}return;}
+    const chat=entry.chat,reply=entry.reply,here=chat===conversation;
+    if(!Array.isArray(reply.parts))reply.parts=[];
+    switch(event.type){
+      case 'session':chat.sessionId=event.sessionId;chat.sessionAgent=entry.task.agent;chat.sessionKey=entry.key;chat.toolsVersion=entry.version;if(here)sessionLabel();break;
+      case 'status':if(here)status(event.text);output('['+event.text+']\n');break;
+      case 'assistant-text-delta':{const part=lastPart(reply,'text');part.text=(part.text+event.text).slice(-100000);reply.text=(reply.text+event.text).slice(-100000);output(event.text);break;}
+      case 'assistant-text':{reply.parts.push({kind:'text',text:event.text});reply.text=((reply.text?reply.text+'\n\n':'')+event.text).slice(-100000);output(event.text+'\n');break;}
+      case 'thinking-delta':{const part=lastPart(reply,'thinking');part.text=(part.text+event.text).slice(-20000);part.end=Date.now();break;}
+      case 'tool-call':{let part=toolPart(entry,event.toolCallId);if(!part){part={kind:'tool',id:event.toolCallId,name:event.toolName,title:event.title,input:event.input,partialInput:'',hasInput:!event.partial,state:'running',...(event.parentToolCallId?{parentToolCallId:event.parentToolCallId}:{})};reply.parts.push(part);}else if(!event.partial){part.input=event.input;part.title=event.title;part.hasInput=true;}if(!event.partial){output('\n['+event.title+']\n');if(here)status(event.title);}break;}
+      case 'tool-input-delta':{const part=toolPart(entry,event.toolCallId);if(part&&!part.hasInput)part.partialInput=(part.partialInput+event.partial).slice(-20000);break;}
+      case 'tool-result':{const part=toolPart(entry,event.toolCallId);if(part){part.result=event.content;part.state=event.isError?'error':'done';}break;}
+      case 'permission-request':reply.parts.push({kind:'permission',requestId:event.requestId,toolName:event.toolName,title:event.title,input:event.input,state:'pending'});status((here?'':`“${chat.title}”: `)+'Approval needed: '+event.title);persistChat(entry);break;
+      case 'permission-resolved':{const part=entry.replies.flatMap(r=>r.parts||[]).find(p=>p.kind==='permission'&&p.requestId===event.requestId);if(part&&part.state==='pending')part.state=event.allow?'allowed':'expired';break;}
+      case 'question-request':reply.parts.push({kind:'question',requestId:event.requestId,runId:event.id,questions:normalizeQuestions(event.questions),state:'pending',at:Date.now()});status((here?'':`“${chat.title}”: `)+'The agent has a question');persistChat(entry);break;
+      case 'question-resolved':{const part=entry.replies.flatMap(r=>r.parts||[]).find(p=>p.kind==='question'&&p.requestId===event.requestId);if(part&&part.state==='pending'){part.state=event.answers?'answered':'expired';if(event.answers)part.answers=event.answers;}break;}
+      case 'usage':reply.usage=normalizeUsage(event,reply.usage);chat.usage=reply.usage;break;
+      case 'error':reply.parts.push({kind:'error',text:event.text});output('\n[error] '+event.text+'\n');break;
+      case 'done':finishRun(entry,event);return;
+    }
+    scheduleReply();
+  };
+  // Events can arrive before runAgent() resolves with the run id; unknown ids are buffered while a start is in flight.
+  api.onAgentEvent(event=>handleEvent(event));
+  const runTask=async(task,chat)=>{
+    if(!chat)chat=conversation||newChat();
+    if(active.has(chat.id)){enqueue(chat,task);return;}
+    const entry={chat,key:projectKey,task,reply:null,replies:[],runId:null,version:'',userStopped:false,nextTaskId:null,cancelOnStart:false};
+    active.set(chat.id,entry);inflight++;stats.runs++;
+    const prior=chat.messages.slice();
+    const context={...(task.withCanvas!==false?canvasContext():{}),images:task.images.map(i=>i.path)};
+    const userMessage={role:'user',text:task.displayPrompt||task.prompt,agent:task.agent,at:Date.now(),...(task.images.length?{images:task.images.map(i=>i.name)}:{}),...('pageId' in context?{canvas:context.documentName||'Canvas'}:{}),...(task.mentions?.length?{mentions:task.mentions}:{})};
+    const checkpoint=takeCheckpoint(chat);if(checkpoint)userMessage.checkpoint=checkpoint;
+    chat.messages.push(userMessage);taskOf.set(userMessage,task);
+    if(chat.title==='New chat'||chat.title==='New quick chat')chat.title=userMessage.text.slice(0,55);
+    const reply={role:'assistant',text:'',parts:[],agent:task.agent,model:task.model,at:Date.now(),state:'running'};chat.messages.push(reply);entry.reply=reply;entry.replies.push(reply);
+    persistChat(entry);renderHistory();
+    try{
+      entry.version=await toolsVersion();
+      // Resume only the same provider/project session created with the same canvas tool set; otherwise seed a new session.
+      const resume=chat.sessionId&&chat.sessionAgent===task.agent&&chat.sessionKey===entry.key&&(!entry.version||chat.toolsVersion===entry.version)?chat.sessionId:'';
+      const seed=resume?'':buildSeed(prior),seedParam=!!api.agentToolsVersion;
+      let prompt=task.prompt;
+      if(seed&&!seedParam)prompt=tail('<previous-conversation>\n'+seed+'\n</previous-conversation>',Math.max(0,195000-prompt.length))+'\n\n'+prompt;
+      if(!seedParam&&task.mentions?.length)prompt+='\n\nReferenced canvas elements: '+task.mentions.map(m=>`${m.label} (id ${m.id}${m.shortId?', short id '+m.shortId:''}, page ${m.pageId})`).join('; ');
+      entry.resumed=!!resume;
+      const result=await api.runAgent({agent:task.agent,model:task.model==='default'?'':task.model,access:task.access,effort:task.effort,instructions:task.instructions,prompt,chatId:chat.id,...(resume?{sessionId:resume}:{}),...(seed&&seedParam?{seed}:{}),...(task.mentions?.length?{mentions:task.mentions}:{}),context});
+      entry.runId=result.id;runs.set(result.id,entry);reply.access=result.access;reply.runtime=result.runtime;inflight--;
+      if(chat===conversation)status((result.quickChat?'Quick chat · scratch folder':'Running in project')+' · '+result.runtime+(result.mcp?' · canvas tools connected':' · canvas tools not connected')+(resume?' · resumed session':seed?' · new session seeded from transcript':''));
+      for(const event of orphans.filter(e=>e.id===result.id)){orphans.splice(orphans.indexOf(event),1);handleEvent(event);}
+      if(!inflight)orphans.length=0;
+      if(entry.cancelOnStart&&active.get(chat.id)===entry)api.cancelAgent(result.id).catch(e=>status(e.message));
+    }catch(e){
+      inflight--;if(!inflight)orphans.length=0;
+      reply.text=e.message;reply.state='error';reply.end=Date.now();stats.failed++;active.delete(chat.id);persistChat(entry);renderHistory();status(e.message);
+      const next=entry.nextTaskId?queueOf(chat).find(t=>t.id===entry.nextTaskId):entry.userStopped?null:queueOf(chat)[0];if(next){queueOf(chat).splice(queueOf(chat).indexOf(next),1);runTask(next,chat);}
+    }
+  };
+  // Steering: the runtime injects a message into the running turn; the transcript shows it and continues in a new reply.
+  const trySteer=async(entry,task)=>{
+    if(!api.steerAgent||!entry.runId)return false;
+    let result;try{result=await api.steerAgent({runId:entry.runId,chatId:entry.chat.id,text:task.prompt,...(task.images.length?{images:task.images.map(i=>i.path)}:{}),...(task.mentions?.length?{mentions:task.mentions}:{})});}catch{return false;}
+    if(!result||result.queued||active.get(entry.chat.id)!==entry)return false;
+    const chat=entry.chat,previous=entry.reply;if(previous.state==='running'){previous.state='complete';previous.end=Date.now();}
+    const userMessage={role:'user',text:task.displayPrompt||task.prompt,agent:task.agent,at:Date.now(),steered:true,...(task.images.length?{images:task.images.map(i=>i.name)}:{}),...(task.mentions?.length?{mentions:task.mentions}:{})};
+    chat.messages.push(userMessage);taskOf.set(userMessage,task);
+    const reply={role:'assistant',text:'',parts:[],agent:previous.agent,model:previous.model,at:Date.now(),state:'running',access:previous.access,runtime:previous.runtime};chat.messages.push(reply);entry.reply=reply;entry.replies.push(reply);
+    persistChat(entry);renderHistory();return true;
+  };
+  const steer=async text=>{text=String(text||'').trim();if(!text)return;const chat=conversation||newChat(),entry=entryOf(chat),task=composeTask(text);if(!entry){await runTask(task,chat);return;}if(!(await trySteer(entry,task)))enqueue(chat,task);};
+  const sendQueuedNow=async id=>{
+    const chat=conversation,q=queueOf(chat),task=q.find(t=>t.id===id);if(!task)return;const entry=entryOf(chat);
+    if(!entry){q.splice(q.indexOf(task),1);renderHistory();await runTask(task,chat);return;}
+    if(await trySteer(entry,task)){const i=q.indexOf(task);if(i>=0)q.splice(i,1);renderHistory();return;}
+    entry.nextTaskId=id;entry.userStopped=false;
+    if(entry.runId)await api.cancelAgent(entry.runId);else entry.cancelOnStart=true;
+    status('Stopping the current turn to send the queued message');
+  };
+  const editQueued=(id,text)=>{const task=queueOf(conversation).find(t=>t.id===id);text=String(text||'').trim();if(!task||!text)return;const suffix=task.prompt.startsWith(task.displayPrompt)?task.prompt.slice(task.displayPrompt.length):'';task.displayPrompt=text;task.prompt=text+suffix;renderHistory();};
+  const moveQueued=(id,delta)=>{const q=queueOf(conversation),i=q.findIndex(t=>t.id===id),j=i+(delta<0?-1:1);if(i<0||j<0||j>=q.length)return;[q[i],q[j]]=[q[j],q[i]];renderHistory();};
+  const removeQueued=id=>{const q=queueOf(conversation),i=q.findIndex(t=>t.id===id);if(i<0)return;q.splice(i,1);renderHistory();};
+  // Rewind: restore the canvas snapshot taken before user message i (one undoable step), keep the full transcript
+  // as a branch, truncate this chat before i and drop its provider session (the next run is seeded instead).
+  const rewindCore=index=>{
+    const chat=conversation;if(!chat)return null;if(isRunning(chat))throw Error('Stop the active task first');
+    let i=Math.min(index,chat.messages.length-1);while(i>0&&chat.messages[i]?.role!=='user')i--;const message=chat.messages[i];if(!message||message.role!=='user')return null;
+    const branch={id:crypto.randomUUID(),title:chat.title+' · before rewind',messages:chat.messages.map(cloneMessage),created:Date.now(),sessionId:chat.sessionId||null,sessionAgent:chat.sessionAgent,sessionKey:chat.sessionKey,toolsVersion:chat.toolsVersion};
+    conversations.splice(conversations.indexOf(chat),0,branch);
+    let restored=false;const saved=message.checkpoint&&checkpoints.get(message.checkpoint);
+    if(saved&&saved.fileId===(window.fileLibrary?.currentId||'')&&window.design?.loadDocument){try{window.design.loadDocument(structuredClone(saved.doc));restored=true;}catch(e){status('Could not restore the canvas: '+e.message);}}
+    chat.messages=chat.messages.slice(0,i);chat.sessionId=null;
+    persist();renderHistory();
+    status(restored?'Rewound the chat and canvas (undo restores the canvas)':'Rewound the chat; no canvas snapshot was available for that message');
+    return {message,restored};
+  };
+  const resend=(message,text)=>{const original=taskOf.get(message);const displayPrompt=text??message.text;const suffix=original&&original.prompt.startsWith(original.displayPrompt)?original.prompt.slice(original.displayPrompt.length):'';return runTask({...currentDefaults(),id:crypto.randomUUID(),at:Date.now(),prompt:displayPrompt+suffix,displayPrompt,images:original?.images||[],mentions:original?.mentions||message.mentions||[],withCanvas:original?original.withCanvas:!!message.canvas},conversation);};
+  const copyMessage=index=>{const message=conversation?.messages[index];if(!message)return;const text=message.text||(message.parts||[]).filter(p=>p.kind==='text').map(p=>p.text).join('\n\n');const fallback=()=>{const area=document.createElement('textarea');area.value=text;document.body.append(area);area.select();document.execCommand('copy');area.remove();};(navigator.clipboard?.writeText?navigator.clipboard.writeText(text):Promise.reject()).catch(fallback).then(()=>status('Copied'));};
+  const answerQuestion=(messageIndex,partIndex,answers)=>{const part=conversation?.messages[messageIndex]?.parts?.[partIndex];if(part?.kind!=='question'||part.state!=='pending')return;const clean={};for(const [key,value] of Object.entries(answers||{}))clean[key]=Array.isArray(value)?value.join(', '):String(value);part.answers=clean;part.state='answered';const runId=part.runId||entryOf(conversation)?.runId;if(api.respondAgentQuestion)Promise.resolve().then(()=>api.respondAgentQuestion({runId,requestId:part.requestId,answers:clean})).catch(e=>status(e.message));else status('This agent runtime cannot receive answers');persist();renderHistory();};
+  $('project-run').onclick=action(async()=>{const text=$('project-prompt').value.trim();if(!text)throw Error('Enter a task.');const chat=conversation||newChat();const task=composeTask(text);$('project-prompt').value='';setDraft('',chat);if(isRunning(chat)){enqueue(chat,task);return;}await runTask(task,chat);});
+  $('project-prompt').addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();$('project-run').click();}});
+  $('project-cancel').onclick=action(async()=>{const entry=entryOf(conversation);if(!entry)return;entry.userStopped=true;entry.nextTaskId=null;if(entry.runId)await api.cancelAgent(entry.runId);else entry.cancelOnStart=true;const kept=queueOf(conversation).length;renderHistory();status('Stopping agent'+(kept?` · ${kept} queued kept`:''));});
+  $('project-review').onclick=()=>{$('project-prompt').value='Review the current uncommitted Git changes. Inspect the diff and relevant source. Report correctness, security, and regression findings with file references. Do not edit files.';setDefaults({...currentDefaults(),access:'ask'});status('Review prompt ready. Choose an agent and run it.');};
+  $('project-apply-design').onclick=()=>{$('project-prompt').value='Implement the attached canvas design in this project using its existing stack. Inspect source, preserve working behavior, apply the design and run checks.';$('chat-attach-canvas').click();status('Canvas attached to task. Choose an agent and run it.');};
+  // Model picker: populated from the provider (Claude SDK supportedModels / Codex model/list); free text still allowed.
+  const modelLists=new Map();
+  const loadModels=async()=>{const agent=$('project-agent').value;const list=$('agent-model-list');try{if(!modelLists.has(agent))modelLists.set(agent,await api.listAgentModels({agent}));if($('project-agent').value!==agent)return;list.replaceChildren();for(const model of modelLists.get(agent)){if(model.id==='default')continue;const option=document.createElement('option');option.value=model.id;option.label=model.name+(model.description?' — '+model.description.slice(0,60):'');list.append(option);}}catch(e){modelLists.delete(agent);output('[model list unavailable: '+e.message+']\n');}};
+  host.querySelector('.agent-config').addEventListener('toggle',event=>{if(event.target.open)loadModels();});
+  loadChats(projectKey);
+  const run=fn=>(...args)=>action(()=>fn(...args))();
+  Object.assign(window.agentWorkspace,{
+    attachImages:files=>action(async()=>{for(const file of files)await attachImage(file);})(),
+    listModels:async agent=>{if(!modelLists.has(agent))modelLists.set(agent,await api.listAgentModels({agent}));return modelLists.get(agent);},
+    answerQuestion,steer:run(steer),editQueued,moveQueued,removeQueued,sendQueuedNow:run(sendQueuedNow),
+    rewindTo:run(index=>{rewindCore(index);}),
+    retry:run(async index=>{const r=rewindCore(index);if(r)await resend(r.message);}),
+    editMessage:run(async(index,text)=>{text=String(text||'').trim();if(!text)throw Error('Enter a message');const r=rewindCore(index);if(r)await resend(r.message,text);}),
+    copyMessage,attachFiles:run(attachFiles),attachFigma:run(attachFigma),linkChat:run(linkChat),
+    getQueue:()=>queueView(queueOf(conversation)),
+  });
+  api.discoverAgents().then(agents=>{$('project-agent-status').textContent=agents.map(a=>`${a.id}: ${a.available?'installed':'not found'}`).join(' · ');for(const option of $('project-agent').options)option.disabled=!agents.find(a=>a.id===option.value)?.available;const first=agents.find(a=>a.available);if(first&&!agents.find(a=>a.id===$('project-agent').value&&a.available))$('project-agent').value=first.id;notify();}).catch(e=>status(e.message));
+})();

@@ -1,0 +1,12 @@
+{ "title": "inserting a child grows the hugging parent without overlaps",
+  "covers": ["edit", "reflow", "sizing"],
+  "edits": [
+    { "target": "List", "kind": "insert-last", "jsx": "<li data-node-label=\"Item 3\" className=\"flex items-center h-10 px-3 rounded-md bg-[#f4f4f5] text-sm\">Payouts</li>" },
+    { "target": "Item 1", "jsx": "<li className=\"h-16\" />" }
+  ],
+  "expect": [
+    { "noOverlap": "List" },
+    { "rendered": "Item 3", "below": "Item 2", "gap": 12, "tol": 1 },
+    { "rendered": "Item 3", "inside": "List", "inset": 16, "tol": 1 },
+    { "rendered": "List", "prop": "h", "eq": 200, "tol": 2, "why": "16 + 64 + 12 + 40 + 12 + 40 + 16" }
+  ] }

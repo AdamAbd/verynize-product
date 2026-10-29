@@ -1,0 +1,134 @@
+/*
+ * Chrome island: plain CSS for legacy DOM the island cannot render itself (main grid, panel columns, chat dock
+ * placement) plus window-drag regions. Values: 281px panels (280 + 1px edge), 499px chat dock (22, 29).
+ * `!important` because legacy/parity stylesheets still style these elements with higher specificity.
+ */
+
+/* ---------- Window drag ---------- */
+#bd-chrome-root {
+  display: block;
+  flex-shrink: 0;
+}
+[data-chrome-bar] {
+  -webkit-app-region: drag;
+}
+[data-chrome-bar] :is(button, input, select, a, [data-document-tab]) {
+  -webkit-app-region: no-drag;
+}
+
+/* ---------- Main grid ----------
+ * Three fixed tracks (sidebar | canvas | properties); a hidden panel keeps its track at 0 width. Every child is placed
+ * explicitly: legacy rules such as `body.agent-chat-open #layer-panel{display:none}` (wonder-shell.css) take a panel out
+ * of the flow, and with auto-placement the canvas would then slide into the 0px sidebar track and the properties panel
+ * into the 1fr canvas track. The canvas track has no minimum so the properties panel never overflows narrow windows. */
+body.bd-chrome > main {
+  display: grid !important;
+  height: calc(100vh - 40px) !important;
+  margin: 0 !important;
+  width: 100% !important;
+  grid-template-columns: 281px minmax(0, 1fr) 281px !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+  overflow: hidden;
+  transition: none;
+}
+body.bd-chrome.left-collapsed > main {
+  grid-template-columns: 0 minmax(0, 1fr) 281px !important;
+}
+body.bd-chrome.right-collapsed > main {
+  grid-template-columns: 281px minmax(0, 1fr) 0 !important;
+}
+body.bd-chrome.left-collapsed.right-collapsed > main {
+  grid-template-columns: 0 minmax(0, 1fr) 0 !important;
+}
+body.bd-chrome > main > #layer-panel {
+  grid-area: 1 / 1 / 2 / 2 !important;
+}
+body.bd-chrome > main > #workspace {
+  grid-area: 1 / 2 / 2 / 3 !important;
+  display: block !important;
+}
+body.bd-chrome > main > #properties {
+  grid-area: 1 / 3 / 2 / 4 !important;
+}
+body.bd-chrome > main > #layer-panel,
+body.bd-chrome > main > #properties {
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  background: var(--background);
+}
+body.bd-chrome > main > #layer-panel {
+  border-right: 1px solid var(--edge) !important;
+}
+body.bd-chrome > main > #properties {
+  border-left: 1px solid var(--edge) !important;
+}
+body.bd-chrome.left-collapsed > main > #layer-panel,
+body.bd-chrome.right-collapsed > main > #properties,
+body.bd-chrome.agent-chat-open > main > #layer-panel {
+  visibility: hidden !important;
+  overflow: hidden !important;
+  border: 0 !important;
+}
+body.bd-chrome > main > #workspace {
+  position: relative;
+  min-width: 0;
+  background: var(--canvas);
+}
+
+/* ---------- Chat open (29): dock 499px on the left, full height; the editor grid shifts right ---------- */
+body.bd-chrome.agent-chat-open > main {
+  margin-left: 499px !important;
+  width: calc(100% - 499px) !important;
+  grid-template-columns: 0 minmax(0, 1fr) 281px !important;
+}
+body.bd-chrome.agent-chat-open.right-collapsed > main {
+  grid-template-columns: 0 minmax(0, 1fr) 0 !important;
+}
+body.bd-chrome.agent-chat-open #agent-chat-dock {
+  top: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  width: 499px !important;
+  height: 100vh !important;
+  z-index: 45;
+  box-sizing: border-box;
+  background: var(--background);
+  border-right: 1px solid var(--edge);
+}
+
+/* ---------- Zoom menu: `#zoom-reset` text is the live percentage (contract); show a label instead ---------- */
+[data-zoom-reset]::before {
+  content: "Zoom to 100%";
+  font-size: 12px;
+  line-height: 16px;
+}
+[data-zoom-reset]::after {
+  content: "⇧0";
+  margin-left: auto;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* Menu items reuse legacy ids, so unscoped legacy rules (`#project-toggle{position:fixed;left:12px…}`,
+ * `#generate-art{margin-top:8px}`, …) would leak in. Island utilities are layered !important and still win. */
+:is(#bd-app-menu, #bd-zoom-menu) [role^="menuitem"][id] {
+  inset: auto !important;
+  margin: 0 !important;
+  border: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  z-index: auto !important;
+  box-shadow: none !important;
+  transform: none !important;
+  background-color: transparent;
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+:is(#bd-app-menu, #bd-zoom-menu) [role^="menuitem"][id] img {
+  display: none;
+}

@@ -1,0 +1,11 @@
+{ "title": "editing text to a long paragraph reflows siblings and parent",
+  "covers": ["edit", "reflow"],
+  "edits": [
+    { "target": "First", "jsx": "<p className=\"text-sm\">This paragraph is now long enough to wrap across several lines inside a 320 pixel card, which must push the second line down and grow the stack.</p>" }
+  ],
+  "expect": [
+    { "noOverlap": "Stack" },
+    { "rendered": "First", "prop": "w", "eq": 288, "tol": 1 },
+    { "rendered": "Second", "below": "First", "gap": 8, "tol": 1.5 },
+    { "rendered": "Second", "inside": "Stack", "inset": 16, "tol": 1 }
+  ] }

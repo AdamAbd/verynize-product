@@ -1,0 +1,6 @@
+{ "title": "variant classes (md:, hover:, dark:) are reported, not silently applied",
+  "covers": ["diagnostics"],
+  "expect": [
+    { "warns": ["md:grid-cols-3", "hover:bg-[#fafafa]", "dark:bg-black"] },
+    { "node": "Cards", "prop": "fill", "color": "transparent" }
+  ] }

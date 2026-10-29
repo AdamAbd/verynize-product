@@ -1,0 +1,33 @@
+/* Inspector island: plain CSS for the host aside (legacy DOM) and native-control details Tailwind can't reach. */
+#properties {
+  display: flex !important;
+  flex-direction: column;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background: var(--background) !important;
+  border-left: 1px solid var(--edge) !important;
+  border-right: 0 !important;
+}
+#properties > #bd-inspector-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+#bd-inspector-root > div {
+  flex: 1;
+  min-height: 0;
+}
+#bd-inspector-root [data-scroll] {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+#shader-settings > summary::-webkit-details-marker {
+  display: none;
+}
+#bd-inspector-root select option:disabled {
+  color: var(--subtle-foreground);
+}
+#bd-inspector-root input[type="color"] {
+  -webkit-appearance: none;
+}

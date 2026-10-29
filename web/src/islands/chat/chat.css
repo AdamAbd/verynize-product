@@ -1,0 +1,135 @@
+/* Chat island: plain CSS for legacy DOM the island cannot render itself (see ../README.md). Tokens only. */
+
+/* Dock geometry (full height, 499px, left edge) is owned by the chrome island (chrome.css); the dock's top row
+   doubles as the window title bar there, so it is a drag region. */
+:root body #agent-chat-dock {
+  padding: 0;
+  background: var(--settings);
+  color: var(--foreground-2);
+  overflow: hidden;
+}
+#bd-chat-header .chat-drag {
+  -webkit-app-region: drag;
+}
+#bd-chat-header .chat-drag :is(button, [role="button"]) {
+  -webkit-app-region: no-drag;
+}
+:root body #agent-chat-dock > .project-agent.bd-chat-section {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  /* Wonder's chat column is #1a1a1a (29/51); the dock box itself is styled by the chrome island. */
+  background: var(--settings);
+}
+.bd-chat-section {
+  min-height: 0;
+}
+#project-dialog .project-agent.bd-chat-section {
+  gap: 0;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--settings);
+}
+
+/* Neutralise legacy element rules that reach into the dock/dialog (`#agent-chat-dock button`, `.project-agent p`,
+   UA blockquote margins …). Unlayered, so the island's (layered, important) utilities still win. */
+:root #agent-chat-dock [data-bd] :is(button, input, select, textarea),
+:root #bd-chat-root :is(button, input, select, textarea) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  box-shadow: none;
+}
+:root #bd-chat-root :is(p, blockquote, ul, ol, li, pre, h1, h2, h3, h4) {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Native disclosure markers off for the island's <summary> rows. */
+#bd-chat-root summary::-webkit-details-marker,
+#bd-portal summary::-webkit-details-marker {
+  display: none;
+}
+#bd-chat-root summary {
+  cursor: default;
+}
+
+/* Scrollbar like Wonder's thin overlay. */
+#bd-chat-root .chat-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge) transparent;
+}
+
+/* Send / Stop are the adopted legacy buttons: desktop-panel.js rewrites their text ("Send"/"Queue"),
+   so the label is hidden and the glyph is a masked icon. */
+#bd-chat-root #project-run,
+#bd-chat-root #project-cancel {
+  position: relative;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
+}
+#bd-chat-root #project-run > *,
+#bd-chat-root #project-cancel > * {
+  display: none !important;
+}
+#bd-chat-root #project-run::before,
+#bd-chat-root #project-cancel::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: var(--primary-foreground);
+  -webkit-mask: var(--bd-chat-icon) center / contain no-repeat;
+  mask: var(--bd-chat-icon) center / contain no-repeat;
+}
+#bd-chat-root #project-run {
+  --bd-chat-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M5 12l7-7 7 7'/%3E%3C/svg%3E");
+}
+#bd-chat-root #project-cancel {
+  --bd-chat-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Ccircle cx='12' cy='12' r='3.5' fill='black'/%3E%3C/svg%3E");
+}
+#bd-chat-root #project-cancel::before {
+  width: 16px;
+  height: 16px;
+  background: var(--foreground);
+}
+
+/* "Wondering" dot grid: a diagonal ripple across the 3×3 dots (37). */
+#bd-chat-root .chat-dots rect:is(:nth-child(2), :nth-child(4)) {
+  animation-delay: 160ms;
+}
+#bd-chat-root .chat-dots rect:is(:nth-child(3), :nth-child(5), :nth-child(7)) {
+  animation-delay: 320ms;
+}
+#bd-chat-root .chat-dots rect:is(:nth-child(6), :nth-child(8)) {
+  animation-delay: 480ms;
+}
+#bd-chat-root .chat-dots rect:nth-child(9) {
+  animation-delay: 640ms;
+}
+
+/* Reduced motion: no pulsing/pinging status decoration (spinners stay, slowed, as the only running cue). */
+@media (prefers-reduced-motion: reduce) {
+  #bd-chat-root :is(.animate-pulse, .animate-ping),
+  #bd-chat-header :is(.animate-pulse, .animate-ping),
+  #bd-portal :is(.animate-pulse, .animate-ping) {
+    animation: none !important;
+  }
+  #bd-chat-root .animate-spin {
+    animation-duration: 2.5s !important;
+  }
+  #bd-chat-root *,
+  #bd-chat-header * {
+    transition-duration: 0s !important;
+  }
+}

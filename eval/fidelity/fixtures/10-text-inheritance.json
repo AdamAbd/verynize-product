@@ -1,0 +1,12 @@
+{ "title": "text color, size, family and tracking inherit from the container",
+  "covers": ["inheritance"],
+  "expect": [
+    { "node": "Lede", "prop": "ink", "color": "#ffffff" },
+    { "node": "Lede", "prop": "fontSize", "eq": 14 },
+    { "node": "Lede", "prop": "fontFamily", "matches": "Geist" },
+    { "node": "Lede", "prop": "letterSpacingPx", "eq": -0.35, "tol": 0.05 },
+    { "node": "Headline", "prop": "ink", "color": "#ffffff" },
+    { "node": "Headline", "prop": "fontSize", "eq": 36 },
+    { "rendered": "Lede", "prop": "color", "color": "#ffffff" },
+    { "rendered": "Headline", "prop": "color", "color": "#ffffff" }
+  ] }

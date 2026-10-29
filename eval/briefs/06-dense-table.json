@@ -1,0 +1,39 @@
+{
+  "id": "06-dense-table",
+  "version": 1,
+  "track": "original",
+  "title": "Dense data table",
+  "viewport": { "width": 1440, "height": 900, "capture": "viewport" },
+  "prompt": "Design the Orders screen of \"Freightline\", an operations console for a regional logistics company. Desktop, 1440x900. Operators scan hundreds of rows a day, so density and scannability matter more than decoration. Include: a page header with title \"Orders\", a count \"1,284 orders\", and actions \"Export CSV\" (secondary) and \"New order\" (primary); a toolbar with search, status filter chips (All, Pending 42, In transit 318, Delayed 17, Delivered 907) with In transit active, a date filter and a column settings button; a table with at least 14 visible rows and columns: checkbox, Order ID (e.g. FL-20931), Customer, Origin -> Destination, Status (badge), Carrier, ETA, Weight (kg), Value (USD); 2 rows selected with a bulk action bar showing \"2 selected\"; at least one Delayed row; sortable header indicator on ETA; and pagination \"1-25 of 318\". Light theme.",
+  "requiredContent": [
+    "Brand Freightline",
+    "Title Orders and count 1,284 orders",
+    "Export CSV and New order buttons",
+    "Search, status chips with counts (In transit active), date filter, column settings",
+    "Table >= 14 rows with the 9 specified columns",
+    "2 selected rows and a bulk action bar",
+    "At least one Delayed status",
+    "Sort indicator on ETA",
+    "Pagination 1-25 of 318"
+  ],
+  "constraints": ["Single screen 1440x900", "Light theme", "English copy", "Realistic, varied data (no repeated identical rows)"],
+  "assetsAllowed": { "icons": true, "photos": false, "generatedImages": false, "avatars": false, "customFonts": true },
+  "inputs": [],
+  "budget": { "maxMinutes": 20, "followUpTurns": 0 },
+  "checklist": [
+    { "id": "c01", "text": "At least 14 table rows are visible within the viewport." },
+    { "id": "c02", "text": "All nine columns are present in the stated order (checkbox through Value)." },
+    { "id": "c03", "text": "Numeric columns (Weight, Value) are right-aligned or use tabular figures so digits line up." },
+    { "id": "c04", "text": "Status values are badges with distinct colors per status, and Delayed is the most alarming color." },
+    { "id": "c05", "text": "Exactly two rows are visibly selected (checked) and a bulk bar shows \"2 selected\"." },
+    { "id": "c06", "text": "The In transit chip is active and chip counts match the prompt (42, 318, 17, 907)." },
+    { "id": "c07", "text": "ETA header shows a sort indicator." },
+    { "id": "c08", "text": "Pagination reads \"1-25 of 318\" (dash style may vary)." },
+    { "id": "c09", "text": "Row data is varied and realistic: order IDs, customers, routes and values differ row to row." },
+    { "id": "c10", "text": "Row height and cell padding are uniform; column text aligns to consistent left edges." },
+    { "id": "c11", "text": "\"New order\" is the only primary-styled button." },
+    { "id": "c12", "text": "No cell text overlaps or overflows into neighboring cells; long values are truncated with an ellipsis if needed.", "critical": true },
+    { "id": "c13", "text": "Table text is at least 12px with sufficient contrast.", "critical": true },
+    { "id": "c14", "text": "No placeholder text remains.", "critical": true }
+  ]
+}

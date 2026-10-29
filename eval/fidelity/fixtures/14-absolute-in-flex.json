@@ -1,0 +1,7 @@
+{ "title": "absolute badge inside a flex card is out of flow",
+  "covers": ["absolute"],
+  "expect": [
+    { "node": "Badge", "prop": "positioning", "eq": "absolute" },
+    { "rendered": "Badge", "relTo": "Card", "eq": { "top": 8, "right": 8 }, "tol": 1 },
+    { "rendered": "Card title", "relTo": "Card", "eq": { "x": 21, "y": 21 }, "tol": 1, "why": "1px border + 20px padding; badge does not take a flow slot" }
+  ] }

@@ -1,0 +1,8 @@
+{ "title": "truncate keeps one line inside a flex row",
+  "covers": ["truncate", "flex-1"],
+  "expect": [
+    { "node": "Name", "prop": "truncate", "eq": true },
+    { "rendered": "Name", "prop": "h", "max": 24 },
+    { "rendered": "Name", "inside": "Row", "inset": 0, "tol": 1 },
+    { "noWarnAbout": ["truncate", "min-w-0"] }
+  ] }

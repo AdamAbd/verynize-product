@@ -1,0 +1,7 @@
+{ "title": "preset and layered arbitrary shadows keep every layer",
+  "covers": ["shadow"],
+  "expect": [
+    { "node": "Preset shadow", "prop": "shadow", "layers": 2 },
+    { "node": "Layered shadow", "prop": "shadow", "layers": 2 },
+    { "node": "Layered shadow", "prop": "shadow", "colors": ["rgba(0,0,0,0.05)", "rgba(0,0,0,0.08)"] }
+  ] }

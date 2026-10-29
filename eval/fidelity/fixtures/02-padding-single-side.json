@@ -1,0 +1,6 @@
+{ "title": "pt-10 pads only the top edge",
+  "covers": ["padding"],
+  "expect": [
+    { "node": "Panel", "prop": "padding", "eq": { "top": 40, "right": 0, "bottom": 0, "left": 0 } },
+    { "rendered": "Copy", "relTo": "Panel", "eq": { "x": 0, "y": 40 }, "tol": 1 }
+  ] }
