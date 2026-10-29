@@ -13,13 +13,11 @@ import {
   SendIcon,
   SettingsIcon,
   Share2Icon,
-  ShieldCheckIcon,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettings, type SectionId } from "./api";
-import { allowRulesAvailable } from "./agent-memory";
-import { AccountPage, AllowedActionsPage, AgentsPage, ConnectionsPage, MemoryPage, ModelsPage, PreferencesPage, UsagePage } from "./pages";
+import { AccountPage, AgentsPage, ConnectionsPage, MemoryPage, ModelsPage, PreferencesPage, UsagePage } from "./pages";
 
 const SECTIONS: { id: SectionId; title: string; icon: LucideIcon; page: ComponentType<Parameters<typeof AccountPage>[0]> }[] = [
   { id: "account", title: "Account", icon: CircleUserIcon, page: AccountPage },
@@ -29,10 +27,11 @@ const SECTIONS: { id: SectionId; title: string; icon: LucideIcon; page: Componen
   { id: "models", title: "Default Models", icon: BoxIcon, page: ModelsPage },
   { id: "connections", title: "Connections", icon: LayoutGridIcon, page: ConnectionsPage },
   { id: "memory", title: "Memory", icon: BookOpenIcon, page: MemoryPage },
-  { id: "permissions", title: "Allowed actions", icon: ShieldCheckIcon, page: AllowedActionsPage },
 ];
+// "permissions" (the old Allowed actions page) now lives in Agents › Allowed without asking.
+const REDIRECT: Partial<Record<SectionId, SectionId>> = { permissions: "agents" };
 // Sections that need a desktop capability (feature-detected on the preload).
-const AVAILABLE: Partial<Record<SectionId, () => boolean>> = { permissions: allowRulesAvailable };
+const AVAILABLE: Partial<Record<SectionId, () => boolean>> = {};
 
 const navRow =
   "flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-left text-sm text-foreground-3 outline-none hover:bg-muted hover:text-foreground-2 focus-visible:ring-1 focus-visible:ring-ring [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg]:text-subtle-foreground";
@@ -53,7 +52,7 @@ function Screen() {
   if (!api) return null;
   const sections = SECTIONS.filter((s) => AVAILABLE[s.id]?.() ?? true);
   const visible = sections.filter((s) => s.title.toLowerCase().includes(query.trim().toLowerCase()));
-  const current = sections.find((s) => s.id === state.section) ?? SECTIONS[1];
+  const current = sections.find((s) => s.id === (REDIRECT[state.section] ?? state.section)) ?? SECTIONS[1];
   const Page = current.page;
   const name = preferences.displayName || "Personal workspace";
 

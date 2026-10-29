@@ -23,6 +23,7 @@ import { ClaudeMark, CodexMark, FigmaIcon, PlusIcon } from "@/components/icons";
 import { legacyClick, legacySet } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { useAdopt } from "./adopt";
+import { useChatBehavior } from "./behavior";
 import { hook } from "./hooks";
 import {
   ChatMenu,
@@ -361,6 +362,7 @@ function documentName() {
 }
 
 export function Composer({ state }: { state: ChatState }) {
+  const { followUp } = useChatBehavior();
   const [empty, setEmpty] = useState(true);
   const [focused, setFocused] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -432,11 +434,12 @@ export function Composer({ state }: { state: ChatState }) {
     setBlank(!prompt.value);
     // The native placeholder is kept for assistive tech but drawn by the island (truncated, beside "⌘L to focus").
     prompt.placeholder = placeholder;
-    // While a turn runs the arrow queues the message behind it (desktop-panel relabels it "Queue").
+    // While a turn runs the arrow sends the follow-up the default way (Settings › Agents: Queue or Steer); ⌘↵ the other way.
     const run = document.getElementById("project-run");
-    run?.setAttribute("aria-label", state.busy ? "Queue message" : "Send");
-    run?.setAttribute("title", state.busy ? "Queue after the current turn" : "Send");
-  }, [state, placeholder]);
+    const steers = followUp === "steer";
+    run?.setAttribute("aria-label", state.busy ? (steers ? "Steer message" : "Queue message") : "Send");
+    run?.setAttribute("title", state.busy ? (steers ? "Send now to the running agent" : "Queue after the current turn") : "Send");
+  }, [state, placeholder, followUp]);
 
   // Restore the saved draft when switching conversations (never over text the user is typing).
   const conversationId = state.conversationId;
@@ -459,16 +462,19 @@ export function Composer({ state }: { state: ChatState }) {
   const mentions = state.mentions ?? [];
   const canDrop = !!ws?.attachImages;
   const hasFiles = (event: DragEvent) => canDrop && [...event.dataTransfer.types].includes("Files");
-  const steer = () => {
+  // The secondary button sends the follow-up the other way from the default (same as ⌘↵).
+  const otherWay = followUp === "steer" ? "queue" : "steer";
+  const sendOther = otherWay === "steer" ? ws?.steer : ws?.queueMessage;
+  const sendOtherWay = () => {
     const prompt = document.getElementById("project-prompt") as HTMLTextAreaElement | null;
     const text = prompt?.value.trim();
-    if (!prompt || !text || !ws?.steer) return;
-    ws.steer(text);
+    if (!prompt || !text || !sendOther) return;
+    sendOther(text);
     legacySet(prompt, "");
-    ws.setDraft?.("");
+    ws?.setDraft?.("");
     prompt.focus();
   };
-  const canSteer = state.busy && !empty && !!ws?.steer;
+  const canSendOther = state.busy && !empty && !!sendOther;
   const showUsage = state.usage !== undefined || state.messages.some((m) => m.usage);
   return (
     <div
@@ -582,14 +588,14 @@ export function Composer({ state }: { state: ChatState }) {
           </button>
         )}
         {showUsage && <UsageRing usage={state.usage ?? state.messages.findLast((m) => m.usage)?.usage} />}
-        {canSteer && (
+        {canSendOther && (
           <button
             type="button"
-            title="Send now to the running agent"
-            onClick={steer}
+            title={otherWay === "steer" ? "Send now to the running agent (⌘↵)" : "Queue after the current turn (⌘↵)"}
+            onClick={sendOtherWay}
             className={cn(hook.steer, "ml-1 flex h-6 items-center rounded-md bg-accent px-2 text-sm text-foreground hover:bg-row")}
           >
-            Steer
+            {otherWay === "steer" ? "Steer" : "Queue"}
           </button>
         )}
         <span ref={cancelSlot} className={cn(hook.stopSlot, state.busy ? "ml-1 flex" : "hidden")} />

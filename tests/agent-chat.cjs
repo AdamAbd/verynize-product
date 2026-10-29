@@ -150,6 +150,23 @@ const path = require('node:path');
     queue = (await state()).queue;
     assert.deepEqual(queue.map(q => q.text), ['queued one edited', 'queued two']);
 
+    // Follow-up messages (Settings › Agents): Send goes the default way, ⌘↵ the other way. The fake app-server
+    // refuses turn/steer, so a steer falls back to the queue; the request in the log shows which way it went.
+    const steerCalls = async () => (await rpc('turn/steer')).length;
+    const queued = n => page.waitForFunction(count => window.agentWorkspace.getState().queue.length === count, n);
+    const steersBefore = await steerCalls();
+    await page.locator('#project-prompt').fill('steered by shortcut'); await page.locator('#project-prompt').press('ControlOrMeta+Enter'); await queued(3);
+    assert.equal(await steerCalls(), steersBefore + 1, '⌘↵ steers while Queue is the default');
+    await page.evaluate(() => window.agentBehavior.set({ followUp: 'steer' }));
+    assert.equal(await page.locator('#project-run').getAttribute('aria-label'), 'Steer message');
+    await sendText('steered by default'); await queued(4);
+    assert.equal(await steerCalls(), steersBefore + 2, 'Send steers when Steer is the default');
+    await page.locator('#project-prompt').fill('queued by shortcut'); await page.locator('#project-prompt').press('ControlOrMeta+Enter'); await queued(5);
+    assert.equal(await steerCalls(), steersBefore + 2, '⌘↵ queues while Steer is the default');
+    await page.evaluate(() => window.agentBehavior.set({ followUp: 'queue' }));
+    for (const task of (await state()).queue.slice(2)) await page.evaluate(id => window.agentWorkspace.removeQueued(id), task.id);
+    assert.deepEqual((await state()).queue.map(q => q.text), ['queued one edited', 'queued two']);
+
     // A runtime question becomes a question part; answering stores the answers on it.
     const runId = await ws(() => window.agentWorkspace.activeRunId());
     await app.evaluate(({ BrowserWindow }, id) => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send('desktop:agent-event', { id, type: 'question-request', requestId: 'q-1', questions: [{ id: 'size', question: 'Which viewport?', options: [{ label: 'Desktop' }, { label: 'Mobile' }] }] }); }, runId);
@@ -219,6 +236,10 @@ const path = require('node:path');
     assert.equal((await rpc('thread/start')).length, startsBefore + 1);
     const seeded = (await rpc('turn/start')).at(-1).params.input[0].text;
     assert.match(seeded, /Summary of the earlier conversation[\s\S]*seed source turn[\s\S]*after a tools update$/, 'the new session is seeded with the transcript summary');
+    // Expand agent work by default (Settings › Agents): turn headers and tool calls render unfolded.
+    await page.evaluate(() => window.agentBehavior.set({ expandWork: true }));
+    await page.waitForFunction(() => document.querySelectorAll('details.chat-thinking[open]').length > 0 && document.querySelectorAll('details.chat-tool[open]').length > 0);
+    await page.evaluate(() => window.agentBehavior.set({ expandWork: false }));
     console.log('PASS chat parity: drafts, suggestions, selection mentions, search, verynize links, queue CRUD, questions, usage, stop keeps queue, send now, rewind branch, tools-version seeding');
   } finally { await app.close(); await fs.rm(root, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

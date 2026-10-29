@@ -11,9 +11,10 @@ import {
 import { cn } from "@/lib/utils";
 import { FigmaIcon } from "@/components/icons";
 import { AdvancedSection, ChatSoundRow } from "./preferences-extra";
-import { AllowedActionsSection, DesignPreferencesSection, useToolsInfo } from "./agent-memory";
+import { DesignPreferencesSection, useToolsInfo } from "./agent-memory";
 import { AgentAccessSection, AgentToolsSection, ProviderAccountList } from "./agents-tools";
 import { agentWorkspace, type AgentInfo, type Preferences, type SettingsApi } from "./api";
+import { AgentBehaviorSections } from "./agents-behavior";
 import {
   Card,
   ChoiceTile,
@@ -332,6 +333,7 @@ export function AgentsPage({ api, accounts }: PageProps) {
             </Row>
           </Card>
         </Section>
+        <AgentBehaviorSections />
       </Pages>
     </>
   );
@@ -585,18 +587,6 @@ export function MemoryPage({ api }: PageProps) {
             </Row>
           </Card>
         </Section>
-      </Pages>
-    </>
-  );
-}
-
-/* ---------- Allowed actions (permissions remembered with “Always allow”) ---------- */
-export function AllowedActionsPage() {
-  return (
-    <>
-      <PageHeader title="Allowed actions" description="Agents ask before running tools that change files or run commands. These are the ones you allowed for good." />
-      <Pages>
-        <AllowedActionsSection />
       </Pages>
     </>
   );

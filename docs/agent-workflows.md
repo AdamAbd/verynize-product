@@ -22,7 +22,7 @@ The chat panel (docked transcript, model picker, access levels, attachments and 
   4. `turn/interrupt` for **Stop**
   
   One app-server process per window serves every chat thread. Approval server-requests (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, MCP elicitations) become approval cards. If app-server is unavailable, the one-shot `codex exec --json` runner in `desktop/agents.cjs` is used instead.
-- **Quick chats** are chats with no repository. They run in a per-chat scratch directory, `userData/agent-workdirs/<chatId>`. **Repository chats** (Code workspace) each run in their own git worktree, `~/Verynize/workspaces/<repo>/<name>` on branch `verynize/<name>` (see `desktop/repositories.cjs`); the renderer passes the chat's folder as `runAgent({root})` and main validates it against the repository registry. Folders without a commit, and chats saved before worktrees existed, run in the repository root. Project memory (`VERYNIZE.md`) and the user's personal instructions are appended to the persona: Claude's `append`, or Codex's `developerInstructions`.
+- **Quick chats** are chats with no repository. They run in a per-chat scratch directory, `userData/agent-workdirs/<chatId>`. **Repository chats** (Code workspace) each run in their own git worktree, `<Verynize folder>/workspaces/<repo>/<name>` (default `~/Verynize`) on branch `<prefix>/<name>` (the Settings › Agents branch prefix, else the GitHub username, else `verynize`; see `desktop/repositories.cjs`); the renderer passes the chat's folder as `runAgent({root})` and main validates it against the repository registry. Folders without a commit, and chats saved before worktrees existed, run in the repository root. Project memory (`VERYNIZE.md`) and the user's personal instructions are appended to the persona: Claude's `append`, or Codex's `developerInstructions`.
 - At most three turns run per window, and only one per chat.
 
 ## Access levels
@@ -52,6 +52,16 @@ Older saved defaults map forward: `read-only` becomes Ask and `workspace-write` 
 | Computer Use in Codex (off) | `--enable computer_use` / `--disable computer_use`. Turning it off cancels running Codex chats that started with it. |
 
 The Codex app-server is keyed by its launch flags, so a changed switch starts a fresh server once no Codex chat is running on the old one. Flag names were checked against Claude Code 2.1.308 (`claude --help`, binary strings) and codex-cli 0.165 (`codex features list`, `codex app-server --print-startup-config`).
+
+## Settings › Agents behaviour
+
+`desktop/agent-behavior.cjs` stores the lower half of Settings › Agents (`userData/agent-behavior.json`) and the runtime reads it per run:
+- **Follow-up messages** (Steer | Queue, default Queue): while a turn runs, Send goes the default way and ⌘↵ the other way (`web/desktop-panel.js`). A steer the runtime cannot take falls back to the queue.
+- **Expand agent work by default**: turn headers, tool groups and tool calls render unfolded (`web/src/islands/chat/transcript.tsx`).
+- **Claude response style**: "Use my Claude Code setting" sends nothing; a chosen style is SDK `settings.outputStyle`. **Codex personality** None sends `personality:"none"` on `thread/start` (new chats only).
+- **Credit the agent** off sends Claude `settings.attribution = {commit:'', pr:''}` (and `includeCoAuthoredBy:false`). Codex follows its own (ChatGPT) setting.
+- **Mode for new chats**: the Default row is the chat defaults' access (the same value as Default Models › Access); a repository's own pick is stored per repository id and applied as `chat.access` when a new chat starts there. The composer's mode picker then changes that chat only.
+- **Allowed without asking** lists and removes Verynize, Claude Code and Codex rules (see `desktop/README.md`).
 
 ## Per-turn context
 
