@@ -76,6 +76,7 @@ async function setup(t, extra = {}) {
   const events = [], record = {};
   const runtime = new AgentRuntime({
     userData: path.join(root, 'userData'),
+    home: path.join(root, 'home'), // shared agent memory is read from here, never the real HOME
     discover: async () => [{ id: 'codex', available: true, path: codex }, { id: 'claude', available: true, path: '/usr/bin/true' }],
     loadClaudeSdk: async () => fakeClaudeSdk(record),
     getBridge: async () => extra.bridge ?? null,

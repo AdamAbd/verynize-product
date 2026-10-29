@@ -33,7 +33,7 @@ function killTree(child, signal = 'SIGTERM') {
 function start(executable, agent, prompt, cwd, emit, options = {}) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 200000) throw Error('Enter a prompt under 200,000 characters');
   const args = argumentsFor(agent, options);
-  const env = childEnv(options.bridge?.token ? { [MCP_TOKEN_ENV]: options.bridge.token } : {});
+  const env = childEnv({ ...(options.env && typeof options.env === 'object' ? options.env : {}), ...(options.bridge?.token ? { [MCP_TOKEN_ENV]: options.bridge.token } : {}) });
   const child = spawn(executable, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
   const id = options.id || randomUUID();
   const map = agent === 'claude' ? createClaudeMapper() : createCodexExecMapper();

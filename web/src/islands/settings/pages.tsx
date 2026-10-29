@@ -2,28 +2,18 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   BookOpenIcon,
-  CheckIcon,
-  CircleUserIcon,
   CopyIcon,
   ExternalLinkIcon,
   GaugeIcon,
   GlobeIcon,
-  MoreHorizontalIcon,
   ServerIcon,
-  XIcon,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { ClaudeMark, CodexMark, FigmaIcon } from "@/components/icons";
+import { FigmaIcon } from "@/components/icons";
 import { AdvancedSection, ChatSoundRow } from "./preferences-extra";
 import { AllowedActionsSection, DesignPreferencesSection, useToolsInfo } from "./agent-memory";
-import { agentWorkspace, type AgentInfo, type AuthKind, type Preferences, type SettingsApi } from "./api";
+import { AgentAccessSection, AgentToolsSection, ProviderAccountList } from "./agents-tools";
+import { agentWorkspace, type AgentInfo, type Preferences, type SettingsApi } from "./api";
 import {
   Card,
   ChoiceTile,
@@ -276,80 +266,6 @@ export function PreferencesPage({ preferences, setPreference }: PageProps) {
 }
 
 /* ---------- Agents (71) ---------- */
-const AGENT_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
-
-function AgentMark({ id }: { id: string }) {
-  return id === "claude" ? (
-    <ClaudeMark className="size-5" />
-  ) : (
-    <CodexMark className="size-5" />
-  );
-}
-
-function StatusBadge({ ok }: { ok: boolean }) {
-  return (
-    <span
-      className={cn(
-        "flex size-3.5 items-center justify-center rounded-full ring-2 ring-card",
-        ok ? "bg-success text-primary-foreground" : "bg-accent text-muted-foreground",
-      )}
-    >
-      {ok ? <CheckIcon data-icon-weight="bold" className="size-2.5" /> : <XIcon data-icon-weight="bold" className="size-2.5" />}
-    </span>
-  );
-}
-
-function AgentCard({ agent, api, account }: { agent: AgentInfo; api: SettingsApi; account?: string }) {
-  const name = AGENT_NAMES[agent.id] ?? agent.id;
-  const run = (kind: AuthKind) => void api.actions.auth(kind, agent.id);
-  return (
-    <Card>
-      <Row
-        icon={
-          <IconTile badge={<StatusBadge ok={agent.available} />}>
-            <AgentMark id={agent.id} />
-          </IconTile>
-        }
-        title={name}
-        description={agent.available ? "Installed · uses your CLI account" : "Not found on this machine"}
-      />
-      {agent.available && (
-        <Row
-          icon={
-            <span className="flex size-8 shrink-0 items-center justify-center text-muted-foreground">
-              <CircleUserIcon className="size-5" />
-            </span>
-          }
-          title={
-            <span id={`account-status-${agent.id}`} className="inline-flex items-center gap-2">
-              {account ?? "CLI account"}
-            </span>
-          }
-          description={account ? "Machine-wide CLI sign-in" : "Check the account to see who is signed in."}
-        >
-          <SettingsButton onClick={() => run("check")}>Check account</SettingsButton>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <SettingsButton variant="ghost" className="w-7 px-0" aria-label={`${name} account actions`}>
-                <MoreHorizontalIcon />
-              </SettingsButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" onEscapeKeyDown={(event) => event.stopPropagation()}>
-              <DropdownMenuItem onSelect={() => run("check")}>Check account</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => run("login")}>Sign in / switch…</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => run("cancel")}>Cancel sign-in</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onSelect={() => run("logout")}>
-                Sign out…
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </Row>
-      )}
-    </Card>
-  );
-}
-
 export function AgentsPage({ api, accounts }: PageProps) {
   const tools = useToolsInfo();
   const [agents, setAgents] = useState<AgentInfo[] | null | undefined>(undefined);
@@ -371,7 +287,7 @@ export function AgentsPage({ api, accounts }: PageProps) {
         <Section
           id="settings-providers"
           title="Provider accounts"
-          description="Use the agents installed on your Mac with their existing accounts."
+          description="Connect the accounts your agents use."
           action={
             <SettingsButton onClick={() => api.select("usage")}>
               <GaugeIcon />
@@ -379,27 +295,10 @@ export function AgentsPage({ api, accounts }: PageProps) {
             </SettingsButton>
           }
         >
-          <div id="settings-agent-list" className="flex flex-col gap-4">
-            {agents === undefined && (
-              <Card>
-                <Row title="Checking installed agents…" />
-              </Card>
-            )}
-            {agents === null && (
-              <Card>
-                <Row title="Desktop app required" description="Open Verynize as a desktop app to use local agents." />
-              </Card>
-            )}
-            {agents?.length === 0 && (
-              <Card>
-                <Row title="No agents found" description={error || "Install Claude Code or Codex, then reopen settings."} />
-              </Card>
-            )}
-            {agents?.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} api={api} account={accounts[agent.id]} />
-            ))}
-          </div>
+          <ProviderAccountList api={api} agents={agents} error={error} accounts={accounts} />
         </Section>
+        <AgentToolsSection />
+        <AgentAccessSection />
         <Section
           id="settings-agent-runtime"
           title="How agents run"
