@@ -14,6 +14,7 @@
 //    Codex thread/fork); second opinions send the latest answer and diff to the other provider.
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { randomUUID, createHash } = require('node:crypto');
 const agents = require('./agents.cjs');
@@ -21,6 +22,7 @@ const settings = require('./agent-settings.cjs');
 const agentAccess = require('./agent-access.cjs'); // Settings › Agents › Access switches
 const agentBehavior = require('./agent-behavior.cjs');
 const { createClaudeMapper, createCodexMapper, toolTitle } = require('./agent-runtime-events.cjs');
+const agentCommands = require('./agent-commands.cjs'); // composer slash commands: Codex prompt/skill expansion
 const agentMemory = require('./agent-memory.cjs'); // Settings › Memory: repo-less memory folder, ~/.codex/AGENTS.md for Claude
 
 const VERSION = '0.6.0';
@@ -210,6 +212,7 @@ function buildTurnContext(context) {
       ...context.mentions.map(m => `- "${m.label}" (id ${m.id}${m.type ? `, ${m.type}` : ''}${m.pageId ? `, pageId ${m.pageId}` : ''})`));
   }
   if (context.images.length) lines.push('Attached images (files on disk):', ...context.images.map(p => '- ' + p));
+  if (context.directories?.length) lines.push('Additional working directories the user added to this chat (read and edit files there too):', ...context.directories.map(p => '- ' + p));
   if (lines.length === 1) return '';
   lines.push('</verynize-context>');
   return lines.join('\n');
@@ -227,6 +230,22 @@ function buildSeedBlock(seed) {
     'Note: the Verynize tools and their capabilities may have changed since then. Do not rely on earlier tool results or element ids without checking them again with the current tools.',
     '</previous-conversation>',
   ].join('\n');
+}
+
+/** Composer slash command (`/name args`): sent as typed so the agent runs it, without the context preamble. */
+const isSlashCommand = prompt => typeof prompt === 'string' && /^\/[a-zA-Z0-9][\w.:-]*(\s|$)/.test(prompt);
+
+/** Extra working directories (composer /add-dir, linked worktrees): absolute existing folders, never `/` or $HOME. */
+async function normalizeDirectories(list, cwd) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const dir of list.slice(0, 10)) {
+    if (typeof dir !== 'string' || !path.isAbsolute(dir) || dir.includes('\0')) continue;
+    const real = await fs.realpath(dir).catch(() => null);
+    if (!real || real === path.parse(real).root || real === os.homedir() || real === cwd || out.includes(real)) continue;
+    if ((await fs.stat(real).catch(() => null))?.isDirectory()) out.push(real);
+  }
+  return out;
 }
 
 function composePrompt(prompt, context, seed) {
@@ -453,9 +472,11 @@ function claudeQueryOptions({ cwd, access, model, effort, sessionId, fork, perso
   return options;
 }
 
-function codexThreadParams({ cwd, access, model, persona }) {
+function codexThreadParams({ cwd, access, model, persona, directories }) {
   const policy = settings.codexPolicy(access);
-  return { cwd, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, ...(policy.approvalsReviewer ? { approvalsReviewer: policy.approvalsReviewer } : {}), ...(model ? { model } : {}), developerInstructions: persona };
+  // Extra working directories (composer /add-dir) become writable roots of the workspace-write sandbox.
+  const roots = policy.sandbox === 'workspace-write' && directories?.length ? { config: { 'sandbox_workspace_write.writable_roots': directories } } : {};
+  return { cwd, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, ...(policy.approvalsReviewer ? { approvalsReviewer: policy.approvalsReviewer } : {}), ...(model ? { model } : {}), developerInstructions: persona, ...roots };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -604,13 +625,17 @@ class AgentRuntime {
       const rawContext = options.context && typeof options.context === 'object' ? { ...options.context } : Array.isArray(options.mentions) ? {} : null;
       if (rawContext && Array.isArray(options.mentions)) rawContext.mentions = options.mentions;
       const context = normalizeContext(rawContext, this.attachmentRoot);
+      const directories = await normalizeDirectories(options.directories, cwd);
+      if (directories.length && context) context.directories = directories;
+      let prompt = options.prompt;
+      if (options.agent === 'codex' && isSlashCommand(prompt)) prompt = await agentCommands.expandCodexCommand(prompt, { home: this.home, cwd }).catch(() => prompt);
       // A seed replaces resume: the old session is not continued, its summary is prepended instead.
       const seed = typeof options.seed === 'string' && options.seed.trim() ? options.seed.slice(-SEED_LIMIT) : '';
       // A fork (rewind) replaces resume too; the seed then only serves as its fallback.
       const fork = normalizeFork(options.fork);
       const sessionId = seed || fork ? '' : normalized.sessionId;
       const run = { id: randomUUID(), chatId, agent: options.agent, cwd, projectKey: project?.root || 'unattached', stopped: false, done: false, sessionId: sessionId || null, cancel: () => {}, computerUse: options.agent === 'codex' && agentSettings.codexComputerUse };
-      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt: options.prompt, executable: found?.path || null, quickChat, agentSettings, memoryDir };
+      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt, directories, executable: found?.path || null, quickChat, agentSettings, memoryDir };
       // Settings › Agents (desktop/agent-behavior.cjs): Claude response style + commit credit, Codex personality.
       const behavior = this.getBehavior ? await Promise.resolve().then(() => this.getBehavior()).catch(() => null) : null;
       if (behavior) { params.claudeSettings = agentBehavior.claudeSettingsFor(behavior); params.codexPersonality = agentBehavior.codexPersonalityFor(behavior); }
@@ -746,7 +771,8 @@ class AgentRuntime {
     const pending = []; let wake = null, inputClosed = false, turnOpen = true;
     const endInput = () => { if (inputClosed) return; inputClosed = true; clearTimeout(run.settleTimer); wake?.(); };
     const armSettle = () => { clearTimeout(run.settleTimer); run.settleTimer = setTimeout(endInput, STEER_SETTLE_MS); run.settleTimer.unref?.(); };
-    const content = await claudeContent(composePrompt(params.prompt, params.context, params.seed), params.context?.images);
+    // A slash command must reach Claude Code as typed (a leading `/`), so the context preamble is left out.
+    const content = isSlashCommand(params.prompt) ? params.prompt : await claudeContent(composePrompt(params.prompt, params.context, params.seed), params.context?.images);
     async function* input() {
       yield { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null };
       for (;;) {
@@ -768,7 +794,7 @@ class AgentRuntime {
     };
     let stderr = '';
     const options = {
-      ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, fork: params.fork, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: params.context?.images?.length ? [path.dirname(params.context.images[0])] : [], agentSettings: params.agentSettings, claudeSettings: params.claudeSettings, memoryDir: params.memoryDir }),
+      ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, fork: params.fork, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: [...(params.context?.images?.length ? [path.dirname(params.context.images[0])] : []), ...(params.directories || [])], agentSettings: params.agentSettings, claudeSettings: params.claudeSettings, memoryDir: params.memoryDir }),
       abortController: abort,
       ...this.claudeHooks(run, params),
       env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `verynize/${VERSION}`, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.agentSettings ? agentAccess.claudeAccessOptions(params.agentSettings).env : {}) }),
@@ -787,6 +813,8 @@ class AgentRuntime {
       try {
         for await (const message of q) {
           if (message?.type === 'stream_event' || message?.type === 'assistant' || message?.type === 'user') { turnOpen = true; clearTimeout(run.settleTimer); }
+          if (message?.type === 'system' && message.subtype === 'init' && Array.isArray(message.slash_commands)) this.rememberClaudeCommands(params.cwd, message.slash_commands.map(name => ({ name: String(name).replace(/^\//, '') })));
+          if (message?.type === 'system' && message.subtype === 'commands_changed' && Array.isArray(message.commands)) this.rememberClaudeCommands(params.cwd, message.commands, true);
           // Last main-chain transcript entry: the fork point a later rewind to after this turn uses.
           if ((message?.type === 'assistant' || message?.type === 'user') && !message.parent_tool_use_id && typeof message.uuid === 'string' && FORK_ID.test(message.uuid)) run.resumeAt = message.uuid;
           for (const event of map(message)) {
@@ -1191,6 +1219,46 @@ class AgentRuntime {
     }
     this.modelCache.set(agent, list);
     return list;
+  }
+
+  // --- slash commands (desktop/agent-commands.cjs) ----------------------------------------------
+  /** Commands Claude Code reported for `cwd` (init `slash_commands`, commands_changed or supportedCommands()). */
+  rememberClaudeCommands(cwd, list, replace = false) {
+    if (!this.claudeCommandCache) this.claudeCommandCache = new Map();
+    const key = cwd || '';
+    const previous = this.claudeCommandCache.get(key);
+    const known = replace ? [] : previous?.list || [];
+    const merged = agentCommands.mergeCommands(list.map(c => ({ name: c.name, description: c.description || '', argumentHint: c.argumentHint || '', source: c.builtin ? 'builtin' : 'agent' })), known);
+    this.claudeCommandCache.set(key, { list: merged, full: replace || !!previous?.full });
+  }
+
+  /** Claude Code's own command list (built-ins, plugins, MCP prompts, skills) for `cwd`; waits at most ~3s. */
+  async claudeCommands(cwd) {
+    if (!this.claudeCommandCache) this.claudeCommandCache = new Map();
+    if (!this.claudeCommandLoads) this.claudeCommandLoads = new Map();
+    const key = cwd || '';
+    const cached = this.claudeCommandCache.get(key);
+    if (cached?.full) return cached.list;
+    let load = this.claudeCommandLoads.get(key);
+    if (!load) {
+      load = (async () => {
+        const found = (await this.discover()).find(a => a.id === 'claude' && a.available);
+        if (!found) return [];
+        const sdk = await this.loadClaudeSdk();
+        const abort = new AbortController();
+        let release; const hold = new Promise(r => { release = r; });
+        const env = agents.childEnv(this.home && this.home !== os.homedir() ? { HOME: this.home } : {});
+        const q = sdk.query({ prompt: (async function* () { await hold; })(), options: { pathToClaudeCodeExecutable: found.path, abortController: abort, env, cwd: cwd || this.userData } });
+        try {
+          const list = await Promise.race([q.supportedCommands(), new Promise((_, reject) => setTimeout(() => reject(Error('Command list timed out')), 20000).unref?.())]);
+          this.rememberClaudeCommands(key, list, true);
+          return this.claudeCommandCache.get(key).list;
+        } finally { release(); try { q.close?.(); } catch {} abort.abort(); }
+      })().catch(() => []).finally(() => this.claudeCommandLoads.delete(key));
+      this.claudeCommandLoads.set(key, load);
+    }
+    const quick = await Promise.race([load, new Promise(r => setTimeout(() => r(null), 3000).unref?.())]);
+    return quick || this.claudeCommandCache.get(key)?.list || [];
   }
 
   close() {

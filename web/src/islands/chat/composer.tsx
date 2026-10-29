@@ -6,20 +6,16 @@ import {
   CircleDotIcon,
   FileIcon,
   FileTextIcon,
-  FolderPlusIcon,
   ImageIcon,
   GitPullRequestIcon,
   HandIcon,
-  LinkIcon,
   LockOpenIcon,
-  MessageSquareIcon,
   NavigationIcon,
-  PaperclipIcon,
   PencilIcon,
   RulerIcon,
   XIcon,
 } from "lucide-react";
-import { ClaudeMark, CodexMark, FigmaIcon, PlusIcon } from "@/components/icons";
+import { ClaudeMark, CodexMark, PlusIcon } from "@/components/icons";
 import { legacyClick, legacySet } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { useAdopt } from "./adopt";
@@ -27,7 +23,6 @@ import { useChatBehavior } from "./behavior";
 import { hook } from "./hooks";
 import {
   ChatMenu,
-  ChatMenuCheckboxItem,
   ChatMenuContent,
   ChatMenuItem,
   ChatMenuLabel,
@@ -42,6 +37,8 @@ import {
 import { MentionIcon, MentionPopover } from "./mention-popover";
 import { agentAvailable, useModels, workspace, type AgentModel, type ChatState } from "./store";
 import { UsageRing } from "./usage-ring";
+import { AttachMenu, WorkingDirectories } from "./attach-menu";
+import { SlashCommands } from "./slash-commands";
 import { DropdownMenu as Menu } from "radix-ui";
 
 const PROMPT_CLASS =
@@ -69,6 +66,13 @@ const AGENTS = [
 function useChecked(id: string) {
   const read = () => !!(document.getElementById(id) as HTMLInputElement | null)?.checked;
   const [checked, setChecked] = useState(read);
+  // Slash commands (/canvas-context, /open-file) flip the legacy checkbox directly.
+  useEffect(() => {
+    const el = document.getElementById(id);
+    const sync = () => setChecked(!!(el as HTMLInputElement | null)?.checked);
+    el?.addEventListener("change", sync);
+    return () => el?.removeEventListener("change", sync);
+  }, [id]);
   const set = useCallback(
     (value: boolean) => {
       legacySet(document.getElementById(id) as HTMLInputElement | null, value);
@@ -214,111 +218,7 @@ function AccessMenu({ access }: { access: string }) {
   );
 }
 
-/* ---------- Attach (32) ---------- */
-const FIGMA_URL = /^https:\/\/([\w-]+\.)?figma\.com\/(file|design|proto|board)\//i;
-
-async function askFigma() {
-  const ask = window.askText ?? (async (title: string) => window.prompt(title));
-  const url = (await ask("Figma link (copy link to a frame or file)", ""))?.trim();
-  if (!url) return;
-  if (!FIGMA_URL.test(url)) {
-    window.alert?.("That doesn't look like a Figma link (https://www.figma.com/design/…).");
-    return;
-  }
-  workspace()?.attachFigma?.(url);
-}
-
-function AttachMenu({ state, attached }: { state: ChatState; attached: boolean }) {
-  const [canvas, setCanvas] = useChecked("agent-canvas-context");
-  const [openFile, setOpenFile] = useChecked("project-context");
-  const ws = workspace();
-  const others = state.conversations.filter((c) => c.id !== state.conversationId);
-  const canLink = !!ws?.linkChat && others.length > 0;
-  return (
-    <ChatMenu modal={false}>
-      <ChatMenuTrigger aria-label="Attach" className={ICON_BUTTON}>
-        <PlusIcon className="size-4" />
-      </ChatMenuTrigger>
-      <ChatMenuContent align="start" side="top" className="w-60">
-        {(attached || !!ws?.attachFiles || canLink) && (
-          <>
-            <ChatMenuLabel>{attached ? "Add to this worktree" : "Add to this chat"}</ChatMenuLabel>
-            {ws?.attachFiles && (
-              <ChatMenuItem onSelect={() => ws.attachFiles?.()}>
-                <FolderPlusIcon />
-                Add files or folder…
-              </ChatMenuItem>
-            )}
-            {attached && (
-              <ChatMenuItem onSelect={() => legacyClick("chat-attach-file")}>
-                <FileTextIcon />
-                Open project file
-              </ChatMenuItem>
-            )}
-            {canLink && (
-              <ChatMenuSub>
-                <ChatMenuSubTrigger>
-                  <LinkIcon />
-                  Link a chat
-                </ChatMenuSubTrigger>
-                <ChatMenuSubContent className="w-60">
-                  <ChatMenuLabel>Share its transcript as context</ChatMenuLabel>
-                  {others.map((chat) => (
-                    <ChatMenuItem key={chat.id} onSelect={() => ws?.linkChat?.(chat.id)}>
-                      <MessageSquareIcon />
-                      <span className="min-w-0 truncate">{chat.title || "Untitled chat"}</span>
-                    </ChatMenuItem>
-                  ))}
-                </ChatMenuSubContent>
-              </ChatMenuSub>
-            )}
-            <ChatMenuSeparator />
-          </>
-        )}
-        <ChatMenuLabel>Attach to this message</ChatMenuLabel>
-        <ChatMenuItem onSelect={() => legacyClick("chat-attach-image")}>
-          <PaperclipIcon />
-          Files and images
-        </ChatMenuItem>
-        {ws?.attachFigma && (
-          <ChatMenuItem onSelect={() => void askFigma()}>
-            <FigmaIcon />
-            Figma design…
-          </ChatMenuItem>
-        )}
-        <ChatMenuItem onSelect={() => legacyClick("chat-attach-canvas")}>
-          <FileIcon />
-          Canvas document
-        </ChatMenuItem>
-        <ChatMenuSeparator />
-        <ChatMenuLabel>Context</ChatMenuLabel>
-        <ChatMenuCheckboxItem checked={canvas} onCheckedChange={(value) => setCanvas(value === true)}>
-          Send canvas context
-        </ChatMenuCheckboxItem>
-        <ChatMenuCheckboxItem
-          disabled={!attached}
-          checked={openFile}
-          onCheckedChange={(value) => setOpenFile(value === true)}
-        >
-          Include the open file
-        </ChatMenuCheckboxItem>
-        {attached && (
-          <>
-            <ChatMenuSeparator />
-            <ChatMenuItem onSelect={() => legacyClick("project-review")}>
-              <GitPullRequestIcon />
-              Review changes
-            </ChatMenuItem>
-            <ChatMenuItem onSelect={() => legacyClick("project-apply-design")}>
-              <RulerIcon />
-              Apply canvas to code
-            </ChatMenuItem>
-          </>
-        )}
-      </ChatMenuContent>
-    </ChatMenu>
-  );
-}
+/* ---------- Attach (32): "+" menu in ./attach-menu.tsx, slash commands in ./slash-commands.tsx ---------- */
 
 function Chip({
   icon,
@@ -514,6 +414,8 @@ export function Composer({ state }: { state: ChatState }) {
         </div>
       )}
       <MentionPopover />
+      <SlashCommands state={state} />
+      <WorkingDirectories state={state} />
       {(canvasContext || state.attachments.length > 0 || mentions.length > 0) && (
         <div className={cn(hook.mentions, "flex flex-wrap gap-1.5 px-2 pt-2 pb-1.5")}>
           {mentions.map((mention) => (
@@ -567,7 +469,7 @@ export function Composer({ state }: { state: ChatState }) {
         )}
       </div>
       <div className="flex h-7.5 items-center gap-0.5 px-1.5 pb-1.5">
-        <AttachMenu state={state} attached={attached} />
+        <AttachMenu state={state} />
         <ModelMenu state={state} open={modelOpen} onOpenChange={setModelOpen} />
         <AccessMenu access={state.defaults.access} />
         <span className="flex-1" />
