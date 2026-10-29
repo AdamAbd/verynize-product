@@ -69,7 +69,10 @@
     notify();
   };
   const watchDesign=(tries=0)=>{if(window.design?.subscribe){window.design.subscribe(()=>syncSelection());syncSelection();return;}if(tries<200)setTimeout(()=>watchDesign(tries+1),100);};
-  const currentMentions=()=>{const out=[],seen=new Set();for(const m of [...selectionMentions.filter(m=>!dismissed.has(m.id)),...manualMentions])if(!seen.has(m.id)){seen.add(m.id);out.push(m);}return out;};
+  // Settings › Preferences › Attach selection to chat: off = the canvas selection is not added to messages.
+  const attachSelection=()=>window.appPreferences?.get?.().attachSelection!==false;
+  window.addEventListener('app-preferences-changed',()=>notify());
+  const currentMentions=()=>{const out=[],seen=new Set();for(const m of [...(attachSelection()?selectionMentions.filter(m=>!dismissed.has(m.id)):[]),...manualMentions])if(!seen.has(m.id)){seen.add(m.id);out.push(m);}return out;};
   const addMention=mention=>{if(!mention||typeof mention.id!=='string')return;dismissed.delete(mention.id);if(!currentMentions().some(m=>m.id===mention.id)){if(manualMentions.length>=20)return;manualMentions.push({id:mention.id,label:String(mention.label||mention.id).slice(0,80),pageId:String(mention.pageId||''),...(mention.type?{type:mention.type}:{}),...(mention.shortId?{shortId:mention.shortId}:{})});}notify();};
   const removeMention=id=>{manualMentions=manualMentions.filter(m=>m.id!==id);if(selectionMentions.some(m=>m.id===id))dismissed.add(id);notify();};
   // @ popover search over the open document (active page first) by name, text, short id or id.
@@ -187,7 +190,7 @@
     conversation=null;const pick=conversations.find(c=>c.id===options.select)||conversations.at(-1);if(pick)switchTo(pick);else if(options.create!==false)newChat();else{renderHistory();activate();}
   };
   // Chat summaries of any project key (the open one live, others from storage) for the Code workspace sidebar.
-  const summaryOf=c=>({id:c.id,title:c.title,created:c.created,count:c.messages?.length||0,...(c.worktree?.branch?{branch:c.worktree.branch}:{}),...(active.has(c.id)?{busy:true}:{})});
+  const summaryOf=c=>({id:c.id,title:c.title,created:c.created,count:c.messages?.length||0,...(c.worktree?.branch?{branch:c.worktree.branch}:{}),...(c.worktree?.path?{root:c.worktree.path}:{}),...(active.has(c.id)?{busy:true}:{})});
   const chatSummaries=key=>{if(key===projectKey)return conversations.map(summaryOf).reverse();try{const saved=JSON.parse(localStorage.getItem(chatsKey(key))||'[]');return (Array.isArray(saved)?saved:[]).filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string').map(c=>{const live=[...active.values()].find(e=>e.chat.id===c.id);return summaryOf(live?live.chat:c);}).reverse();}catch{return [];}};
   const removeChat=id=>{const i=conversations.findIndex(c=>c.id===id);if(i<0)return false;if(active.has(id))throw Error('Stop the chat before archiving it');const [chat]=conversations.splice(i,1);queues.delete(id);setDraft('',chat);persist();if(conversation===chat){conversation=null;const last=conversations.at(-1);if(last)switchTo(last);else{renderHistory();activate();}}else renderHistory();return true;};
   const agentSection=host.querySelector('.project-agent');
@@ -282,7 +285,7 @@
   const escapeAttr=text=>String(text).replace(/[&"<>]/g,c=>({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'})[c]);
   const attachmentBlock=a=>a.kind==='file'?`<attached-file path="${escapeAttr(a.name)}">\n${a.text}\n</attached-file>`:a.kind==='folder'?`<attached-folder path="${escapeAttr(a.name)}">\n${a.text}\n</attached-folder>`:a.kind==='figma'?`<figma-link url="${escapeAttr(a.url)}">The user linked this Figma file. You cannot open Figma links yourself. If you need its contents, ask the user to bring it onto the canvas with Import Figma, then read it with the canvas tools.</figma-link>`:a.kind==='chat'?`<linked-chat title="${escapeAttr(a.name)}">\n${a.text}\n</linked-chat>`:'Attachment '+a.name+':\n'+a.text;
   // Ids only: the agent reads content through the canvas MCP tools.
-  const canvasContext=()=>{try{const design=window.design;if(!design?.getDocument)return {};const doc=design.getDocument(),page=doc.pages?.find(p=>p.id===doc.activePage),library=window.fileLibrary,file=library?.list?.().find(f=>f.id===library.currentId);return {documentName:doc.name||file?.name||'',documentId:library?.currentId||'',documentPath:file?.nativePath||'',pageId:doc.activePage||'',pageName:page?.name||'',selection:design.getSelection?.()||[]};}catch{return {};}};
+  const canvasContext=()=>{try{const design=window.design;if(!design?.getDocument)return {};const doc=design.getDocument(),page=doc.pages?.find(p=>p.id===doc.activePage),library=window.fileLibrary,file=library?.list?.().find(f=>f.id===library.currentId);return {documentName:doc.name||file?.name||'',documentId:library?.currentId||'',documentPath:file?.nativePath||'',pageId:doc.activePage||'',pageName:page?.name||'',selection:attachSelection()?design.getSelection?.()||[]:[]};}catch{return {};}};
   // A task captures the composer (text, attachments, mentions); canvas context is read when it actually runs.
   const composeTask=displayPrompt=>{
     let prompt=displayPrompt;if($('project-context').checked&&openFile)prompt+=`\n\nOpen file ${openFile.path}:\n${openFile.text.slice(0,16000)}`;

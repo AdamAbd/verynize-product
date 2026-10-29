@@ -25,4 +25,45 @@ if(allow){await nav('Allowed actions');await page.waitForSelector('#settings-all
 // Agents › About shows the tools version pushed by the MCP bridge.
 await nav('Agents');await page.waitForFunction(()=>/^[0-9a-f]{12}$/.test(document.getElementById('settings-tools-version')?.textContent||''),null,{timeout:15000});
 await nav('Preferences');
-await page.screenshot({path:'/tmp/better-settings.png'});console.log('PASS reference settings UI, themes, model defaults, instructions, design preferences, tools version, custom nudges and persistence');}finally{await app.close();await fs.rm(dir,{recursive:true,force:true})}})().catch(e=>{console.error(e);process.exitCode=1});
+// Preferences › Advanced: Wonder defaults, toggles persist (data-pref contract).
+const prefs=()=>page.evaluate(()=>window.appPreferences.get());
+const advanced={chatTabs:false,lineChanges:false,openLinksInApp:true,attachSelection:true,openPullRequest:false};
+for(const [key,value]of Object.entries(advanced)){assert.equal(await page.locator(`[data-pref="${key}"]`).getAttribute('aria-checked'),String(value),key+' default');await page.locator(`[data-pref="${key}"]`).click();await page.waitForFunction(([k,v])=>window.appPreferences.get()[k]===v,[key,!value]);}
+// Notifications › custom MP3: the native picker (stubbed) copies the file into userData; preview plays it.
+const mp3=path.join(dir,'ding.mp3');await fs.writeFile(mp3,Buffer.concat([Buffer.from('ID3'),Buffer.alloc(509)]));
+const notMp3=path.join(dir,'notes.mp3');await fs.writeFile(notMp3,'plain text');
+await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]})},notMp3);
+await page.locator('[data-pref="sound"]').selectOption('choose-mp3');await page.getByText('That file is not an MP3').waitFor();
+assert.equal((await prefs()).sound,'none');
+await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]})},mp3);
+await page.locator('[data-pref="sound"]').selectOption('choose-mp3');
+await page.waitForFunction(()=>window.appPreferences.get().sound==='custom'&&window.appPreferences.get().customSoundName==='ding.mp3');
+assert.equal(await page.locator('[data-pref="sound"]').inputValue(),'custom');
+assert.deepEqual(await fs.readFile(path.join(dir,'sounds','custom.mp3')),await fs.readFile(mp3));
+assert.equal(await page.evaluate(async()=>(await window.desktop.appPreferences.readSound()).length),512);
+await page.locator('[data-pref="sound"]').selectOption('marimba');assert.equal((await prefs()).sound,'marimba');
+assert.equal(await page.evaluate(()=>window.verynizeAlerts.handle({type:'permission-request'})),true,'needs-you events are handled');
+// Attach selection to chat (now off): the canvas selection is not added to the composer; on again, it is.
+const nodeId=await page.evaluate(()=>window.design.getDocument().pages[0].nodes.at(-1).id);
+await page.evaluate(id=>window.design.setSelection([id]),nodeId);
+assert.equal((await page.evaluate(()=>window.agentWorkspace.getState().mentions||[])).length,0,'selection not attached while off');
+await page.locator('[data-pref="attachSelection"]').click();
+await page.waitForFunction(id=>(window.agentWorkspace.getState().mentions||[]).some(m=>m.id===id),nodeId);
+// Design links (now off): a verynize:// link from the OS is ignored; on again, it selects the element.
+const pageId=await page.evaluate(()=>window.design.getDocument().activePage);
+const link=`verynize://node/doc/${pageId}/${nodeId}`;
+const openUrl=url=>app.evaluate(({app},u)=>app.emit('open-url',{preventDefault(){}},u),url);
+await page.evaluate(()=>window.design.setSelection([]));
+await openUrl(link);await page.waitForTimeout(400);
+assert.deepEqual(await page.evaluate(()=>window.design.getSelection()),[],'links ignored while off');
+await page.locator('[data-pref="openLinksInApp"]').click();await page.waitForFunction(()=>window.appPreferences.get().openLinksInApp===true);await page.waitForTimeout(200);
+await openUrl(link);
+await page.waitForFunction(id=>window.design.getSelection().join()===id,nodeId);
+assert.equal(await page.locator('#settings-screen').isVisible(),false,'opening a link leaves settings');
+await page.reload();await page.waitForSelector('#shell-settings',{state:'attached'});
+const saved=await prefs();
+assert.deepEqual({chatTabs:saved.chatTabs,lineChanges:saved.lineChanges,openLinksInApp:saved.openLinksInApp,attachSelection:saved.attachSelection,openPullRequest:saved.openPullRequest,sound:saved.sound,customSoundName:saved.customSoundName},{chatTabs:true,lineChanges:true,openLinksInApp:true,attachSelection:true,openPullRequest:true,sound:'marimba',customSoundName:'ding.mp3'});
+await page.locator('.app-menu-trigger:visible').first().click();await page.locator('#shell-settings').click();
+assert.equal(await page.locator('[data-pref="chatTabs"]').getAttribute('aria-checked'),'true');
+assert.equal(await page.locator('[data-pref="sound"] option[value="custom"]').textContent(),'ding.mp3');
+await page.screenshot({path:'/tmp/better-settings.png'});console.log('PASS reference settings UI, themes, model defaults, instructions, design preferences, tools version, custom nudges, advanced preferences, custom sound, attach selection, design links and persistence');}finally{await app.close();await fs.rm(dir,{recursive:true,force:true})}})().catch(e=>{console.error(e);process.exitCode=1});

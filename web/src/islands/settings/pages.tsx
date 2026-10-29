@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { ClaudeMark, CodexMark, FigmaIcon } from "@/components/icons";
+import { AdvancedSection, ChatSoundRow } from "./preferences-extra";
 import { AllowedActionsSection, DesignPreferencesSection, useToolsInfo } from "./agent-memory";
 import { agentWorkspace, type AgentInfo, type AuthKind, type Preferences, type SettingsApi } from "./api";
 import {
@@ -174,19 +175,8 @@ export function PreferencesPage({ preferences, setPreference }: PageProps) {
       <Pages>
         <Section id="settings-notifications" title="Notifications">
           <Card>
-            <Row title="When a chat finishes" description="Choose a sound for completed tasks." htmlFor="settings-sound">
-              <NativeSelect
-                id="settings-sound"
-                data-pref="sound"
-                value={preferences.sound}
-                onChange={(event) => setPreference({ sound: event.target.value as Preferences["sound"] })}
-              >
-                <option value="none">None</option>
-                <option value="chime">Chime</option>
-                <option value="pop">Pop</option>
-              </NativeSelect>
-            </Row>
-            <Row title="Desktop notifications" description="Alerts when an agent task finishes.">
+            <ChatSoundRow preferences={preferences} setPreference={setPreference} />
+            <Row title="Desktop notifications" description="Alerts when a chat finishes or needs you.">
               <Toggle
                 aria-label="Desktop notifications"
                 data-pref="notifications"
@@ -278,6 +268,8 @@ export function PreferencesPage({ preferences, setPreference }: PageProps) {
             </Row>
           </Card>
         </Section>
+
+        <AdvancedSection preferences={preferences} setPreference={setPreference} />
       </Pages>
     </>
   );

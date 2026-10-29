@@ -94,7 +94,7 @@ export type ChatState = {
   /** Project keys with a run in progress. */
   busyKeys?: string[];
 };
-export type ChatSummary = { id: string; title: string; created: number; count: number; branch?: string; busy?: boolean };
+export type ChatSummary = { id: string; title: string; created: number; count: number; branch?: string; /** Worktree folder (absent when the chat shares the repository root). */ root?: string; busy?: boolean };
 export type WorkspaceActions = Partial<
   Record<"openDesign" | "saveDesign" | "saveDesignAs" | "gitStatus" | "createWorktree" | "livePreview" | "captureApp" | "exportPDF", () => void>
 >;

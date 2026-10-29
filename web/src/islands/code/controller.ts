@@ -3,6 +3,7 @@
 // root when it is not a committed git repository); quick chats have no repository. Exposed as window.codeWorkspace
 // for the chat island and legacy scripts.
 import { useSyncExternalStore } from "react";
+import type { ChatSummary } from "../chat/store";
 import { desktop, errorMessage, setStatus, workspace, type Repository } from "./api";
 
 type Store = { repositories: Repository[]; loaded: boolean; pending: boolean };
@@ -90,6 +91,22 @@ async function createChat(repository?: Repository | null) {
 
 export const newQuickChat = () => newChat(null);
 
+/** Folder a chat works in: its own worktree, else the repository root (several chats can share one). */
+export const chatFolder = (chat: ChatSummary, key: string) => chat.root ?? key;
+
+/** Chat tabs: a new chat in the same worktree as the current chat (no new worktree is created). */
+export function newTab() {
+  return guard(async () => {
+    const ws = workspace();
+    const state = ws?.getState();
+    const repo = state ? repositoryByKey(state.projectKey) : null;
+    const current = state?.conversationId ? ws?.chatSummaries?.(state.projectKey).find((c) => c.id === state.conversationId) : null;
+    if (!ws || !repo || !current) return newChat();
+    ws.createChat?.({ repoId: repo.id, worktree: current.root ? { path: current.root, branch: current.branch ?? null } : null });
+    setStatus(current.branch ? `New tab on ${current.branch}` : `New tab in ${repo.name}`);
+  });
+}
+
 /** Open a chat of a repository (or of the quick chats). */
 export function openChat(key: string, chatId: string) {
   const ws = workspace();
@@ -173,14 +190,16 @@ export function archiveChat(key: string, chatId: string) {
     const chat = ws.chatSummaries?.(key).find((c) => c.id === chatId);
     if (!chat) return;
     if (chat.busy) throw Error("Stop the chat before archiving it");
+    // Chat tabs share a worktree: keep it while another chat still works in it.
+    const shared = (ws.chatSummaries?.(key) ?? []).some((c) => c.id !== chatId && !!chat.root && c.root === chat.root);
     if (
       !window.confirm(
-        `Archive “${chat.title}”?${chat.branch ? ` Its worktree is removed; branch ${chat.branch} is kept.` : ""}`,
+        `Archive “${chat.title}”?${chat.branch && !shared ? ` Its worktree is removed; branch ${chat.branch} is kept.` : ""}`,
       )
     )
       return;
     const repo = repositoryByKey(key);
-    if (repo && chat.branch) {
+    if (repo && chat.branch && !shared) {
       try {
         await desktop()?.repositories?.removeChatWorktree({ repoId: repo.id, chatId });
       } catch (error) {

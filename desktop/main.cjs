@@ -16,6 +16,7 @@ const {registerAgentRuntime}=require('./agent-runtime.cjs'); // agent chat runti
 const entry=path.join(__dirname,'../web/index.html');
 let primaryRuntime=null,repositories=null; // agent runtime of the latest editor window (serves ask_agent)
 app.setName('Verynize');
+require('./app-preferences.cjs').attachDeepLinks(app); // verynize:// design links (Settings › Preferences › Advanced)
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   // Design preferences: one file shared by the agent persona (agent-runtime.cjs) and the MCP tools.
@@ -38,6 +39,8 @@ app.whenReady().then(() => {
     registerFigma(handle,win);
     registerRendering(handle,win);
     registerAgentAuth(handle,win);
+    // Settings › Preferences (desktop/app-preferences.cjs): soundChoose/soundRead/soundClear, linksReady/linksSetEnabled, worktreeLineStats.
+    require('./app-preferences.cjs').registerAppPreferences(handle,win,{app,dialog,registry:repositories,userData:app.getPath('userData')});
     handle('openExternal',value=>{const url=new URL(value);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('Only HTTP and HTTPS links are supported');return shell.openExternal(url.href);});
     let lastNotification=0;
     handle('notifyTask',options=>{if(!options||typeof options.title!=='string'||typeof options.body!=='string')throw Error('Invalid notification');if(Date.now()-lastNotification<3000||!Notification.isSupported())return false;lastNotification=Date.now();new Notification({title:options.title.slice(0,120),body:options.body.slice(0,300)}).show();return true;});

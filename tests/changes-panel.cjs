@@ -101,6 +101,17 @@ process.exit(2);
     await page.keyboard.press('Escape');
     await panel.waitFor({ state: 'detached' });
     assert.match(await button.textContent(), /No changes/);
-    console.log('PASS changes panel: agent-turn refresh, diff, discard confirm, commit, publish, pull request');
+    assert.equal(await page.locator('#changes-pr-button').count(), 0, 'the pull request replaces the changes only when preferred');
+
+    // Preferences › Advanced › Open the side panel on the pull request: the header shows the PR; changes stay one click away.
+    await page.evaluate(() => window.appPreferences.set({ openPullRequest: true }));
+    await page.locator('#changes-pr-button').waitFor({ timeout: 15000 });
+    assert.match(await page.locator('#changes-pr-button').textContent(), /#12 Hero section.*Open/);
+    await page.locator('#changes-button').click();
+    await page.locator('#changes-panel').waitFor();
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.appPreferences.set({ openPullRequest: false }));
+    await page.locator('#changes-pr-button').waitFor({ state: 'detached' });
+    console.log('PASS changes panel: agent-turn refresh, diff, discard confirm, commit, publish, pull request, pull request side panel preference');
   } finally { await app.close(); await fs.rm(root, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

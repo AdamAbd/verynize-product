@@ -31,6 +31,8 @@ const {execFileSync}=require('node:child_process');
  await fs.writeFile(path.join(app,'package.json'),JSON.stringify({name:'verynize',productName:'Verynize',version,main:'desktop/main.cjs',type:'module'}));
  const plist=path.join(target,'Contents/Info.plist');
  for(const [key,value]of Object.entries({CFBundleName:'Verynize',CFBundleDisplayName:'Verynize',CFBundleIdentifier:'local.verynize.desktop',CFBundleShortVersionString:version,CFBundleVersion:version}))execFileSync('/usr/bin/plutil',['-replace',key,'-string',value,plist]);
+ // verynize:// design links (desktop/app-preferences.cjs): macOS only routes schemes declared in Info.plist.
+ execFileSync('/usr/bin/plutil',['-replace','CFBundleURLTypes','-json',JSON.stringify([{CFBundleURLName:'local.verynize.design-link',CFBundleURLSchemes:['verynize']}]),plist]);
  execFileSync('/usr/bin/codesign',['--force','--deep','--sign','-',target],{stdio:'pipe'});
  console.log(target);
 })().catch(error=>{console.error(error.message);process.exitCode=1});

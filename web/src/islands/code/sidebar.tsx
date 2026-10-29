@@ -27,8 +27,10 @@ import { cn } from "@/lib/utils";
 import { ChatMenu, ChatMenuContent, ChatMenuItem, ChatMenuSeparator, ChatMenuTrigger } from "../chat/menu";
 import type { ChatState, ChatSummary } from "../chat/store";
 import { workspace, type Repository } from "./api";
-import { addRepository, archiveChat, archiveRepository, newChat, newQuickChat, openChat, openRepository, QUICK, useRepositories } from "./controller";
+import { usePreference } from "../settings/preference-store";
+import { addRepository, archiveChat, archiveRepository, chatFolder, newChat, newQuickChat, openChat, openRepository, QUICK, useRepositories } from "./controller";
 import { openMemory } from "./editor-state";
+import { useLineStats, type LineStat } from "./line-stats";
 import { useNextSteps } from "./next-steps";
 
 const iconButton =
@@ -99,7 +101,32 @@ function RunningDot() {
   );
 }
 
-function ChatRow({ chat, chatKey, active, quick }: { chat: ChatSummary; chatKey: string; active: boolean; quick: boolean }) {
+function LineChanges({ stat }: { stat?: LineStat }) {
+  if (!stat || (!stat.added && !stat.removed)) return null;
+  return (
+    <span data-line-changes className="flex shrink-0 items-center gap-1 text-xs tabular-nums" title={`${stat.files} ${stat.files === 1 ? "file" : "files"} changed`}>
+      <span className="text-diff-add">+{stat.added}</span>
+      <span className="text-diff-remove">−{stat.removed}</span>
+    </span>
+  );
+}
+
+function ChatRow({
+  chat,
+  chatKey,
+  active,
+  quick,
+  stat,
+  tabs = 1,
+}: {
+  chat: ChatSummary;
+  chatKey: string;
+  active: boolean;
+  quick: boolean;
+  stat?: LineStat;
+  /** Chats sharing this worktree when chat tabs are on (the row stands for all of them). */
+  tabs?: number;
+}) {
   const entries: MenuEntry[] = [
     { label: "Open chat", icon: <MessageSquareIcon />, run: () => openChat(chatKey, chat.id) },
     { label: "Archive chat", icon: <ArchiveIcon />, run: () => void archiveChat(chatKey, chat.id), separator: true },
@@ -121,6 +148,12 @@ function ChatRow({ chat, chatKey, active, quick }: { chat: ChatSummary; chatKey:
             <GitBranchIcon className={cn("size-3.5 shrink-0", active ? "text-primary-text" : "text-muted-foreground")} />
           )}
           <span className="min-w-0 flex-1 truncate text-left">{chat.title}</span>
+          <LineChanges stat={stat} />
+          {tabs > 1 && (
+            <span data-tab-count={tabs} title={`${tabs} tabs`} className="shrink-0 rounded-sm bg-muted px-1 text-xs text-muted-foreground tabular-nums">
+              {tabs}
+            </span>
+          )}
           {chat.busy && <RunningDot />}
         </button>
       </RowMenus>
@@ -133,6 +166,26 @@ function RepositoryGroup({ repo, state }: { repo: Repository; state: ChatState }
   const chats = ws?.chatSummaries?.(repo.root) ?? [];
   const current = state.projectKey === repo.root;
   const actions = ws?.actions;
+  const chatTabs = usePreference("chatTabs") === true;
+  const lineChanges = usePreference("lineChanges") === true;
+  const stats = useLineStats(
+    chats.map((chat) => chatFolder(chat, repo.root)),
+    lineChanges,
+  );
+  const activeId = current ? state.conversationId : null;
+  // Chat tabs: one row per worktree, standing for the open (else most recent) chat in it.
+  const rows: { chat: ChatSummary; tabs: number; busy: boolean }[] = [];
+  if (chatTabs) {
+    const groups = new Map<string, ChatSummary[]>();
+    for (const chat of chats) {
+      const folder = chatFolder(chat, repo.root);
+      groups.set(folder, [...(groups.get(folder) ?? []), chat]);
+    }
+    for (const group of groups.values()) {
+      const shown = group.find((c) => c.id === activeId) ?? group[0];
+      rows.push({ chat: shown, tabs: group.length, busy: group.some((c) => c.busy) });
+    }
+  } else rows.push(...chats.map((chat) => ({ chat, tabs: 1, busy: !!chat.busy })));
   const entries: MenuEntry[] = [
     { label: "New chat", icon: <SquarePenIcon />, run: () => void newChat(repo) },
     { label: "Project memory", icon: <FolderOpenIcon />, run: () => void openRepositoryThen(repo, openMemory), separator: true },
@@ -159,8 +212,16 @@ function RepositoryGroup({ repo, state }: { repo: Repository; state: ChatState }
       </div>
       {chats.length > 0 && (
         <ul aria-label={`${repo.name} chats`} className="m-0 flex list-none flex-col p-0">
-          {chats.map((chat) => (
-            <ChatRow key={chat.id} chat={chat} chatKey={repo.root} active={current && chat.id === state.conversationId} quick={false} />
+          {rows.map(({ chat, tabs, busy }) => (
+            <ChatRow
+              key={chat.id}
+              chat={busy && !chat.busy ? { ...chat, busy } : chat}
+              chatKey={repo.root}
+              active={chat.id === activeId}
+              quick={false}
+              stat={lineChanges ? stats[chatFolder(chat, repo.root)] : undefined}
+              tabs={tabs}
+            />
           ))}
         </ul>
       )}

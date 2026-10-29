@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { ChangesButton } from "../chat/changes-panel";
 import type { ChatState } from "../chat/store";
 import { workspace } from "./api";
+import { ChatTabs } from "./chat-tabs";
 import { refresh, repositoryByKey, QUICK } from "./controller";
 import { FileEditor } from "./editor";
 import { rootChanged, useOpenFile } from "./editor-state";
@@ -137,6 +138,7 @@ export function CodeWorkspace({ state }: { state: ChatState }) {
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
             <Toolbar state={state} panelOpen={panelOpen} onTogglePanel={togglePanel} />
+            {!file && <ChatTabs state={state} />}
             {file && <FileEditor file={file} />}
             <div ref={chatHost} id="code-chat-host" className={cn("flex min-h-0 flex-1 flex-col", file && "hidden")} />
           </div>

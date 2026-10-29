@@ -3,6 +3,7 @@
 import { mountIsland, ensureContainer } from "@/lib/mount";
 import { Toaster } from "@/components/ui/sonner";
 import { attachSettings } from "./settings/api";
+import { startPreferenceRuntime } from "./settings/preference-runtime";
 import { SettingsScreen } from "./settings/SettingsScreen";
 import { DialogEnhancer, ExportToasts } from "./settings/dialogs";
 import "./settings/settings.css";
@@ -22,6 +23,7 @@ mountIsland(
   "settings",
   () => {
     attachSettings();
+    startPreferenceRuntime();
     return ensureContainer("bd-settings-root");
   },
   () => <Island />,
