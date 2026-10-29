@@ -143,6 +143,30 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     await page.waitForFunction(() => /No dev server command found/.test(document.getElementById('project-status').textContent));
     assert.equal((await page.evaluate(() => window.desktop.devServer.status())).root, first.chatRoot);
 
+    // 7b. Preferences › Advanced: line changes per worktree in the sidebar, and chat tabs sharing one worktree.
+    assert.equal(await page.locator('[data-line-changes]').count(), 0, 'line changes are off by default');
+    assert.equal(await page.locator('#code-chat-tabs').count(), 0, 'chat tabs are off by default');
+    await page.evaluate(() => window.appPreferences.set({ lineChanges: true }));
+    await page.waitForFunction(id => document.querySelector(`[data-chat-id="${id}"] [data-line-changes]`)?.textContent === '+1−1', first.conversationId);
+    await page.evaluate(() => window.appPreferences.set({ chatTabs: true }));
+    await page.locator(`#code-chat-tabs [data-chat-tab="${first.conversationId}"][aria-selected="true"]`).waitFor();
+    await page.locator('#code-new-tab').click();
+    await page.waitForFunction(([id, root]) => { const s = window.agentWorkspace.getState(); return s.conversationId !== id && s.chatRoot === root && s.activeRoot === root; }, [first.conversationId, first.chatRoot]);
+    const tab = await state();
+    assert.equal(tab.branch, first.branch, 'a tab works on the same branch');
+    assert.equal(await page.locator('#code-chat-tabs [data-chat-tab]').count(), 2);
+    assert.equal(await page.locator('[data-repository="site"] [data-chat-id]').count(), 2, 'one sidebar row per worktree');
+    assert.equal(await page.locator(`[data-chat-id="${tab.conversationId}"] [data-tab-count="2"]`).count(), 1);
+    await page.locator(`#code-chat-tabs [data-chat-tab="${first.conversationId}"]`).click();
+    await page.waitForFunction(id => window.agentWorkspace.getState().conversationId === id, first.conversationId);
+    page.once('dialog', dialog => dialog.accept());
+    await page.locator(`#code-chat-tabs [data-chat-tab="${tab.conversationId}"] + button`).click();
+    await page.waitForFunction(() => document.querySelectorAll('#code-chat-tabs [data-chat-tab]').length === 1);
+    await fs.access(first.chatRoot); // the shared worktree stays while a chat still uses it
+    await page.evaluate(() => window.appPreferences.set({ chatTabs: false, lineChanges: false }));
+    await page.locator('#code-chat-tabs').waitFor({ state: 'detached' });
+    assert.equal(await page.locator('[data-line-changes]').count(), 0);
+
     if (process.env.CODE_WORKSPACE_SHOT) {
       await page.locator(`#code-file-tree [data-path="src"]`).click();
       await page.mouse.move(700, 500);
@@ -169,6 +193,6 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     await page.waitForFunction(() => document.querySelectorAll('[data-repository="site"] [data-chat-id]').length === 1);
     await assert.rejects(fs.access(second.chatRoot));
     assert.ok(git(repo, 'branch', '--list', second.branch).includes(second.branch));
-    console.log('PASS code workspace: in-window mode switch, add repository, per-chat worktrees and branches, file tree, edit/save in worktree, agent cwd, chat switching, quick chats, persistence, archive');
+    console.log('PASS code workspace: in-window mode switch, add repository, per-chat worktrees and branches, file tree, edit/save in worktree, agent cwd, chat switching, quick chats, line changes, chat tabs, persistence, archive');
   } finally { await app.close(); await fs.rm(root, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
