@@ -6,7 +6,6 @@ import { PanelLeftIcon, PlusIcon } from "@/components/icons";
 import { activePage, legacy, legacySet, useBodyClass, useDesign } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { run } from "./legacy";
-import { toggleBodyClass } from "./hooks";
 import { Tip } from "./tip";
 
 const iconButton =
@@ -19,7 +18,8 @@ export function TitleBar() {
   const doc = useDesign();
   const filesView = useBodyClass("files-view");
   const chatOpen = useBodyClass("agent-chat-open");
-  const leftCollapsed = useBodyClass("left-collapsed");
+  // The sidebar toggle shows the repositories / chats list (code island, `body.chat-sidebar-open`), not the layers.
+  const chatSidebarOpen = useBodyClass("chat-sidebar-open");
   // Code mode (web/src/islands/code): the bar turns transparent over the code workspace and hosts its breadcrumb.
   const codeMode = useBodyClass("code-mode");
   const codeSidebarCollapsed = useBodyClass("code-sidebar-collapsed");
@@ -52,13 +52,28 @@ export function TitleBar() {
       data-chrome-bar=""
       className={cn(
         "relative z-40 flex h-chrome shrink-0 items-center border-b pr-2 text-xs select-none",
-        codeMode ? "border-transparent bg-transparent pl-0" : chatOpen ? "border-divider bg-background pl-chat" : "border-divider bg-background pl-traffic",
+        codeMode
+          ? "border-transparent bg-transparent pl-0"
+          : chatOpen
+            ? "border-divider bg-background pl-chat"
+            : chatSidebarOpen
+              ? "border-divider bg-background pl-2"
+              : "border-divider bg-background pl-traffic",
       )}
     >
       {codeMode && (
         <>
-          <div className={cn("flex h-full shrink-0 items-center pl-traffic", !codeSidebarCollapsed && "w-code-sidebar")}>
-            <Tip label={codeSidebarCollapsed ? "Show sidebar" : "Hide sidebar"} shortcut="⌘B" side="bottom">
+          <div
+            className={cn(
+              "flex h-full shrink-0 items-center pl-traffic",
+              !codeSidebarCollapsed && "w-code-sidebar",
+            )}
+          >
+            <Tip
+              label={codeSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+              shortcut="⌘B"
+              side="bottom"
+            >
               <button
                 type="button"
                 id="code-sidebar-toggle"
@@ -76,18 +91,20 @@ export function TitleBar() {
       )}
       {!chatOpen && (
         <span className={cn("contents", codeMode && "hidden")}>
-          <Tip label={leftCollapsed ? "Show sidebar" : "Hide sidebar"} side="bottom">
-            <button
-              type="button"
-              id="chrome-sidebar"
-              aria-label="Toggle sidebar"
-              aria-pressed={!leftCollapsed}
-              className={cn(iconButton, "ml-0.5")}
-              onClick={() => toggleBodyClass("left-collapsed")}
-            >
-              <PanelLeftIcon />
-            </button>
-          </Tip>
+          {!chatSidebarOpen && (
+            <Tip label="Show sidebar" side="bottom">
+              <button
+                type="button"
+                id="chrome-sidebar"
+                aria-label="Show sidebar"
+                aria-pressed={false}
+                className={cn(iconButton, "ml-0.5")}
+                onClick={() => document.body.classList.add("chat-sidebar-open")}
+              >
+                <PanelLeftIcon />
+              </button>
+            </Tip>
+          )}
           <Tip label="Chat" shortcut="⌘L" side="bottom">
             <button
               type="button"
@@ -96,7 +113,9 @@ export function TitleBar() {
               aria-pressed={chatOpen}
               className={cn(iconButton, "ml-0.5", chatOpen && "bg-accent text-foreground")}
               onClick={() => {
-                const workspace = window.agentWorkspace as { openChat?: () => void; closeChat?: () => void } | undefined;
+                const workspace = window.agentWorkspace as
+                  | { openChat?: () => void; closeChat?: () => void }
+                  | undefined;
                 if (document.body.classList.contains("agent-chat-open")) workspace?.closeChat?.();
                 else workspace?.openChat?.();
               }}
@@ -108,7 +127,10 @@ export function TitleBar() {
         </span>
       )}
 
-      <nav aria-label="Open files" className={cn("flex min-w-0 items-center gap-1.5", codeMode && "hidden")}>
+      <nav
+        aria-label="Open files"
+        className={cn("flex min-w-0 items-center gap-1.5", codeMode && "hidden")}
+      >
         <button
           type="button"
           id="files-home"
@@ -125,7 +147,8 @@ export function TitleBar() {
           aria-current={filesView ? undefined : "page"}
           className={cn(tab, "min-w-0 shrink gap-0 pr-2.5", !filesView && tabActive)}
           onClick={() => {
-            if (filesView) (window.fileLibrary as { showEditor?: () => void } | undefined)?.showEditor?.();
+            if (filesView)
+              (window.fileLibrary as { showEditor?: () => void } | undefined)?.showEditor?.();
           }}
         >
           <File className="mr-1.5" />
@@ -158,11 +181,21 @@ export function TitleBar() {
       <div className={cn("min-w-4 self-stretch", codeMode ? "shrink-0" : "flex-1")} />
 
       <Tip label="Search" shortcut="⌘K" side="bottom">
-        <button type="button" id="shell-search" aria-label="Search files" className={iconButton} onClick={() => run("shell-search")}>
+        <button
+          type="button"
+          id="shell-search"
+          aria-label="Search files"
+          className={iconButton}
+          onClick={() => run("shell-search")}
+        >
           <Search />
         </button>
       </Tip>
-      <div role="radiogroup" aria-label="Mode" className="ml-1 flex h-7 shrink-0 items-center rounded-full bg-muted p-0.5">
+      <div
+        role="radiogroup"
+        aria-label="Mode"
+        className="ml-1 flex h-7 shrink-0 items-center rounded-full bg-muted p-0.5"
+      >
         <Tip label="Design" side="bottom">
           <button
             type="button"
@@ -173,7 +206,13 @@ export function TitleBar() {
               "flex size-6 items-center justify-center rounded-full text-foreground-3 outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3.5",
               !codeMode && "bg-accent text-foreground",
             )}
-            onClick={() => (window.agentWorkspace as unknown as { setCodeMode?: (on: boolean) => void } | undefined)?.setCodeMode?.(false)}
+            onClick={() =>
+              (
+                window.agentWorkspace as unknown as
+                  | { setCodeMode?: (on: boolean) => void }
+                  | undefined
+              )?.setCodeMode?.(false)
+            }
           >
             <Palette />
           </button>
@@ -188,7 +227,13 @@ export function TitleBar() {
               "flex size-6 items-center justify-center rounded-full text-foreground-3 outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3.5",
               codeMode && "bg-accent text-foreground",
             )}
-            onClick={() => (window.agentWorkspace as unknown as { setCodeMode?: (on: boolean) => void } | undefined)?.setCodeMode?.(true)}
+            onClick={() =>
+              (
+                window.agentWorkspace as unknown as
+                  | { setCodeMode?: (on: boolean) => void }
+                  | undefined
+              )?.setCodeMode?.(true)
+            }
           >
             <Braces />
           </button>

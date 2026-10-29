@@ -45,37 +45,47 @@ export async function refresh() {
   return repositories;
 }
 
-export const repositoryByKey = (key: string) => store.repositories.find((r) => r.root === key) ?? null;
+export const repositoryByKey = (key: string) =>
+  store.repositories.find((r) => r.root === key) ?? null;
 
 /** Create a chat in `repository` with its own worktree, then make it the active chat. */
 export function newChat(repository?: Repository | null) {
   return guard(async () => {
-    const ws = workspace();
-    const api = desktop()?.repositories;
-    const key = ws?.getState().projectKey ?? QUICK;
-    const repo = repository === undefined ? repositoryByKey(key) : repository;
-    if (!ws) return;
-    if (repository === undefined && !repo && key !== QUICK) {
-      // A project opened outside the repository list: plain chat in its root.
-      ws.createChat?.({});
-      return;
-    }
-    if (!repo || !api) {
-      ws.switchProject?.(QUICK, "", { create: false });
-      ws.createChat?.({});
-      return;
-    }
-    emit({ pending: true });
-    try {
-      const id = crypto.randomUUID();
-      const worktree = await api.createChatWorktree({ repoId: repo.id, chatId: id });
-      ws.switchProject?.(repo.root, repo.name, { create: false });
-      ws.createChat?.({ id, repoId: repo.id, worktree: worktree.shared ? null : { path: worktree.path, branch: worktree.branch } });
-      setStatus(worktree.shared ? `New chat in ${repo.name}` : `New chat on ${worktree.branch}`);
-    } finally {
-      emit({ pending: false });
-    }
+    await createChat(repository);
+    showDock();
   });
+}
+
+async function createChat(repository?: Repository | null) {
+  const ws = workspace();
+  const api = desktop()?.repositories;
+  const key = ws?.getState().projectKey ?? QUICK;
+  const repo = repository === undefined ? repositoryByKey(key) : repository;
+  if (!ws) return;
+  if (repository === undefined && !repo && key !== QUICK) {
+    // A project opened outside the repository list: plain chat in its root.
+    ws.createChat?.({});
+    return;
+  }
+  if (!repo || !api) {
+    ws.switchProject?.(QUICK, "", { create: false });
+    ws.createChat?.({});
+    return;
+  }
+  emit({ pending: true });
+  try {
+    const id = crypto.randomUUID();
+    const worktree = await api.createChatWorktree({ repoId: repo.id, chatId: id });
+    ws.switchProject?.(repo.root, repo.name, { create: false });
+    ws.createChat?.({
+      id,
+      repoId: repo.id,
+      worktree: worktree.shared ? null : { path: worktree.path, branch: worktree.branch },
+    });
+    setStatus(worktree.shared ? `New chat in ${repo.name}` : `New chat on ${worktree.branch}`);
+  } finally {
+    emit({ pending: false });
+  }
 }
 
 export const newQuickChat = () => newChat(null);
@@ -85,6 +95,12 @@ export function openChat(key: string, chatId: string) {
   const ws = workspace();
   const repo = repositoryByKey(key);
   ws?.switchProject?.(key, repo?.name ?? "", { select: chatId, create: key === QUICK });
+  showDock();
+}
+
+/** Outside Code mode the chat lives in the design dock: picking or creating a chat from the sidebar opens it. */
+function showDock() {
+  if (!document.body.classList.contains("code-mode")) workspace()?.openChat?.();
 }
 
 /** Show a repository: its latest chat, or a new chat when it has none. */
@@ -105,11 +121,23 @@ export function addRepository(kind: "local" | "new" | "clone") {
     else {
       let repository: string | undefined;
       if (kind === "clone") {
-        repository = (await window.askText?.("HTTPS GitHub repository URL", "https://github.com/"))?.trim() || undefined;
+        repository =
+          (await window.askText?.("HTTPS GitHub repository URL", "https://github.com/"))?.trim() ||
+          undefined;
         if (!repository) return;
       }
-      const suggested = repository ? repository.replace(/\.git$/, "").split("/").pop() || "my-project" : "my-project";
-      const name = (await window.askText?.(kind === "clone" ? "Folder name for the clone" : "Repository name", suggested))?.trim();
+      const suggested = repository
+        ? repository
+            .replace(/\.git$/, "")
+            .split("/")
+            .pop() || "my-project"
+        : "my-project";
+      const name = (
+        await window.askText?.(
+          kind === "clone" ? "Folder name for the clone" : "Repository name",
+          suggested,
+        )
+      )?.trim();
       if (!name) return;
       setStatus(kind === "clone" ? "Cloning repository…" : "Creating repository…");
       repo = await api.create({ name, ...(repository ? { repository } : {}) });
@@ -125,8 +153,12 @@ export function addRepository(kind: "local" | "new" | "clone") {
 export function archiveRepository(repo: Repository) {
   return guard(async () => {
     const ws = workspace();
-    if ((ws?.chatSummaries?.(repo.root) ?? []).some((c) => c.busy)) throw Error("Stop the running chats in this repository first");
-    if (!window.confirm(`Remove ${repo.name} from the list? Files and chat worktrees stay on disk.`)) return;
+    if ((ws?.chatSummaries?.(repo.root) ?? []).some((c) => c.busy))
+      throw Error("Stop the running chats in this repository first");
+    if (
+      !window.confirm(`Remove ${repo.name} from the list? Files and chat worktrees stay on disk.`)
+    )
+      return;
     await desktop()?.repositories?.archive(repo.id);
     if (ws?.getState().projectKey === repo.root) ws.switchProject?.(QUICK, "", { create: true });
     await refresh();
@@ -141,14 +173,24 @@ export function archiveChat(key: string, chatId: string) {
     const chat = ws.chatSummaries?.(key).find((c) => c.id === chatId);
     if (!chat) return;
     if (chat.busy) throw Error("Stop the chat before archiving it");
-    if (!window.confirm(`Archive “${chat.title}”?${chat.branch ? ` Its worktree is removed; branch ${chat.branch} is kept.` : ""}`)) return;
+    if (
+      !window.confirm(
+        `Archive “${chat.title}”?${chat.branch ? ` Its worktree is removed; branch ${chat.branch} is kept.` : ""}`,
+      )
+    )
+      return;
     const repo = repositoryByKey(key);
     if (repo && chat.branch) {
       try {
         await desktop()?.repositories?.removeChatWorktree({ repoId: repo.id, chatId });
       } catch (error) {
         if (!/uncommitted/.test(errorMessage(error))) throw error;
-        if (!window.confirm("This chat has uncommitted changes in its worktree. Delete them and archive anyway?")) return;
+        if (
+          !window.confirm(
+            "This chat has uncommitted changes in its worktree. Delete them and archive anyway?",
+          )
+        )
+          return;
         await desktop()?.repositories?.removeChatWorktree({ repoId: repo.id, chatId, force: true });
       }
     }

@@ -233,7 +233,8 @@ export function VariablesSection({
       id="insp-variables"
       className={cn(
         "flex min-h-0 shrink-0 flex-col border-b border-divider",
-        open && grow && "flex-1",
+        // Accordion: an open Variables list keeps its own height and only shrinks (and scrolls) when space runs out.
+        open && grow && "shrink",
         open && !grow && "max-h-1/2",
       )}
     >

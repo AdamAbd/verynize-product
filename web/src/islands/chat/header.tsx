@@ -1,6 +1,21 @@
 // Dock header (29, 33, 34): project / chat switcher on the left, "Start preview" split button on the right.
-import { CameraIcon, SparklesIcon, ChevronDownIcon, ChevronsUpDownIcon, FileDownIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, GitForkIcon, LaptopIcon, MessageSquareIcon, ChevronLeftIcon, PlayIcon } from "lucide-react";
+import {
+  CameraIcon,
+  SparklesIcon,
+  ChevronDownIcon,
+  ChevronsUpDownIcon,
+  FileDownIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  GitBranchIcon,
+  GitForkIcon,
+  LaptopIcon,
+  MessageSquareIcon,
+  ChevronLeftIcon,
+  PlayIcon,
+} from "lucide-react";
 import { PanelLeftIcon, PlusIcon } from "@/components/icons";
+import { useBodyClass } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import {
   ChatMenu,
@@ -21,12 +36,17 @@ import { workspace, type ChatState } from "./store";
 /** Parallel chats: the workspace reports which conversations are running (busyChats); switching stays enabled. */
 const parallel = (state: ChatState) => Array.isArray(state.busyChats);
 const running = (state: ChatState, id: string | null) =>
-  !!id && (parallel(state) ? state.busyChats!.includes(id) : state.busy && id === state.conversationId);
+  !!id &&
+  (parallel(state) ? state.busyChats!.includes(id) : state.busy && id === state.conversationId);
 
 /** Small pulsing dot marking a conversation whose agent is running. */
 function RunningDot({ className }: { className?: string }) {
   return (
-    <span role="img" aria-label="Running" className={cn("relative flex size-1.5 shrink-0", className)}>
+    <span
+      role="img"
+      aria-label="Running"
+      className={cn("relative flex size-1.5 shrink-0", className)}
+    >
       <span className="absolute inset-0 animate-ping rounded-full bg-primary-text opacity-60 motion-reduce:animate-none" />
       <span className="relative size-1.5 rounded-full bg-primary-text" />
     </span>
@@ -47,7 +67,9 @@ function ChatList({ state, createLabel }: { state: ChatState; createLabel: strin
         >
           <MessageSquareIcon />
           <span className="min-w-0 truncate">{chat.title}</span>
-          {running(state, chat.id) && <RunningDot className={chat.id === state.conversationId ? "ml-auto" : "mr-1 ml-auto"} />}
+          {running(state, chat.id) && (
+            <RunningDot className={chat.id === state.conversationId ? "ml-auto" : "mr-1 ml-auto"} />
+          )}
         </ChatMenuItem>
       ))}
       <ChatMenuSeparator />
@@ -86,7 +108,10 @@ function Switcher({ state }: { state: ChatState }) {
           )}
           <span className="truncate">{title}</span>
           {elsewhere > 0 && (
-            <span title={`${elsewhere} other ${elsewhere === 1 ? "chat is" : "chats are"} running`} className="flex">
+            <span
+              title={`${elsewhere} other ${elsewhere === 1 ? "chat is" : "chats are"} running`}
+              className="flex"
+            >
               <RunningDot />
             </span>
           )}
@@ -142,7 +167,8 @@ function Switcher({ state }: { state: ChatState }) {
 }
 
 function PreviewButton() {
-  const segment = "flex h-6.5 items-center text-base leading-5.25 text-foreground-2 hover:bg-muted data-[state=open]:bg-muted";
+  const segment =
+    "flex h-6.5 items-center text-base leading-5.25 text-foreground-2 hover:bg-muted data-[state=open]:bg-muted";
   return (
     <div className="flex shrink-0 items-center rounded-md border border-card-border bg-background">
       <button
@@ -155,7 +181,10 @@ function PreviewButton() {
       </button>
       <span className="h-6.5 w-px bg-card-border" />
       <ChatMenu modal={false}>
-        <ChatMenuTrigger aria-label="Preview options" className={cn(segment, "w-5.5 justify-center rounded-r-md")}>
+        <ChatMenuTrigger
+          aria-label="Preview options"
+          className={cn(segment, "w-5.5 justify-center rounded-r-md")}
+        >
           <ChevronDownIcon className="size-3 text-muted-foreground" />
         </ChatMenuTrigger>
         <ChatMenuContent align="end" className="w-52">
@@ -196,24 +225,31 @@ function PreviewButton() {
 
 export function DockHeader({ state }: { state: ChatState }) {
   const attached = state.projectKey !== "unattached";
+  // With the repositories / chats sidebar open (code/design-sidebar.tsx) the dock sits right of it: no traffic-light inset.
+  const sidebarOpen = useBodyClass("chat-sidebar-open") && !state.codeMode;
   const iconButton =
     "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground-2";
   return (
     <>
       {/* Top row shares the window title bar (chrome island leaves the left 499px to the dock): traffic-light inset. */}
-      <div className={cn(hook.drag, "flex h-10 shrink-0 items-center gap-1 border-b border-border bg-settings pr-1.5 pl-20")}>
-        <button
-          type="button"
-          aria-label="Show layers"
-          title="Show layers"
-          className={iconButton}
-          onClick={() => {
-            document.body.classList.remove("left-collapsed");
-            workspace()?.closeChat();
-          }}
-        >
-          <PanelLeftIcon className="size-4" />
-        </button>
+      <div
+        className={cn(
+          hook.drag,
+          "flex h-10 shrink-0 items-center gap-1 border-b border-border bg-settings pr-1.5",
+          sidebarOpen ? "pl-1.5" : "pl-20",
+        )}
+      >
+        {!sidebarOpen && (
+          <button
+            type="button"
+            aria-label="Show sidebar"
+            title="Show sidebar"
+            className={iconButton}
+            onClick={() => document.body.classList.add("chat-sidebar-open")}
+          >
+            <PanelLeftIcon className="size-4" />
+          </button>
+        )}
         <Switcher state={state} />
         <span className="flex-1" />
         <button
