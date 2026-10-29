@@ -174,6 +174,35 @@ class GitChanges {
     return { root: this.root, ...(await this.branchInfo(branch)), files: listed, totals, truncated: files.length > listed.length };
   }
 
+  /** Where this branch left the default branch: merge base of HEAD with origin/HEAD, main or master (null if none). */
+  async defaultBase() {
+    for (const ref of ['refs/remotes/origin/HEAD', 'refs/heads/main', 'refs/heads/master', 'refs/remotes/origin/main', 'refs/remotes/origin/master']) {
+      const result = await this.git(['merge-base', 'HEAD', ref]);
+      if (result.code === 0 && result.stdout.trim()) return { ref: ref.replace(/^refs\/(heads|remotes)\//, ''), oid: result.stdout.trim() };
+    }
+    return null;
+  }
+
+  /** Every file this branch changed since the default branch: its commits plus uncommitted and untracked files. */
+  async branchChanges() {
+    await this.ensureRepository();
+    const { branch, files } = await this.listFiles();
+    const base = branch.oid ? await this.defaultBase() : null;
+    const changed = new Map();
+    if (base) {
+      const tokens = (await this.gitOk(['diff', '--name-status', '-z', '--no-renames', '--no-ext-diff', base.oid, '--'])).toString().split('\0');
+      for (let i = 0; i + 1 < tokens.length; i += 2) {
+        const letter = tokens[i][0];
+        const status = letter === 'A' ? 'added' : letter === 'D' ? 'deleted' : letter === 'U' ? 'conflicted' : 'modified';
+        if (tokens[i + 1]) changed.set(tokens[i + 1], status);
+      }
+    }
+    // Uncommitted entries fill in what the base diff cannot see (untracked files, a branch with no base).
+    for (const file of files) if (!changed.has(file.path)) changed.set(file.path, file.status);
+    const list = [...changed].map(([path, status]) => ({ path, status }));
+    return { root: this.root, base: base?.ref ?? null, files: list.slice(0, MAX_FILES), truncated: list.length > MAX_FILES };
+  }
+
   async countUntracked(relative) {
     try {
       const target = path.join(this.root, relative);
@@ -359,6 +388,7 @@ function registerGitChanges(handle, { getProject }) {
   const at = async options => new GitChanges(await resolveRoot(getProject(), options?.root));
   const mutate = method => async (options = {}) => { const repo = await at(options); return serial(repo.root, () => method(repo, options)); };
   handle('gitChanges', async options => (await at(options)).summary());
+  handle('gitBranchChanges', async options => (await at(options)).branchChanges());
   handle('gitDiff', async options => (await at(options)).diff(options?.file));
   handle('gitCommit', mutate((repo, options) => repo.commit(options.message)));
   handle('gitDiscard', mutate((repo, options) => repo.discard(options.file)));

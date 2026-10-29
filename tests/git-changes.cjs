@@ -135,7 +135,7 @@ test('root containment: project root and its worktrees only', async () => {
     // IPC registration wires every handler through the root check.
     const handlers = {};
     registerGitChanges((name, fn) => (handlers[name] = fn), { getProject: () => project });
-    assert.deepEqual(Object.keys(handlers).sort(), ['gitChanges', 'gitCommit', 'gitCreatePullRequest', 'gitDiff', 'gitDiscard', 'gitPullRequest', 'gitPush']);
+    assert.deepEqual(Object.keys(handlers).sort(), ['gitBranchChanges', 'gitChanges', 'gitCommit', 'gitCreatePullRequest', 'gitDiff', 'gitDiscard', 'gitPullRequest', 'gitPush']);
     assert.equal((await handlers.gitChanges({ root: worktree.path })).branch, 'design/panel');
     await assert.rejects(handlers.gitCommit({ root: base, message: 'x' }), /not this project/);
   } finally {
@@ -202,6 +202,35 @@ process.exit(2);
     assert.equal((await repo.createPullRequest({})).existed, true);
     assert.deepEqual(calls.filter(c => c[1] === 'create').length, 1);
     assert.ok((await fs.readFile(log, 'utf8')).includes('"--fill"'));
+  } finally {
+    restoreEnv(saved);
+    await fs.rm(base, { recursive: true, force: true });
+  }
+});
+
+test('branch changes: commits since the default branch plus uncommitted and untracked files', async () => {
+  const { base, root } = await setup();
+  const saved = { ...process.env };
+  Object.assign(process.env, identity);
+  try {
+    const repo = new GitChanges(root);
+    // On main itself the merge base is HEAD, so all changes are the uncommitted ones.
+    await fs.writeFile(path.join(root, 'draft.txt'), 'draft\n');
+    assert.deepEqual(await repo.branchChanges(), { root, base: 'main', files: [{ path: 'draft.txt', status: 'untracked' }], truncated: false });
+    await fs.rm(path.join(root, 'draft.txt'));
+
+    git(root, 'checkout', '-b', 'verynize/finch');
+    await fs.writeFile(path.join(root, 'committed.css'), 'a{}\n');
+    await fs.rm(path.join(root, 'remove-me.txt'));
+    git(root, 'add', '--all');
+    git(root, 'commit', '-m', 'Branch work');
+    await fs.writeFile(path.join(root, 'index.html'), '<h1>Changed</h1>\n');
+    await fs.writeFile(path.join(root, 'new.txt'), 'new\n');
+
+    const all = await repo.branchChanges();
+    assert.equal(all.base, 'main');
+    assert.deepEqual(Object.fromEntries(all.files.map(f => [f.path, f.status])), { 'committed.css': 'added', 'index.html': 'modified', 'remove-me.txt': 'deleted', 'new.txt': 'untracked' });
+    assert.deepEqual((await repo.summary()).files.map(f => f.path).sort(), ['index.html', 'new.txt'], 'uncommitted stays the working tree only');
   } finally {
     restoreEnv(saved);
     await fs.rm(base, { recursive: true, force: true });

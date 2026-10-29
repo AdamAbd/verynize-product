@@ -185,14 +185,38 @@ async function write(file, text) {
     await page.waitForFunction(() => document.querySelectorAll('#chat-slash-commands [data-command]').length === 1);
     await page.locator('#project-prompt').press('Enter');
     assert.equal(await page.locator('#project-prompt').inputValue(), '/prompts:draftpr ');
+    assert.equal(await page.locator('[data-chat-command]').getAttribute('data-chat-command'), 'prompts:draftpr', 'the command shows as a badge');
     assert.equal(await page.locator('#chat-slash-commands').count(), 0, 'the list closes once a command is chosen');
     // Sending runs it: the Codex custom prompt is expanded with its arguments.
-    await page.locator('#project-prompt').pressSequentially('Launch "the hero"');
-    await page.locator('#project-run').click();
+    // Text can go before and after the badge; sending moves the command to the front.
+    await page.locator('#project-prompt').press('Home');
+    await page.locator('#project-prompt').pressSequentially('Launch ');
+    await page.locator('#project-prompt').press('End');
+    await page.locator('#project-prompt').pressSequentially('"the hero"');
+    assert.equal(await page.locator('#project-prompt').inputValue(), 'Launch /prompts:draftpr "the hero"');
+    await shot('command-badge');
+    // Enter sends.
+    await page.locator('#project-prompt').press('Enter');
     await completed(3);
+    assert.equal(await page.locator('[data-chat-command]').count(), 0, 'sending clears the badge');
     const expanded = (await turns()).at(-1).params.input[0].text;
     assert.ok(expanded.endsWith('\n\nDraft a PR titled "Launch" covering: Launch "the hero" (cost $5).'), expanded.slice(-200));
     assert.doesNotMatch(expanded, /prompts:draftpr/, 'the command itself is replaced by the prompt body');
+    // Backspace right after a badge removes the whole command.
+    await page.locator('#project-prompt').pressSequentially('/dra');
+    await page.waitForFunction(() => document.querySelectorAll('#chat-slash-commands [data-command]').length === 1);
+    await page.locator('#project-prompt').press('Enter');
+    await page.locator('#project-prompt').press('Backspace');
+    await page.locator('#project-prompt').press('Backspace');
+    assert.equal(await page.locator('#project-prompt').inputValue(), '');
+    // Shift+Enter adds a line; Enter on an empty prompt does nothing.
+    await page.locator('#project-prompt').press('Enter');
+    assert.equal(await page.locator('#project-prompt').inputValue(), '');
+    await page.locator('#project-prompt').pressSequentially('line one');
+    await page.locator('#project-prompt').press('Shift+Enter');
+    await page.locator('#project-prompt').pressSequentially('line two');
+    assert.equal(await page.locator('#project-prompt').inputValue(), 'line one\nline two');
+    assert.equal((await turns()).length, 3, 'Shift+Enter does not send');
 
     // Keyboard: ↑↓ move, Tab chooses, Escape closes.
     await page.locator('#project-prompt').fill('');

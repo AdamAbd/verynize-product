@@ -217,3 +217,54 @@ export function setPrompt(text: string, caret = text.length) {
   prompt.focus();
   prompt.setSelectionRange(caret, caret);
 }
+
+/* ---------- Agent commands inside the prompt text ---------- */
+// A command or skill picked from the slash list stays in the prompt as "/name" (anywhere, so text can go before and
+// after it); the composer draws it as a badge. Agents only run a command at the start of a message, so sending moves
+// it to the front.
+const commandNames = new Set<string>();
+export const rememberCommand = (name: string) => void commandNames.add(name);
+
+const TOKEN = /(^|\s)\/([^\s/]+)(?=\s|$)/g;
+export type PromptRun = { text: string; command?: string };
+
+/** The prompt split into plain text and picked-command tokens ("/name" at a word start). */
+export function promptRuns(text: string): PromptRun[] {
+  const runs: PromptRun[] = [];
+  let last = 0;
+  for (const match of text.matchAll(TOKEN)) {
+    if (!commandNames.has(match[2])) continue;
+    const start = match.index + match[1].length;
+    if (start > last) runs.push({ text: text.slice(last, start) });
+    runs.push({ text: `/${match[2]}`, command: match[2] });
+    last = start + match[2].length + 1;
+  }
+  if (last < text.length) runs.push({ text: text.slice(last) });
+  return runs;
+}
+
+/** Start of a picked-command token that ends exactly at `caret`, or -1. */
+export function commandEndingAt(text: string, caret: number) {
+  const found = text.slice(0, caret).match(/(^|\s)\/([^\s/]+)$/);
+  return found && commandNames.has(found[2]) ? caret - found[2].length - 1 : -1;
+}
+
+/** "/name text before text after": the first picked command moved to the front of the prompt. */
+export function commandFirst(text: string) {
+  const runs = promptRuns(text);
+  const index = runs.findIndex((run) => run.command);
+  if (index <= 0) return text;
+  const rest = runs
+    .filter((_, i) => i !== index)
+    .map((run) => run.text)
+    .join("")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return rest ? `${runs[index].text} ${rest}` : runs[index].text;
+}
+
+/** Called just before the prompt is sent. */
+export function moveCommandFirst() {
+  const prompt = promptEl();
+  if (prompt) prompt.value = commandFirst(prompt.value);
+}

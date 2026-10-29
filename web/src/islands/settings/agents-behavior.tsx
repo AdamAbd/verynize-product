@@ -89,7 +89,7 @@ function ChatSection({ behavior }: { behavior: AgentBehavior }) {
       <Card>
         <Row
           title="Follow-up messages"
-          description="Steer joins the current work, Queue waits until it’s done. ⌘↵ sends the other way."
+          description="Steer joins the current work, Queue waits until it’s done. ↵ sends this way, ⌘↵ the other way."
         >
           <div id="settings-follow-up">
             <Segmented

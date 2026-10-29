@@ -8,6 +8,26 @@ const args = process.argv.slice(2);
 const log = process.env.FAKE_CODEX_LOG;
 if (log) fs.appendFileSync(log, JSON.stringify({ args, token: process.env.VERYNIZE_MCP_TOKEN || null }) + '\n');
 
+const MARKDOWN_SAMPLE = [
+  '**Fonts** and `font/display`',
+  'first line',
+  'second line',
+  '',
+  '| Variable | Nilai | Dipakai |',
+  '|---|:---:|---|',
+  '| `font/body` | Instrument Sans 400 | Teks isi |',
+  '| `space/page-x` | 80 | Padding |',
+  '',
+  '- [x] done',
+  '- [ ] todo',
+  '',
+  '```ts',
+  'const a = 1;',
+  '```',
+  '',
+  'Open verynize://node/editor/page-1/abcd. Docs: https://example.com/docs, [bad](javascript:alert(1)), ~~old~~ <b>raw</b>',
+].join('\n');
+
 if (args[0] === 'app-server' && args.includes('--help')) {
   if (process.env.FAKE_CODEX_NO_APP_SERVER === '1') { console.error('unrecognized subcommand'); process.exit(2); }
   console.log('[experimental] Run the app server or related tooling');
@@ -61,7 +81,8 @@ async function runTurn(threadId, turnId, text, images) {
   notify('item/completed', { threadId, turnId, item: { type: 'commandExecution', id: 'cmd-1', command: 'ls', cwd: '/tmp', status: declined ? 'declined' : 'completed', aggregatedOutput: declined ? '' : 'hello.txt\n', exitCode: declined ? null : 0 } });
   notify('item/started', { threadId, turnId, item: { type: 'mcpToolCall', id: 'mcp-1', server: 'verynize', tool: 'get_design_context', arguments: { pageId: 'page-1' }, status: 'inProgress' } });
   notify('item/completed', { threadId, turnId, item: { type: 'mcpToolCall', id: 'mcp-1', server: 'verynize', tool: 'get_design_context', arguments: { pageId: 'page-1' }, status: 'completed', result: { content: [{ type: 'text', text: 'page ok' }] }, error: null } });
-  const reply = `Reply to ${JSON.stringify(text.slice(-300))} images=${images.length} declined=${declined}`;
+  // "markdown sample" gets a fixed Markdown reply (tests/chat-markdown.cjs).
+  const reply = /markdown sample/.test(text) ? MARKDOWN_SAMPLE : `Reply to ${JSON.stringify(text.slice(-300))} images=${images.length} declined=${declined}`;
   for (const part of [reply.slice(0, 9), reply.slice(9)]) notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg-1', delta: part });
   notify('item/completed', { threadId, turnId, item: { type: 'agentMessage', id: 'msg-1', text: reply } });
   if (!/indicators/.test(text)) notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: { last: { inputTokens: 5, outputTokens: 7 } } });
