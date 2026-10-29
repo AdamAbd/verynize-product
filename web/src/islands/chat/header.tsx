@@ -29,8 +29,10 @@ import {
   ChatMenuTrigger,
 } from "./menu";
 import { ChangesButton } from "./changes-panel";
+import { ChatHeaderButton, ChatIconButton } from "./controls";
 import { presetImplementPrompt } from "./changes";
 import { hook } from "./hooks";
+import { ChatTip } from "./tip";
 import { workspace, type ChatState } from "./store";
 
 /** Parallel chats: the workspace reports which conversations are running (busyChats); switching stays enabled. */
@@ -97,25 +99,21 @@ function Switcher({ state }: { state: ChatState }) {
             <span className="text-subtle-foreground">/</span>
           </>
         )}
-        <ChatMenuTrigger
-          id="chat-switcher"
-          className="flex h-7 min-w-0 items-center gap-2 rounded-md px-2 text-foreground-2 hover:bg-muted data-[state=open]:bg-muted"
-        >
-          {attached ? (
-            <GitBranchIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <MessageSquareIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-          <span className="truncate">{title}</span>
-          {elsewhere > 0 && (
-            <span
-              title={`${elsewhere} other ${elsewhere === 1 ? "chat is" : "chats are"} running`}
-              className="flex"
-            >
-              <RunningDot />
-            </span>
-          )}
-          <ChevronsUpDownIcon className="size-3 shrink-0 text-muted-foreground" />
+        <ChatMenuTrigger asChild>
+          <ChatHeaderButton id="chat-switcher" className="h-7 min-w-0 shrink justify-start">
+            {attached ? (
+              <GitBranchIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            ) : (
+              <MessageSquareIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span className="truncate">{title}</span>
+            {elsewhere > 0 && (
+              <span title={`${elsewhere} other ${elsewhere === 1 ? "chat is" : "chats are"} running`} className="flex">
+                <RunningDot />
+              </span>
+            )}
+            <ChevronsUpDownIcon className="size-3 shrink-0 text-muted-foreground" />
+          </ChatHeaderButton>
         </ChatMenuTrigger>
       </div>
       <ChatMenuContent align="start" className="w-56">
@@ -167,25 +165,20 @@ function Switcher({ state }: { state: ChatState }) {
 }
 
 function PreviewButton() {
-  const segment =
-    "flex h-6.5 items-center text-base leading-5.25 text-foreground-2 hover:bg-muted data-[state=open]:bg-muted";
+  // Split button (29 "Start preview ⌄"): two header buttons and a divider inside one bordered group.
   return (
-    <div className="flex shrink-0 items-center rounded-md border border-card-border bg-background">
-      <button
-        type="button"
-        className={cn(segment, "gap-2 rounded-l-md pr-2.5 pl-2")}
-        onClick={() => workspace()?.actions?.livePreview?.()}
-      >
+    <div role="group" aria-label="Preview" className="flex h-7 shrink-0 items-stretch overflow-hidden rounded-md border border-card-border bg-background">
+      <ChatHeaderButton segment="text" onClick={() => workspace()?.actions?.livePreview?.()}>
         <PlayIcon className="size-3 fill-current text-muted-foreground" />
         Start preview
-      </button>
-      <span className="h-6.5 w-px bg-card-border" />
+      </ChatHeaderButton>
+      {/* Divider in the group's own edge colour (the shared Separator uses the lighter panel border). */}
+      <span aria-hidden="true" className="w-px shrink-0 bg-card-border" />
       <ChatMenu modal={false}>
-        <ChatMenuTrigger
-          aria-label="Preview options"
-          className={cn(segment, "w-5.5 justify-center rounded-r-md")}
-        >
-          <ChevronDownIcon className="size-3 text-muted-foreground" />
+        <ChatMenuTrigger asChild>
+          <ChatHeaderButton segment="icon" aria-label="Preview options">
+            <ChevronDownIcon className="size-3 text-muted-foreground" />
+          </ChatHeaderButton>
         </ChatMenuTrigger>
         <ChatMenuContent align="end" className="w-52">
           <ChatMenuItem onSelect={() => workspace()?.actions?.livePreview?.()}>
@@ -227,8 +220,6 @@ export function DockHeader({ state }: { state: ChatState }) {
   const attached = state.projectKey !== "unattached";
   // With the repositories / chats sidebar open (code/design-sidebar.tsx) the dock sits right of it: no traffic-light inset.
   const sidebarOpen = useBodyClass("chat-sidebar-open") && !state.codeMode;
-  const iconButton =
-    "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground-2";
   return (
     <>
       {/* Top row shares the window title bar (chrome island leaves the left 499px to the dock): traffic-light inset. */}
@@ -240,27 +231,19 @@ export function DockHeader({ state }: { state: ChatState }) {
         )}
       >
         {!sidebarOpen && (
-          <button
-            type="button"
-            aria-label="Show sidebar"
-            title="Show sidebar"
-            className={iconButton}
-            onClick={() => document.body.classList.add("chat-sidebar-open")}
-          >
-            <PanelLeftIcon className="size-4" />
-          </button>
+          <ChatTip label="Show sidebar" side="bottom">
+            <ChatIconButton aria-label="Show sidebar" onClick={() => document.body.classList.add("chat-sidebar-open")}>
+              <PanelLeftIcon className="size-4" />
+            </ChatIconButton>
+          </ChatTip>
         )}
         <Switcher state={state} />
         <span className="flex-1" />
-        <button
-          type="button"
-          aria-label="Hide chat"
-          title="Hide chat"
-          onClick={() => workspace()?.closeChat()}
-          className={iconButton}
-        >
-          <ChevronLeftIcon className="size-3" />
-        </button>
+        <ChatTip label="Hide chat" side="bottom">
+          <ChatIconButton aria-label="Hide chat" onClick={() => workspace()?.closeChat()}>
+            <ChevronLeftIcon className="size-3" />
+          </ChatIconButton>
+        </ChatTip>
       </div>
       {/* In Code mode the Changes button lives in the code workspace's files panel (ids must stay unique). */}
       {attached && !state.codeMode && (

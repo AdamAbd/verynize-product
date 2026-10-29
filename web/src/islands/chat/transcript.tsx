@@ -19,7 +19,6 @@ import {
   GitBranchIcon,
   GlobeIcon,
   ImageIcon,
-  LoaderCircleIcon,
   SearchIcon,
   ShieldCheckIcon,
   ShieldQuestionIcon,
@@ -27,12 +26,18 @@ import {
   SquareTerminalIcon,
 } from "lucide-react";
 import { LogoIcon } from "@/components/icons";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Spinner } from "@/components/ui/spinner";
 import { legacySet } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
+import { ChatActionButton, ChatIconButton, ChatPillButton, ChatSuggestionButton } from "./controls";
 import { Markdown, openAppLink } from "./markdown";
-import { ChatMenu, ChatMenuContent, ChatMenuItem, ChatMenuLabel, ChatMenuSeparator, ChatMenuTrigger } from "./menu";
+import { ChatMenu, ChatMenuContent, ChatMenuItem, ChatMenuNote, ChatMenuSeparator, ChatMenuTrigger } from "./menu";
 import { MentionIcon } from "./mention-popover";
 import { QuestionCard } from "./question-card";
+import { ChatTip } from "./tip";
 import { usageSummary } from "./usage-ring";
 import { useAdopt } from "./adopt";
 import { useChatBehavior } from "./behavior";
@@ -107,6 +112,22 @@ function ThinkingText({ text }: { text?: string }) {
   return <p className="py-1 text-sm leading-5 whitespace-pre-wrap text-muted-foreground">{text.trim()}</p>;
 }
 
+/**
+ * Open state of a Collapsible that follows `force` whenever it changes (expand-work setting, a live step), and the
+ * user's own toggles otherwise.
+ */
+function useForcedOpen(force: boolean) {
+  const [open, setOpen] = useState(force);
+  const [last, setLast] = useState(force);
+  if (last !== force) {
+    setLast(force);
+    setOpen(force);
+  }
+  return [open, setOpen] as const;
+}
+
+const DISCLOSURE = "flex items-center gap-2 rounded-sm p-0 outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
+
 /* ---------- Tool calls: Wonder shows "Ran 5 commands ›" and the live step ("Editing the canvas", 39). ---------- */
 
 const CANVAS = /^mcp__verynize__/;
@@ -172,22 +193,27 @@ function nestTools(parts: ChatPart[]): Nesting {
 function SubSteps({ items, nesting, onToggle }: { items: Indexed[]; nesting: Nesting; onToggle: (index: number, open: boolean) => void }) {
   const live = items.some(({ part }) => part.kind === "tool" && (part.state ?? "running") === "running");
   const { expandWork } = useChatBehavior();
+  const [open, setOpen] = useForcedOpen(live || expandWork);
   return (
-    <details open={live || expandWork || undefined} className="group/sub m-0 ml-1.5 border-l border-border pl-3.5">
-      <summary className="flex h-6 list-none items-center gap-2 p-0 text-sm text-subtle-foreground hover:text-foreground-3">
-        {items.length} {items.length === 1 ? "step" : "steps"}
-        <ChevronRightIcon className="size-3 transition-transform group-open/sub:rotate-90 motion-reduce:transition-none" />
-      </summary>
-      <div className="flex flex-col">
-        {items.map(({ part, index }) =>
-          part.kind === "tool" ? (
-            <ToolRow key={index} part={part} nesting={nesting} onToggle={(open) => onToggle(index, open)} onToggleChild={onToggle} />
-          ) : part.kind === "permission" ? (
-            <PermissionRow key={index} part={part} />
-          ) : null,
-        )}
+    <Collapsible asChild open={open} onOpenChange={setOpen}>
+      <div className="group/sub m-0 ml-1.5 border-l border-border pl-3.5">
+        <CollapsibleTrigger asChild>
+          <button type="button" className={cn(DISCLOSURE, "h-6 text-sm text-subtle-foreground hover:text-foreground-3")}>
+            {items.length} {items.length === 1 ? "step" : "steps"}
+            <ChevronRightIcon className="size-3 transition-transform group-data-[state=open]/sub:rotate-90 motion-reduce:transition-none" />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="flex flex-col">
+          {items.map(({ part, index }) =>
+            part.kind === "tool" ? (
+              <ToolRow key={index} part={part} nesting={nesting} onToggle={(open) => onToggle(index, open)} onToggleChild={onToggle} />
+            ) : part.kind === "permission" ? (
+              <PermissionRow key={index} part={part} />
+            ) : null,
+          )}
+        </CollapsibleContent>
       </div>
-    </details>
+    </Collapsible>
   );
 }
 
@@ -223,7 +249,9 @@ function ToolRow({
         <Icon className="size-3.5 shrink-0" />
         <span className={cn(hook.toolTitle, "min-w-0 truncate", mono && "font-mono text-xs")}>{label}</span>
         {state === "running" && (
-          <LoaderCircleIcon aria-label="running" className={cn(hook.toolState, "size-3.5 shrink-0 animate-spin")} />
+          <span className={cn(hook.toolState, "flex shrink-0")}>
+            <Spinner role="img" aria-label="running" className="size-3.5" />
+          </span>
         )}
         {(state === "error" || state === "interrupted") && (
           <CircleAlertIcon
@@ -263,18 +291,25 @@ function ToolRow({
 /** Completed tool calls of a running turn, collapsed to "Ran N commands ›" (39). */
 function ToolGroup({ tools, nesting, onToggle }: { tools: Indexed[]; nesting: Nesting; onToggle: (index: number, open: boolean) => void }) {
   const { expandWork } = useChatBehavior();
+  const [open, setOpen] = useForcedOpen(expandWork);
   return (
-    <details open={expandWork || undefined} className="group/tools m-0 rounded-none border-0 bg-transparent p-0">
-      <summary className="flex list-none items-center gap-2 p-0 text-base leading-5.25 text-muted-foreground hover:text-foreground-3">
-        {toolCount(tools.length)}
-        <ChevronRightIcon className="size-3 transition-transform group-open/tools:rotate-90" />
-      </summary>
-      <div className="flex flex-col pt-1.5">
-        {tools.map(({ part, index }) => (
-          <ToolRow key={index} part={part} nesting={nesting} onToggle={(open) => onToggle(index, open)} onToggleChild={onToggle} />
-        ))}
+    <Collapsible asChild open={open} onOpenChange={setOpen}>
+      <div className="group/tools m-0">
+        <CollapsibleTrigger asChild>
+          <button type="button" className={cn(DISCLOSURE, "text-base leading-5.25 text-muted-foreground hover:text-foreground-3")}>
+            {toolCount(tools.length)}
+            <ChevronRightIcon className="size-3 transition-transform group-data-[state=open]/tools:rotate-90" />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent asChild>
+          <div className="flex flex-col pt-1.5">
+            {tools.map(({ part, index }) => (
+              <ToolRow key={index} part={part} nesting={nesting} onToggle={(next) => onToggle(index, next)} onToggleChild={onToggle} />
+            ))}
+          </div>
+        </CollapsibleContent>
       </div>
-    </details>
+    </Collapsible>
   );
 }
 
@@ -294,41 +329,42 @@ function PermissionCard({ part, onAnswer }: { part: ChatPart; onAnswer: (allow: 
   const args = input(part);
   const detail = typeof args.command === "string" ? args.command : pretty(part.input).slice(0, 2000);
   return (
-    <div className={cn(hook.permission, "m-0 rounded-xl border border-card-border bg-card p-3 text-base leading-5.25", stateHook(part.state))}>
-      <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <ShieldQuestionIcon className="size-3.5 text-primary-text" />
-        Approval needed
-      </p>
-      <p className="mt-1 break-words text-foreground">Allow {part.title || part.toolName}?</p>
-      {detail && detail !== "{}" && (
-        <pre className="m-0 mt-2 max-h-40 overflow-auto rounded-lg border border-card-border bg-settings px-2.5 py-2 font-mono text-xs leading-4.5 break-words whitespace-pre-wrap text-foreground-3">
-          {detail}
-        </pre>
-      )}
-      <div className="mt-3 flex justify-end gap-1.5">
-        <button
-          type="button"
-          className={cn(hook.deny, "flex h-6 items-center rounded-md border border-edge px-2.5 text-sm text-foreground-2 hover:bg-muted")}
-          onClick={() => onAnswer(false)}
-        >
-          Deny
-        </button>
-        <button
-          type="button"
-          title={`Allow ${part.toolName || "this tool"} for the rest of this chat`}
-          className="flex h-6 items-center rounded-md border border-edge px-2.5 text-sm text-foreground-2 hover:bg-muted"
-          onClick={() => onAnswer(true, true)}
-        >
-          Always allow
-        </button>
-        <button
-          type="button"
-          className={cn(hook.allow, "flex h-6 items-center rounded-md bg-primary px-2.5 text-sm text-primary-foreground hover:bg-primary-hover")}
-          onClick={() => onAnswer(true)}
-        >
-          Allow
-        </button>
-      </div>
+    <div className={cn(hook.permission, stateHook(part.state))}>
+      <Card>
+        <CardHeader>
+          <CardDescription>
+            <span className="flex items-center gap-2">
+              <ShieldQuestionIcon className="size-3.5 text-primary-text" />
+              Approval needed
+            </span>
+          </CardDescription>
+          <CardTitle>
+            <span className="block text-base leading-5.25 font-normal break-words">Allow {part.title || part.toolName}?</span>
+          </CardTitle>
+        </CardHeader>
+        {detail && detail !== "{}" && (
+          <CardContent>
+            <pre className="m-0 max-h-40 overflow-auto rounded-lg border border-card-border bg-settings px-2.5 py-2 font-mono text-xs leading-4.5 break-words whitespace-pre-wrap text-foreground-3">
+              {detail}
+            </pre>
+          </CardContent>
+        )}
+        <CardFooter>
+          <div className="flex w-full justify-end gap-1.5">
+            <ChatActionButton variant="outline" hook={hook.deny} onClick={() => onAnswer(false)}>
+              Deny
+            </ChatActionButton>
+            <ChatTip label={`Allow ${part.toolName || "this tool"} for the rest of this chat`}>
+              <ChatActionButton variant="outline" onClick={() => onAnswer(true, true)}>
+                Always allow
+              </ChatActionButton>
+            </ChatTip>
+            <ChatActionButton hook={hook.allow} onClick={() => onAnswer(true)}>
+              Allow
+            </ChatActionButton>
+          </div>
+        </CardFooter>
+      </Card>
     </div>
   );
 }
@@ -350,9 +386,14 @@ function PermissionRow({ part }: { part: ChatPart }) {
 
 function ErrorRow({ text }: { text?: string }) {
   return (
-    <div className={cn(hook.error, "flex gap-2 rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm leading-5 text-destructive")}>
-      <CircleAlertIcon className="mt-0.75 size-3.5 shrink-0" />
-      <p className="min-w-0 break-words whitespace-pre-wrap">{text}</p>
+    // Not a live region (role unset): transcripts re-render whole, and old errors must not be re-announced.
+    <div className={hook.error}>
+      <Alert variant="destructive" role={undefined}>
+        <CircleAlertIcon />
+        <AlertDescription>
+          <p className="min-w-0 break-words whitespace-pre-wrap">{text}</p>
+        </AlertDescription>
+      </Alert>
     </div>
   );
 }
@@ -366,14 +407,13 @@ const STATE_NOTE: Record<string, string> = {
 
 /* ---------- Per-message actions (hover / focus-within; absolutely placed, so no layout shift) ---------- */
 
-const ACTION =
-  "flex size-5 shrink-0 items-center justify-center rounded-sm text-subtle-foreground hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:outline-hidden data-[state=open]:bg-muted data-[state=open]:text-foreground";
-
 function ActionButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
   return (
-    <button type="button" title={label} aria-label={label} onClick={onClick} className={ACTION}>
-      {children}
-    </button>
+    <ChatTip label={label} side="bottom">
+      <ChatIconButton size="xs" aria-label={label} onClick={onClick}>
+        {children}
+      </ChatIconButton>
+    </ChatTip>
   );
 }
 
@@ -413,15 +453,17 @@ function RestoreButton({ index, canvas }: { index: number; canvas: boolean }) {
   const label = canvas ? "Restore checkpoint" : "Rewind to here";
   return (
     <ChatMenu modal={false}>
-      <ChatMenuTrigger title={label} aria-label={label} className={ACTION}>
-        <HistoryIcon className="size-3.5" />
+      <ChatMenuTrigger asChild>
+        <ChatIconButton size="xs" title={label} aria-label={label}>
+          <HistoryIcon className="size-3.5" />
+        </ChatIconButton>
       </ChatMenuTrigger>
       <ChatMenuContent align="end" side="bottom" className="w-64">
-        <ChatMenuLabel className="h-auto py-1 leading-4.5">
+        <ChatMenuNote>
           {canvas
             ? "Restore the canvas to how it was before this message? Later messages are removed and the agent continues from here."
             : "Rewind the chat to before this message? Later messages are removed and the agent continues from here. Files and the canvas are not changed."}
-        </ChatMenuLabel>
+        </ChatMenuNote>
         <ChatMenuSeparator />
         <ChatMenuItem onSelect={() => workspace()?.rewindTo?.(index)}>
           <HistoryIcon />
@@ -474,6 +516,7 @@ function EditBox({ initial, onCancel, onSave }: { initial: string; onCancel: () 
   };
   return (
     <div className="flex w-full flex-col gap-2">
+      {/* Edits in place inside the bubble (the bubble is the field), so a bare native textarea, not a bordered input. */}
       <textarea
         ref={ref}
         value={value}
@@ -492,12 +535,10 @@ function EditBox({ initial, onCancel, onSave }: { initial: string; onCancel: () 
       />
       <div className="flex items-center justify-end gap-1.5">
         <span className="mr-auto text-xs text-subtle-foreground">Resends from here</span>
-        <button type="button" onClick={onCancel} className="flex h-6 items-center rounded-md border border-edge px-2.5 text-sm text-foreground-2 hover:bg-muted">
+        <ChatActionButton variant="outline" onClick={onCancel}>
           Cancel
-        </button>
-        <button type="button" onClick={save} className="flex h-6 items-center rounded-md bg-primary px-2.5 text-sm text-primary-foreground hover:bg-primary-hover">
-          Send
-        </button>
+        </ChatActionButton>
+        <ChatActionButton onClick={save}>Send</ChatActionButton>
       </div>
     </div>
   );
@@ -618,18 +659,10 @@ function artboardLinks(parts: ChatPart[]): { url: string; name?: string }[] {
 
 function ArtboardPill({ url, name }: { url: string; name?: string }) {
   return (
-    <button
-      type="button"
-      title={url}
-      onClick={() => openAppLink(url)}
-      className={cn(
-        hook.artboardLink,
-        "flex h-7 max-w-full items-center gap-2 self-start rounded-lg border border-card-border bg-card px-2.5 text-sm text-foreground-2 hover:bg-muted",
-      )}
-    >
+    <ChatPillButton hook={hook.artboardLink} title={url} onClick={() => openAppLink(url)} className="max-w-full self-start">
       <FrameIcon className="size-3.5 shrink-0 text-primary-text" />
       <span className="truncate">{name ? `Open ${name}` : "Open artboard"}</span>
-    </button>
+    </ChatPillButton>
   );
 }
 
@@ -793,18 +826,10 @@ function EmptyState({ suggestions }: { suggestions: { title: string; prompt: str
         <ul aria-label="Suggestions" className="m-0 mt-3 grid w-full max-w-100 list-none grid-cols-2 gap-1.5 p-0">
           {suggestions.slice(0, 4).map((item) => (
             <li key={item.title} className="flex">
-              <button
-                type="button"
-                title={item.prompt}
-                onClick={() => fill(item.prompt)}
-                className={cn(
-                  hook.suggestion,
-                  "flex w-full flex-col items-start gap-0.5 rounded-xl border border-card-border bg-card px-3 py-2 text-left hover:bg-muted focus-visible:border-ring focus-visible:outline-hidden",
-                )}
-              >
+              <ChatSuggestionButton hook={hook.suggestion} title={item.prompt} onClick={() => fill(item.prompt)} className="w-full">
                 <span className="w-full truncate text-sm text-foreground-2">{item.title}</span>
                 <span className="line-clamp-2 text-xs leading-4 text-muted-foreground">{item.prompt}</span>
-              </button>
+              </ChatSuggestionButton>
             </li>
           ))}
         </ul>
@@ -855,7 +880,7 @@ export function Transcript({ state }: { state: ChatState }) {
       ref={scroller}
       onClick={(event) => {
         // Expanding a row is reading, not following: keep the row where it is instead of jumping to the bottom.
-        if ((event.target as HTMLElement).closest("summary")) pinned.current = false;
+        if ((event.target as HTMLElement).closest("summary, [data-slot=collapsible-trigger]")) pinned.current = false;
       }}
       onScroll={(event) => {
         const el = event.currentTarget;

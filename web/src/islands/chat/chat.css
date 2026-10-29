@@ -55,6 +55,23 @@
   line-height: inherit;
 }
 
+/* desktop-panel.js injects card styles for the hook classes (yellow approval box, dark #111 code wells). The island
+   draws these with Card / Alert, and the hook classes sit on plain wrappers, so the injected boxes are neutralised. */
+#bd-chat-root :is(.chat-permission, .chat-error, .chat-tool-body, div.chat-thinking) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+  color: inherit;
+}
+#bd-chat-root :is(.chat-tool-body, .chat-permission) pre {
+  margin: 0;
+  border-radius: 0;
+  background: none;
+}
+
 /* Native disclosure markers off for the island's <summary> rows. */
 #bd-chat-root summary::-webkit-details-marker,
 #bd-portal summary::-webkit-details-marker {

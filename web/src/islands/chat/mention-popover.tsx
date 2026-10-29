@@ -3,6 +3,7 @@
 // capture phase, so Enter/Escape never reach the legacy handlers while the list is open.
 import { useEffect, useRef, useState } from "react";
 import { BoxIcon, FrameIcon, ImageIcon, SparklesIcon, SquareIcon, TypeIcon } from "lucide-react";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { legacySet } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { hook } from "./hooks";
@@ -109,36 +110,52 @@ export function MentionPopover() {
     if (match && items[active]) prompt?.setAttribute("aria-activedescendant", `bd-mention-${active}`);
   }, [match, items, active]);
 
-  if (!match) return null;
   const pick = (item: ChatMention) =>
     document.getElementById("project-prompt")?.dispatchEvent(new CustomEvent("bd-mention-pick", { detail: item }));
+  // shadcn Popover anchored to the composer's top edge. Focus stays in the prompt (aria-activedescendant); Escape,
+  // outside clicks and blur are handled by the prompt listeners above, so the popover's own dismissal is disabled.
   return (
-    <div
-      className={cn(
-        hook.mentionPopover,
-        "absolute inset-x-0 bottom-full z-40 mb-1.5 overflow-hidden rounded-xl border border-card-border bg-background p-1 text-sm text-foreground-2 shadow-menu",
+    <Popover open={!!match}>
+      <PopoverAnchor asChild>
+        <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-0" />
+      </PopoverAnchor>
+      {match && (
+        <PopoverContent
+          side="top"
+          align="start"
+          sideOffset={6}
+          role={undefined}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+          className="w-(--radix-popover-trigger-width)"
+        >
+          {/* -m-2 pulls the rows out to a 4px inset inside the popover's 12px padding, like the chat menus. */}
+          <div className={cn(hook.mentionPopover, "-m-2 text-sm text-foreground-2")}>
+            <p className="flex h-6 items-center px-2 text-muted-foreground">{match.query ? `Layers matching “${match.query}”` : "Mention a layer"}</p>
+            <ul id="bd-mention-list" role="listbox" aria-label="Canvas layers" className="m-0 flex max-h-56 list-none flex-col overflow-y-auto p-0">
+              {items.length === 0 && <li className="flex h-6 items-center px-2 text-subtle-foreground">No matching layers</li>}
+              {items.map((item, i) => (
+                <li
+                  key={item.id}
+                  id={`bd-mention-${i}`}
+                  role="option"
+                  aria-selected={i === active}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseMove={() => setActive(i)}
+                  onClick={() => pick(item)}
+                  className={cn("flex h-6 cursor-default items-center gap-2 rounded-md px-2", i === active && "bg-muted")}
+                >
+                  <MentionIcon type={item.type} />
+                  <span className="min-w-0 truncate">{item.label}</span>
+                  {item.type && <span className="ml-auto shrink-0 text-xs text-subtle-foreground capitalize">{item.type}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </PopoverContent>
       )}
-    >
-      <p className="flex h-6 items-center px-2 text-muted-foreground">{match.query ? `Layers matching “${match.query}”` : "Mention a layer"}</p>
-      <ul id="bd-mention-list" role="listbox" aria-label="Canvas layers" className="m-0 flex max-h-56 list-none flex-col overflow-y-auto p-0">
-        {items.length === 0 && <li className="flex h-6 items-center px-2 text-subtle-foreground">No matching layers</li>}
-        {items.map((item, i) => (
-          <li
-            key={item.id}
-            id={`bd-mention-${i}`}
-            role="option"
-            aria-selected={i === active}
-            onMouseDown={(event) => event.preventDefault()}
-            onMouseMove={() => setActive(i)}
-            onClick={() => pick(item)}
-            className={cn("flex h-6 cursor-default items-center gap-2 rounded-md px-2", i === active && "bg-muted")}
-          >
-            <MentionIcon type={item.type} />
-            <span className="min-w-0 truncate">{item.label}</span>
-            {item.type && <span className="ml-auto shrink-0 text-xs text-subtle-foreground capitalize">{item.type}</span>}
-          </li>
-        ))}
-      </ul>
-    </div>
+    </Popover>
   );
 }
