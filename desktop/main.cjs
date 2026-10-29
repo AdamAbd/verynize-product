@@ -75,6 +75,8 @@ app.whenReady().then(() => {
     primaryRuntime=agentRuntime;win.on('closed',()=>{if(primaryRuntime===agentRuntime)primaryRuntime=null;});
     // Settings › Agents (desktop/agent-tools.cjs): agentProviderAccounts, agentMcp{List,Add,Remove,Login}, agentAccess{Get,Set}
     require('./agent-tools.cjs').registerAgentTools(handle,win,{userData:app.getPath('userData'),getRuntime:()=>agentRuntime});
+    // Composer indicators (desktop/agent-live-status.cjs): agentLiveMcpStatus, agentLiveContext.
+    require('./agent-live-status.cjs').registerAgentLiveStatus(handle,{getRuntime:()=>agentRuntime});
     // --- agent shell (desktop/agent-shell.cjs): open project for the dev server / terminal MCP tools ---
     require('./agent-shell.cjs').registerShellWindow(win,{getProject:()=>project});
     require('./agent-shell.cjs').registerDevServerIPC(handle,{getProject:()=>project}); // devServerStatus/Start/Stop for the Start preview button

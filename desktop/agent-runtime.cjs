@@ -776,6 +776,9 @@ class AgentRuntime {
       canUseTool: (toolName, toolInput, opts = {}) => this.claudeCanUseTool(run, toolName, toolInput, opts),
     };
     const q = sdk.query({ prompt: input(), options });
+    // Composer indicators (desktop/agent-live-status.cjs): live MCP status and context breakdown while the run is open.
+    run.mcpStatus = () => q.mcpServerStatus();
+    run.contextUsage = () => q.getContextUsage({ detail: 'summary' });
     run.cancel = async () => {
       if (run.done) return; run.stopped = true;
       try { await Promise.race([q.interrupt(), new Promise(r => setTimeout(r, 3000))]); } catch {}
@@ -880,7 +883,7 @@ class AgentRuntime {
     };
     rpc.on(message => {
       if (message.method === '$exit') { for (const run of server.threads.values()) this.finish(run, { code: 1, error: 'Codex app-server stopped unexpectedly' }); server.threads.clear(); server.children.clear(); return; }
-      if (message.method === 'account/rateLimits/updated') { // account-wide: every running chat gets it
+      if (message.method === 'account/rateLimits/updated' || (message.method === 'mcpServer/startupStatus/updated' && !message.params?.threadId)) { // account-wide: every running chat gets it
         for (const run of new Set(server.threads.values())) if (!run.done && !run.helper) for (const event of run.map(message)) this.forward(run, event);
         return;
       }
@@ -950,6 +953,7 @@ class AgentRuntime {
     }
     if (!thread) thread = (await server.rpc.request('thread/start', params.codexPersonality ? { ...threadParams, personality: params.codexPersonality } : threadParams)).thread;
     run.threadId = thread.id; run.map = createCodexMapper();
+    run.mcpStatus = () => server.rpc.request('mcpServerStatus/list', { threadId: thread.id, detail: 'toolsAndAuthOnly' }, 15000);
     server.threads.set(thread.id, run);
     this.forward(run, { type: 'session', sessionId: thread.id });
     const input = codexInput(composePrompt(params.prompt, params.context, params.seed), params.context?.images);

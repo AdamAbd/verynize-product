@@ -41,7 +41,9 @@ import {
 } from "./menu";
 import { MentionIcon, MentionPopover } from "./mention-popover";
 import { agentAvailable, useModels, workspace, type AgentModel, type ChatState } from "./store";
+import { ToolsPopover } from "./tools-popover";
 import { UsageRing } from "./usage-ring";
+import { WorksWith } from "./works-with";
 import { DropdownMenu as Menu } from "radix-ui";
 
 const PROMPT_CLASS =
@@ -475,7 +477,6 @@ export function Composer({ state }: { state: ChatState }) {
     prompt.focus();
   };
   const canSendOther = state.busy && !empty && !!sendOther;
-  const showUsage = state.usage !== undefined || state.messages.some((m) => m.usage);
   return (
     <div
       className={cn(
@@ -587,7 +588,9 @@ export function Composer({ state }: { state: ChatState }) {
             <RulerIcon className="size-3.5" />
           </button>
         )}
-        {showUsage && <UsageRing usage={state.usage ?? state.messages.findLast((m) => m.usage)?.usage} />}
+        <WorksWith state={state} />
+        <ToolsPopover state={state} />
+        <UsageRing state={state} />
         {canSendOther && (
           <button
             type="button"

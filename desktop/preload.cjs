@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('desktop',{
  // end Settings › Preferences hook
  // Settings › Usage and Memory (desktop/agent-usage.cjs, desktop/agent-memory.cjs).
  agentUsage:{read:options=>call('agentUsage',options),layers:()=>call('agentLayerUsage')},
+ // Composer indicators (desktop/agent-live-status.cjs): live MCP server status and context breakdown of a chat's run.
+ agentLiveStatus:{mcp:options=>call('agentLiveMcpStatus',options),context:options=>call('agentLiveContext',options)},
  agentMemory:{overview:()=>call('agentMemoryOverview'),reveal:options=>call('agentMemoryReveal',options),open:options=>call('agentMemoryOpen',options)},
  // integrated terminal hook (desktop/terminal.cjs): PTY shells for the code-mode terminal panel.
  terminalCreate:options=>call('terminalCreate',options),terminalWrite:options=>call('terminalWrite',options),terminalResize:options=>call('terminalResize',options),terminalKill:options=>call('terminalKill',options),

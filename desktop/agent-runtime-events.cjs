@@ -19,6 +19,9 @@
 //                        `usage` is the same normalized object as the flat fields. Events can be partial
 //                        (a rate-limit update carries only `rateLimit`): merge the fields that are present.
 //                        rateLimit: [{label, usedPercent (0-100), resetsAt? (ms epoch)}]
+//   mcp-status           {agent, servers:[{name, status, error?}], partial?}  MCP servers the agent runtime reports
+//                        (Claude init `mcp_servers`, Codex `mcpServer/startupStatus/updated`). status: connected |
+//                        starting | failed | needs-auth | disabled | not-started. `partial`: merge by name.
 //   error                {text}
 //   done                 {code, stopped, sessionId?}
 //
@@ -112,6 +115,18 @@ function codexRateLimits(snapshot) {
   return out;
 }
 
+// --- MCP server status -----------------------------------------------------------------------
+const MCP_STATUS = { connected: 'connected', ready: 'connected', pending: 'starting', starting: 'starting', failed: 'failed', cancelled: 'failed', 'needs-auth': 'needs-auth', authenticationRequired: 'needs-auth', disabled: 'disabled', notStarted: 'not-started', 'not-started': 'not-started' };
+/** One provider server status ({name, status|runtimeStatus, error?}) -> {name, status, error?} or null. */
+function mcpServer(entry) {
+  if (!entry || typeof entry.name !== 'string' || !entry.name) return null;
+  let status = MCP_STATUS[entry.status ?? entry.runtimeStatus] || null;
+  if (!status && entry.authStatus === 'notLoggedIn') status = 'needs-auth';
+  const error = typeof entry.error === 'string' && entry.error ? entry.error : typeof entry.toolsError === 'string' && entry.toolsError ? entry.toolsError : '';
+  return { name: entry.name.slice(0, 100), status: status || 'not-started', ...(error ? { error: clip(error, 300) } : {}) };
+}
+const mcpServers = list => (Array.isArray(list) ? list.map(mcpServer).filter(Boolean) : []);
+
 // --- Claude Agent SDK / `claude --output-format stream-json` --------------------------------
 function createClaudeMapper() {
   const state = { streamed: false, blocks: new Map(), sessionId: null, sawText: false, contextTokens: 0 };
@@ -127,6 +142,7 @@ function createClaudeMapper() {
       if (message.subtype === 'init') {
         const servers = (message.mcp_servers || []).map(s => `${s.name}: ${s.status}`).join(', ');
         out.push({ type: 'status', text: `Session ready${message.model ? ' · ' + message.model : ''}${servers ? ' · MCP ' + servers : ''}` });
+        if (Array.isArray(message.mcp_servers)) out.push({ type: 'mcp-status', agent: 'claude', servers: mcpServers(message.mcp_servers) });
       } else if (message.subtype === 'compact_boundary') out.push({ type: 'status', text: 'Compacting conversation' });
       else if (message.subtype === 'status' && message.status) out.push({ type: 'status', text: String(message.status) });
       else if (message.subtype === 'session_state_changed' && message.state === 'idle') out.push({ type: 'turn-idle' });
@@ -240,6 +256,7 @@ function createCodexMapper({ parentToolCallId } = {}) {
         break;
       }
       case 'thread/tokenUsage/updated': { const event = params.tokenUsage && usageEvent(codexUsage(params.tokenUsage)); if (event) out.push(event); break; }
+      case 'mcpServer/startupStatus/updated': { const server = mcpServer(params); if (server) out.push({ type: 'mcp-status', agent: 'codex', partial: true, servers: [server] }); break; }
       case 'account/rateLimits/updated': { const rateLimit = codexRateLimits(params.rateLimits); if (rateLimit.length) out.push(usageEvent({ rateLimit })); break; }
       case 'error': if (!params.willRetry) out.push({ type: 'error', text: clip(params.error?.message || 'Codex error', 4000) }); else out.push({ type: 'status', text: 'Retrying: ' + (params.error?.message || '') }); break;
       case 'turn/completed': {
@@ -276,4 +293,4 @@ function createCodexExecMapper() {
   };
 }
 
-module.exports = { createClaudeMapper, createCodexMapper, createCodexExecMapper, toolTitle, clip, usageEvent, claudeUsage, claudeRateLimit, codexUsage, codexRateLimits };
+module.exports = { mcpServer, mcpServers, createClaudeMapper, createCodexMapper, createCodexExecMapper, toolTitle, clip, usageEvent, claudeUsage, claudeRateLimit, codexUsage, codexRateLimits };
