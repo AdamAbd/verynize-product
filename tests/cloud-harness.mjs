@@ -149,3 +149,27 @@ export async function signIn(origin, email, fetchImpl = fetch) {
   if (!verified.ok) throw Error("sign-in verify failed: " + (await verified.text()));
   return { ...(await verified.json()), link };
 }
+
+/**
+ * Create an email + password account through Better Auth, follow the emailed verification link
+ * and sign in. Returns the bearer token (the desktop sends it as X-Verynize-Session).
+ */
+export async function passwordUser(origin, email, name, fetchImpl = fetch, ip = "192.0.2.1") {
+  const password = "a long enough password";
+  const post = (path, body) =>
+    fetchImpl(origin + path, {
+      method: "POST",
+      headers: { "content-type": "application/json", "cf-connecting-ip": ip },
+      body: JSON.stringify(body),
+    });
+  const signedUp = await post("/api/auth/sign-up/email", { email, password, name });
+  if (!signedUp.ok) throw Error("sign-up failed: " + (await signedUp.text()));
+  const outbox = await (
+    await fetchImpl(origin + "/api/dev/outbox?to=" + encodeURIComponent(email))
+  ).json();
+  const link = new URL(outbox.messages.find((m) => /Verify/.test(m.subject)).link);
+  await fetchImpl(origin + link.pathname + link.search, { redirect: "manual" });
+  const signedIn = await post("/api/auth/sign-in/email", { email, password });
+  if (!signedIn.ok) throw Error("sign-in failed: " + (await signedIn.text()));
+  return signedIn.headers.get("set-auth-token");
+}

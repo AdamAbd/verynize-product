@@ -2,6 +2,7 @@ import { defineConfig, bindings, exports } from "cf/config";
 export default defineConfig({
   worker: {
     name: "verynize",
+    domains: ["verynize.gayaloo.app"],
     entrypoint: "./cloud/worker.js",
     compatibilityDate: "2026-10-28",
     // Better Auth imports node:async_hooks and node:crypto.
@@ -10,7 +11,7 @@ export default defineConfig({
     limits: { cpuMs: 30_000 },
     assets: {
       notFoundHandling: "single-page-application",
-      runWorkerFirst: ["/api/*", "/u/*", "/apps/*", "/passkey", "/passkey.js"],
+      runWorkerFirst: ["/api/*", "/u/*", "/apps/*", "/passkey", "/passkey.js", "/account/*"],
     },
     env: {
       ROOM_CREATION: bindings.rateLimit({ namespace: "1001", simple: { limit: 10, period: 60 } }),
@@ -19,13 +20,13 @@ export default defineConfig({
       ACCOUNTS: bindings.durableObject({ worker: "verynize", exportName: "AccountDirectory" }),
       APPS: bindings.durableObject({ worker: "verynize", exportName: "PublishedApp" }),
       // Better Auth users, sessions and organizations (cloud/auth.js). Schema: cloud/migrations.
-      DB: bindings.d1({ name: "verynize" }),
+      DB: bindings.d1({ name: "verynize", id: "76210bc4-d4fe-4075-a321-776c2525a828" }),
       // Signs Better Auth cookies and tokens. Generate with `openssl rand -base64 32`.
       BETTER_AUTH_SECRET: bindings.secret(),
-      // Email sign-in relay (cloud/mail.js). The URL and token are deployment secrets; never use "outbox" in production.
-      EMAIL_PROVIDER: bindings.text("webhook"),
-      EMAIL_WEBHOOK_URL: bindings.secret(),
-      EMAIL_WEBHOOK_TOKEN: bindings.secret(),
+      // Native transactional email. Never use "outbox" in production.
+      EMAIL_PROVIDER: bindings.text("cloudflare"),
+      EMAIL_FROM: bindings.text("mada@gayaloo.app"),
+      EMAIL: bindings.sendEmail({ allowedSenderAddresses: ["mada@gayaloo.app"] }),
     },
     exports: {
       DesignRoom: exports.durableObject({ storage: "sqlite" }),

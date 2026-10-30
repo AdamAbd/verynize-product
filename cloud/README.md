@@ -21,6 +21,7 @@ Each local change is turned into small operations: `doc`, `page`, `node` (proper
 The room broadcasts only accepted, resolved operations (`{type:'ops',revision,client,batch,ops,rejected}`). Replaying them in order reproduces the server document exactly. Each client renders the confirmed server state plus its own unacknowledged batches.
 
 While collaborating, undo and redo step through this client's own changes only (`window.cloudHistory`, which `web/app.js` consults). Each step stores the documents around the local change, and consecutive changes within 600 ms with no remote edit between them form one step. Undo replays the inverse operations rebased over the remote operations received since that step:
+
 - Properties, page and node orders, and nodes that a collaborator changed later are left alone.
 - An add is not undone if a collaborator edited that node.
 - Text inverses are merged by range into the current text, and are skipped when the ranges overlap.
@@ -76,17 +77,34 @@ The desktop publisher (`desktop/app-publish.cjs`) runs the project's own `build`
 
 ## Better Auth on D1 (`cloud/auth.js`)
 
-Email + password accounts and organizations run on [Better Auth](https://better-auth.com) with the `DB` D1 binding. The schema lives in `cloud/migrations/*.sql`; `node scripts/auth-schema.mjs` prints the SQL for the current options, which is the starting point for a new migration after changing plugins or fields. This is the foundation for replacing the `AccountDirectory` accounts below: for now both run side by side, and the desktop still signs in through the legacy routes.
+Email + password accounts and organizations run on [Better Auth](https://better-auth.com) with the `DB` D1 binding. The schema lives in `cloud/migrations/*.sql`; `node scripts/auth-schema.mjs` prints the SQL for the current options, which is the starting point for a new migration after changing plugins or fields. The desktop signs in with email + password (Share › Account: Sign in, Create account, Forgot password). Accounts, rooms, profiles and apps still live in `AccountDirectory` until they move to D1, and passkeys keep their own `vs_…` sessions.
 
 - Every Better Auth endpoint is served under `/api/auth/*`, after the legacy account routes (their paths do not overlap). The main ones are `POST sign-up/email {email,password,name}`, `POST sign-in/email {email,password}`, `GET get-session`, `POST sign-out`, `POST request-password-reset {email,redirectTo}`, `POST reset-password {token,newPassword}`, `GET verify-email?token=…` and `POST send-verification-email`, plus the organization plugin under `organization/*` (`create`, `list`, `get-full-organization`, `invite-member`, `accept-invitation`, `update-member-role`, `remove-member`, …).
 - Passwords are 10–128 characters and hashed with Better Auth's default scrypt. Email verification is required before sign-in. A password reset revokes every session of the account. Reset, verification and organization invitation emails go through `cloud/mail.js` (invitation links are `<origin>/#invitation=<id>`).
 - Sessions last 30 days and travel only as bearer tokens: sign-in returns the token in the body and in the `set-auth-token` response header, and clients send `Authorization: Bearer <token>`. The Worker drops request `Cookie` and response `Set-Cookie` headers, so there are no ambient credentials, and Better Auth's cookie CSRF check is disabled (it refuses the `Origin: null` sent by the desktop's `file://` renderer). Redirect and callback URLs are still validated against trusted origins. Responses carry the desktop CORS headers and expose `set-auth-token`.
 - `sign-up/email`, `sign-in/email`, `request-password-reset`, `reset-password`, `send-verification-email` and `change-password` are limited by `AUTH_LIMIT` per IP and endpoint. Better Auth's own limiter is off because it keeps state in isolate memory.
+- **Bridge to directory accounts.** Every API that takes a session (`X-Verynize-Session`, `Authorization: Bearer` or the socket's `?session=`) accepts either a legacy `vs_…` session or a Better Auth token. A Better Auth user acts through the directory account with the same email (`linkVerifiedAccount`): it is created when missing (display name from the sign-up name), and an account made earlier by a magic link or an email invitation is linked and marked verified. This is safe because Better Auth only signs in verified addresses and does not allow email changes. Room roles, invitations by email, profiles, passkey registration and apps therefore work unchanged.
+- `POST /api/auth/signout` ends the Better Auth session it is called with (or the legacy session). `POST /api/auth/signout-all` revokes every Better Auth session of the user and every directory session of the linked account. `GET /api/me` counts both.
+- Emailed links land on Worker pages (`cloud/account-pages.js`). Clients pass `callbackURL: "/account/verified"` to sign-up and sign-in, and `redirectTo: "/account/reset-password"` to `request-password-reset`. `/account/verified` runs no script. `/account/reset-password` loads only `/account/reset-password.js` (CSP `script-src 'self'`), which drops the token from the address bar and posts `reset-password`. An unverified sign-in (403 `EMAIL_NOT_VERIFIED`) emails a fresh verification link.
+- The legacy magic-link routes (`/api/auth/start`, `/api/auth/verify`) remain for older desktop builds; the current desktop no longer offers them.
 - `BETTER_AUTH_SECRET` signs tokens. `AUTH_URL` (optional) overrides the origin used in emailed links, which otherwise is the request origin.
+
+## Organizations and room access (`cloud/orgs.js`)
+
+Rooms created by an email + password user belong to a Better Auth organization, recorded in the D1 `room` table (`cloud/migrations/0002_rooms.sql`). The document stays in the room's Durable Object. Rooms created with a legacy session, or without signing in, stay outside organizations until an owner moves them.
+
+- **Personal organization.** Each user has one, created on first use (`GET /api/me` returns `personalOrganizationId`; `POST /api/rooms` without `organizationId` uses it). Its slug is `personal-<user id>`, and its metadata carries `personal: true`. Other organizations cannot use that slug prefix or set the marker, and metadata updates keep the marker as it is.
+- **Room role from the organization.** Owners and admins of the organization become room owners. Members get the organization's `metadata.roomRole` (`viewer`, `commenter` or `editor`; the default is `editor`). A request's role is the highest of its capability link, its direct room membership and its organization role. The router computes the organization role from D1 and forwards it as `x-verynize-org-role`; a client-sent header of that name is dropped.
+- **Live changes.** Adding a member, accepting an invitation, removing a member, changing a member role, changing `roomRole` and leaving the organization all update the live sockets of the affected rooms (`DesignRoom.applyOrgRoles`). The update sends `role` messages, or `revoked` followed by a close with code 4401.
+- `POST /api/rooms {document, organizationId?}` creates the room in an organization the caller belongs to (403 otherwise; 401 for legacy sessions). The response includes `organizationId`.
+- `PUT /api/rooms/:id/organization {organizationId}` moves a room. The caller must be a room owner and a member of the target organization. It also attaches legacy rooms to an organization.
+- `GET /api/orgs/:id/rooms` (members) → `{role, rooms:[{id,title,createdAt,updatedAt}]}`. `GET /api/me/rooms` merges direct memberships with organization rooms (`organizationId`, `organizationName`), keeping the higher role. `GET /api/rooms/:id/access` adds `organization {id,name}`.
+- An organization that still has rooms cannot be deleted (409). Titles listed from D1 follow the room's title whenever a room response reports it.
+- Better Auth endpoints also accept the session in `X-Verynize-Session`, so the desktop sends one header everywhere.
 
 ## Email delivery (`cloud/mail.js`)
 
-`EMAIL_PROVIDER` selects the transport. `outbox` stores messages for `/api/dev/outbox` (tests and local development only). `webhook` POSTs `{to,subject,text}` to `EMAIL_WEBHOOK_URL` with `Bearer EMAIL_WEBHOOK_TOKEN`, so that a relay you operate sends the mail. Any other value disables email sign-in with a 503. `cloudflare.config.ts` sets `webhook` and declares both values as secrets. Real delivery **needs a live credential** and has not been exercised. Invitation emails are best effort, and a failed delivery never blocks the membership change. Passkeys work without email delivery.
+`EMAIL_PROVIDER` selects the transport. `cloudflare` sends through the `EMAIL` send-email binding from `EMAIL_FROM` (what `cloudflare.config.ts` uses). `outbox` stores messages for `/api/dev/outbox` (tests and local development only). `webhook` POSTs `{to,subject,text}` to `EMAIL_WEBHOOK_URL` with `Bearer EMAIL_WEBHOOK_TOKEN`, so that a relay you operate sends the mail. Any other value disables email sign-in with a 503. The webhook relay needs its own live credential and has not been exercised. Invitation emails are best effort, and a failed delivery never blocks the membership change. Passkeys work without email delivery.
 
 ## Security notes
 
@@ -102,6 +120,9 @@ Rooms created by the previous snapshot-only Worker are migrated in place. Their 
 
 `tests/cloud-harness.mjs` builds the Worker with `vp build` once per test process and runs that bundle (the same one `cf deploy --prebuilt` uploads), and applies `cloud/migrations` to the persisted local D1 database, recording them in `d1_migrations` as `cf d1 migrations apply` does.
 
+- `node tests/cloud-auth-bridge.mjs`: Better Auth sessions acting through directory accounts. Legacy account linking by verified email, new accounts, profiles, room roles and email invitations, socket sessions, passkey tickets, unverified resend, the reset page flow, sign out and sign out everywhere.
+- `node tests/cloud-orgs.mjs`: personal organizations, rooms in organizations, organization roles granting room roles, the default member role, live role changes and revocation on update, removal and leaving, rejoining, direct and organization roles combined, listings, moving rooms (including legacy ones), a forged role header, reserved slugs and refusal to delete an organization with rooms.
+- `node tests/cloud-account-pages.mjs`: the verification landing and the password-reset page in a real Electron browser window (no preload).
 - `node tests/cloud-auth.mjs`: Better Auth on D1. Sign-up, required email verification (including a tampered token), password sign-in with bearer tokens and no cookies, sessions, organizations with emailed invitations and acceptance, password reset that revokes sessions, sign-out, per-IP rate limit and restart persistence.
 - `node tests/cloud-rooms.mjs`: capability auth, isolation, stale-write 409, WebSocket presence and updates, publication, restart persistence, unpublish, creation rate limit.
 - `node tests/cloud-merge.mjs`: the merge engine (round trips, LWW/HLC, text ranges, cycles, orphans, delete/undo, hostile operations, randomized convergence) and the room over WebSockets (concurrent edits, duplicate batches, restart-persistent stamps, future-stamp clamp, legacy snapshot coexistence).
@@ -110,7 +131,17 @@ Rooms created by the previous snapshot-only Worker are migrated in place. Their 
 - `node tests/cloud-passkeys-desktop.mjs`: Electron with Chromium's CDP virtual authenticator. It registers a passkey from Share › Account, signs out, signs in with the passkey through the handoff, and checks that removal refuses sign-in.
 - `node tests/cloud-apps.mjs`: a real project build uploaded and served (content types, base injection, SPA fallback, ETag, versions, pinned URLs, rollback, ownership, path and manifest validation, failed builds, persistence, unpublish).
 - `node tests/cloud-desktop.mjs`: two Electron clients (invite join, cursors, sync, reconnect, conflict-free merging of layers, properties and text, local-only undo/redo rebased over remote edits, publication, and the legacy-server conflict prompt).
-- `node tests/cloud-accounts-desktop.mjs`: two Electron clients through the Share panel (sign-in, profile, email invites, viewer enforcement, live promotion, role links, rotation, comments, recovery, app build/publish/rollback/unpublish, sign out everywhere).
+- `node tests/cloud-accounts-desktop.mjs`: two Electron clients through the Share panel (email + password sign-up, verification and sign-in, profile, email invites, viewer enforcement, live promotion, role links, rotation, comments, recovery, app build/publish/rollback/unpublish, sign out everywhere).
 - `tests/cloud-async.cjs` (`npm run test:ux`): stale panel completions never touch a newly selected document.
 
 The installed `cf/config` (`@cloudflare/config`) and Miniflare type definitions determine the beta configuration shape (text/secret bindings, multi-module manifests). Earlier passes consulted Context7 for Durable Object WebSocket hibernation and SQLite patterns.
+
+## Drizzle ORM on D1
+
+`db.js` constructs a request-scoped Drizzle D1 client. `schema.js` maps the eight existing D1 tables (Better Auth plus the organization room index). Better Auth uses its Drizzle adapter with SQLite and interactive transactions disabled for D1. Organization queries use the query builder and parameterized `sql` templates for joins. Durable Object storage remains independent.
+
+Existing SQL migrations in `cloud/migrations` remain authoritative and are applied by `npm run db:migrate`; this adapter change requires no new migration. Auth date fields deliberately use ISO text mappings, preserving the original adapter's stored values in SQLite `date` columns; room timestamps stay epoch milliseconds. Do not regenerate those fields as integer timestamps without a separate data migration.
+
+When changing auth plugins or fields, use `scripts/auth-schema.mjs` as a reference for Better Auth's required SQL, review an incremental SQL migration (never replay the initial CREATE TABLE statements), and update `cloud/schema.js` to match. The generator intentionally uses the native SQLite adapter only for schema discovery. It is not the runtime database adapter. No Drizzle Kit push or remote credentials are needed for this integration.
+
+Validation: `npm run test:cloud` covers old-format session reads/expiry/revocation, new account flows, room permissions, and restart persistence; `npm run deploy:check` validates Worker packaging without uploading.
