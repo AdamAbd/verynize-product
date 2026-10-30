@@ -41,8 +41,12 @@ export function authOptions(env = {}, { baseURL, database } = {}) {
         });
       },
     },
+    // Emailed links land on server pages (cloud/account-pages.js): clients pass
+    // callbackURL "/account/verified" and redirectTo "/account/reset-password".
     emailVerification: {
       sendOnSignUp: true,
+      // An unverified sign-in attempt (403 EMAIL_NOT_VERIFIED) emails a fresh link.
+      sendOnSignIn: true,
       // The link opens in a browser, and cookies are not used, so a session there would be lost.
       autoSignInAfterVerification: false,
       sendVerificationEmail: async ({ user, url }) => {

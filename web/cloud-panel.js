@@ -4,6 +4,7 @@
   const Ops = window.VerynizeOps;
   const LOCAL_KEYS = ["activePage"];
   const ACCOUNT_KEY = "verynize.cloud.account";
+  const SESSION_TOKEN = /^(vs_[0-9a-f]{64}|[A-Za-z0-9]{16,64}\.[A-Za-z0-9+/=_%-]{16,128})$/;
   const ROLE_LABEL = { owner: "Owner", editor: "Editor", commenter: "Commenter", viewer: "Viewer" };
   const root = document.createElement("section");
   root.id = "cloud-panel";
@@ -16,8 +17,11 @@
 <a id="cloud-public" target="_blank" rel="noopener noreferrer"></a><p id="cloud-status" role="status">Not connected</p>
 <div id="cloud-conflict" hidden><p>A collaborator changed the design while you were editing. Your work has not been overwritten.</p><button id="cloud-reload">Load shared version</button><button id="cloud-overwrite">Replace shared version with mine</button></div>
 <details class="cloud-section" id="cloud-account-section"><summary>Account</summary>
- <div id="cloud-signed-out"><label>Email<input id="cloud-email" type="email" autocomplete="email" placeholder="you@studio.com"></label><div class="cloud-actions"><button id="cloud-signin-start">Email me a sign-in link</button></div>
-  <label>Sign-in link or code<input id="cloud-signin-code" placeholder="Paste the link from the email"></label><div class="cloud-actions"><button id="cloud-signin-verify">Sign in</button></div><div class="cloud-actions"><button id="cloud-passkey-signin">Sign in with a passkey</button></div></div>
+ <div id="cloud-signed-out"><label>Email<input id="cloud-email" type="email" autocomplete="email" placeholder="you@studio.com"></label>
+  <label>Password<input id="cloud-password" type="password" autocomplete="current-password" minlength="10" maxlength="128" placeholder="At least 10 characters"></label>
+  <label>Name (for a new account)<input id="cloud-signup-name" maxlength="80" autocomplete="name" placeholder="Designer"></label>
+  <div class="cloud-actions"><button id="cloud-signin">Sign in</button><button id="cloud-signup">Create account</button><button id="cloud-forgot">Forgot password</button></div>
+  <div class="cloud-actions"><button id="cloud-passkey-signin">Sign in with a passkey</button></div></div>
  <div id="cloud-signed-in" hidden><p id="cloud-account"></p>
   <label>Handle<input id="cloud-handle" maxlength="30" autocomplete="off"></label><label>Display name<input id="cloud-display-name" maxlength="80"></label><label>Avatar URL<input id="cloud-avatar" placeholder="https://…"></label>
   <div class="cloud-actions"><button id="cloud-profile-save">Save profile</button><button id="cloud-profile-open">View public profile</button></div>
@@ -187,7 +191,8 @@
   const loadAccount = () => {
     try {
       const value = JSON.parse(localStorage.getItem(ACCOUNT_KEY) || "null");
-      return value && /^vs_[0-9a-f]{64}$/.test(value.session) ? value : null;
+      // Legacy directory sessions (passkeys) or Better Auth bearer tokens (email + password).
+      return value && SESSION_TOKEN.test(value.session) ? value : null;
     } catch {
       return null;
     }
@@ -211,7 +216,7 @@
       const e = new Error(
         response.status === 409 && data?.document
           ? "Shared document changed; resolve the conflict below."
-          : data?.error || `Server returned ${response.status}`,
+          : data?.error || data?.message || `Server returned ${response.status}`,
       );
       e.status = response.status;
       e.data = data;
@@ -1068,43 +1073,64 @@
     if (!account) throw Error("Sign in first");
     return request(path, options, { server: account.server });
   };
-  async function verify(code, server) {
-    let token = code.trim();
-    if (/^https?:/.test(token)) {
-      const url = new URL(token);
-      server = url.origin;
-      token = new URLSearchParams(url.hash.slice(1)).get("signin") || "";
-    }
-    if (!/^[0-9a-f]{64}$/.test(token)) throw Error("Paste the sign-in link from the email");
-    const result = await request(
-      "/api/auth/verify",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          token,
-          label: window.desktop ? "Verynize desktop" : "Verynize web",
-        }),
-      },
-      { server, session: false },
-    );
-    saveAccount({ server, session: result.session, account: result.account });
-    $("cloud-signin-code").value = "";
-    status(`Signed in as ${result.account.email}`);
-    refreshRooms().catch(() => {});
-  }
-  $("cloud-signin-start").onclick = action(async () => {
+  // Email + password accounts (Better Auth on the server). Emailed verification and reset links
+  // open the server's /account/* pages in a browser; the app only signs in with the password.
+  const credentials = () => {
     const email = $("cloud-email").value.trim();
     if (!email) throw Error("Enter your email address");
+    return { email, password: $("cloud-password").value };
+  };
+  $("cloud-signin").onclick = action(async () => {
+    const server = base();
+    const { email, password } = credentials();
+    if (!password) throw Error("Enter your password");
+    const response = await fetch(server + "/api/auth/sign-in/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, callbackURL: "/account/verified" }),
+    });
+    const data = await response.json().catch(() => null);
+    if (response.status === 403 && data?.code === "EMAIL_NOT_VERIFIED")
+      throw Error(`Verify your email first. A new link was sent to ${email}.`);
+    if (response.status === 401) throw Error("Email or password is incorrect");
+    if (!response.ok)
+      throw Error(data?.message || data?.error || `Server returned ${response.status}`);
+    const session = response.headers.get("set-auth-token") || "";
+    if (!SESSION_TOKEN.test(session)) throw Error("The server did not return a session");
+    const me = await request(
+      "/api/me",
+      { headers: { "X-Verynize-Session": session } },
+      { server, session: false },
+    );
+    saveAccount({ server, session, account: me.account });
+    $("cloud-password").value = "";
+    status(`Signed in as ${me.account.email}`);
+    refreshRooms().catch(() => {});
+  });
+  $("cloud-signup").onclick = action(async () => {
+    const { email, password } = credentials();
+    if (password.length < 10) throw Error("Choose a password of at least 10 characters");
+    const name = $("cloud-signup-name").value.trim() || email.split("@")[0];
     await request(
-      "/api/auth/start",
-      { method: "POST", body: JSON.stringify({ email }) },
+      "/api/auth/sign-up/email",
+      {
+        method: "POST",
+        body: JSON.stringify({ email, password, name, callbackURL: "/account/verified" }),
+      },
       { server: base(), session: false },
     );
-    status(
-      `Check ${email} for a sign-in link, then paste it below. It works once, for 15 minutes.`,
-    );
+    $("cloud-password").value = "";
+    status(`Check ${email} for a verification link, then sign in here with your password.`);
   });
-  $("cloud-signin-verify").onclick = action(() => verify($("cloud-signin-code").value, base()));
+  $("cloud-forgot").onclick = action(async () => {
+    const { email } = credentials();
+    await request(
+      "/api/auth/request-password-reset",
+      { method: "POST", body: JSON.stringify({ email, redirectTo: "/account/reset-password" }) },
+      { server: base(), session: false },
+    );
+    status(`If ${email} has an account, a password reset link is on its way.`);
+  });
   $("cloud-profile-save").onclick = action(async () => {
     const result = await accountRequest("/api/me", {
       method: "PATCH",
@@ -1394,12 +1420,6 @@
 
   // ---- links opened in a browser ----------------------------------------------------------------
   const params = new URLSearchParams(location.hash.slice(1));
-  if (params.has("signin") && location.protocol.startsWith("http")) {
-    $("cloud-dialog").showModal();
-    verify(params.get("signin"), location.origin)
-      .then(() => history.replaceState(null, "", location.pathname))
-      .catch((e) => status(e.message));
-  }
   if (params.has("room") && (params.has("token") || sessionFor(location.origin))) {
     $("cloud-dialog").showModal();
     status("Invite detected. Join invite to load this shared design.");

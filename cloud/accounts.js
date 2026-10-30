@@ -104,6 +104,23 @@ export class AccountDirectory extends DurableObject {
     return publicAccount(row);
   }
 
+  /**
+   * The directory account for a Better Auth user (cloud/auth.js). Better Auth only signs in
+   * verified addresses, so the email proves ownership: an account created earlier by a magic
+   * link or an invitation is linked and marked verified. Emails cannot be changed in Better
+   * Auth, so the address stays a stable link until accounts move to D1.
+   */
+  linkVerifiedAccount(rawEmail, name) {
+    const email = normalizeEmail(rawEmail);
+    const created = !this.accountByEmail(email);
+    const account = this.ensureAccount(email);
+    this.sql.exec("UPDATE accounts SET verified=1 WHERE id=?", account.id);
+    const displayName = typeof name === "string" ? name.trim().slice(0, 80) : "";
+    if (created && displayName)
+      this.sql.exec("UPDATE accounts SET display_name=? WHERE id=?", displayName, account.id);
+    return publicAccount(this.account(account.id));
+  }
+
   async startSignIn(rawEmail, origin) {
     const email = normalizeEmail(rawEmail);
     const token = randomHex(32),

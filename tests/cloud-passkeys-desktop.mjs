@@ -32,15 +32,18 @@ try {
   });
   await page.locator("#cloud-server").fill(server);
 
-  // Magic-link sign-in first, then register a passkey for the account.
+  // Email + password sign-in first, then register a passkey for the account.
   await page.locator("#cloud-email").fill("alice@example.test");
-  await page.locator("#cloud-signin-start").click();
+  await page.locator("#cloud-password").fill("alice long password");
+  await page.locator("#cloud-signup").click();
   await statusIncludes("Check alice@example.test");
   const { messages } = await (
     await fetch(`${direct}/api/dev/outbox?to=alice%40example.test`)
   ).json();
-  await page.locator("#cloud-signin-code").fill(messages[0].link);
-  await page.locator("#cloud-signin-verify").click();
+  const link = new URL(messages.find((m) => /Verify/.test(m.subject)).link);
+  await fetch(direct + link.pathname + link.search, { redirect: "manual" });
+  await page.locator("#cloud-password").fill("alice long password");
+  await page.locator("#cloud-signin").click();
   await page.waitForFunction(() => !document.getElementById("cloud-signed-in").hidden);
 
   async function ceremonyWindow(trigger) {

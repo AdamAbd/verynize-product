@@ -1,4 +1,4 @@
-// Desktop UI for cloud accounts: two real Electron clients sign in through the magic-link outbox,
+// Desktop UI for cloud accounts: two real Electron clients create email + password accounts (verified through the outbox),
 // edit profiles, share a room by email with roles, rotate and recover links, comment, and
 // build/publish/roll back/unpublish a project app against local workerd.
 import { Miniflare } from "miniflare";
@@ -52,18 +52,33 @@ try {
       (text) => document.getElementById("cloud-status").textContent.includes(text),
       text,
     );
-  async function signIn(page, email) {
+  async function signIn(page, email, password = "a long enough password") {
     await panel(page);
     await page.locator("#cloud-server").fill(server);
     await section(page, "cloud-account-section");
     await page.locator("#cloud-email").fill(email);
-    await page.locator("#cloud-signin-start").click();
+    // Create the account, then follow the emailed verification link as a browser would.
+    await page.locator("#cloud-password").fill(password);
+    await page.locator("#cloud-signup-name").fill(email.split("@")[0]);
+    await page.locator("#cloud-signup").click();
     await statusIncludes(page, "Check " + email);
+    assert.equal(await page.locator("#cloud-password").inputValue(), "", "password field cleared");
+    // Signing in before verifying is refused and sends a new link.
+    await page.locator("#cloud-password").fill(password);
+    await page.locator("#cloud-signin").click();
+    await statusIncludes(page, "Verify your email first");
     const { messages } = await (
       await fetch(`${server}/api/dev/outbox?to=${encodeURIComponent(email)}`)
     ).json();
-    await page.locator("#cloud-signin-code").fill(messages[0].link);
-    await page.locator("#cloud-signin-verify").click();
+    const verified = await fetch(messages.find((m) => /Verify/.test(m.subject)).link, {
+      redirect: "manual",
+    });
+    assert.equal(verified.headers.get("location"), "/account/verified");
+    await page.locator("#cloud-password").fill("not the password");
+    await page.locator("#cloud-signin").click();
+    await statusIncludes(page, "Email or password is incorrect");
+    await page.locator("#cloud-password").fill(password);
+    await page.locator("#cloud-signin").click();
     await page.waitForFunction(() => !document.getElementById("cloud-signed-in").hidden);
     assert.match(await page.locator("#cloud-account").textContent(), new RegExp(email));
   }
@@ -250,7 +265,7 @@ try {
     401,
   );
   console.log(
-    "PASS desktop accounts: magic-link sign-in, profile edit, email invite with roles, token-free member join, viewer enforcement, live promotion, role links, rotation, comments, owner recovery, project app build/publish/rollback/unpublish, sign out everywhere",
+    "PASS desktop accounts: email + password sign-up, verification, sign-in, profile edit, email invite with roles, token-free member join, viewer enforcement, live promotion, role links, rotation, comments, owner recovery, project app build/publish/rollback/unpublish, sign out everywhere",
   );
 } finally {
   await Promise.all(apps.map((app) => app.close()));
