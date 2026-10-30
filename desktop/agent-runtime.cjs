@@ -25,6 +25,10 @@ const agentBehavior = require('./agent-behavior.cjs');
 const { createClaudeMapper, createCodexMapper, toolTitle } = require('./agent-runtime-events.cjs');
 const agentCommands = require('./agent-commands.cjs'); // composer slash commands: Codex prompt/skill expansion
 const agentMemory = require('./agent-memory.cjs'); // Settings › Memory: repo-less memory folder, ~/.codex/AGENTS.md for Claude
+// Named accounts, Verynize-managed MCP servers + tool permission defaults, and per-chat autonomy (Settings › Accounts / Tools, chat Autonomy panel).
+const { AgentProfiles } = require('./agent-profiles.cjs');
+const toolConfig = require('./agent-tool-config.cjs');
+const agentAutonomy = require('./agent-autonomy.cjs');
 
 const VERSION = '0.6.0';
 const MAX_RUNS = 3;
@@ -480,6 +484,34 @@ function codexThreadParams({ cwd, access, model, persona, directories }) {
   return { cwd, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, ...(policy.approvalsReviewer ? { approvalsReviewer: policy.approvalsReviewer } : {}), ...(model ? { model } : {}), developerInstructions: persona, ...roots };
 }
 
+/**
+ * Apply a run's account, Verynize tool configuration and chat autonomy to Claude SDK options (pure, for tests).
+ * `account.env` points Claude Code at a named account's CLAUDE_CONFIG_DIR; `tools` = AgentToolConfig.forRun();
+ * `autonomy` = normalized per-chat settings.
+ */
+function applyClaudePolicy(options, { access, account, tools, autonomy } = {}) {
+  const out = { ...options };
+  if (account?.env && Object.keys(account.env).length) out.env = { ...(out.env || {}), ...account.env };
+  if (tools?.servers?.length) out.mcpServers = { ...toolConfig.claudeServers(tools.servers), ...(out.mcpServers || {}) };
+  const lists = toolConfig.claudePermissionLists(tools?.permissions || []);
+  const allowed = [...lists.allowed, ...(autonomy?.allowedTools || [])].filter(t => !(autonomy?.deniedTools || []).includes(t));
+  const denied = [...lists.denied.filter(t => !(autonomy?.allowedTools || []).includes(t)), ...(autonomy?.deniedTools || [])];
+  if (allowed.length) out.allowedTools = [...new Set([...(out.allowedTools || []), ...allowed])];
+  if (denied.length) out.disallowedTools = [...new Set([...(out.disallowedTools || []), ...denied])];
+  if (autonomy?.maxTurns) out.maxTurns = autonomy.maxTurns;
+  if (autonomy?.maxBudgetUsd) out.maxBudgetUsd = autonomy.maxBudgetUsd;
+  if (autonomy?.planFirst) { out.permissionMode = 'plan'; delete out.allowDangerouslySkipPermissions; }
+  void access;
+  return out;
+}
+
+/** Codex thread params under "plan before edits": nothing is written without an approval. */
+function applyCodexPlanFirst(threadParams, autonomy) {
+  if (!autonomy?.planFirst) return threadParams;
+  const { config, ...rest } = threadParams;
+  return { ...rest, approvalPolicy: 'untrusted', sandbox: 'read-only' };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Optional MCP bridge (owned by another module; may not exist).
 async function defaultBridge() {
@@ -561,12 +593,23 @@ class AgentRuntime {
     loadAccess = dir => agentAccess.loadAccessSettings(dir),
     home = agentMemory.resolveHome(),
     getBehavior = null,
+    profiles = null,
+    tools = null,
+    autonomy = null,
   } = {}) {
     if (!userData) throw Error('userData directory required');
     Object.assign(this, { userData, getProject, resolveProject, emitRaw: emit, discover, loadClaudeSdk, spawnProcess, getBridge, startFallback, loadPreferences, loadAccess, home, getBehavior });
+    // Shared with the Settings IPC handlers in main.cjs so both see the same cached store.
+    this.profiles = profiles || new AgentProfiles({ userData });
+    this.toolConfig = tools || new toolConfig.AgentToolConfig({ userData });
+    this.autonomy = autonomy || new agentAutonomy.AgentAutonomy({ userData });
+    // One Codex app-server per account slot ('system' = the computer's own login, else a named account id).
+    this.codexPool = new Map();
     this.runs = new Map(); this.pendingStarts = 0; this.permissions = new Map(); this.questions = new Map(); this.codex = null; this.codexSupport = new Map(); this.modelCache = new Map(); this.seq = 0;
     this.helpers = new Set(); this.allowRules = new AllowRules(path.join(userData, 'agent-allow-rules.json'));
   }
+  get codex() { return this.codexPool.get('system') || null; }
+  set codex(server) { if (server) this.codexPool.set('system', server); else this.codexPool?.delete('system'); }
   get attachmentRoot() { return path.join(this.userData, 'agent-attachments'); }
   active() { return this.runs.size + this.pendingStarts; }
   /** Running chats, so the renderer can rebuild per-chat busy state. */
@@ -622,7 +665,11 @@ class AgentRuntime {
       const shared = agentSettings.shareMemory ? await agentAccess.sharedMemoryBlock(options.agent, { cwd, ...(this.home ? { home: this.home } : {}) }).catch(() => '') : '';
       const homeText = agentSettings.shareMemory ? '' : await agentMemory.homeInstructions(options.agent, { home: this.home }).catch(() => '');
       const memoryDir = quickChat && options.agent === 'claude' ? await agentMemory.repoLessMemoryDir(this.userData).catch(() => null) : null;
-      const persona = [buildPersona({ bridge: !!bridge, quickChat, instructions: typeof options.instructions === 'string' ? options.instructions : '', memory, preferences, homeInstructions: homeText }), agentAccess.accessPersonaLines(agentSettings), shared].filter(Boolean).join('\n\n');
+      // Account (named profile or this Mac), Verynize tool config for this project, and the chat's autonomy.
+      const account = await this.profiles.resolve(options.agent, { id: typeof options.account === 'string' ? options.account : undefined, chatId });
+      const autonomy = options.autonomy && typeof options.autonomy === 'object' ? agentAutonomy.normalizeAutonomy(options.autonomy) : await this.autonomy.get(chatId);
+      const tools = await this.toolConfig.forRun(options.agent, { projects: [cwd, project?.repositoryRoot] }).catch(() => ({ servers: [], permissions: [] }));
+      const persona = [buildPersona({ bridge: !!bridge, quickChat, instructions: typeof options.instructions === 'string' ? options.instructions : '', memory, preferences, homeInstructions: homeText }), agentAccess.accessPersonaLines(agentSettings), shared, autonomy.planFirst ? agentAutonomy.PLAN_FIRST_PERSONA : ''].filter(Boolean).join('\n\n');
       const rawContext = options.context && typeof options.context === 'object' ? { ...options.context } : Array.isArray(options.mentions) ? {} : null;
       if (rawContext && Array.isArray(options.mentions)) rawContext.mentions = options.mentions;
       const context = normalizeContext(rawContext, this.attachmentRoot);
@@ -635,12 +682,15 @@ class AgentRuntime {
       // A fork (rewind) replaces resume too; the seed then only serves as its fallback.
       const fork = normalizeFork(options.fork);
       const sessionId = seed || fork ? '' : normalized.sessionId;
-      const run = { id: randomUUID(), chatId, agent: options.agent, cwd, projectKey: project?.root || 'unattached', stopped: false, done: false, sessionId: sessionId || null, cancel: () => {}, computerUse: options.agent === 'codex' && agentSettings.codexComputerUse };
-      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt, directories, executable: found?.path || null, quickChat, agentSettings, memoryDir };
+      const run = { id: randomUUID(), chatId, agent: options.agent, cwd, projectKey: project?.root || 'unattached', stopped: false, done: false, sessionId: sessionId || null, cancel: () => {}, computerUse: options.agent === 'codex' && agentSettings.codexComputerUse, autonomy, toolRules: tools.permissions, account: { id: account.id, name: account.name }, codexSlot: account.system ? 'system' : account.id, steps: 0 };
+      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt, directories, executable: found?.path || null, quickChat, agentSettings, memoryDir, account, tools, autonomy };
       // Settings › Agents (desktop/agent-behavior.cjs): Claude response style + commit credit, Codex personality.
       const behavior = this.getBehavior ? await Promise.resolve().then(() => this.getBehavior()).catch(() => null) : null;
       if (behavior) { params.claudeSettings = agentBehavior.claudeSettingsFor(behavior); params.codexPersonality = agentBehavior.codexPersonalityFor(behavior); }
       this.runs.set(run.id, run);
+      // Visible in the transcript: the effective autonomy of this run (only when the chat customised it, uses a named account or extra MCP servers).
+      const customised = autonomy.planFirst || autonomy.maxTurns || autonomy.maxBudgetUsd || autonomy.allowedTools.length || autonomy.deniedTools.length || autonomy.autoApprove.length || !account.system || tools.servers.length;
+      if (customised) this.emit(run, { type: 'autonomy', text: agentAutonomy.describeAutonomy(autonomy, { access: normalized.access, account: account.system ? '' : account.name }), settings: autonomy, account: { id: account.id, name: account.name }, servers: tools.servers.map(s => s.name) });
       let runtime;
       try {
         if (options.agent === 'claude') runtime = await this.startClaude(params);
@@ -650,7 +700,7 @@ class AgentRuntime {
         }
       } catch (error) { this.runs.delete(run.id); throw error; }
       run.runtime = runtime;
-      return { id: run.id, runId: run.id, chatId, runtime, cwd, quickChat, access: normalized.access, mcp: !!bridge, steerable: !!run.steer, seeded: !!params.seed, rewound: !!run.rewound };
+      return { id: run.id, runId: run.id, chatId, runtime, cwd, quickChat, access: normalized.access, account: { id: account.id, name: account.name }, mcp: !!bridge, steerable: !!run.steer, seeded: !!params.seed, rewound: !!run.rewound };
     } finally { this.pendingStarts--; }
   }
 
@@ -659,7 +709,7 @@ class AgentRuntime {
     clearTimeout(run.settleTimer);
     for (const [requestId, pending] of this.permissions) if (pending.runId === run.id) pending.resolve(false, requestId);
     for (const pending of [...this.questions.values()]) if (pending.runId === run.id) pending.resolve(null);
-    if (this.codex) for (const [threadId, child] of this.codex.children) if (child.run === run) this.codex.children.delete(threadId);
+    for (const server of this.codexPool.values()) for (const [threadId, child] of server.children) if (child.run === run) server.children.delete(threadId);
     if (error && !run.stopped) this.emit(run, { type: 'error', text: String(error).slice(0, 4000) });
     this.runs.delete(run.id);
     this.emit(run, { type: 'done', code: run.stopped ? 130 : code, stopped: run.stopped, ...(run.sessionId ? { sessionId: run.sessionId } : {}), ...(run.sessionId && run.resumeAt ? { resumeAt: run.resumeAt } : {}) });
@@ -667,13 +717,37 @@ class AgentRuntime {
 
   forward(run, event) {
     if (event.type === 'session') run.sessionId = event.sessionId;
+    this.enforceLimits(run, event);
     if (event.type === 'error') { if (run.stopped) return; run.failed = true; }
     this.emit(run, event);
+  }
+
+  /** Chat autonomy limits the provider cannot enforce itself: Codex tool steps and a reported cost over budget. */
+  enforceLimits(run, event) {
+    const a = run.autonomy;
+    if (!a || run.helper || run.done || run.stopped || run.limitHit) return;
+    let reason = '';
+    if (event.type === 'tool-call' && !event.partial && !event.parentToolCallId && run.agent === 'codex' && a.maxTurns) {
+      run.steps = (run.steps || 0) + 1;
+      if (run.steps > a.maxTurns) reason = `Stopped: this chat allows at most ${a.maxTurns} tool steps per run.`;
+    }
+    const cost = Number.isFinite(event.costUsd) ? event.costUsd : Number.isFinite(event.usage?.costUsd) ? event.usage.costUsd : undefined;
+    if (event.type === 'usage' && a.maxBudgetUsd && cost !== undefined && cost > a.maxBudgetUsd) reason = `Stopped: this run cost $${cost.toFixed(2)}, over the chat budget of $${a.maxBudgetUsd.toFixed(2)}.`;
+    if (!reason) return;
+    run.limitHit = true;
+    this.emit(run, { type: 'policy', decision: 'limit', text: reason });
+    Promise.resolve().then(() => run.cancel()).catch(() => {});
   }
 
   // --- permissions -----------------------------------------------------------------------------
   async askPermission(run, toolName, input, signal, { toolCallId, canAlwaysAllow = true } = {}) {
     if (run.helper) return false; // read-only helpers never get extra permissions
+    // Chat autonomy first (denied patterns win), then Settings › Tools permission defaults.
+    const auto = agentAutonomy.autonomyDecision(run.autonomy, toolName, input) || (() => { const d = toolConfig.decisionFor(run.toolRules || [], toolName); return d && d !== 'ask' ? { decision: d, reason: `${toolName}: ${d === 'allow' ? 'allowed' : 'denied'} by default in Settings › Tools` } : null; })();
+    if (auto) {
+      if (!run.done) this.emit(run, { type: 'policy', decision: auto.decision, toolName, title: toolTitle(toolName, input || {}), text: auto.reason, ...(toolCallId ? { toolCallId } : {}) });
+      return auto.decision === 'allow';
+    }
     if (await this.allowRules.matches(run.projectKey || 'unattached', toolName, input).catch(() => false)) return true;
     if (signal?.aborted || run.done) return false;
     const requestId = randomUUID();
@@ -798,10 +872,13 @@ class AgentRuntime {
       ...claudeQueryOptions({ cwd: params.cwd, access: params.access, model: params.model, effort: params.effort, sessionId: params.sessionId, fork: params.fork, persona: params.persona, bridge: params.bridge, executable: params.executable, additionalDirectories: [...(params.context?.images?.length ? [path.dirname(params.context.images[0])] : []), ...(params.directories || [])], agentSettings: params.agentSettings, claudeSettings: params.claudeSettings, memoryDir: params.memoryDir }),
       abortController: abort,
       ...this.claudeHooks(run, params),
-      env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `verynize/${VERSION}`, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.agentSettings ? agentAccess.claudeAccessOptions(params.agentSettings).env : {}) }),
+      env: agents.childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `verynize/${VERSION}`, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.agentSettings ? agentAccess.claudeAccessOptions(params.agentSettings).env : {}), ...(params.account?.env || {}) }),
       stderr: data => { stderr = (stderr + data).slice(-8000); },
       canUseTool: (toolName, toolInput, opts = {}) => this.claudeCanUseTool(run, toolName, toolInput, opts),
     };
+    const policed = applyClaudePolicy(options, params);
+    for (const key of Object.keys(options)) if (!(key in policed)) delete options[key];
+    Object.assign(options, policed);
     const q = sdk.query({ prompt: input(), options });
     // Composer indicators (desktop/agent-live-status.cjs): live MCP status and context breakdown while the run is open.
     run.mcpStatus = () => q.mcpServerStatus();
@@ -875,7 +952,7 @@ class AgentRuntime {
     const handle = this.startFallback(params.executable, 'claude', composePrompt(params.prompt, params.context, params.seed), params.cwd, event => {
       if (event.type === 'done') { run.stopped = run.stopped || event.stopped; this.finish(run, { code: event.code }); return; }
       const { id: _id, ...rest } = event; this.forward(run, rest);
-    }, { model: params.model, access: params.access, effort: params.effort, sessionId: params.sessionId, structured: true, appendSystemPrompt: params.persona, bridge: params.bridge, id: run.id, claudeSettings: params.claudeSettings, ...(params.agentSettings ? (({ env, cliArgs }) => ({ env, extraArgs: cliArgs }))(agentAccess.claudeAccessOptions(params.agentSettings)) : {}) });
+    }, { model: params.model, access: params.access, effort: params.effort, sessionId: params.sessionId, structured: true, appendSystemPrompt: params.persona, bridge: params.bridge, id: run.id, claudeSettings: params.claudeSettings, ...(params.agentSettings ? (({ env, cliArgs }) => ({ env: { ...env, ...(params.account?.env || {}) }, extraArgs: cliArgs }))(agentAccess.claudeAccessOptions(params.agentSettings)) : { env: params.account?.env || {} }) });
     run.cancel = () => { run.stopped = true; handle.cancel(); };
     return 'claude-cli';
   }
@@ -896,12 +973,14 @@ class AgentRuntime {
     return this.codexSupport.get(executable);
   }
 
-  async codexServer(executable, bridge, extraArgs = []) {
-    const key = executable + '|' + (bridge?.url || '') + '|' + extraArgs.join(' ');
-    if (this.codex && !this.codex.rpc.closed && this.codex.key === key) return this.codex;
-    if (this.codex && !this.codex.rpc.closed && ([...this.runs.values()].some(r => r.runtime === 'codex-app-server' && !r.done) || [...this.helpers].some(h => h.agent === 'codex'))) return this.codex;
-    this.codex?.rpc.close();
-    const env = agents.childEnv(bridge?.token ? { [settings.MCP_TOKEN_ENV]: bridge.token } : {});
+  /** `slot`: account the server runs as ('system' or a named account id); `extraEnv`: its CODEX_HOME and MCP server env values. */
+  async codexServer(executable, bridge, extraArgs = [], { slot = 'system', extraEnv = {} } = {}) {
+    const key = executable + '|' + (bridge?.url || '') + '|' + extraArgs.join(' ') + '|' + createHash('sha256').update(JSON.stringify(extraEnv)).digest('hex').slice(0, 16);
+    const current = this.codexPool.get(slot);
+    if (current && !current.rpc.closed && current.key === key) return current;
+    if (current && !current.rpc.closed && ([...this.runs.values()].some(r => r.runtime === 'codex-app-server' && !r.done && (r.codexSlot || 'system') === slot) || (slot === 'system' && [...this.helpers].some(h => h.agent === 'codex')))) return current;
+    current?.rpc.close();
+    const env = agents.childEnv({ ...extraEnv, ...(bridge?.token ? { [settings.MCP_TOKEN_ENV]: bridge.token } : {}) });
     const child = this.spawnProcess(executable, ['app-server', ...settings.codexMcpArgs(bridge), ...extraArgs], { env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     const rpc = new JsonRpcChild(child);
     // threads: main thread id -> run. children: subagent thread id -> {run, map} (collabAgentToolCall).
@@ -936,7 +1015,7 @@ class AgentRuntime {
         this.forward(run, event);
       }
     });
-    this.codex = server;
+    this.codexPool.set(slot, server);
     await rpc.request('initialize', { clientInfo: { name: 'verynize', title: 'Verynize', version: VERSION }, capabilities: { experimentalApi: true } }, 20000);
     rpc.notify('initialized');
     return server;
@@ -967,8 +1046,10 @@ class AgentRuntime {
 
   async startCodex(params) {
     const { run } = params;
-    const server = await this.codexServer(params.executable, params.bridge, params.agentSettings ? agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) : []);
-    const threadParams = codexThreadParams(params);
+    const extra = toolConfig.codexServerArgs(params.tools?.servers || []);
+    if (extra.skipped.length) this.emit(run, { type: 'status', text: `Skipped MCP server ${extra.skipped.join(', ')}: an environment variable name clashes with another server.` });
+    const server = await this.codexServer(params.executable, params.bridge, [...(params.agentSettings ? agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) : []), ...extra.args], { slot: run.codexSlot || 'system', extraEnv: { ...(params.account?.env || {}), ...extra.env } });
+    const threadParams = applyCodexPlanFirst(codexThreadParams(params), params.autonomy);
     let thread;
     if (params.fork) {
       try { thread = (await server.rpc.request('thread/fork', { threadId: params.fork.sessionId, lastTurnId: params.fork.at, ...threadParams, excludeTurns: true })).thread; }
@@ -1013,7 +1094,7 @@ class AgentRuntime {
     const handle = this.startFallback(params.executable, 'codex', prompt, params.cwd, event => {
       if (event.type === 'done') { run.stopped = run.stopped || event.stopped; this.finish(run, { code: event.code }); return; }
       const { id: _id, ...rest } = event; this.forward(run, rest);
-    }, { model: params.model, access: params.access, effort: params.effort, structured: true, bridge: params.bridge, id: run.id, codexPersonality: params.codexPersonality, ...(params.agentSettings ? { extraArgs: agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) } : {}) });
+    }, { model: params.model, access: params.access, effort: params.effort, structured: true, bridge: params.bridge, id: run.id, codexPersonality: params.codexPersonality, env: { ...(params.account?.env || {}), ...toolConfig.codexServerArgs(params.tools?.servers || []).env }, extraArgs: [...(params.agentSettings ? agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) : []), ...toolConfig.codexServerArgs(params.tools?.servers || []).args] });
     run.cancel = () => { run.stopped = true; handle.cancel(); };
     return 'codex-exec';
   }
@@ -1268,13 +1349,14 @@ class AgentRuntime {
 
   close() {
     for (const run of this.runs.values()) { try { run.cancel(); } catch {} }
-    this.codex?.rpc.close(); this.codex = null;
+    for (const server of this.codexPool.values()) server.rpc.close();
+    this.codexPool.clear();
   }
 }
 
 // IPC surface (all `desktop:<name>`, exposed by desktop/preload.cjs).
-function registerAgentRuntime(handle, win, { userData, getProject, resolveProject, getBehavior = null }) {
-  const runtime = new AgentRuntime({ userData, getProject, resolveProject, getBehavior, emit: event => { if (!win.isDestroyed()) win.webContents.send('desktop:agent-event', event); } });
+function registerAgentRuntime(handle, win, { userData, getProject, resolveProject, getBehavior = null, profiles = null, tools = null, autonomy = null }) {
+  const runtime = new AgentRuntime({ userData, getProject, resolveProject, getBehavior, profiles, tools, autonomy, emit: event => { if (!win.isDestroyed()) win.webContents.send('desktop:agent-event', event); } });
   handle('runAgent', options => runtime.run(options));
   handle('cancelAgent', id => runtime.cancel(id));
   handle('listAgentRuns', () => runtime.list());
@@ -1331,5 +1413,5 @@ async function claudeContent(text, images = []) {
 module.exports = {
   AgentRuntime, registerAgentRuntime, buildPersona, createDesignTurnGuard, designHooks, toolOutcome, STOP_REASON, buildTurnContext, normalizeContext, composePrompt, buildSeedBlock, claudeQueryOptions, codexThreadParams, JsonRpcChild, defaultBridge,
   claudeQuestions, claudeAnswerInput, codexQuestions, codexAnswers, normalizeAnswers, allowRuleFor, ruleMatches, AllowRules, heuristicTitle, cleanTitle, agentToolsVersion, preferenceStore, MAX_RUNS,
-  normalizeFork, buildReviewTask,
+  normalizeFork, buildReviewTask, applyClaudePolicy, applyCodexPlanFirst,
 };

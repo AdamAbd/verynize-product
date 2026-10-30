@@ -4,7 +4,7 @@
 import '../web/node-style.js';
 
 const api = globalThis.BetterNodeStyle;
-export const { nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss, PALETTES, BLEND_MODES, FILTERS, SHADOW_TYPES, MASK_TYPES, OUTLINE_STYLES, effectsOf, validateEffects } = api;
+export const { nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss, PALETTES, BLEND_MODES, FILTERS, SHADOW_TYPES, MASK_TYPES, MASK_MODES, MASK_REPEATS, MASK_COMPOSITES, OUTLINE_STYLES, effectsOf, validateEffects } = api;
 // Paint stack and SVG paint helpers (fills, svgPaints).
 export const { paintError, eachPaintColor, paintColor, fillsCss, svgPaintList, svgColorKey, recolorSvg, PAINT_TYPES, IMAGE_FITS } = api;
 export default api;

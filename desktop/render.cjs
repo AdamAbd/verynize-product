@@ -38,11 +38,19 @@ function familiesFromHtml(html,splitFontStack){
  for(const m of decode(source).matchAll(/font-weight\s*:\s*(\d{3}|bold)/gi))for(const entry of byFamily.values())entry.weights.add(m[1]==='bold'?700:Number(m[1]));
  return [...byFamily.values()].slice(0,40).map(e=>({family:e.family,weights:[...e.weights].sort((a,b)=>a-b),styles:[...e.styles]}));
 }
-async function embedFonts(html,families){
+// Fonts embedded by the document itself (`fontFaces`, e.g. captured web fonts) arrive as @font-face
+// rules with data: sources inside the HTML. They are lifted out (so the navigation URL stays small),
+// injected with insertCSS like cached fonts, and never looked up in the font cache.
+function liftEmbeddedFonts(html){
+ const rules=[],families=new Set();
+ const lean=String(html).replace(/@font-face\s*\{[^{}]*?src\s*:\s*url\(\s*["']?data:font\/[^{}]*\}/gi,rule=>{rules.push(rule);const family=/font-family\s*:\s*(["']?)([^;"'}]+)\1/i.exec(rule)?.[2];if(family)families.add(family.trim().toLowerCase());return '';});
+ return {html:lean,css:rules.slice(0,40).join('\n'),families,count:Math.min(40,rules.length)};
+}
+async function embedFonts(html,families,own=new Set()){
  try{
   const fonts=await loadFonts();
   const wanted=(families||familiesFromHtml(html,fonts.splitFontStack)).filter(f=>f&&typeof f.family==='string');
-  const loadable=wanted.filter(f=>!fonts.isGenericFamily(f.family));
+  const loadable=wanted.filter(f=>!fonts.isGenericFamily(f.family)&&!own.has(f.family.toLowerCase()));
   if(!loadable.length)return {css:'',loaded:0,missing:[]};
   const ensured=await fonts.ensureFonts(loadable);
   const face=await fonts.fontFaceCss(loadable,{embed:true});
@@ -63,7 +71,8 @@ async function renderNow({html,width,height,scale,fonts:families,measure},parent
   const outputWidth=outputSize(width,scale),outputHeight=outputSize(height,scale);
   // Chromium clamps page zoom at 5×; larger factors add CSS zoom on the root for the remainder.
   const pageZoom=Math.min(scale,4),cssZoom=scale/pageZoom;
-  const fonts=await embedFonts(html,families);
+  const lifted=liftEmbeddedFonts(html);html=lifted.html;
+  const fonts=await embedFonts(html,families,lifted.families);fonts.loaded+=lifted.count;
   const window=new BrowserWindow({show:false,useContentSize:true,width:outputWidth,height:outputHeight,transparent:true,frame:false,webPreferences:{partition:'render-'+Date.now(),sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});
   const close=()=>{if(!window.isDestroyed())window.destroy();};const offClosed=onWindowClosed(parent,close);
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',e=>e.preventDefault());
@@ -78,6 +87,7 @@ async function renderNow({html,width,height,scale,fonts:families,measure},parent
    if(cssZoom>1)await window.webContents.executeJavaScript(`document.documentElement.style.zoom=${JSON.stringify(String(cssZoom))}`);
    // Inserted after load so large embedded fonts never inflate the navigation URL.
    if(fonts.css)await window.webContents.insertCSS(fonts.css);
+   if(lifted.css)await window.webContents.insertCSS(lifted.css);
    await window.webContents.executeJavaScript(`Promise.race([Promise.all([document.body&&document.body.offsetHeight,...[...document.fonts].map(face=>face.load().catch(()=>{}))]).then(()=>Promise.all([document.fonts.ready,...[...document.images].map(image=>image.decode().catch(()=>{}))])).then(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))),new Promise(resolve=>setTimeout(resolve,4000))])`);
    const boxes=measure?await window.webContents.executeJavaScript(MEASURE).catch(()=>null):null;
    const image=await window.webContents.capturePage({x:0,y:0,width:outputWidth,height:outputHeight},{stayHidden:true,stayAwake:true});
@@ -99,9 +109,19 @@ function registerRendering(handle,parent){let active=false;registerArtworkExport
 // Artwork export (inspector Export section): vector PDF of the selection, native save dialog and the
 // font catalog for the font family picker.
 const csp='<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data: blob:; style-src \'unsafe-inline\'; font-src data:">';
+// The PDF page runs without JavaScript, so web fonts (cached or embedded) are loaded through the
+// DevTools protocol before printing; otherwise printToPDF can run before any font face has decoded.
+async function settleFonts(webContents){
+ const debug=webContents.debugger;
+ try{debug.attach('1.3');}catch{return;}
+ try{await Promise.race([debug.sendCommand('Runtime.evaluate',{expression:'Promise.all([...document.fonts].map(f=>f.load().catch(()=>{}))).then(()=>document.fonts.ready).then(()=>new Promise(r=>requestAnimationFrame(()=>r(true))))',awaitPromise:true}),new Promise(resolve=>setTimeout(resolve,5000))]);}
+ catch{/* print with whatever has loaded */}
+ finally{try{debug.detach();}catch{/* already detached */}}
+}
 async function renderPDF(input,parent=null){
  const {html,width,height}=renderOptions({...input,scale:1});
- const fonts=await embedFonts(html,null);
+ const lifted=liftEmbeddedFonts(input.html);
+ const fonts=await embedFonts(lifted.html,null,lifted.families);fonts.loaded+=lifted.count;
  const window=new BrowserWindow({show:false,width,height,webPreferences:{partition:'pdf-'+Date.now(),sandbox:true,contextIsolation:true,nodeIntegration:false,javascript:false}});
  const close=()=>{if(!window.isDestroyed())window.destroy();};const offClosed=onWindowClosed(parent,close);
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',e=>e.preventDefault());
@@ -110,8 +130,10 @@ async function renderPDF(input,parent=null){
   // One page exactly the artwork size (CSS px → inches at 96 dpi), no margins.
   const title=String(input.title||'Export').replace(/[<>&]/g,'').slice(0,120);
   const page=`<title>${title}</title><style>@page{size:${width}px ${height}px;margin:0}html,body{margin:0;width:${width}px;height:${height}px;overflow:hidden}</style>`;
-  await window.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(csp+page+html));
+  await window.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(csp+page+lifted.html));
   if(fonts.css)await window.webContents.insertCSS(fonts.css);
+  if(lifted.css)await window.webContents.insertCSS(lifted.css);
+  await settleFonts(window.webContents);
   const pdf=await window.webContents.printToPDF({printBackground:true,preferCSSPageSize:true,margins:{marginType:'none'},pageSize:{width:width/96,height:height/96}});
   return {dataURL:'data:application/pdf;base64,'+pdf.toString('base64'),width,height,bytes:pdf.length,fonts:{loaded:fonts.loaded,missing:fonts.missing}};
  }finally{close();offClosed();}

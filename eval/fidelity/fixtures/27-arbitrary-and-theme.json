@@ -1,0 +1,19 @@
+{ "title": "arbitrary values and theme tokens resolve through the engine; variant classes are kept and written back",
+  "covers": ["arbitrary-values", "theme-tokens", "variants", "round-trip"],
+  "roundTrip": true,
+  "expect": [
+    { "node": "Panel", "prop": "padding", "eq": { "top": 7, "right": 7, "bottom": 7, "left": 7 } },
+    { "node": "Panel", "prop": "gap", "eq": { "x": 13, "y": 13 } },
+    { "node": "Panel", "prop": "radius", "eq": { "tl": 3, "tr": 3, "br": 3, "bl": 3 } },
+    { "node": "Panel", "prop": "variants", "eq": "md:p-8 hover:bg-sky-600" },
+    { "warns": ["md:p-8", "hover:bg-sky-600"] },
+    { "node": "T", "prop": "fontSize", "eq": 15 },
+    { "node": "T", "prop": "lineHeightPx", "eq": 22 },
+    { "node": "T", "prop": "letterSpacingPx", "eq": 0.3, "tol": 0.01 },
+    { "node": "T", "prop": "ink", "color": "tw:sky-900" },
+    { "node": "U", "prop": "lineHeightPx", "eq": 24 },
+    { "node": "U", "prop": "fontWeight", "eq": 500 },
+    { "node": "U", "prop": "ink", "matches": "^#[0-9a-f]{6}cc$" },
+    { "serializedNot": "md:p-8.*md:p-8", "why": "variant classes are written back once" },
+    { "rendered": "Panel", "prop": "w", "eq": 400 }
+  ] }

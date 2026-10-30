@@ -1,0 +1,3 @@
+/* Only at 1000px and wider. */
+.hero h1 { font-size: 3.5rem; }
+.plans { gap: 32px; }

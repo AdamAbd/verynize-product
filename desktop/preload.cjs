@@ -4,11 +4,21 @@ contextBridge.exposeInMainWorld('desktop',{
  agentAccountStatus:options=>call('agentAccountStatus',options),startAgentLogin:options=>call('startAgentLogin',options),cancelAgentLogin:options=>call('cancelAgentLogin',options),agentLogout:options=>call('agentLogout',options),openExternal:url=>call('openExternal',url),
  onAuthEvent:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:auth-event',listener);return()=>ipcRenderer.removeListener('desktop:auth-event',listener)},
  notifyTask:options=>call('notifyTask',options),
+ // Share › Publish app (desktop/app-publish.cjs): build the open project and upload it to the cloud server.
+ cloudAppDetect:()=>call('cloudAppDetect'),cloudAppPublish:options=>call('cloudAppPublish',options),cloudPasskeyOpen:options=>call('cloudPasskeyOpen',options),cloudPasskeyClose:()=>call('cloudPasskeyClose'),
  // Settings › Preferences hook (desktop/app-preferences.cjs): custom chat sound, verynize:// links, worktree line counts.
  appPreferences:{chooseSound:()=>call('soundChoose'),readSound:()=>call('soundRead'),clearSound:()=>call('soundClear'),linksReady:options=>call('linksReady',options),setLinksEnabled:enabled=>call('linksSetEnabled',enabled),worktreeLineStats:roots=>call('worktreeLineStats',roots),onOpenLink:callback=>{const listener=(_event,url)=>callback(url);ipcRenderer.on('desktop:open-link',listener);return()=>ipcRenderer.removeListener('desktop:open-link',listener)}},
  // end Settings › Preferences hook
  // Settings › Usage and Memory (desktop/agent-usage.cjs, desktop/agent-memory.cjs).
  agentUsage:{read:options=>call('agentUsage',options),layers:()=>call('agentLayerUsage')},
+ // Named provider accounts, Verynize MCP servers + permission defaults, per-chat autonomy (desktop/agent-profiles.cjs, agent-tool-config.cjs, agent-autonomy.cjs).
+ agentProfiles:{list:()=>call('agentProfilesList'),add:options=>call('agentProfilesAdd',options),rename:options=>call('agentProfilesRename',options),remove:options=>call('agentProfilesRemove',options),setDefault:options=>call('agentProfilesSetDefault',options),setChat:options=>call('agentProfilesSetChat',options),chat:options=>call('agentProfilesChat',options)},
+ agentToolConfig:{list:()=>call('agentToolConfigList'),saveServer:options=>call('agentToolConfigSaveServer',options),setEnabled:options=>call('agentToolConfigSetEnabled',options),removeServer:options=>call('agentToolConfigRemoveServer',options),setPermission:options=>call('agentToolConfigSetPermission',options)},
+ agentAutonomy:{get:options=>call('agentAutonomyGet',options),set:options=>call('agentAutonomySet',options)},
+ // Global search and history-preserving moves (desktop/project-search.cjs, desktop/repository-moves.cjs).
+ templatePacks:{encode:pack=>call('templatePackEncode',pack),decode:bytes=>call('templatePackDecode',bytes)},
+ projectSearch:{search:options=>call('projectSearch',options),open:options=>call('projectSearchOpen',options)},
+ repositoryMoves:{moveInside:options=>call('repositoryMoveInside',options),relocate:options=>call('repositoryRelocate',options),moveAcross:options=>call('repositoryMoveAcross',options),chooseDestination:()=>call('repositoryChooseDestination')},
  // Composer indicators (desktop/agent-live-status.cjs): live MCP server status and context breakdown of a chat's run.
  agentLiveStatus:{mcp:options=>call('agentLiveMcpStatus',options),context:options=>call('agentLiveContext',options)},
  agentMemory:{overview:()=>call('agentMemoryOverview'),reveal:options=>call('agentMemoryReveal',options),open:options=>call('agentMemoryOpen',options)},
@@ -27,9 +37,12 @@ contextBridge.exposeInMainWorld('desktop',{
  // end agent-bridge hook
  renderDesign:options=>call('renderDesign',options),fontFaces:families=>call('fontFaces',families),
  // inspector export hook (desktop/render.cjs registerArtworkExport): artwork PDF, native save dialog, font catalog.
- renderPDF:options=>call('renderPDF',options),saveExport:options=>call('saveExport',options),fontCatalog:()=>call('fontCatalog'),exportCode:options=>call('exportCode',options),
+ renderPDF:options=>call('renderPDF',options),saveExport:options=>call('saveExport',options),fontCatalog:()=>call('fontCatalog'),exportCode:options=>call('exportCode',options),importHtml:options=>call('importHtml',options),importHtmlFile:options=>call('importHtmlFile',options),
  // end inspector export hook
  importFigma:options=>call('importFigma',options),
+ // Figma clipboard/.fig import and OAuth account (desktop/figma.cjs, desktop/figma-oauth.cjs).
+ figmaClipboard:html=>call('figmaClipboard',html),figmaFile:options=>call('figmaFile',options),figmaFileOpen:()=>call('figmaFileOpen'),
+ figmaOAuth:{status:()=>call('figmaOAuthStatus'),configure:options=>call('figmaOAuthConfigure',options),connect:()=>call('figmaOAuthConnect'),cancel:()=>call('figmaOAuthCancel'),disconnect:()=>call('figmaOAuthDisconnect')},
  generateVector:options=>call('generateVector',options),cancelGeneration:()=>call('cancelGeneration'),
  designDetach:()=>call('designDetach'),
  designOpen:()=>call('designOpen'),designSave:options=>call('designSave',options),designReload:()=>call('designReload'),
@@ -40,6 +53,10 @@ contextBridge.exposeInMainWorld('desktop',{
  previewInspect:options=>call('previewInspect',options),
  previewEdit:options=>call('previewEdit',options),
  captureLivePreview:options=>call('captureLivePreview',options),
+ // Web page capture and region picking (desktop/capture-remote.cjs, desktop/preview.cjs previewElementAt).
+ captureRemote:options=>call('captureRemote',options),captureRemoteProbe:options=>call('captureRemoteProbe',options),previewElementAt:point=>call('previewElementAt',point),
+ // Photographic image providers (desktop/generate.cjs): settings never return the API key.
+ imageProvider:{get:()=>call('imageProviderGet'),set:options=>call('imageProviderSet',options),generate:options=>call('generateImage',options)},
  previewApp:options=>call('previewApp',options),exportPDF:html=>call('exportPDF',html),
  createProject:options=>call('createProject',options),
  // Code workspace (desktop/repositories.cjs): repository list, per-chat git worktrees, active root; dev server controls.

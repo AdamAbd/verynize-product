@@ -1,0 +1,7 @@
+/* Layered base: loses to the unlayered page rules above. */
+@layer base {
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #0f172a; background: #f8fafc; line-height: 1.5; }
+  h1, h2 { color: #0f172a; }
+  .plan { background: #fef3c7; }
+}

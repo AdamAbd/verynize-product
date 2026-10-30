@@ -91,8 +91,15 @@ test('JSX codec writes effects as Tailwind classes and reads them back', () => {
   for (const cls of ['mix-blend-multiply', 'outline-2', 'outline-dashed', 'outline-offset-4', '[filter:blur(2px)_hue-rotate(45deg)_drop-shadow(0px_2px_4px_#000000)]', '[backdrop-filter:blur(6px)]'])
     assert.ok(code.includes(cls), cls);
   const target = doc([]);
-  const result = createArtboards(target, 'p', code + '\n<p className="text-white [text-shadow:0_1px_2px_#00000080] brightness-110 mix-blend-plus-lighter">Hi</p>');
+  // Classes alone (no data-vn side channel, as an agent might write them): box shadows read back as the shadow string.
+  assert.match(code, / data-vn='/);
+  const result = createArtboards(target, 'p', code.replace(/ data-vn='[^']*'/, '') + '\n<p className="text-white [text-shadow:0_1px_2px_#00000080] brightness-110 mix-blend-plus-lighter">Hi</p>');
   const [frame, text] = (result.document || target).pages[0].nodes.filter(n => n.type === 'frame' || n.type === 'text');
+  // With the side channel the structured lists come back exactly (codec-residual.mjs).
+  const exact = createArtboards(doc([]), 'p', code).document.pages[0].nodes[0];
+  assert.deepEqual(exact.shadows, node.shadows);
+  assert.deepEqual(exact.filters, node.filters);
+  assert.ok(!exact.shadow);
   assert.equal(frame.blendMode, 'multiply');
   assert.deepEqual([frame.outlineWidth, frame.outlineOffset, frame.outlineColor, frame.outlineStyle], [2, 4, '#5eead4', 'dashed']);
   assert.equal(frame.shadow, '0px 12px 4px -4px #00000040');

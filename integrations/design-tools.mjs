@@ -30,8 +30,9 @@ import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { applyOperations, BINDABLE, checkVariableValue } from './design-store.mjs';
-import { setAlias, detachAlias } from './variables.mjs';
+import { setAlias, detachAlias, folderOf, folderMembers, folderRenames } from './variables.mjs';
 import { exportHTML } from './export-html.mjs';
+import { documentToJsx, documentToHtml, importJsxInto, prepareHtmlImport } from './codec-source.mjs';
 import {
   clone, ensureShortIds, indexPage, getPage, elementCode, runDirectives, createArtboards, duplicateElements, removeSubtree,
   describeTokens, tokenColor, checkTokenName, renameTokenRefs, unbindToken, syncTokenColors,
@@ -45,6 +46,7 @@ import { searchStockPhotos, fetchImageAsDataUrl, attribution, trackUnsplashDownl
 import { missingFonts } from './fonts.mjs';
 import { createPreferenceStore, defaultPreferencesPath, MAX_PREFERENCE_LENGTH } from './preferences.mjs';
 import { shellToolTable, SHELL_INSTRUCTIONS } from './shell-tools.mjs'; // bridge-only running-app/terminal/editor-action tools
+import { presetIds as shaderPresetIds, COLOR_ROLES as SHADER_COLOR_ROLES, PARAM_KEYS as SHADER_PARAM_KEYS } from './shaders.mjs';
 
 export const SERVER_NAME = 'verynize';
 export const SERVER_VERSION = '0.6.0';
@@ -119,8 +121,41 @@ const tokenName = z.string().min(1).max(100);
 const TOKEN_TYPES = ['color', 'dimension', 'number', 'fontFamily', 'fontWeight'];
 const tokenType = z.enum(TOKEN_TYPES);
 const tokenValue = z.union([z.string().min(1).max(200), z.number().finite()]);
-const describeAllTokens = document => [...describeTokens(document), ...describeVariables(document)];
+const withFolder = token => (folderOf(token.name) ? { ...token, folder: folderOf(token.name) } : token);
+const describeAllTokens = document => [...describeTokens(document), ...describeVariables(document)].map(withFolder);
 const tokenExists = (document, name) => Object.hasOwn(document.tokens, name) || Object.hasOwn(document.variables || {}, name);
+/** Move a colour token or typed variable to a new name; bound layers, paints and aliases follow. */
+function moveToken(document, from, to) {
+  if (Object.hasOwn(document.tokens, from)) { document.tokens[to] = document.tokens[from]; delete document.tokens[from]; renameTokenRefs(document, from, to); }
+  else { document.variables[to] = document.variables[from]; delete document.variables[from]; renameVariableRefs(document, from, to); }
+}
+/** Rename every variable of a folder at once (two phases so nested names never chain-rename). */
+function renameTokenFolder(document, from, to) {
+  const source = String(from).trim().replace(/^\/+|\/+$/g, '');
+  const renames = folderRenames(document, source, to);
+  if (!renames.length) throw new Error(`Folder ${source} has no variables`);
+  renames.forEach(([name], i) => moveToken(document, name, `\u0001${i}`));
+  renames.forEach(([, next], i) => moveToken(document, `\u0001${i}`, next));
+  return renames;
+}
+/** Colour properties bind_variables can attach a colour token to: layer field holding the token name and the colour it resolves into. */
+const COLOR_BINDINGS = { fill: ['token', 'color'], svgColor: ['svgColorToken', 'svgColor'], strokeColor: ['strokeToken', 'strokeColor'], outlineColor: ['outlineToken', 'outlineColor'] };
+function bindColor(document, node, property, token) {
+  const [tokenKey, colorKey] = COLOR_BINDINGS[property];
+  const topSolid = property === 'fill' && Array.isArray(node.fills) ? node.fills.find(p => p?.type === 'solid' && !p.hidden) : null;
+  if (property === 'fill' && Array.isArray(node.fills) && !topSolid) throw new Error('fill binding needs a solid paint; this element only has gradient/image paints');
+  if (token === null) {
+    if (topSolid) delete topSolid.token;
+    else if (property === 'fill') node.token = '';
+    else delete node[tokenKey];
+    return;
+  }
+  if (!Object.hasOwn(document.tokens, token)) throw new Error(Object.hasOwn(document.variables || {}, token) ? `${property} takes a color token; ${token} is ${document.variables[token].type}` : `Token ${token} does not exist; create it with create_design_tokens`);
+  if (property === 'svgColor' && !(node.type === 'image' && /^data:image\/svg\+xml;base64,/.test(node.src || ''))) throw new Error('svgColor binds only on SVG image elements');
+  if (property === 'outlineColor' && !(node.outlineWidth > 0)) throw new Error('outlineColor needs an outline; set outline-* classes first');
+  if (topSolid) { topSolid.token = token; topSolid.color = document.tokens[token]; return; }
+  node[tokenKey] = token; node[colorKey] = document.tokens[token];
+}
 /** Value stored for a typed variable: dimensions/numbers as numbers ("14px" -> 14), font weights as strings. */
 function variableValue(type, value, name) {
   let out = value;
@@ -165,13 +200,13 @@ const layoutFields = {
   // Structured effects (validated in full by validateEffects in web/node-style.js).
   blendMode: z.enum(['normal', 'darken', 'multiply', 'plus-darker', 'color-burn', 'lighten', 'screen', 'plus-lighter', 'color-dodge', 'overlay', 'soft-light', 'hard-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity']).optional(),
   outlineWidth: z.number().finite().min(0).max(1000).optional(), outlineOffset: z.number().finite().min(-1000).max(1000).optional(),
-  outlineColor: z.string().regex(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i).optional(), outlineStyle: z.enum(['solid', 'dashed', 'dotted']).optional(),
+  outlineColor: z.string().regex(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i).optional(), outlineStyle: z.enum(['solid', 'dashed', 'dotted']).optional(), outlineToken: z.string().max(100).describe('colour variable bound to the outline colour').optional(), strokeToken: z.string().max(100).describe('colour variable bound to the border colour').optional(), strokeColors: z.array(z.object({ color: z.string().regex(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i), token: z.string().max(100).optional() }).strict()).length(4).describe('per-side border colours: top, right, bottom, left').optional(),
   shadows: z.array(z.object({ type: z.enum(['box', 'drop', 'text']), inset: z.boolean().optional(), x: z.number().finite(), y: z.number().finite(), blur: z.number().finite().min(0), spread: z.number().finite(), color: z.string().regex(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i), token: z.string().max(100).optional(), hidden: z.boolean().optional() }).strict()).max(20).describe('box = box-shadow (inset = inner), drop = filter drop-shadow, text = text-shadow (text layers only); token binds the color to a color variable').optional(),
   filters: z.array(z.object({ type: z.enum(['blur', 'brightness', 'contrast', 'grayscale', 'hueRotate', 'invert', 'saturate', 'sepia']), value: z.number().finite(), backdrop: z.boolean().optional(), hidden: z.boolean().optional() }).strict()).max(20).describe('blur px; hueRotate deg; brightness/contrast/saturate 0–3; grayscale/invert/sepia 0–1. backdrop = backdrop-filter').optional(),
-  masks: z.array(z.object({ type: z.enum(['linear', 'radial', 'conic']), rotation: z.number().finite().optional(), alpha: z.number().finite().min(0).max(100).optional(), invert: z.boolean().optional(), hidden: z.boolean().optional() }).strict()).max(8).describe('gradient fade masks').optional(),
+  masks: z.array(z.object({ type: z.enum(['linear', 'radial', 'conic', 'image', 'custom']), rotation: z.number().finite().optional(), alpha: z.number().finite().min(0).max(100).optional(), invert: z.boolean().optional(), hidden: z.boolean().optional(), src: z.string().max(15e6).describe('image mask: embedded data:image URL').optional(), css: z.string().max(2100).describe('custom mask: a CSS gradient').optional(), mode: z.enum(['auto', 'alpha', 'luminance']).optional(), repeat: z.enum(['repeat', 'no-repeat', 'repeat-x', 'repeat-y', 'space', 'round']).optional(), x: z.number().finite().describe('position X %').optional(), y: z.number().finite().describe('position Y %').optional(), size: z.string().max(40).describe('auto, cover, contain, or "<n>%"/"<n>px" (one or two values)').optional(), composite: z.enum(['add', 'subtract', 'intersect', 'exclude']).describe('how this mask combines with the masks below it').optional() }).strict()).max(8).describe('masks: gradient fades, embedded images, custom CSS gradients').optional(),
   textStyle: z.record(z.string().regex(/^[a-zA-Z]{1,40}$/), z.union([z.string().max(400), z.number().finite(), z.boolean()])).refine(v => Object.keys(v).length <= 30, 'At most 30 textStyle keys').optional(),
 };
-const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(['aurora', 'waves', 'noise', 'ribbon', 'mesh', 'swirl']).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields };
+const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields };
 const pageName = z.string().min(1).max(200);
 const operations = z.array(z.discriminatedUnion('type', [
   z.object({ type: z.literal('create_page'), id: z.string().min(1).max(200).optional(), name: pageName }),
@@ -180,7 +215,9 @@ const operations = z.array(z.discriminatedUnion('type', [
   z.object({ type: z.literal('create_node'), pageId: z.string().min(1).max(200), node: z.object({ id: z.string().min(1).max(200).optional(), ...nodeFields }).strict() }),
   z.object({ type: z.literal('update_node'), pageId: z.string().min(1).max(200), nodeId: z.string().min(1).max(200), properties: z.object(nodeFields).strict() }),
   z.object({ type: z.literal('delete_node'), pageId: z.string().min(1).max(200), nodeId: z.string().min(1).max(200) }),
-  z.object({ type: z.literal('set_token'), name: tokenName, value: z.string().regex(/^#[0-9a-fA-F]{6}$/) }),
+  z.object({ type: z.literal('set_token'), name: tokenName, value: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/) }),
+  z.object({ type: z.literal('set_variable'), name: tokenName, variableType: z.enum(['dimension', 'number', 'fontFamily', 'fontWeight']), value: z.union([z.number().finite(), z.string().min(1).max(200)]) }),
+  z.object({ type: z.literal('delete_token'), name: tokenName }),
   z.object({ type: z.literal('rename_document'), name: pageName }),
 ])).min(1).max(500);
 
@@ -577,7 +614,7 @@ function toolTable(backend, context = {}) {
           if (Object.hasOwn(document.tokens, token.name)) { if (!overwrite) { kept.push(token.name); continue; } updated.push(token.name); } else created.push(token.name);
           document.tokens[token.name] = tokenColor(token.value);
         }
-        return { document, result: { created, updated, kept, tokens: describeTokens(document) } };
+        return { document, result: { created, updated, kept, tokens: describeAllTokens(document) } };
       });
       return {
         archetype: tokens.archetype, ...out.result,
@@ -588,8 +625,13 @@ function toolTable(backend, context = {}) {
   };
   t.get_design_tokens = {
     description: 'List design tokens: colors and typed variables (dimension, number, fontFamily, fontWeight) with their CSS variable names. Colors are used as bg-[var(--…)] / text-[var(--…)]; bind dimension/number/font variables to element properties with bind_variables.',
-    inputSchema: { document: documentArg }, annotations: { readOnlyHint: true },
-    run: async ({ document: ref }) => { const state = await readPrepared(backend, ref); return { tokens: describeAllTokens(state.document) }; },
+    inputSchema: { document: documentArg, type: tokenType.optional().describe('Only tokens of this type'), folder: z.string().min(1).max(100).optional().describe('Only tokens inside this slash folder (e.g. "space"), nested folders included') },
+    annotations: { readOnlyHint: true },
+    run: async ({ document: ref, type, folder }) => {
+      const state = await readPrepared(backend, ref);
+      const prefix = folder ? folder.replace(/^\/+|\/+$/g, '') + '/' : '';
+      return { tokens: describeAllTokens(state.document).filter(t => (!type || t.type === type) && (!prefix || t.name.startsWith(prefix))) };
+    },
   };
   t.create_design_tokens = {
     description: 'Create design tokens (they appear in the Variables panel). type: color (default; hex/rgb value), dimension (pixels, e.g. 16 or "16px"), number (e.g. 1.5), fontFamily (e.g. "Inter") or fontWeight (e.g. "600"). Names may use slashes (color/text/primary -> var(--color-text-primary), radius/md, font/body). Fails if a token exists.',
@@ -609,9 +651,10 @@ function toolTable(backend, context = {}) {
     },
   };
   t.update_design_tokens = {
-    description: 'Change token values and/or rename tokens (colors and typed variables; the type stays the same). Elements bound to a token follow the change. aliasOf makes a token reference another token of the same type (its value follows that token); aliasOf: null or a new value detaches the reference.',
-    inputSchema: { document: documentArg, tokens: z.array(z.object({ name: tokenName, newName: tokenName.optional(), value: tokenValue.optional(), aliasOf: tokenName.nullable().optional() })).min(1).max(200) },
-    run: async ({ document: ref, tokens }) => {
+    description: 'Change token values and/or rename tokens (colors and typed variables; the type stays the same: dimension in px, number, fontFamily, fontWeight). Elements bound to a token follow the change. aliasOf makes a token reference another token of the same type (its value follows that token); aliasOf: null or a new value detaches the reference. folders renames slash folders (every variable inside, any type, references follow).',
+    inputSchema: { document: documentArg, tokens: z.array(z.object({ name: tokenName, newName: tokenName.optional(), value: tokenValue.optional(), aliasOf: tokenName.nullable().optional() })).max(200).optional(), folders: z.array(z.object({ name: tokenName, newName: tokenName })).max(50).optional() },
+    run: async ({ document: ref, tokens = [], folders = [] }) => {
+      if (!tokens.length && !folders.length) throw new Error('Provide tokens and/or folders to update');
       const out = await write(backend, ref, document => {
         for (const token of tokens) {
           const isColor = Object.hasOwn(document.tokens, token.name), variable = document.variables?.[token.name];
@@ -625,20 +668,22 @@ function toolTable(backend, context = {}) {
           else if (token.aliasOf !== undefined) setAlias(document, token.name, token.aliasOf);
           if (token.newName && token.newName !== token.name) {
             checkTokenName(token.newName); if (tokenExists(document, token.newName)) throw new Error(`Token ${token.newName} already exists`);
-            if (isColor) { document.tokens[token.newName] = document.tokens[token.name]; delete document.tokens[token.name]; renameTokenRefs(document, token.name, token.newName); }
-            else { document.variables[token.newName] = variable; delete document.variables[token.name]; renameVariableRefs(document, token.name, token.newName); }
+            moveToken(document, token.name, token.newName);
           }
         }
-        return { document, result: { updated: tokens.map(t => t.newName || t.name), tokens: describeAllTokens(document) } };
+        for (const folder of folders) renameTokenFolder(document, folder.name, folder.newName); // after token edits
+        return { document, result: { updated: [...folders.map(f => f.newName + '/'), ...tokens.map(t => t.newName || t.name)], tokens: describeAllTokens(document) } };
       });
       return { ...out.result, live: out.live, revision: out.revision };
     },
   };
   t.delete_design_tokens = {
-    description: 'Delete tokens (colors or typed variables). Bound elements keep the current value as a plain value.',
-    inputSchema: { document: documentArg, names: z.array(tokenName).min(1).max(200) }, annotations: { destructiveHint: true },
-    run: async ({ document: ref, names }) => {
+    description: 'Delete tokens (colors or typed variables), or whole slash folders. Bound elements keep the current value as a plain value.',
+    inputSchema: { document: documentArg, names: z.array(tokenName).max(200).optional(), folders: z.array(tokenName).max(50).optional() }, annotations: { destructiveHint: true },
+    run: async ({ document: ref, names = [], folders = [] }) => {
+      if (!names.length && !folders.length) throw new Error('Provide names and/or folders to delete');
       const out = await write(backend, ref, document => {
+        for (const folder of folders) { const members = folderMembers(document, folder.replace(/^\/+|\/+$/g, '')); if (!members.length) throw new Error(`Folder ${folder} has no variables`); names = [...names, ...members.filter(n => !names.includes(n))]; }
         for (const name of names) {
           if (Object.hasOwn(document.tokens, name)) { unbindToken(document, name); delete document.tokens[name]; }
           else if (Object.hasOwn(document.variables || {}, name)) { unbindVariable(document, name); delete document.variables[name]; if (!Object.keys(document.variables).length) delete document.variables; }
@@ -650,13 +695,14 @@ function toolTable(backend, context = {}) {
     },
   };
   t.bind_variables = {
-    description: `Bind element properties to dimension/number/fontFamily/fontWeight tokens so they follow the token (shown as bound in the inspector). Properties: ${Object.entries(BINDABLE).map(([k, types]) => `${k} (${types.join('/')})`).join(', ')}. Set token to null to unbind (the element keeps its current value). Color tokens are applied with bg-[var(--…)] / text-[var(--…)] classes instead.`,
-    inputSchema: { document: documentArg, pageId: pageArg, bindings: z.array(z.object({ id: elementId, property: z.enum(Object.keys(BINDABLE)), token: tokenName.nullable() })).min(1).max(500) },
+    description: `Bind element properties to tokens so they follow the token (shown as bound in the inspector). Typed properties: ${Object.entries(BINDABLE).map(([k, types]) => `${k} (${types.join('/')})`).join(', ')}. Color properties (color tokens): ${Object.keys(COLOR_BINDINGS).join(', ')}. Set token to null to unbind (the element keeps its current value). Text and background colors can also use bg-[var(--…)] / text-[var(--…)] classes.`,
+    inputSchema: { document: documentArg, pageId: pageArg, bindings: z.array(z.object({ id: elementId, property: z.enum([...Object.keys(BINDABLE), ...Object.keys(COLOR_BINDINGS)]), token: tokenName.nullable() })).min(1).max(500) },
     run: async ({ document: ref, pageId, bindings }) => {
       const out = await write(backend, ref, document => {
         const page = getPage(document, pageId), index = indexPage(page);
         for (const { id, property, token } of bindings) {
           const node = index.require(id);
+          if (Object.hasOwn(COLOR_BINDINGS, property)) { bindColor(document, node, property, token); continue; }
           if (token === null) { if (node.bindings) { delete node.bindings[property]; if (!Object.keys(node.bindings).length) delete node.bindings; } continue; }
           const variable = document.variables?.[token];
           if (!variable) throw new Error(Object.hasOwn(document.tokens, token) ? `${token} is a color token; use bg-[var(--…)] / text-[var(--…)] classes for colors` : `Token ${token} does not exist; create it with create_design_tokens`);
@@ -755,6 +801,59 @@ function toolTable(backend, context = {}) {
     description: 'Export one page as standalone HTML (returned as text; nothing is written to disk). Shader nodes include only the app-authored WebGL runtime.',
     inputSchema: { name: documentArg, pageId: pageArg }, annotations: { readOnlyHint: true },
     run: async ({ name, pageId }) => { const state = await backend.read(name); return { html: exportHTML(state.document, pageId), revision: state.revision }; },
+  };
+  // Source round trips (integrations/codec-source.mjs, codec-html.mjs): lossless exports and imports.
+  t.export_css = {
+    description: 'Export one page as HTML with a class-based stylesheet (CSS variables in :root). Lossless: import_html reads it back exactly; layers whose CSS was edited are rebuilt from their declarations.',
+    inputSchema: { name: documentArg, pageId: pageArg }, annotations: { readOnlyHint: true },
+    run: async ({ name, pageId }) => { const state = await backend.read(name); return { html: documentToHtml(state.document, pageId), revision: state.revision }; },
+  };
+  t.export_jsx = {
+    description: 'Export every artboard of a page as Tailwind JSX with a header carrying variables and page settings. Lossless: import_jsx reads it back exactly.',
+    inputSchema: { name: documentArg, pageId: pageArg }, annotations: { readOnlyHint: true },
+    run: async ({ name, pageId }) => { const state = await backend.read(name); return { code: documentToJsx(state.document, pageId), revision: state.revision }; },
+  };
+  const viewportArg = z.object({ width: z.number().int().min(200).max(8000), height: z.number().int().min(200).max(8000), colorScheme: z.enum(['light', 'dark']).optional() }).strict().optional().describe('Viewport for @media, vw/vh and responsive Tailwind variants (default 1440x900, light)');
+  t.import_html = {
+    description: 'Import HTML as new artboards: inline html, a local .html file path (its <link>/@import stylesheets and images resolve relative to it, inside its folder), or an http(s) url (needs allowRemote). Computes the CSS cascade for the viewport, turns :root custom properties into colour tokens and typed variables, keeps Tailwind classes. Also reads export_css output losslessly. Returns warnings for CSS that has no canvas equivalent.',
+    inputSchema: { document: documentArg, pageId: pageArg, html: z.string().min(1).max(5_000_000).optional(), path: z.string().min(1).max(4096).optional(), url: z.string().url().max(4096).optional(), viewport: viewportArg, allowRemote: z.boolean().optional().describe('Fetch http(s) stylesheets and images (default false)') },
+    run: async ({ document: ref, pageId, html, path: file, url, viewport, allowRemote = false }) => {
+      if ([html, file, url].filter(v => v !== undefined).length !== 1) throw new Error('Pass exactly one of html, path or url');
+      const { readFile, stat } = await import('node:fs/promises');
+      const nodePath = await import('node:path');
+      let source = html, baseUrl, root;
+      if (file !== undefined) {
+        if (!nodePath.isAbsolute(file)) throw new Error('path must be absolute');
+        const info = await stat(file);
+        if (!info.isFile() || info.size > 5_000_000) throw new Error('path must be an HTML file under 5 MB');
+        source = await readFile(file, 'utf8'); baseUrl = file; root = nodePath.dirname(file);
+      }
+      if (url !== undefined) {
+        if (!allowRemote) throw new Error('Importing from a url needs allowRemote: true');
+        const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+        if (Number(res.headers.get('content-length')) > 5_000_000) throw new Error('page exceeds 5 MB');
+        source = await res.text();
+        if (source.length > 5_000_000) throw new Error('page exceeds 5 MB');
+        baseUrl = res.url || url;
+      }
+      const state = await backend.read(ref);
+      const page = getPage(state.document, pageId);
+      const prepared = await prepareHtmlImport(source, state.document, page.id, { baseUrl, root, allowFiles: file !== undefined, allowRemote, viewport });
+      let created = [];
+      const out = await write(backend, ref, document => { const r = prepared.apply(document); created = r.roots.map(root => indexPage(r.page).shortId(root)); return { document: r.document, result: null }; });
+      const warnings = warningText([...prepared.warnings]);
+      return { artboards: created, stats: { elements: prepared.stats.elements, stylesheets: prepared.stats.stylesheets, rules: prepared.stats.rules, tokens: prepared.stats.tokens, variables: prepared.stats.variables, bindings: prepared.stats.bindings, restored: prepared.stats.restored }, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
+    },
+  };
+  t.import_jsx = {
+    description: 'Import Tailwind JSX with any number of root elements as new artboards: export_jsx output, an exported React component (Code export), or create_artboard JSX. Variables in the @verynize header are added when missing.',
+    inputSchema: { document: documentArg, pageId: pageArg, code: z.string().min(1).max(5_000_000), viewport: viewportArg },
+    run: async ({ document: ref, pageId, code, viewport }) => {
+      let created = [], warnings = [];
+      const out = await write(backend, ref, document => { const r = importJsxInto(document, getPage(document, pageId).id, code, { viewport: viewport || null }); created = r.roots.map(root => indexPage(r.page).shortId(root)); warnings = warningText(r.warnings || []); return { document: r.document, result: null }; });
+      return { artboards: created, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
+    },
   };
   Object.assign(t, shellToolTable(backend, context, { readPrepared, write, getPage, indexPage, invalidate: name => sessionFor(backend).receipts.invalidate(docKey(name)) }));
   return t;

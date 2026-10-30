@@ -359,6 +359,9 @@
       case 'question-resolved':{const part=entry.replies.flatMap(r=>r.parts||[]).find(p=>p.kind==='question'&&p.requestId===event.requestId);if(part&&part.state==='pending'){part.state=event.answers?'answered':'expired';if(event.answers)part.answers=event.answers;}break;}
       case 'usage':reply.usage=normalizeUsage(event,reply.usage);chat.usage=reply.usage;break;
       case 'error':reply.parts.push({kind:'error',text:event.text});output('\n[error] '+event.text+'\n');break;
+      // Chat autonomy (desktop/agent-autonomy.cjs): the run's effective settings and automatic allow/deny/limit decisions.
+      case 'autonomy':if(event.text)reply.parts.push({kind:'autonomy',text:String(event.text).slice(0,600)});break;
+      case 'policy':reply.parts.push({kind:'policy',decision:String(event.decision||''),toolName:String(event.toolName||''),text:String(event.text||'').slice(0,600)});output('\n['+(event.text||event.decision)+']\n');if(event.decision==='limit'&&here)status(event.text);break;
       case 'done':finishRun(entry,event);return;
     }
     scheduleReply();

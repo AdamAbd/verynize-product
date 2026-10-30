@@ -2,8 +2,9 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { validateEffects } from './node-style.mjs';
-import { paintError } from './node-style.mjs';
-import { validateAliases } from './variables.mjs';
+import { paintError, eachPaintColor } from './node-style.mjs';
+import { validateAliases, dropAliases } from './variables.mjs';
+import { presetIds, shaderError } from './shaders.mjs';
 
 const TYPES = new Set(['rectangle', 'text', 'frame', 'image', 'shader']);
 const LIMIT = 20 * 1024 * 1024;
@@ -48,6 +49,16 @@ function validateIcons(document) {
     if (typeof icon.src !== 'string' || icon.src.length > 200000 || !/^data:image\/svg\+xml;base64,/.test(icon.src)) throw new Error('Icon source must be an embedded SVG');
   }
 }
+// Embedded @font-face fonts from web page capture (desktop/capture-core.cjs); mirrors validate() in web/app.js.
+function validateFontFaces(document) {
+  if (document.fontFaces === undefined) return;
+  if (!Array.isArray(document.fontFaces) || document.fontFaces.length > 40) throw new Error('fontFaces must be an array of at most 40 fonts');
+  for (const f of document.fontFaces) {
+    if (!f || typeof f.family !== 'string' || !/^[^;{}<>\\"]{1,100}$/.test(f.family) || !/^(normal|bold|[1-9]00( [1-9]00)?)$/.test(String(f.weight)) || !['normal', 'italic', 'oblique'].includes(f.style)) throw new Error('Invalid embedded font descriptor');
+    if (typeof f.src !== 'string' || f.src.length > 3e6 || !/^data:font\/(woff2|woff|ttf|otf);base64,[A-Za-z0-9+/=]+$/.test(f.src)) throw new Error('Embedded font source must be a base64 font data URL');
+    if (f.unicodeRange !== undefined && (typeof f.unicodeRange !== 'string' || !/^[\w+?, -]{1,2000}$/.test(f.unicodeRange))) throw new Error('Invalid embedded font unicode-range');
+  }
+}
 function validateBindings(bindings) {
   if (bindings === undefined) return;
   if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings)) throw new Error('Invalid node bindings');
@@ -61,6 +72,7 @@ export function validateDocument(document) {
   validateVariables(document);
   validateAliases(document);
   validateIcons(document);
+  validateFontFaces(document);
   const ids=new Set(); let total=0;
   for(const page of document.pages) {
     requireString(page.id,'Page id'); requireString(page.name,'Page name');
@@ -79,7 +91,7 @@ export function validateDocument(document) {
       for(const key of ['fontSize','radius','gap','padding','columns','zIndex','rotation','opacity','strokeWidth','lineHeight','letterSpacing'])if(node[key]!==undefined&&!Number.isFinite(node[key]))throw new Error(`Invalid node ${key}`);
       if(node.preview!==undefined){const v=node.preview;if(node.type!=='frame'||node.parentId||!v||typeof v!=='object'||Array.isArray(v)||typeof v.root!=='string'||v.root.length>4096||['name','chatId','url'].some(k=>v[k]!==undefined&&(typeof v[k]!=='string'||v[k].length>4096)))throw Error('Invalid preview configuration');if(v.url){let u;try{u=new URL(v.url)}catch{throw Error('Invalid preview URL')}if(!['http:','https:'].includes(u.protocol)||!['localhost','127.0.0.1','[::1]'].includes(u.hostname)||u.username||u.password)throw Error('Invalid preview URL')}}
       if(node.opacity!==undefined&&(node.opacity<0||node.opacity>100))throw Error('Invalid opacity');if(node.clipContent!==undefined&&typeof node.clipContent!=='boolean')throw Error('Invalid clipping');for(const key of ['locked','hidden','flipX','flipY','ellipse'])if(node[key]!==undefined&&typeof node[key]!=='boolean')throw new Error(`Invalid node ${key}`);
-      if(node.type==='shader'){if(!['aurora','waves','noise','ribbon','mesh','swirl'].includes(node.shaderPreset||'aurora'))throw new Error('Invalid shader preset');for(const [key,max] of [['shaderSpeed',5],['shaderIntensity',2]])if(node[key]!==undefined&&(!Number.isFinite(node[key])||node[key]<0||node[key]>max))throw new Error('Invalid shader uniform '+key);}
+      if(node.type==='shader'){if(!presetIds.includes(node.shaderPreset||'aurora'))throw new Error('Invalid shader preset');for(const [key,max] of [['shaderSpeed',5],['shaderIntensity',2]])if(node[key]!==undefined&&(!Number.isFinite(node[key])||node[key]<0||node[key]>max))throw new Error('Invalid shader uniform '+key);}
       if(node.animated!==undefined&&!['','aurora','sunset','ocean'].includes(node.animated))throw new Error('Invalid animated palette');
       if(node.layout!==undefined&&!['free','flex','grid','block','inline'].includes(node.layout))throw new Error('Invalid node layout');
       if(node.fontWeight!==undefined&&!/^(normal|bold|[1-9][0-9]{0,2}|1000)$/.test(String(node.fontWeight)))throw new Error('Invalid node fontWeight');
@@ -87,8 +99,9 @@ export function validateDocument(document) {
       if (node.svgColorToken !== undefined && (typeof node.svgColorToken !== 'string' || !VARIABLE_NAME.test(node.svgColorToken) || node.svgColor === undefined)) throw new Error('Invalid SVG color variable');
       validateBindings(node.bindings);
       { const fx = validateEffects(node); if (fx) throw new Error(fx); } // structured effects, shared with validate() in web/app.js
+      { const se = shaderError(node); if (se) throw new Error(se); } // shader preset/colours/sliders, shared with validate() in web/app.js
       { const pe = paintError(node); if (pe) throw new Error(pe); } // paint stack + SVG paints, shared with validate() in web/app.js
-      for(const key of ['color','fontFamily','textAlign','direction','layout','token','gradient','mask','strokeColor','shadow','alignItems','justifyContent'])if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key].length>4000))throw new Error(`Invalid node ${key}`);
+      for(const key of ['color','fontFamily','textAlign','direction','layout','token','gradient','mask','strokeColor','shadow','alignItems','justifyContent','variantClasses'])if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key].length>4000))throw new Error(`Invalid node ${key}`);
     }
     for(const node of page.nodes) {
       const chain=new Set([node.id]);let parent=node.parentId;
@@ -114,6 +127,8 @@ export function applyOperations(document, operations) {
       case 'update_node': {const node=page.nodes.find(n=>n.id===op.nodeId);if(!node)throw new Error('Node not found');if('id' in op.properties)throw new Error('Node id cannot be changed');if('text' in op.properties&&!('textRuns' in op.properties))node.textRuns=[];Object.assign(node,clone(op.properties));break;}
       case 'delete_node': {if(!page.nodes.some(n=>n.id===op.nodeId))throw new Error('Node not found');const removed=new Set([op.nodeId]);let changed=true;while(changed){changed=false;for(const n of page.nodes)if(removed.has(n.parentId)&&!removed.has(n.id)){removed.add(n.id);changed=true;}}page.nodes=page.nodes.filter(n=>!removed.has(n.id));break;}
       case 'set_token': if(['__proto__','prototype','constructor'].includes(op.name))throw new Error('Reserved token name');d.tokens[op.name]=op.value;break;
+      case 'set_variable': if(RESERVED_NAMES.includes(op.name))throw new Error('Reserved token name');if(Object.hasOwn(d.tokens,op.name))throw new Error(`${op.name} is a color token`);{const value=op.variableType==='dimension'||op.variableType==='number'?Number(op.value):String(op.value);if(!checkVariableValue(op.variableType,value))throw new Error(`Invalid ${op.variableType} value for ${op.name}`);d.variables={...d.variables,[op.name]:{type:op.variableType,value}};}break;
+      case 'delete_token': {const color=Object.hasOwn(d.tokens,op.name),typed=Object.hasOwn(d.variables||{},op.name);if(!color&&!typed)throw new Error(`Token ${op.name} does not exist`);dropAliases(d,op.name);for(const p of d.pages)for(const n of p.nodes){if(color){if(n.token===op.name){n.color=d.tokens[op.name];n.token='';}if(n.svgColorToken===op.name){n.svgColor=d.tokens[op.name];delete n.svgColorToken;}eachPaintColor(n,c=>{if(c.token===op.name){c.color=d.tokens[op.name];delete c.token;}});}if(typed&&n.bindings){for(const [k,v] of Object.entries(n.bindings))if(v===op.name)delete n.bindings[k];if(!Object.keys(n.bindings).length)delete n.bindings;}}if(color)delete d.tokens[op.name];else{delete d.variables[op.name];if(!Object.keys(d.variables).length)delete d.variables;}break;}
       case 'rename_document':d.name=op.name;break;
       default:throw new Error('Unknown operation');
     }

@@ -6,7 +6,7 @@
 //   node eval/run-fidelity.mjs [--filter <substr>] [--verbose] [--no-render] [--json <out.json>]
 //
 // Exit code: 0 when every fixture passes, 1 otherwise.
-import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as A from './lib/adapter.mjs';
@@ -21,7 +21,11 @@ const filter = opt('--filter'), verbose = flag('--verbose'), noRender = flag('--
 
 const dir = join(here, 'fidelity/fixtures');
 const fixtures = readdirSync(dir).filter(f => f.endsWith('.json')).sort()
-  .map(f => ({ id: f.replace(/\.json$/, ''), ...JSON.parse(readFileSync(join(dir, f), 'utf8')), jsx: readFileSync(join(dir, f.replace(/\.json$/, '.jsx')), 'utf8') }))
+  .map(f => {
+    // Source: NN-name.jsx (codec JSX) or NN-name.html (HTML + CSS through the HTML importer).
+    const html = join(dir, f.replace(/\.json$/, '.html'));
+    return { id: f.replace(/\.json$/, ''), ...JSON.parse(readFileSync(join(dir, f), 'utf8')), ...(existsSync(html) ? { html: readFileSync(html, 'utf8') } : { jsx: readFileSync(join(dir, f.replace(/\.json$/, '.jsx')), 'utf8') }) };
+  })
   .filter(f => !filter || f.id.includes(filter));
 
 // ---------------------------------------------------------------------------------------------
@@ -77,7 +81,7 @@ async function runFixture(fx) {
   const record = (a, error, skipped = false) => results.push({ assertion: a, ok: !error && !skipped, skipped, error });
   let state;
   try {
-    state = await A.build(fx.jsx, fx.viewport);
+    state = fx.html !== undefined ? await A.buildHtml(fx.html, fx.viewport) : await A.build(fx.jsx, fx.viewport);
     for (const step of fx.edits || []) state = await A.edit(state, step);
     await A.validate(state);
   } catch (error) { return { status: 'ERROR', results, error: error.message }; }
@@ -141,7 +145,8 @@ async function runFixture(fx) {
     try {
       if (codeError) throw new Error(`serialize failed: ${codeError}`);
       const strip = c => String(c).replace(/\s*data-node-id="[^"]*"/g, '');
-      const state2 = await A.build(code1, fx.viewport);
+      // The document's variables travel with the code (as they do in the editor and in exports).
+      const state2 = await A.build(code1, fx.viewport, { tokens: state.doc.tokens, variables: state.doc.variables });
       const code2 = await A.serialize(state2);
       const diffs = [];
       if (strip(code1) !== strip(code2)) diffs.push('serialize(parse(serialize(x))) differs from serialize(x)');

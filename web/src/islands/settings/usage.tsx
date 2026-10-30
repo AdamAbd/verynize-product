@@ -6,6 +6,7 @@ import { ClaudeMark, CodexMark, LogoIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { agentWorkspace, settingsApi } from "./api";
 import { Card, PageHeader, Row, Section, SettingsButton } from "./controls";
+import { desktopApi, errorText, type Profile } from "./workspace-ipc";
 
 type Limit = { id: string; label: string; usedPercent: number; resetsAt?: number };
 type ProviderUsage = {
@@ -35,7 +36,7 @@ type LayerUsage = {
   resetsAt: number;
 };
 type UsageIpc = {
-  read(options: { agent: "claude" | "codex"; refresh?: boolean }): Promise<ProviderUsage>;
+  read(options: { agent: "claude" | "codex"; refresh?: boolean; profile?: string }): Promise<ProviderUsage>;
   layers(): Promise<LayerUsage>;
 };
 
@@ -176,7 +177,7 @@ function ProviderCard({
   loading,
   now,
 }: {
-  provider: (typeof PROVIDERS)[number];
+  provider: { id: string; name: string; manage: string; url: string; mark: ReactNode };
   usage: ProviderUsage | null;
   loading: boolean;
   now: number;
@@ -378,11 +379,36 @@ export function UsageView() {
   const [usage, setUsage] = useState<Record<string, ProviderUsage | null>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [layers, setLayers] = useState<LayerUsage | null>(null);
+  // Named accounts (Settings › Accounts): each gets its own card with its own limits.
+  const [named, setNamed] = useState<Profile[]>([]);
 
   const load = useCallback(
     (refresh: boolean) => {
       if (!ipc?.read) return;
       if (ipc.layers) void ipc.layers().then(setLayers, () => setLayers(null));
+      void desktopApi()
+        ?.agentProfiles?.list()
+        .then((list) => {
+          const accounts = list.profiles.filter((p) => !p.system);
+          setNamed(accounts);
+          const read = ipc.read;
+          if (!read) return;
+          for (const p of accounts) {
+            const key = `${p.agent}:${p.id}`;
+            setLoading((state) => ({ ...state, [key]: true }));
+            read({ agent: p.agent, refresh, profile: p.id })
+              .then(
+                (value) => setUsage((state) => ({ ...state, [key]: value })),
+                (error: unknown) =>
+                  setUsage((state) => ({
+                    ...state,
+                    [key]: { agent: p.agent, status: "error", message: errorText(error), limits: [], updatedAt: Date.now() },
+                  })),
+              )
+              .finally(() => setLoading((state) => ({ ...state, [key]: false })));
+          }
+        })
+        .catch(() => setNamed([]));
       for (const { id } of PROVIDERS) {
         setLoading((state) => ({ ...state, [id]: true }));
         ipc
@@ -435,7 +461,21 @@ export function UsageView() {
               now={now}
             />
           ))
-        ) : (
+        ) : null}
+        {available &&
+          named.map((p) => {
+            const base = PROVIDERS.find((x) => x.id === p.agent)!;
+            return (
+              <ProviderCard
+                key={p.id}
+                provider={{ ...base, id: `${p.agent}-account-${p.id}`, name: `${base.name} · ${p.name}` }}
+                usage={usage[`${p.agent}:${p.id}`] ?? null}
+                loading={!!loading[`${p.agent}:${p.id}`]}
+                now={now}
+              />
+            );
+          })}
+        {available ? null : (
           <Card>
             <Row
               title="Available in the desktop app"

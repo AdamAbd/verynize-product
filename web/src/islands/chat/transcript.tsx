@@ -3,6 +3,8 @@
 // .chat-tool > summary, .chat-thinking, .chat-permission-allow/-deny, .chat-error.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
+  GaugeIcon,
+  ShieldOffIcon,
   CheckIcon,
   ChevronRightIcon,
   CopyIcon,
@@ -384,6 +386,25 @@ function PermissionRow({ part }: { part: ChatPart }) {
   );
 }
 
+/** Autonomy summary of a run and the runtime's automatic decisions (desktop/agent-autonomy.cjs). */
+function NoticeRow({ part }: { part: ChatPart }) {
+  const decision = (part as ChatPart & { decision?: string }).decision;
+  const Icon = part.kind === "autonomy" || decision === "limit" ? GaugeIcon : decision === "allow" ? ShieldCheckIcon : ShieldOffIcon;
+  return (
+    <div
+      data-chat-notice={part.kind}
+      data-decision={decision ?? ""}
+      className={cn(
+        "flex items-start gap-1.5 text-xs leading-4",
+        decision === "limit" || decision === "deny" ? "text-destructive" : "text-muted-foreground",
+      )}
+    >
+      <Icon className="mt-px size-3.5 shrink-0" />
+      <span className="min-w-0 break-words">{part.kind === "autonomy" ? `Autonomy: ${part.text}` : part.text}</span>
+    </div>
+  );
+}
+
 function ErrorRow({ text }: { text?: string }) {
   return (
     // Not a live region (role unset): transcripts re-render whole, and old errors must not be re-announced.
@@ -615,7 +636,8 @@ type Block =
   | { type: "tools"; key: string; done: Indexed[]; live?: Indexed }
   | { type: "permission"; key: string; item: Indexed }
   | { type: "question"; key: string; item: Indexed }
-  | { type: "error"; key: string; text?: string };
+  | { type: "error"; key: string; text?: string }
+  | { type: "notice"; key: string; part: ChatPart };
 
 /** Visible blocks of a running turn: text, "Ran N commands" + live step, pending approvals, errors. */
 function runningBlocks(parts: ChatPart[], nesting: Nesting): Block[] {
@@ -635,6 +657,7 @@ function runningBlocks(parts: ChatPart[], nesting: Nesting): Block[] {
     } else if (part.kind === "permission") blocks.push({ type: "permission", key, item: { part, index } });
     else if (part.kind === "question") blocks.push({ type: "question", key, item: { part, index } });
     else if (part.kind === "error") blocks.push({ type: "error", key, text: part.text });
+    else if ((part.kind === "autonomy" && part.text) || part.kind === "policy") blocks.push({ type: "notice", key, part });
   });
   return blocks;
 }
@@ -704,6 +727,7 @@ function AssistantMessage({
         {blocks.map((block) => {
           if (block.type === "text") return <Markdown key={block.key} text={block.text} />;
           if (block.type === "error") return <ErrorRow key={block.key} text={block.text} />;
+          if (block.type === "notice") return <NoticeRow key={block.key} part={block.part} />;
           if (block.type === "question") return question(block.item.part, block.item.index, block.key);
           if (block.type === "permission")
             return block.item.part.state === "pending" ? (
@@ -734,6 +758,8 @@ function AssistantMessage({
           <ToolRow key={partIndex} part={part} nesting={nesting} onToggle={(open) => toggle(partIndex, open)} onToggleChild={toggle} />,
         ];
       if (part.kind === "permission") return [<PermissionRow key={partIndex} part={part} />];
+      if (part.kind === "policy" && (part as ChatPart & { decision?: string }).decision !== "limit")
+        return [<NoticeRow key={partIndex} part={part} />];
       return [];
     });
     const tools = parts.filter((p) => p.kind === "tool").length;
@@ -741,7 +767,14 @@ function AssistantMessage({
     const label = timed ? `Wondered for ${seconds(message.at, message.end)}s` : tools ? toolCount(tools) : "Thought";
     const answerParts = parts
       .map((part, partIndex) => ({ part, index: partIndex }))
-      .filter(({ part: p }) => (p.kind === "text" && p.text?.trim()) || p.kind === "error" || p.kind === "question");
+      .filter(
+        ({ part: p }) =>
+          (p.kind === "text" && p.text?.trim()) ||
+          p.kind === "error" ||
+          p.kind === "question" ||
+          (p.kind === "autonomy" && !!p.text) ||
+          (p.kind === "policy" && (p as ChatPart & { decision?: string }).decision === "limit"),
+      );
     content = (
       <>
         {(work.length > 0 || (timed && parts.length > 0)) && <TurnHeader label={label}>{work.length ? work : undefined}</TurnHeader>}
@@ -751,6 +784,8 @@ function AssistantMessage({
         {answerParts.map(({ part, index: partIndex }) =>
           part.kind === "error" ? (
             <ErrorRow key={partIndex} text={part.text} />
+          ) : part.kind === "autonomy" || part.kind === "policy" ? (
+            <NoticeRow key={partIndex} part={part} />
           ) : part.kind === "question" ? (
             question(part, partIndex, partIndex)
           ) : (

@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { Check, Copy, Pipette, X } from "lucide-react";
+import { Check, Copy, Folder, Pipette, X } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { Field, IconButton, NativeSelect, Swatch, useHookClass } from "./controls";
@@ -28,6 +28,7 @@ import {
   type ColorFormat,
   type Hsva,
 } from "./color";
+import { groupByFolder, leafOf } from "./vars";
 
 // Remember the last chosen format across pickers (Wonder keeps it per session).
 let lastFormat: ColorFormat = "hex";
@@ -258,20 +259,41 @@ export function ColorPicker({
           aria-label="Colour variables"
           className="flex max-h-72 min-h-40 flex-col overflow-y-auto"
         >
-          {tokenEntries.map(([name, color]) => (
-            <button
-              key={name}
-              type="button"
-              role="option"
-              aria-selected={token === name}
-              className="flex h-7 items-center gap-2 rounded-md px-2 text-left text-xs text-foreground-2 hover:bg-accent"
-              onClick={() => onToken(name)}
+          {groupByFolder(tokenEntries).map(({ folder, items }) => (
+            <div
+              key={folder || "/"}
+              role="group"
+              aria-label={folder || "Colors"}
+              data-variable-folder={folder}
+              className="flex flex-col"
             >
-              <Swatch color={color} className="size-3.5" />
-              <span className="min-w-0 flex-1 truncate">{name}</span>
-              <span className="text-muted-foreground uppercase">{color}</span>
-              {token === name ? <Check className="size-3.5" aria-hidden /> : null}
-            </button>
+              {folder ? (
+                <div className="flex h-7 items-center gap-1 px-2 text-xs text-muted-foreground">
+                  <Folder className="size-3.5" aria-hidden />
+                  <span className="min-w-0 truncate">{folder}</span>
+                </div>
+              ) : null}
+              {items.map(([name, color]) => (
+                <button
+                  key={name}
+                  type="button"
+                  role="option"
+                  aria-selected={token === name}
+                  aria-label={name}
+                  data-variable={name}
+                  className={cn(
+                    "flex h-7 items-center gap-2 rounded-md px-2 text-left text-xs text-foreground-2 hover:bg-accent",
+                    folder && "pl-6",
+                  )}
+                  onClick={() => onToken(name)}
+                >
+                  <Swatch color={color} className="size-3.5" />
+                  <span className="min-w-0 flex-1 truncate">{folder ? leafOf(name) : name}</span>
+                  <span className="text-muted-foreground uppercase">{color}</span>
+                  {token === name ? <Check className="size-3.5" aria-hidden /> : null}
+                </button>
+              ))}
+            </div>
           ))}
           {!tokenEntries.length ? (
             <p className="px-2 py-3 text-xs text-muted-foreground">

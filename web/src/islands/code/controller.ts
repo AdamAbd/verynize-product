@@ -243,6 +243,8 @@ export type CodeWorkspaceApi = {
   openChat: typeof openChat;
   openMemory: () => void;
   refresh: typeof refresh;
+  /** Global search (settings island): show a project in Code mode and open one of its files. */
+  openFile?: (root: string, path: string) => Promise<void>;
 };
 declare global {
   interface Window {

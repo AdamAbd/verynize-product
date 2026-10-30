@@ -131,7 +131,12 @@
   //     box -> box-shadow (inset = inner shadow), drop -> filter drop-shadow(), text -> text-shadow (text layers only)
   //     `token` binds the color to a Colors variable; `color` keeps the resolved fallback.
   //   filters [{type: keyof FILTERS, value, backdrop?, hidden?}] -> filter / backdrop-filter, in list order
-  //   masks [{type: 'linear'|'radial'|'conic', rotation, alpha, invert?, hidden?}] -> gradient mask-image layers
+  //   masks [{type: 'linear'|'radial'|'conic'|'image'|'custom', rotation, alpha, invert?, hidden?,
+  //           src? (image: embedded data URL), css? (custom: a CSS gradient), mode? ('alpha'|'luminance'),
+  //           repeat?, x?/y? (position %), size? ('auto'|'cover'|'contain'|'<n>%'|'<n>px'), composite?}]
+  //     -> mask-image layers plus mask-mode / mask-repeat / mask-position / mask-size / mask-composite lists
+  //   outlineToken / strokeToken bind the outline / border colour to a Colors variable; strokeColors
+  //     [{color, token?} x4] (top, right, bottom, left) paints each border side separately.
   const BLEND_MODES = ['normal', 'darken', 'multiply', 'plus-darker', 'color-burn', 'lighten', 'screen', 'plus-lighter', 'color-dodge', 'overlay', 'soft-light', 'hard-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
   const FILTERS = {
     blur: {fn: 'blur', unit: 'px', min: 0, max: 1000, value: 4},
@@ -144,7 +149,13 @@
     sepia: {fn: 'sepia', unit: '', min: 0, max: 1, value: 1},
   };
   const SHADOW_TYPES = ['box', 'drop', 'text'];
-  const MASK_TYPES = ['linear', 'radial', 'conic'];
+  const MASK_TYPES = ['linear', 'radial', 'conic', 'image', 'custom'];
+  const MASK_MODES = ['auto', 'alpha', 'luminance'];
+  const MASK_REPEATS = ['repeat', 'no-repeat', 'repeat-x', 'repeat-y', 'space', 'round'];
+  const MASK_COMPOSITES = ['add', 'subtract', 'intersect', 'exclude'];
+  const MASK_SIZE = /^(auto|cover|contain|\d{1,5}(\.\d{1,3})?(px|%)( \d{1,5}(\.\d{1,3})?(px|%))?)$/;
+  const MASK_IMAGE = /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
+  const MASK_CSS = /^(repeating-)?(linear|radial|conic)-gradient\([^;{}<>\\]{1,2000}\)$/i;
   const OUTLINE_STYLES = ['solid', 'dashed', 'dotted'];
   const FX_HEX = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
   const FX_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,99}$/;
@@ -160,6 +171,8 @@
   }
   const filterCss = f => { const d = FILTERS[f.type]; return `${d.fn}(${r3(Math.min(d.max, Math.max(d.min, num(f.value, d.value))))}${d.unit})`; };
   function maskCss(m) {
+    if (m.type === 'image') return `url("${m.src}")`;
+    if (m.type === 'custom') return m.css;
     const a = Math.min(100, Math.max(0, num(m.alpha, 100))) / 100, solid = `rgba(0, 0, 0, ${r3(a)})`, clear = 'rgba(0, 0, 0, 0)';
     const [from, to] = m.invert === true ? [clear, solid] : [solid, clear];
     if (m.type === 'radial') return `radial-gradient(${from}, ${to})`;
@@ -171,19 +184,35 @@
    * Returns {blend, outline, boxShadow[], drop[], textShadow[], filter[], backdrop[], masks[]} (CSS strings).
    */
   function effectsOf(n, tokens) {
-    const shadows = visible(n.shadows), filters = visible(n.filters).filter(f => FILTERS[f.type]);
+    const shadows = visible(n.shadows), filters = visible(n.filters).filter(f => FILTERS[f.type]), masks = visible(n.masks).filter(usableMask);
     const width = Math.max(0, num(n.outlineWidth));
     return {
       blend: BLEND_MODES.includes(n.blendMode) && n.blendMode !== 'normal' ? n.blendMode : '',
-      outline: width > 0 ? {width, style: pick(n.outlineStyle, OUTLINE_STYLES, 'solid'), color: FX_HEX.test(n.outlineColor || '') ? n.outlineColor : '#000000', offset: num(n.outlineOffset)} : null,
+      outline: width > 0 ? {width, style: pick(n.outlineStyle, OUTLINE_STYLES, 'solid'), color: shadowColor({color: n.outlineColor || '#000000', token: n.outlineToken}, tokens), offset: num(n.outlineOffset)} : null,
+      border: borderColors(n, tokens),
       boxShadow: shadows.filter(s => s.type === 'box').map(s => shadowCss(s, tokens)),
       drop: shadows.filter(s => s.type === 'drop').map(s => shadowCss(s, tokens)),
       textShadow: n.type === 'text' ? shadows.filter(s => s.type === 'text').map(s => shadowCss(s, tokens)) : [],
       filter: filters.filter(f => f.backdrop !== true).map(filterCss),
       backdrop: filters.filter(f => f.backdrop === true).map(filterCss),
-      masks: visible(n.masks).filter(m => MASK_TYPES.includes(m.type)).map(maskCss),
+      masks: masks.map(maskCss),
+      maskLayers: masks.map(m => ({
+        mode: m.mode === 'alpha' || m.mode === 'luminance' ? m.mode : 'match-source',
+        repeat: pick(m.repeat, MASK_REPEATS, 'repeat'),
+        position: `${r3(num(m.x))}% ${r3(num(m.y))}%`,
+        size: MASK_SIZE.test(m.size || '') ? m.size : 'auto',
+        composite: pick(m.composite, MASK_COMPOSITES, 'add'),
+      })),
     };
   }
+  /** Border colour CSS (one value or four sides) when a variable or per-side colours apply, else ''. */
+  function borderColors(n, tokens) {
+    if (Array.isArray(n.strokeColors) && n.strokeColors.length === 4)
+      return n.strokeColors.map(c => shadowColor({color: c?.color || n.strokeColor || '#000000', token: c?.token}, tokens)).join(' ');
+    if (n.strokeToken && tokens && FX_HEX.test(tokens[n.strokeToken] || '')) return tokens[n.strokeToken];
+    return '';
+  }
+  const usableMask = m => MASK_TYPES.includes(m.type) && (m.type !== 'image' || MASK_IMAGE.test(m.src || '')) && (m.type !== 'custom' || MASK_CSS.test(m.css || ''));
   const isBool = v => v === undefined || typeof v === 'boolean';
   const finite = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
   /** Validate the structured effect fields of a layer. Returns an error message, or '' when valid. */
@@ -193,6 +222,10 @@
     if (n.outlineOffset !== undefined && !finite(n.outlineOffset, -1000, 1000)) return 'Invalid outline offset';
     if (n.outlineColor !== undefined && !FX_HEX.test(String(n.outlineColor))) return 'Invalid outline color';
     if (n.outlineStyle !== undefined && !OUTLINE_STYLES.includes(n.outlineStyle)) return 'Invalid outline style';
+    const tokenName = v => v === undefined || (typeof v === 'string' && FX_NAME.test(v));
+    if (!tokenName(n.outlineToken)) return 'Invalid outline color variable';
+    if (!tokenName(n.strokeToken)) return 'Invalid border color variable';
+    if (n.strokeColors !== undefined && (!Array.isArray(n.strokeColors) || n.strokeColors.length !== 4 || !n.strokeColors.every(c => c && typeof c === 'object' && FX_HEX.test(String(c.color)) && tokenName(c.token)))) return 'Invalid border side colors';
     const list = (v, max) => v === undefined || (Array.isArray(v) && v.length <= max && v.every(item => item && typeof item === 'object' && !Array.isArray(item) && isBool(item.hidden)));
     if (!list(n.shadows, 20)) return 'Invalid shadows';
     for (const s of n.shadows || []) {
@@ -204,7 +237,16 @@
     if (!list(n.filters, 20)) return 'Invalid filters';
     for (const f of n.filters || []) if (!Object.hasOwn(FILTERS, f.type) || !finite(f.value, FILTERS[f.type].min, FILTERS[f.type].max) || !isBool(f.backdrop)) return 'Invalid filter';
     if (!list(n.masks, 8)) return 'Invalid masks';
-    for (const m of n.masks || []) if (!MASK_TYPES.includes(m.type) || !finite(m.rotation ?? 0, -3600, 3600) || !finite(m.alpha ?? 100, 0, 100) || !isBool(m.invert)) return 'Invalid mask';
+    for (const m of n.masks || []) {
+      if (!MASK_TYPES.includes(m.type) || !finite(m.rotation ?? 0, -3600, 3600) || !finite(m.alpha ?? 100, 0, 100) || !isBool(m.invert)) return 'Invalid mask';
+      if (m.type === 'image' && (typeof m.src !== 'string' || m.src.length > 15e6 || !MASK_IMAGE.test(m.src))) return 'Image mask needs an embedded base64 image';
+      if (m.type === 'custom' && (typeof m.css !== 'string' || !MASK_CSS.test(m.css) || /url\s*\(/i.test(m.css))) return 'Custom mask needs a CSS gradient';
+      if (m.mode !== undefined && !MASK_MODES.includes(m.mode)) return 'Invalid mask mode';
+      if (m.repeat !== undefined && !MASK_REPEATS.includes(m.repeat)) return 'Invalid mask repeat';
+      if (m.composite !== undefined && !MASK_COMPOSITES.includes(m.composite)) return 'Invalid mask operation';
+      if (!finite(m.x ?? 0, -10000, 10000) || !finite(m.y ?? 0, -10000, 10000)) return 'Invalid mask position';
+      if (m.size !== undefined && (typeof m.size !== 'string' || !MASK_SIZE.test(m.size))) return 'Invalid mask size';
+    }
     return '';
   }
 
@@ -293,13 +335,33 @@
     }
     return "";
   }
-  /** Call fn on every colour holder ({color, token}) of the paint stack: solid paints and gradient stops. */
+  /** Flat `${prefix}Color` / `${prefix}Token` pair (outline, border) seen as one {color, token} holder. */
+  function flatHolder(n, colorKey, tokenKey, fn) {
+    if (n[colorKey] === undefined && !n[tokenKey]) return;
+    const h = { color: n[colorKey], token: n[tokenKey] };
+    fn(h);
+    if (h.color !== undefined) n[colorKey] = h.color;
+    if (h.token) n[tokenKey] = h.token;
+    else delete n[tokenKey];
+  }
+  /**
+   * Call fn on every colour holder ({color, token}) of a layer that can bind a Colors variable: solid paints and
+   * gradient stops, shadows, border (uniform `strokeToken` and per-side `strokeColors`), outline
+   * (`outlineToken`) and shader colours. Rename/delete/sync of colour variables goes through here.
+   */
   function eachPaintColor(n, fn) {
-    if (!Array.isArray(n?.fills)) return;
-    for (const p of n.fills) {
-      if (p?.type === "solid") fn(p);
-      else if (Array.isArray(p?.stops)) for (const s of p.stops) if (s) fn(s);
-    }
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n.fills))
+      for (const p of n.fills) {
+        if (p?.type === "solid") fn(p);
+        else if (Array.isArray(p?.stops)) for (const s of p.stops) if (s) fn(s);
+      }
+    if (Array.isArray(n.shadows)) for (const s of n.shadows) if (s && typeof s === "object") fn(s);
+    if (Array.isArray(n.strokeColors)) for (const s of n.strokeColors) if (s && typeof s === "object") fn(s);
+    if (n.shaderColors && typeof n.shaderColors === "object")
+      for (const c of Object.values(n.shaderColors)) if (c && typeof c === "object") fn(c);
+    flatHolder(n, "strokeColor", "strokeToken", fn);
+    flatHolder(n, "outlineColor", "outlineToken", fn);
   }
   const resolveColor = (c, tokens) =>
     c.token && tokens && HEX_COLOR.test(tokens[c.token] || "") ? tokens[c.token] : c.color;
@@ -644,7 +706,18 @@
     if (fx.filter.length || fx.drop.length) set('filter', [...fx.filter, ...fx.drop].join(' '));
     if (fx.backdrop.length) set('backdrop-filter', fx.backdrop.join(' '));
     if (fx.textShadow.length) set('text-shadow', fx.textShadow.join(', '));
-    if (fx.masks.length) set('mask-image', [...fx.masks, safe(n.mask)].filter(Boolean).join(', '));
+    if (fx.masks.length) {
+      set('mask-image', [...fx.masks, safe(n.mask)].filter(Boolean).join(', '));
+      // Per-layer options only when one differs from the CSS defaults (older documents keep their CSS).
+      const layers = [...fx.maskLayers, ...(safe(n.mask) ? [{mode: 'match-source', repeat: 'repeat', position: '0% 0%', size: 'auto', composite: 'add'}] : [])];
+      const list = key => layers.map(l => l[key]).join(', ');
+      if (layers.some(l => l.mode !== 'match-source')) set('mask-mode', list('mode'));
+      if (layers.some(l => l.repeat !== 'repeat')) set('mask-repeat', list('repeat'));
+      if (layers.some(l => l.position !== '0% 0%')) set('mask-position', list('position'));
+      if (layers.some(l => l.size !== 'auto')) set('mask-size', list('size'));
+      if (layers.some(l => l.composite !== 'add')) set('mask-composite', list('composite'));
+    }
+    if (fx.border) set('border-color', fx.border);
     if (fx.blend) set('mix-blend-mode', fx.blend);
 
     // Text.
@@ -709,5 +782,5 @@
   /** Index of the last in-flow (not hidden, not absolute) child in a list of siblings. */
   const lastInFlowId = children => children.filter(c => !c.hidden && c.position !== 'absolute').at(-1)?.id;
 
-  root.BetterNodeStyle = {nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss: safe, PALETTES, paintError, eachPaintColor, paintColor, fillsCss, svgPaintList, svgColorKey, recolorSvg, PAINT_TYPES, IMAGE_FITS, BLEND_MODES, FILTERS, SHADOW_TYPES, MASK_TYPES, OUTLINE_STYLES, effectsOf, validateEffects};
+  root.BetterNodeStyle = {nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss: safe, PALETTES, paintError, eachPaintColor, paintColor, fillsCss, svgPaintList, svgColorKey, recolorSvg, PAINT_TYPES, IMAGE_FITS, BLEND_MODES, FILTERS, SHADOW_TYPES, MASK_TYPES, MASK_MODES, MASK_REPEATS, MASK_COMPOSITES, OUTLINE_STYLES, effectsOf, validateEffects};
 })(typeof globalThis !== 'undefined' ? globalThis : window);

@@ -19,6 +19,7 @@ export const MENU_IDS = [
   "generate-art",
   "figma-import",
   "trace-bitmap",
+  "capture-webpage",
   "import-tokens",
   "rename-page",
   "delete-page",

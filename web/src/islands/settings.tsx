@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { attachSettings } from "./settings/api";
 import { startPreferenceRuntime } from "./settings/preference-runtime";
 import { SettingsScreen } from "./settings/SettingsScreen";
+import { GlobalSearchDialog } from "./settings/projects";
 import { DialogEnhancer, ExportToasts } from "./settings/dialogs";
 import "./settings/settings.css";
 
@@ -12,6 +13,7 @@ function Island() {
   return (
     <>
       <SettingsScreen />
+      <GlobalSearchDialog />
       <DialogEnhancer />
       <ExportToasts />
       <Toaster position="bottom-right" offset={16} visibleToasts={3} />

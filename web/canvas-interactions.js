@@ -718,6 +718,11 @@
       }
     }
 
+    function unbindKeys(node, keys) {
+      if (!node.bindings) return;
+      for (const key of keys) if (key) delete node.bindings[key];
+      if (!Object.keys(node.bindings).length) delete node.bindings;
+    }
     function startResize(e, id, corner) {
       const n = find(id); if (!n || n.locked) return;
       let total = Number(n.rotation) || 0, ancestor = n;
@@ -733,6 +738,8 @@
         if (ev.shiftKey || scaling) { const fx = w / s.w, fy = h / s.h, f = Math.abs(fx - 1) > Math.abs(fy - 1) ? fx : fy; w = Math.max(10, s.w * f); h = Math.max(10, s.h * f); }
         const dw = w - s.w, dh = h - s.h, a = (Number(n.rotation) || 0) * Math.PI / 180, parent = find(n.parentId);
         n.w = w; n.h = h;
+        // A dragged size replaces a variable-bound W/H: keep the new value, drop the binding (undo restores both).
+        unbindKeys(n, [w !== s.w && 'w', h !== s.h && 'h']);
         if (n.wMode === 'hug' || n.wMode === 'fill') n.wMode = 'fixed';
         if (n.hMode === 'hug' || n.hMode === 'fill') n.hMode = 'fixed';
         if (!isFlow(parent)) {
@@ -744,6 +751,7 @@
           for (const c of content) {
             if (c.d.id !== id) { c.d.x = c.x * f; c.d.y = c.y * f; c.d.w = Math.max(1, c.w * f); c.d.h = Math.max(1, c.h * f); }
             c.d.fontSize = clamp(c.fontSize * f, 8, 200); c.d.radius = c.radius * f; c.d.gap = c.gap * f; c.d.padding = c.padding * f; c.d.strokeWidth = c.strokeWidth * f;
+            if (f !== 1) unbindKeys(c.d, [c.d.id !== id && 'w', c.d.id !== id && 'h', 'fontSize', 'radius', 'gap', 'padding', 'strokeWidth']);
           }
         }
         ed.render();
@@ -1168,6 +1176,9 @@
       const text = e.clipboardData?.getData('text/plain') || '';
       const data = parseClipboard(text);
       if (data) { clipboard = data; paste(data, {inPlace}); return; }
+      // Layers copied in Figma (binary scene in text/html), converted by web/figma-panel.js + the main process.
+      const html = e.clipboardData?.getData('text/html') || '';
+      if (window.figmaPaste?.accepts(html)) { window.figmaPaste.convert(html).then(layers => { if (layers) paste(layers, {inPlace}); }); return; }
       const file = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/') && f.size < 8e6);
       if (file) {
         const reader = new FileReader();

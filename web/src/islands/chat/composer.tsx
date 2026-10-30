@@ -38,6 +38,7 @@ import { MentionIcon, MentionPopover } from "./mention-popover";
 import { agentAvailable, useModels, workspace, type AgentModel, type ChatState } from "./store";
 import { ToolsPopover } from "./tools-popover";
 import { UsageRing } from "./usage-ring";
+import { AutonomyPopover } from "./autonomy-panel";
 import { AttachMenu, WorkingDirectories } from "./attach-menu";
 import { SlashCommands } from "./slash-commands";
 import { WorksWith } from "./works-with";
@@ -496,6 +497,7 @@ export function Composer({ state }: { state: ChatState }) {
         <AccessMenu access={state.defaults.access} />
         <span className="flex-1" />
         <WorksWith state={state} />
+        <AutonomyPopover state={state} />
         <ToolsPopover state={state} />
         <UsageRing state={state} />
         {canSendOther && (
