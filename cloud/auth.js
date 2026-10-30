@@ -9,6 +9,9 @@
 // URLs are still checked against trusted origins. Rate limiting is done by the Worker with
 // the AUTH_LIMIT binding: Better Auth's built-in limiter keeps state in isolate memory, which is
 // not shared between Workers isolates.
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { database } from "./db.js";
+import * as schema from "./schema.js";
 import { betterAuth } from "better-auth";
 import { bearer, organization } from "better-auth/plugins";
 import { sendMail } from "./mail.js";
@@ -91,5 +94,10 @@ export function authOptions(env = {}, { baseURL, database } = {}) {
 /** The Better Auth instance for one request. */
 export function createAuth(env, request) {
   const baseURL = env.AUTH_URL || new URL(request.url).origin;
-  return betterAuth(authOptions(env, { baseURL, database: env.DB }));
+  return betterAuth(
+    authOptions(env, {
+      baseURL,
+      database: drizzleAdapter(database(env), { provider: "sqlite", schema, transaction: false }),
+    }),
+  );
 }
