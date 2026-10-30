@@ -32,7 +32,8 @@ const MAX_FILES = 3000,
   MAX_FILE = 25 * 1024 * 1024,
   MAX_TOTAL = 100 * 1024 * 1024;
 const NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
-const SESSION = /^vs_[0-9a-f]{64}$/;
+// Legacy directory sessions (vs_…) or Better Auth bearer tokens (cloud/auth.js).
+const SESSION = /^(vs_[0-9a-f]{64}|[A-Za-z0-9]{16,64}\.[A-Za-z0-9+/=_%-]{16,128})$/;
 
 const readJson = async (file) => {
   try {

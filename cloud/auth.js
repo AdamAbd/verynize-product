@@ -9,9 +9,13 @@
 // URLs are still checked against trusted origins. Rate limiting is done by the Worker with
 // the AUTH_LIMIT binding: Better Auth's built-in limiter keeps state in isolate memory, which is
 // not shared between Workers isolates.
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { database } from "./db.js";
+import * as schema from "./schema.js";
 import { betterAuth } from "better-auth";
 import { bearer, organization } from "better-auth/plugins";
 import { sendMail } from "./mail.js";
+import { organizationHooks } from "./orgs.js";
 
 export const AUTH_BASE_PATH = "/api/auth";
 
@@ -41,8 +45,12 @@ export function authOptions(env = {}, { baseURL, database } = {}) {
         });
       },
     },
+    // Emailed links land on server pages (cloud/account-pages.js): clients pass
+    // callbackURL "/account/verified" and redirectTo "/account/reset-password".
     emailVerification: {
       sendOnSignUp: true,
+      // An unverified sign-in attempt (403 EMAIL_NOT_VERIFIED) emails a fresh link.
+      sendOnSignIn: true,
       // The link opens in a browser, and cookies are not used, so a session there would be lost.
       autoSignInAfterVerification: false,
       sendVerificationEmail: async ({ user, url }) => {
@@ -67,6 +75,8 @@ export function authOptions(env = {}, { baseURL, database } = {}) {
     plugins: [
       bearer(),
       organization({
+        // Room access follows membership (cloud/orgs.js); these push changes to live sockets.
+        organizationHooks: organizationHooks(env),
         sendInvitationEmail: async ({ email, organization: org, inviter, id }) => {
           const link = `${baseURL}/#invitation=${id}`;
           await mail({
@@ -84,5 +94,10 @@ export function authOptions(env = {}, { baseURL, database } = {}) {
 /** The Better Auth instance for one request. */
 export function createAuth(env, request) {
   const baseURL = env.AUTH_URL || new URL(request.url).origin;
-  return betterAuth(authOptions(env, { baseURL, database: env.DB }));
+  return betterAuth(
+    authOptions(env, {
+      baseURL,
+      database: drizzleAdapter(database(env), { provider: "sqlite", schema, transaction: false }),
+    }),
+  );
 }
