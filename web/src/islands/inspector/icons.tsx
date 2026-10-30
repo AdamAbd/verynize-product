@@ -138,10 +138,19 @@ function addIcons(entries: { name: string; markup: string }[]) {
 }
 
 function insertIcon(icon: DesignIcon) {
-  const svg = cleanSvg(fromBase64(icon.src.slice(SVG_PREFIX.length)));
-  const { w, h } = svg ? svgSize(svg) : { w: 24, h: 24 };
   try {
-    window.design.addNode("image", { name: icon.name, w, h, color: "transparent", src: icon.src });
+    let svg: SVGSVGElement | null;
+    try {
+      svg = icon.src.startsWith(SVG_PREFIX)
+        ? cleanSvg(fromBase64(icon.src.slice(SVG_PREFIX.length)))
+        : null;
+    } catch {
+      throw new Error("This icon contains invalid SVG data. Upload or paste it again.");
+    }
+    if (!svg) throw new Error("This icon contains invalid SVG data. Upload or paste it again.");
+    const { w, h } = svgSize(svg);
+    const src = SVG_PREFIX + toBase64(new XMLSerializer().serializeToString(svg));
+    window.design.addNode("image", { name: icon.name, w, h, color: "transparent", src });
   } catch (error) {
     toast.error(error instanceof Error ? error.message : String(error));
   }

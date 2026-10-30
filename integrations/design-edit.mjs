@@ -707,11 +707,18 @@ export function describeVariables(document) {
 /** CSS custom properties for color tokens and typed variables (`:root { --name: value; }`). */
 export function variablesCss(document) {
   const lines = [];
-  for (const [name, value] of Object.entries(document.tokens || {})) lines.push(`  ${cssVarForToken(name)}: ${value};`);
+  const names = new Map();
+  const add = (name, value) => {
+    const identifier = cssVarForToken(name);
+    if (names.has(identifier)) throw new Error(`Variables “${names.get(identifier)}” and “${name}” both export as ${identifier}. Rename one before exporting CSS.`);
+    names.set(identifier, name);
+    lines.push(`  ${identifier}: ${value};`);
+  };
+  for (const [name, value] of Object.entries(document.tokens || {})) add(name, value);
   for (const [name, v] of Object.entries(document.variables || {})) {
     if (!checkVariableValue(v.type, v.value)) continue;
     const value = v.type === 'dimension' ? `${v.value}px` : v.type === 'fontFamily' ? (/^[a-zA-Z-]+$/.test(v.value.trim()) ? v.value.trim() : `'${v.value.trim().replace(/['\\]/g, '')}'`) : String(v.value);
-    lines.push(`  ${cssVarForToken(name)}: ${value};`);
+    add(name, value);
   }
   return lines.length ? `:root {\n${lines.join('\n')}\n}\n` : '';
 }

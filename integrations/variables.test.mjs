@@ -122,3 +122,16 @@ test('font catalog: network list is cached, offline falls back to cache then bun
     assert.ok(empty.fonts.some(f => f.family === 'Playfair Display'));
   } finally { await rm(cacheDir, { recursive: true, force: true }); }
 });
+
+
+test('CSS variable export rejects aliases instead of silently overriding values', () => {
+  for (const d of [
+    doc({ tokens: { 'space/md': '#123456', 'space-md': '#abcdef' } }),
+    doc({ tokens: { 'space-md': '#123456' }, variables: { 'space/md': { type: 'dimension', value: 16 } } }),
+    doc({ variables: { 'space md': { type: 'dimension', value: 16 }, 'space.md': { type: 'number', value: 2 } } }),
+  ]) {
+    validateDocument(d);
+    assert.throws(() => variablesCss(d), /both export as --space-md.*Rename one/);
+  }
+  assert.match(variablesCss(doc({ variables: { 'space/md': { type: 'dimension', value: 16 } } })), /--space-md: 16px;/);
+});

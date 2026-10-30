@@ -1,0 +1,116 @@
+// Real inspector interactions: detached colours retain their appearance and scalar variable
+// bindings replace conflicting imported per-side values without changing independent axes.
+const { _electron } = require('@playwright/test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+
+(async () => {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'inspector-binding-'));
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${profile}`], timeout: 20000 });
+  try {
+    const page = await app.firstWindow({ timeout: 20000 });
+    await page.waitForSelector('#canvas .layer');
+    const node = id => page.evaluate(id => window.design.getDocument().pages[0].nodes.find(n => n.id === id), id);
+    const styles = id => page.locator(`#canvas [data-id="${id}"]`).evaluate(el => {
+      const s = getComputedStyle(el);
+      return { color: s.backgroundColor, radius: s.borderRadius, border: s.borderWidth, padding: s.padding, x: s.columnGap, y: s.rowGap };
+    });
+    await page.evaluate(() => {
+      const d = window.design.getDocument();
+      d.tokens = { brand: '#22558880', accent: '#cc4400' };
+      d.variables = { space: { type: 'dimension', value: 24 } };
+      d.pages = [{ id: 'p', name: 'Binding checks', nodes: [
+        { id: 'card', name: 'Card', type: 'frame', x: 20, y: 20, w: 320, h: 220,
+          color: '#ff0000', token: 'brand', layout: 'flex', direction: 'row', flexWrap: true,
+          radius: 0, cornerRadii: [4, 8, 12, 16], strokeWidth: 1, strokeWidths: [1, 2, 3, 4],
+          padding: 0, paddingTop: 5, paddingRight: 5, paddingBottom: 5, paddingLeft: 5,
+          gap: 0, gapX: 7, gapY: 9 },
+        { id: 'other', name: 'Other', type: 'rectangle', x: 400, y: 20, w: 120, h: 120,
+          color: '#00ff00', token: 'accent' },
+        { id: 'fallback', name: 'Fallback', type: 'rectangle', x: 550, y: 20, w: 120, h: 120,
+          color: '#778899', token: 'missing' },
+      ] }];
+      d.activePage = 'p';
+      window.design.setDocument(d);
+      window.design.setSelection(['card', 'other', 'fallback']);
+    });
+
+    const colorsBefore = await Promise.all(['card', 'other', 'fallback'].map(styles));
+    await page.locator('#fill-section').getByRole('button', { name: 'Apply variable', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Detach variable', exact: true }).click();
+    for (const [i, id] of ['card', 'other', 'fallback'].entries()) {
+      assert.equal((await node(id)).token, '');
+      assert.equal((await styles(id)).color, colorsBefore[i].color, `${id}: detach retains rendered colour`);
+    }
+    assert.equal((await node('card')).color, '#22558880', 'fill alpha is preserved');
+    assert.equal((await node('other')).color, '#cc4400', 'each selected layer retains its own token value');
+    assert.equal((await node('fallback')).color, '#778899', 'missing tokens retain the local fallback');
+    await page.evaluate(() => window.design.runCommand('edit.undo'));
+    assert.equal((await node('card')).token, 'brand', 'one undo restores the complete detach operation');
+    await page.evaluate(() => window.design.runCommand('edit.redo'));
+    assert.equal((await node('card')).color, '#22558880');
+
+    await page.evaluate(() => window.design.setSelection(['card']));
+    // Direct scalar edits must have the same visible effect as binding a variable.
+    for (const [field, value, override, initial, cssKey] of [
+      ['radius', '18', 'cornerRadii', [4, 8, 12, 16], 'radius'],
+      ['strokeWidth', '6', 'strokeWidths', [1, 2, 3, 4], 'border'],
+    ]) {
+      await page.locator(`[name="${field}"]`).fill(value);
+      await page.locator(`[name="${field}"]`).press('Enter');
+      assert.equal((await node('card'))[override], undefined, `${field}: uniform input clears overrides`);
+      assert.equal((await styles('card'))[cssKey], `${value}px`);
+      await page.evaluate(() => window.design.runCommand('edit.undo'));
+      assert.deepEqual((await node('card'))[override], initial, `${field}: one undo restores individual values`);
+    }
+    const bind = async field => {
+      await page.locator(`[data-bind="${field}"]`).scrollIntoViewIfNeeded();
+      await page.locator(`[data-bind="${field}"]`).focus();
+      await page.locator(`[data-bind="${field}"]`).click();
+      await page.locator('[role="menuitem"][data-variable="space"]').click();
+      await page.waitForFunction(field => window.design.getDocument().pages[0].nodes[0].bindings?.[field] === 'space', field);
+    };
+    await bind('radius');
+    assert.equal((await node('card')).cornerRadii, undefined);
+    assert.equal((await styles('card')).radius, '24px');
+    await bind('strokeWidth');
+    assert.equal((await node('card')).strokeWidths, undefined);
+    assert.equal((await styles('card')).border, '24px');
+    await bind('padding');
+    for (const side of ['Top', 'Right', 'Bottom', 'Left']) assert.equal((await node('card'))[`padding${side}`], undefined);
+    assert.equal((await styles('card')).padding, '24px');
+    await bind('gap');
+    assert.equal((await styles('card')).x, '24px');
+    assert.equal((await styles('card')).y, '9px', 'binding the main-axis gap preserves the independent cross-axis gap');
+    await page.evaluate(() => window.design.runCommand('edit.undo'));
+    assert.equal((await node('card')).gapX, 7, 'undo restores the original override');
+    assert.equal((await node('card')).bindings.gap, undefined);
+
+    // Vertical flex binds row-gap; grid binds column-gap even when carrying an old flex direction.
+    for (const [layout, direction, expected] of [['flex', 'column', { x: '7px', y: '24px' }], ['grid', 'column', { x: '24px', y: '9px' }]]) {
+      await page.evaluate(([layout, direction]) => {
+        window.design.updateNodes(['card'], { layout, direction, gap: 0, gapX: 7, gapY: 9 });
+      }, [layout, direction]);
+      await bind('gap');
+      const actual = await styles('card');
+      assert.deepEqual({ x: actual.x, y: actual.y }, expected);
+      await page.locator('[data-bound="gap"]').click();
+      await page.getByRole('menuitem', { name: 'Detach variable', exact: true }).click();
+      assert.equal((await node('card')).bindings.gap, undefined);
+      const detached = await styles('card');
+      assert.deepEqual({ x: detached.x, y: detached.y }, expected, 'numeric detach keeps its resolved spacing');
+    }
+    await page.reload();
+    await page.waitForSelector('#canvas [data-id="card"]');
+    assert.equal((await node('card')).color, '#22558880', 'detached colour persists across reload');
+    assert.equal((await styles('card')).radius, '24px', 'bound scalar survives persistence');
+    console.log('PASS fill detach: alpha, mixed selection, missing token, undo/redo, reload; numeric bindings: override removal, independent gaps, undo and detach');
+  } finally {
+    await app.close();
+    await fs.rm(profile, { recursive: true, force: true });
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

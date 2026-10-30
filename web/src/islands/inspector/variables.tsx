@@ -250,10 +250,16 @@ export function VariablesSection({ open, onToggle }: { open: boolean; onToggle: 
                 <DropdownMenuItem
                   id="copy-variables-css"
                   onSelect={async () => {
-                    await copyText(css());
-                    toast.success(
-                      `Copied ${total} ${total === 1 ? "variable" : "variables"} as CSS`,
-                    );
+                    try {
+                      await copyText(css());
+                      toast.success(
+                        `Copied ${total} ${total === 1 ? "variable" : "variables"} as CSS`,
+                      );
+                    } catch (error) {
+                      toast.error("Export failed", {
+                        description: error instanceof Error ? error.message : String(error),
+                      });
+                    }
                   }}
                 >
                   <Copy />
@@ -296,7 +302,12 @@ export function VariablesSection({ open, onToggle }: { open: boolean; onToggle: 
                 <IconButton id="add-token" icon={PlusIcon} label="Create variable" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" sideOffset={4} className="w-44">
-                <DropdownMenuItem id="add-color-token" onSelect={() => createColorToken()}>
+                <DropdownMenuItem
+                  id="add-color-token"
+                  onSelect={async () => {
+                    if (await createColorToken()) reveal();
+                  }}
+                >
                   <Palette />
                   Colors
                 </DropdownMenuItem>

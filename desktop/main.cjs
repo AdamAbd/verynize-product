@@ -1,3 +1,4 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 const { app, BrowserWindow, session, dialog, Notification, shell, screen } = require('electron');
 const path = require('node:path');
 const {pathToFileURL}=require('node:url');
@@ -76,7 +77,7 @@ app.whenReady().then(() => {
     // --- also: respondAgentQuestion, steerAgent, listAgentRuns, listAllowRules, removeAllowRule, agentToolsVersion, agentTitle, designPreferences* ---
     agentRuntime=registerAgentRuntime(handle,win,{userData:app.getPath('userData'),getProject:()=>project,resolveProject:async root=>Project.open((await repositories.resolveRoot(root)).root),getBehavior:()=>behaviorStore.get()});
     agentBehavior.registerAgentBehavior(handle,win,{store:behaviorStore,registry:repositories,dialog,shell,getRuntime:()=>agentRuntime,userData:app.getPath('userData')});
-    primaryRuntime=agentRuntime;win.on('closed',()=>{if(primaryRuntime===agentRuntime)primaryRuntime=null;});
+    primaryRuntime=agentRuntime;onWindowClosed(win,()=>{if(primaryRuntime===agentRuntime)primaryRuntime=null;});
     // Settings › Agents (desktop/agent-tools.cjs): agentProviderAccounts, agentMcp{List,Add,Remove,Login}, agentAccess{Get,Set}
     require('./agent-tools.cjs').registerAgentTools(handle,win,{userData:app.getPath('userData'),getRuntime:()=>agentRuntime});
     // Chat composer "+" menu and slash commands: listAgentCommands (desktop/agent-commands.cjs); designReferences*, worktreeAddFiles, pickWorkingDirectory (desktop/chat-attachments.cjs).

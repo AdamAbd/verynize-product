@@ -1,7 +1,8 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 const fs=require('node:fs/promises');const os=require('node:os');const path=require('node:path');
 const {execFile}=require('node:child_process');const exec=require('node:util').promisify(execFile);const agents=require('./agents.cjs');
 function registerGeneration(handle,parent){let active=null;
- parent.on('closed',()=>active?.cancel());
+ onWindowClosed(parent,()=>active?.cancel());
  handle('generateVector',async options=>{
   if(active)throw Error('A vector is already being generated');
   if(!options||!['claude','codex'].includes(options.agent)||typeof options.prompt!=='string'||!options.prompt.trim()||options.prompt.length>4000)throw Error('Choose an agent and a prompt under 4000 characters');

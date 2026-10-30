@@ -1,3 +1,4 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 const path=require('node:path');
 const {pathToFileURL}=require('node:url');
 const fs=require('node:fs/promises');
@@ -58,7 +59,7 @@ async function renderNow({html,width,height,scale,fonts:families,measure},parent
   const outputWidth=Math.ceil(width*scale),outputHeight=Math.ceil(height*scale);
   const fonts=await embedFonts(html,families);
   const window=new BrowserWindow({show:false,useContentSize:true,width:outputWidth,height:outputHeight,transparent:true,frame:false,webPreferences:{partition:'render-'+Date.now(),sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});
-  const close=()=>{if(!window.isDestroyed())window.destroy();};parent?.once('closed',close);
+  const close=()=>{if(!window.isDestroyed())window.destroy();};const offClosed=onWindowClosed(parent,close);
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',e=>e.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_w,_p,cb)=>cb(false));
   window.webContents.session.webRequest.onBeforeRequest((details,cb)=>cb({cancel:!details.url.startsWith('data:')&&!details.url.startsWith('blob:')}));
@@ -72,7 +73,7 @@ async function renderNow({html,width,height,scale,fonts:families,measure},parent
    const boxes=measure?await window.webContents.executeJavaScript(MEASURE).catch(()=>null):null;
    const image=await window.webContents.capturePage({x:0,y:0,width:outputWidth,height:outputHeight},{stayHidden:true,stayAwake:true});
    return {dataURL:image.resize({width:outputWidth,height:outputHeight,quality:'best'}).toDataURL(),width:outputWidth,height:outputHeight,...(boxes&&Object.keys(boxes).length?{boxes}:{}),fonts:{loaded:fonts.loaded,missing:fonts.missing}};
-  }finally{close();parent?.removeListener('closed',close);}
+  }finally{close();offClosed();}
 }
 function registerRendering(handle,parent){let active=false;registerArtworkExport(handle,parent);
  handle('renderDesign',async input=>{if(active)throw Error('An export is already rendering');renderOptions(input);active=true;try{return await renderHTML(input,parent)}finally{active=false}});
@@ -93,7 +94,7 @@ async function renderPDF(input,parent=null){
  const {html,width,height}=renderOptions({...input,scale:1});
  const fonts=await embedFonts(html,null);
  const window=new BrowserWindow({show:false,width,height,webPreferences:{partition:'pdf-'+Date.now(),sandbox:true,contextIsolation:true,nodeIntegration:false,javascript:false}});
- const close=()=>{if(!window.isDestroyed())window.destroy();};parent?.once('closed',close);
+ const close=()=>{if(!window.isDestroyed())window.destroy();};const offClosed=onWindowClosed(parent,close);
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',e=>e.preventDefault());
  window.webContents.session.webRequest.onBeforeRequest((details,cb)=>cb({cancel:!details.url.startsWith('data:')&&!details.url.startsWith('blob:')}));
  try{
@@ -104,7 +105,7 @@ async function renderPDF(input,parent=null){
   if(fonts.css)await window.webContents.insertCSS(fonts.css);
   const pdf=await window.webContents.printToPDF({printBackground:true,preferCSSPageSize:true,margins:{marginType:'none'},pageSize:{width:width/96,height:height/96}});
   return {dataURL:'data:application/pdf;base64,'+pdf.toString('base64'),width,height,bytes:pdf.length,fonts:{loaded:fonts.loaded,missing:fonts.missing}};
- }finally{close();parent?.removeListener('closed',close);}
+ }finally{close();offClosed();}
 }
 const EXPORT_TYPES={png:['PNG image','image/png'],jpg:['JPEG image','image/jpeg'],webp:['WebP image','image/webp'],svg:['SVG image','image/svg+xml'],pdf:['PDF document','application/pdf'],html:['HTML document','text/html'],css:['CSS stylesheet','text/css']};
 /** Validate a save request: {name, data: data URL or text, extension}. */

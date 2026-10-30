@@ -222,8 +222,18 @@
 
     // ---------- Camera ----------
     const viewport = () => wrap.getBoundingClientRect();
+    // Compositing: a permanently promoted #canvas (will-change: transform) freezes its raster scale, so after a zoom out
+    // the whole world is still drawn with tiles at the old, larger scale and Chromium runs out of tile memory ("tile
+    // memory limits exceeded", content stops drawing). The layer is promoted only while the camera pans (a cheap
+    // translate of existing tiles) and released once it settles; zoom changes are never promoted, so every zoom level
+    // rasters at its own scale and stays crisp.
+    let lastZoom = null, releaseTimer = 0;
+    const releaseLayer = () => { clearTimeout(releaseTimer); canvas.classList.remove('camera-moving'); };
     function applyCamera() {
       canvas.style.transform = `translate(${cam.x}px, ${cam.y}px) scale(${cam.zoom})`;
+      if (lastZoom !== cam.zoom) releaseLayer();
+      else { canvas.classList.add('camera-moving'); clearTimeout(releaseTimer); releaseTimer = setTimeout(releaseLayer, 160); }
+      lastZoom = cam.zoom;
       canvas.style.setProperty('--iz', String(1 / cam.zoom));
       const label = $('#zoom-reset'); if (label) label.textContent = Math.round(cam.zoom * 100) + '%';
       if (lastPage) cameras.set(lastPage, {...cam});

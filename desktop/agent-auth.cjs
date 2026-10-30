@@ -1,3 +1,4 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 const {spawn}=require('node:child_process');
 const {randomUUID}=require('node:crypto');
 const os=require('node:os');
@@ -16,5 +17,5 @@ class AgentAuth {
  async logout({agent}={}){checkAgent(agent);if(this.reserved.has(agent))throw Error('Cancel pending sign-in before signing out');this.reserved.add(agent);try{const executable=await this.executable(agent);if(!executable)throw Error('Agent CLI is not installed');const result=await bounded(executable,COMMANDS[agent].logout,this.spawnProcess);if(result.code!==0)throw Error('CLI sign-out failed');return {loggedOut:true};}finally{this.reserved.delete(agent);}}
  close(){for(const operation of [...this.pending.values()])operation.cancel();}
 }
-function registerAgentAuth(handle,parent){const auth=new AgentAuth({emit:event=>{if(!parent.isDestroyed())parent.webContents.send('desktop:auth-event',event);}});handle('agentAccountStatus',options=>auth.status(options));handle('startAgentLogin',options=>auth.login(options));handle('cancelAgentLogin',options=>auth.cancel(options));handle('agentLogout',options=>auth.logout(options));parent.once('closed',()=>auth.close());return auth;}
+function registerAgentAuth(handle,parent){const auth=new AgentAuth({emit:event=>{if(!parent.isDestroyed())parent.webContents.send('desktop:auth-event',event);}});handle('agentAccountStatus',options=>auth.status(options));handle('startAgentLogin',options=>auth.login(options));handle('cancelAgentLogin',options=>auth.cancel(options));handle('agentLogout',options=>auth.logout(options));onWindowClosed(parent,()=>auth.close());return auth;}
 module.exports={AgentAuth,registerAgentAuth,COMMANDS};
