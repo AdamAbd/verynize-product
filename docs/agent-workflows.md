@@ -156,3 +156,10 @@ No test calls a real model unless the smoke flag is set.
 
 - Claude Agent SDK, checked through Context7 (`/websites/code_claude_en_agent-sdk`): `Options`, `PermissionMode`, `mcpServers` HTTP headers, `includePartialMessages`, `resume`. Also checked against the installed `sdk.d.ts` (0.3.312): `pathToClaudeCodeExecutable`, `canUseTool`, `interrupt()`, `supportedModels()`, `close()`.
 - Codex app-server: `codex app-server generate-ts`, for `ThreadStartParams`, `TurnStartParams`, `TurnInterruptParams`, `ServerNotification` and `ServerRequest`.
+
+## Accounts, tools and autonomy
+
+- **Accounts** (Settings › Accounts, `desktop/agent-profiles.cjs`): besides "This Mac", any number of named accounts per provider. Each keeps its own login in a private folder (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`). The account a run uses is the chat's pick (Autonomy panel), else the provider default. Codex runs one app-server per account. Settings › Usage shows one card per named account. Sign-in launches the installed CLI's browser login with the account folder; a successful live provider login is not verified by the tests (needs a live credential).
+- **Tools** (Settings › Tools, `desktop/agent-tool-config.cjs`): Verynize-managed MCP servers (stdio or HTTP, global or per project) are added to Claude's `mcpServers` and to Codex as `-c mcp_servers.<name>.*` overrides; permission defaults become Claude `allowedTools`/`disallowedTools` and are applied to approval requests of both agents.
+- **Autonomy** (composer gauge button, `desktop/agent-autonomy.cjs`): per chat access level, account, allowed/denied tools, auto-approve rules (`Tool: text`), max turns (Claude `maxTurns`; Codex tool steps), budget (Claude `maxBudgetUsd`; both stop on a reported cost over it) and plan before edits (Claude `permissionMode: 'plan'`; Codex read-only sandbox + `untrusted` approvals + a persona instruction). A customised run starts with an `autonomy` transcript line; automatic decisions appear as `policy` lines.
+- Tests: `node --test tests/agent-accounts-tools.cjs`, `node --test tests/workspace-search-moves.cjs`, `node tests/agent-workspace-ui.cjs`.

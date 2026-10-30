@@ -2,7 +2,7 @@
 // Shadow / Filters / Mask lists (shadows.tsx, filters.tsx, masks.tsx). Data model and CSS mapping live in
 // web/node-style.js (effectsOf / validateEffects), so the canvas, HTML export and JSX codec agree.
 import { useRef, useState, type ComponentProps, type ReactNode } from "react";
-import { Check, Droplet, Eye, EyeOff, Minus } from "lucide-react";
+import { Check, Droplet, Eye, EyeOff, Minus, Unlink } from "lucide-react";
 import { PlusIcon } from "@/components/icons";
 import { type DesignDocument } from "@/lib/bridge";
 import {
@@ -50,13 +50,23 @@ export type FilterType =
   | "saturate"
   | "sepia";
 export type Filter = { type: FilterType; value: number; backdrop?: boolean; hidden?: boolean };
-export type MaskType = "linear" | "radial" | "conic";
+export type MaskType = "linear" | "radial" | "conic" | "image" | "custom";
 export type Mask = {
   type: MaskType;
   rotation?: number;
   alpha?: number;
   invert?: boolean;
   hidden?: boolean;
+  /** Image mask: embedded data URL. */
+  src?: string;
+  /** Custom mask: a CSS gradient. */
+  css?: string;
+  mode?: "auto" | "alpha" | "luminance";
+  repeat?: string;
+  x?: number;
+  y?: number;
+  size?: string;
+  composite?: "add" | "subtract" | "intersect" | "exclude";
 };
 export type EffectNode = Node & {
   blendMode?: string;
@@ -64,6 +74,7 @@ export type EffectNode = Node & {
   outlineOffset?: number;
   outlineColor?: string;
   outlineStyle?: string;
+  outlineToken?: string;
   strokeStyle?: string;
   shadows?: Shadow[];
   filters?: Filter[];
@@ -200,6 +211,14 @@ export function EffectColorField({
             onCommit(next);
           }}
         />
+        {bound ? (
+          <IconButton
+            icon={Unlink}
+            label={`Detach ${label.toLowerCase()} variable`}
+            data-detach-token={token}
+            onClick={() => onCommit(bound)}
+          />
+        ) : null}
       </div>
     </ColorPopover>
   );
@@ -303,7 +322,7 @@ export function BorderStyleSelect({ node, selection }: Omit<EffectProps, "doc">)
 }
 
 /* ---------- Outline (a real CSS outline: width, offset, colour, style) ---------- */
-export function OutlineSection({ node, selection }: EffectProps) {
+export function OutlineSection({ doc, node, selection }: EffectProps) {
   const n = node as EffectNode;
   const width = typeof n.outlineWidth === "number" ? n.outlineWidth : 0;
   const [open, setOpen] = useOutlineOpen(node.id, width > 0);
@@ -323,6 +342,7 @@ export function OutlineSection({ node, selection }: EffectProps) {
       outlineOffset: undefined,
       outlineColor: undefined,
       outlineStyle: undefined,
+      outlineToken: undefined,
     }));
   return (
     <OptionalSection
@@ -371,7 +391,18 @@ export function OutlineSection({ node, selection }: EffectProps) {
           name="outlineColor"
           label="Outline colour"
           value={color}
-          onCommit={(next) => patch({ outlineColor: next, outlineWidth: Math.max(width, 1) })}
+          tokens={doc.tokens}
+          token={n.outlineToken}
+          onToken={(name) =>
+            patch({
+              outlineToken: name || undefined,
+              outlineColor: doc.tokens?.[name] ?? color,
+              outlineWidth: Math.max(width, 1),
+            })
+          }
+          onCommit={(next) =>
+            patch({ outlineColor: next, outlineToken: undefined, outlineWidth: Math.max(width, 1) })
+          }
         />
       </div>
       <NativeSelect

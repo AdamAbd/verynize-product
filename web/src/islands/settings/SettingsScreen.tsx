@@ -7,6 +7,9 @@ import {
   BoxIcon,
   ChevronsUpDownIcon,
   CircleUserIcon,
+  FolderGit2Icon,
+  PlugIcon,
+  UsersIcon,
   GaugeIcon,
   LayoutGridIcon,
   SearchIcon,
@@ -18,11 +21,17 @@ import {
 import { cn } from "@/lib/utils";
 import { useSettings, type SectionId } from "./api";
 import { AccountPage, AgentsPage, ConnectionsPage, MemoryPage, ModelsPage, PreferencesPage, UsagePage } from "./pages";
+import { AccountsPage } from "./accounts";
+import { ToolsPage } from "./tools-config";
+import { ProjectsPage } from "./projects";
 
 const SECTIONS: { id: SectionId; title: string; icon: LucideIcon; page: ComponentType<Parameters<typeof AccountPage>[0]> }[] = [
   { id: "account", title: "Account", icon: CircleUserIcon, page: AccountPage },
   { id: "preferences", title: "Preferences", icon: SettingsIcon, page: PreferencesPage },
   { id: "agents", title: "Agents", icon: SendIcon, page: AgentsPage },
+  { id: "accounts", title: "Accounts", icon: UsersIcon, page: AccountsPage },
+  { id: "tools", title: "Tools", icon: PlugIcon, page: ToolsPage },
+  { id: "projects", title: "Projects", icon: FolderGit2Icon, page: ProjectsPage },
   { id: "usage", title: "Usage", icon: GaugeIcon, page: UsagePage },
   { id: "models", title: "Default Models", icon: BoxIcon, page: ModelsPage },
   { id: "connections", title: "Connections", icon: LayoutGridIcon, page: ConnectionsPage },

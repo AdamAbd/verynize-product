@@ -6,7 +6,8 @@
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 const log = process.env.FAKE_CODEX_LOG;
-if (log) fs.appendFileSync(log, JSON.stringify({ args, token: process.env.VERYNIZE_MCP_TOKEN || null }) + '\n');
+// codexHome / mcpEnv let account and MCP-server tests see the child environment (names only for mcpEnv).
+if (log) fs.appendFileSync(log, JSON.stringify({ args, token: process.env.VERYNIZE_MCP_TOKEN || null, ...(process.env.CODEX_HOME ? { codexHome: process.env.CODEX_HOME } : {}), ...(process.env.FAKE_MCP_SECRET ? { mcpEnv: process.env.FAKE_MCP_SECRET } : {}) }) + '\n');
 
 const MARKDOWN_SAMPLE = [
   '**Fonts** and `font/display`',

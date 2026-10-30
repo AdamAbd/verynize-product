@@ -27,18 +27,25 @@ export async function codec() {
   return modules;
 }
 
-export const blankDocument = ({ width = 1440, height = 900 } = {}) => ({
-  version: 2, name: 'Eval', activePage: 'p1', tokens: {},
+export const blankDocument = ({ width = 1440, height = 900 } = {}, tokens = {}, variables) => ({
+  version: 2, name: 'Eval', activePage: 'p1', tokens: { ...tokens }, ...(variables ? { variables: { ...variables } } : {}),
   pages: [{ id: 'p1', name: 'Page', width, height, nodes: [] }],
 });
 
 const normWarnings = list => (Array.isArray(list) ? list : []).map(w => typeof w === 'string' ? w : w?.message || w?.text || JSON.stringify(w));
 const pageOf = state => state.doc.pages.find(p => p.id === state.pageId) || state.doc.pages[0];
 
+/** HTML (+ CSS) -> document through the HTML importer. Returns the same shape as build(). */
+export async function buildHtml(html, viewport) {
+  const { importHtml } = await import(new URL('integrations/codec-html.mjs', repo).href);
+  const result = await importHtml(html, { viewport });
+  return { doc: result.document, pageId: result.pageId, warnings: result.warnings, rootIds: (result.roots || []).map(r => r.id) };
+}
+
 /** JSX -> document. Returns {doc, pageId, warnings, rootIds}. */
-export async function build(jsx, viewport) {
+export async function build(jsx, viewport, { tokens, variables } = {}) {
   const m = await codec();
-  const result = await m.createArtboards(blankDocument(viewport), 'p1', jsx);
+  const result = await m.createArtboards(blankDocument(viewport, tokens, variables), 'p1', jsx);
   const warnings = normWarnings(result.warnings).concat(normWarnings(result.diagnostics));
   return { doc: result.document, pageId: 'p1', warnings, rootIds: (result.roots || []).map(r => r.id) };
 }
@@ -179,4 +186,10 @@ export const flexGrow = node => num(node.grow) ?? num(node.flexGrow) ?? (sizing(
 export const textTransform = node => String(node.textTransform ?? node.textCase ?? 'none').toLowerCase();
 export const box = node => ({ x: num(node.x) ?? 0, y: num(node.y) ?? 0, w: num(node.w) ?? num(node.width) ?? 0, h: num(node.h) ?? num(node.height) ?? 0 });
 
-export const ACCESSORS = { padding, radius, gap, fill, ink, strokeColor, strokeWidth, sizing, layout, direction, fontSize, lineHeightPx, fontWeight, fontFamily, letterSpacingPx, gradient, shadow, truncate, positioning, flexGrow, textTransform, box };
+export const token = node => String(node.token ?? '');
+export const variants = node => String(node.variantClasses ?? '');
+export const bindings = node => (node.bindings && typeof node.bindings === 'object' ? node.bindings : {});
+export const hidden = node => node.hidden === true;
+export const effects = node => ({ shadows: (node.shadows || []).length, hiddenShadows: (node.shadows || []).filter(s => s.hidden).length, filters: (node.filters || []).length, masks: (node.masks || []).length });
+
+export const ACCESSORS = { token, variants, bindings, hidden, effects, padding, radius, gap, fill, ink, strokeColor, strokeWidth, sizing, layout, direction, fontSize, lineHeightPx, fontWeight, fontFamily, letterSpacingPx, gradient, shadow, truncate, positioning, flexGrow, textTransform, box };

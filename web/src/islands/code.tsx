@@ -4,8 +4,9 @@
 import { useEffect } from "react";
 import { mountIsland } from "@/lib/mount";
 import { useChatState } from "./chat/store";
-import { addRepository, newChat, newQuickChat, openChat, refresh, start } from "./code/controller";
-import { openMemory } from "./code/editor-state";
+import { workspace } from "./code/api";
+import { addRepository, newChat, newQuickChat, openChat, openRepository, refresh, repositoryByKey, start } from "./code/controller";
+import { openFile, openMemory } from "./code/editor-state";
 import { CodeWorkspace } from "./code/workspace";
 import { DesignChatSidebar } from "./code/design-sidebar";
 import "./code/code.css";
@@ -17,6 +18,20 @@ window.codeWorkspace = {
   openChat,
   openMemory: () => void openMemory(),
   refresh,
+  // Global search results (settings island) open here: switch to the project, then load the file.
+  openFile: async (root: string, path: string) => {
+    workspace()?.setCodeMode?.(true);
+    const repo = repositoryByKey(root);
+    window.appSettings?.close?.();
+    if (repo && workspace()?.getState().projectKey !== repo.root) await openRepository(repo);
+    // Files are read from the active root: wait until the main process confirmed the chat's folder.
+    for (let i = 0; i < 100; i++) {
+      const s = workspace()?.getState();
+      if (s?.activeRoot && (!s.chatRoot || s.activeRoot === s.chatRoot)) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await openFile(path);
+  },
 };
 
 function Island() {

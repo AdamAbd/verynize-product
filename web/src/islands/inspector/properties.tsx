@@ -42,9 +42,8 @@ import { BindableField } from "./bind";
 import { CORNER_KEYS } from "./vars";
 import { ExportSection } from "./export-section";
 import { FillTools, PaintStack } from "./paints";
-import { alphaPercent, parseColor, toHex } from "./color";
+import { parseColor, toHex } from "./color";
 import {
-  SHADER_PRESETS,
   descendants,
   fmt,
   hexLabel,
@@ -62,6 +61,14 @@ import { BlendMenu, BorderStyleSelect, OutlineSection } from "./effects";
 import { ShadowSection } from "./shadows";
 import { FilterSection } from "./filters";
 import { MaskSection } from "./masks";
+import { BorderColors } from "./border-colors";
+import {
+  ShaderParameters,
+  ShaderPicker,
+  isParam,
+  shaderPresetName,
+  shaderPresets,
+} from "./shader-library";
 
 type Props = { doc: DesignDocument; node: Node; selection: string[] };
 
@@ -476,7 +483,8 @@ const ANIMATED = [
 function ShaderSettings({ node, selection }: { node: Node | undefined; selection: string[] }) {
   const shader = node?.type === "shader";
   const set = (key: string) => (value: string) => node && setField(selection, node, key, value);
-  const preset = SHADER_PRESETS.find(([v]) => v === node?.shaderPreset)?.[1] ?? "Aurora";
+  const preset = shaderPresetName(node?.shaderPreset);
+  const [picker, setPicker] = useState(false);
   return (
     <details id="shader-settings" hidden={!shader} className="group/shader m-0 border-0 p-0">
       <summary className="flex h-6 cursor-default list-none items-center justify-between rounded-md bg-input px-2 text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring">
@@ -493,7 +501,7 @@ function ShaderSettings({ node, selection }: { node: Node | undefined; selection
               label="Shader preset"
               value={node.shaderPreset}
               onChange={set("shaderPreset")}
-              options={SHADER_PRESETS.map(([value, label]) => ({ value, label }))}
+              options={shaderPresets().map((p) => ({ value: p.id, label: p.name }))}
             />
           </Caption>
           <div className="grid grid-cols-2 gap-2">
@@ -518,16 +526,20 @@ function ShaderSettings({ node, selection }: { node: Node | undefined; selection
               />
             </Caption>
           </div>
-          <button
-            type="button"
-            id="choose-shader"
-            className="flex h-6 items-center justify-center rounded-md bg-input text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
-            onClick={() => formClick("choose-shader")}
-          >
-            Choose shader…
-          </button>
+          <ShaderPicker node={node} selection={selection} open={picker} onOpenChange={setPicker}>
+            <button
+              type="button"
+              id="choose-shader"
+              aria-expanded={picker}
+              className="flex h-6 items-center justify-center rounded-md bg-input text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+              onClick={() => setPicker(!picker)}
+            >
+              Choose shader…
+            </button>
+          </ShaderPicker>
           <p className="text-2xs text-subtle-foreground">
-            Fill colour or a colour variable drives the shader colour. Speed 0 freezes motion.
+            Classic presets follow the fill colour; the other families use their own colours below.
+            Speed 0 freezes motion.
           </p>
         </div>
       ) : null}
@@ -559,9 +571,13 @@ function FillSection({
       </div>
       <div className="flex flex-col gap-2 px-3 pt-1 pb-2.75">
         <ShaderSettings node={node} selection={selection} />
+        {node ? <ShaderParameters doc={doc} node={node} selection={selection} /> : null}
         {node ? (
           <>
-            <PaintStack doc={doc} node={node} selection={selection} />
+            {/* Parametric shaders take their colours from the rows above; the single fill colour only drives the classic presets. */}
+            {node.type === "shader" && isParam(node.shaderPreset) ? null : (
+              <PaintStack doc={doc} node={node} selection={selection} />
+            )}
             <div className="grid grid-cols-2 gap-2">
               {/* Free-form CSS gradients (older documents, codec input) stay editable until cleared. */}
               {node.gradient ? (
@@ -700,9 +716,7 @@ function BorderSection({ doc, node, selection }: Props) {
   );
   const [sidesOpen, setSidesOpen] = useOptional(node.id, Array.isArray(node.strokeWidths));
   const sidesExpanded = sidesOpen && !node.bindings?.strokeWidth;
-  const [picker, setPicker] = useState(false);
   const set = (key: string) => (value: string) => setField(selection, node, key, value);
-  const commit = (color: string) => setField(selection, node, "strokeColor", color);
   return (
     <OptionalSection id="border-section" title="Border" open={open} onOpenChange={setOpen}>
       <div className="grid grid-cols-2 gap-2">
@@ -730,59 +744,23 @@ function BorderSection({ doc, node, selection }: Props) {
             )}
           </BindableField>
         </Caption>
-        <Caption label="Colour">
-          <ColorPopover
-            open={picker}
-            onOpenChange={setPicker}
-            value={node.strokeColor || "#000000"}
-            onCommit={commit}
-          >
-            <div data-color-anchor>
-              <Field
-                name="strokeColor"
-                label="Border colour"
-                value={hexLabel(node.strokeColor)}
-                inputClassName="uppercase"
-                prefix={
-                  <button
-                    type="button"
-                    aria-label="Pick border colour"
-                    aria-expanded={picker}
-                    className="flex rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={() => setPicker(!picker)}
-                  >
-                    <Swatch color={node.strokeColor} className="size-3.5" />
-                  </button>
-                }
-                scrub={false}
-                suffix={
-                  alphaPercent(node.strokeColor) < 100
-                    ? `${alphaPercent(node.strokeColor)}%`
-                    : undefined
-                }
-                onCommit={(value) => {
-                  const hex = parseHex(value, node.strokeColor);
-                  return hex ? commit(hex) : "Use a hex colour such as A58BDD";
-                }}
-              />
-            </div>
-          </ColorPopover>
+        <Caption label="Style">
+          <div className="flex items-center justify-end gap-2">
+            <BorderStyleSelect node={node} selection={selection} />
+            <IconButton
+              icon={SquareDashed}
+              label="Independent border widths"
+              active={sidesExpanded}
+              aria-expanded={sidesExpanded}
+              onClick={() => {
+                if (!sidesExpanded) expandIndividual(selection, "strokeWidths", "strokeWidth");
+                setSidesOpen(!sidesExpanded);
+              }}
+            />
+          </div>
         </Caption>
       </div>
-      <div className="flex items-center justify-end gap-2">
-        <BorderStyleSelect node={node} selection={selection} />
-        <IconButton
-          icon={SquareDashed}
-          label="Independent border widths"
-          active={sidesExpanded}
-          aria-expanded={sidesExpanded}
-          onClick={() => {
-            if (!sidesExpanded) expandIndividual(selection, "strokeWidths", "strokeWidth");
-            setSidesOpen(!sidesExpanded);
-          }}
-        />
-      </div>
+      <BorderColors doc={doc} node={node} selection={selection} />
       {sidesExpanded ? (
         <IndividualFields
           node={node}
@@ -904,9 +882,13 @@ export function PropertiesBody({
       <FillSection doc={doc} node={node} selection={selection} />
       {node ? <BorderSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <OutlineSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <ShadowSection key={"shadow-" + node.id} doc={doc} node={node} selection={selection} /> : null}
+      {node ? (
+        <ShadowSection key={"shadow-" + node.id} doc={doc} node={node} selection={selection} />
+      ) : null}
       {node ? <FilterSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <MaskSection key={"mask-" + node.id} doc={doc} node={node} selection={selection} /> : null}
+      {node ? (
+        <MaskSection key={"mask-" + node.id} doc={doc} node={node} selection={selection} />
+      ) : null}
       {node ? <ExportSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <LayerSection doc={doc} node={node} selection={selection} /> : null}
       {!node ? <PageSection doc={doc} /> : null}

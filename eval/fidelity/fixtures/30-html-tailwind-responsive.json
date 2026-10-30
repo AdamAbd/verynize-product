@@ -1,0 +1,18 @@
+{ "title": "HTML import of a Tailwind page: utilities by the real engine, responsive variants applied for the viewport, state variants recorded",
+  "covers": ["html-import", "tailwind", "variants"],
+  "viewport": { "width": 1280, "height": 800 },
+  "roundTrip": true,
+  "expect": [
+    { "node": "Nav", "prop": "layout", "eq": "flex" },
+    { "node": "Nav", "prop": "hidden", "eq": false },
+    { "node": "Nav", "prop": "padding", "eq": { "top": 12, "right": 24, "bottom": 12, "left": 24 } },
+    { "node": "Nav", "prop": "variants", "eq": "md:flex" },
+    { "node": "Brand", "prop": "fontSize", "eq": 20 },
+    { "node": "Link", "prop": "ink", "color": "tw:indigo-600" },
+    { "node": "Grid", "prop": "layout", "eq": "grid" },
+    { "node": "Grid", "prop": "gap", "eq": { "x": 18, "y": 18 } },
+    { "node": "Tile", "prop": "fill", "color": "#e0e7ff" },
+    { "node": "Tile", "prop": "variants", "eq": "dark:bg-zinc-800" },
+    { "rendered": "Tile", "prop": "h", "eq": 96 },
+    { "noOverlap": "Grid" }
+  ] }

@@ -29,6 +29,8 @@ const os = require('node:os');
     await page.locator('.app-menu-trigger:visible').first().click();await page.locator('#import').click();
     await page.locator('#source').fill('<div style="position:absolute;left:12px;top:24px;color:#ff0000">Imported text</div><script>window.compromised=true</script>');
     await page.locator('#apply').click();
+    // The desktop importer (codec-html via IPC) is asynchronous: wait for the dialog to close.
+    await page.waitForFunction(() => !document.getElementById('modal').open, null, { timeout: 15000 });
     assert.equal(await count(), 5);
     assert.equal(await page.locator('#canvas .selected').evaluate(e => e.textContent.replace(/\s+$/,'')), 'Imported text');
     assert.equal(await page.evaluate(() => window.compromised), undefined);

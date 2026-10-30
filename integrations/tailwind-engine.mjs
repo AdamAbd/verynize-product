@@ -39,7 +39,7 @@ export function compileClass(cls) {
   if (!candidates.length) result = { kind: 'invalid' };
   else if (candidates[0].variants?.length) {
     const ast = ds.candidatesToAst([cls])[0];
-    result = ast?.length ? { kind: 'variant', variants: candidates[0].variants.map(v => { try { return ds.printVariant(v); } catch { return '?'; } }) } : { kind: 'invalid' };
+    result = ast?.length ? { kind: 'variant', variants: candidates[0].variants.map(v => { try { return ds.printVariant(v); } catch { return '?'; } }), ...variantBody(ast) } : { kind: 'invalid' };
   } else {
     const ast = ds.candidatesToAst([cls])[0] || [];
     const decls = [], childDecls = [], extras = [];
@@ -58,6 +58,39 @@ export function compileClass(cls) {
   }
   compiled.set(cls, result);
   return result;
+}
+
+/**
+ * What a variant class compiles to: the @media conditions wrapping it and its declarations.
+ * `plain` is true when every rule targets the element itself (or its children, like space-y) without
+ * a state selector (:hover, .dark &, [data-*]…), so it applies whenever the media conditions match.
+ */
+function variantBody(ast) {
+  const media = [], decls = [], childDecls = [];
+  let plain = true;
+  const walk = (nodes, depth) => {
+    for (const node of nodes || []) {
+      if (node.kind === 'at-rule' && node.name === '@property') {
+        const initial = node.nodes?.find(d => d.kind === 'declaration' && d.property === 'initial-value');
+        if (initial && !INITIAL.has(node.params.trim())) INITIAL.set(node.params.trim(), initial.value);
+        continue;
+      }
+      if (node.kind === 'at-rule') {
+        if (node.name === '@media') media.push(node.params.trim()); else plain = false;
+        walk(node.nodes, depth + 1);
+        continue;
+      }
+      if (node.kind !== 'rule') continue;
+      const selector = node.selector.trim();
+      const child = /^:where\(\.[^\s:]+(?:\\:[^\s:]+)*\s*>\s*:not\(:last-child\)\)$/.test(selector);
+      // A plain class selector: "." + escaped name, with no unescaped ':' / '[' / ' ' afterwards.
+      const self = /^\.(?:\\.|[^\s:[\]>~+()])+$/.test(selector);
+      if (!self && !child) plain = false;
+      for (const d of node.nodes || []) if (d.kind === 'declaration' && d.value !== undefined) (child ? childDecls : decls).push({ property: d.property, value: d.value, important: !!d.important });
+    }
+  };
+  walk(ast, 0);
+  return { media, plain: plain && (decls.length > 0 || childDecls.length > 0), decls, childDecls };
 }
 
 /** Sort classes the way Tailwind emits them (so `p-4 px-2` behaves like CSS). Invalid classes keep input order. */

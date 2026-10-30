@@ -44,18 +44,28 @@ Implemented and exercised in Verynize:
 
 Validation for this change: integration tests 116/116; codec fidelity 26 fixtures and 105/105 checks; inspector variable-library/binding, canvas-page, inspector-parity and native render-export Electron suites; syntax/asset checks, UI lint and TypeScript checks. This is targeted validation, not a rerun of every unrelated desktop/cloud suite.
 
-## Remaining gaps against Wonder's shipped product
+## Gaps closed on 30 October 2026
 
-- Native Figma clipboard conversion, OAuth account connection and full Figma fidelity; native .fig/.pen compatibility. PAT-based supported REST import is implemented but awaits a live account test.
-- Arbitrary remote webpage capture with full assets/custom fonts, interactive region selection, source mapping, and interactive behavior recovery. Local API region capture is implemented.
-- Photographic image model providers and smooth/high-fidelity curve tracing; implemented generation is agent-authored vector illustration with optional PNG rendering.
-- Remaining inspector parity: color variable binding for border/outline, Image/Custom masks and advanced mask options (mode, repeat, position, size, boolean operations), shadow variable bindings and hidden effects in JSX export, canvas resize detaching bound W/H, and folder grouping inside the bind/color pickers. Paint stacks, image fill fit, multicolor SVG replacement, structured border/outline/shadow/filter/blend/gradient-mask controls, variable folders, color rename, variable references and the Dimensions/Numbers binding map are implemented; see docs/audits/2026-10-30-impl-*-agent.md for exact boundaries.
-- Exact Wonder shader library and parameter compatibility; the implemented WebGL presets are independently authored.
-- Full CSS/Tailwind import/export fidelity; external stylesheet resolution; general source round trips.
-- Provider-hosted multi-account management (Settings › Usage shows the plan limits of the one signed-in Claude Code and Codex account), tool/plugin configuration, comprehensive agent autonomy UI. Local CLI sign-in/switch and model defaults exist; successful provider browser login remains unverified.
-- Accounts, public creator profiles, identity-based permissions, token recovery/rotation, full real-time semantic merging.
-- Published running applications with build/deployment automation; current public publishing is a design snapshot.
-- Global source-code search across projects, complete template/library ecosystem and history-preserving workspace moves. Local file/page/layer search, original templates and document-persisted shared views are implemented.
+Six parallel agents implemented every item of the previous gap list. Each audit records files, tests and boundaries: [inspector/shader](audits/2026-10-30-impl-inspector-shader-agent.md), [Figma](audits/2026-10-30-impl-figma-agent.md), [capture/generation](audits/2026-10-30-impl-capture-generation-agent.md), [codec](audits/2026-10-30-impl-codec-agent.md), [cloud](audits/2026-10-30-impl-cloud-agent.md), [agents/workspace](audits/2026-10-30-impl-agents-workspace-agent.md). Some audits list limits early on that their follow-up sections later close.
+
+- Figma: clipboard paste and .fig import through an original binary decoder, PKCE OAuth with encrypted token storage, broader conversion fidelity. .pen files are vendor-encrypted and deliberately refused.
+- Capture: arbitrary URL capture in an isolated session with cross-origin images, embedded custom fonts (used by HTML/PNG/JPG/WebP/PDF/Code exports), region picker, source mapping and interaction-state metadata.
+- Generation: OpenAI-compatible and generic HTTP image providers (key in safeStorage); smooth Bézier tracing with IoU ≥ 0.978 on the fidelity cases.
+- Inspector: border/outline color variables, Image/Custom and advanced masks, folder-grouped pickers, resize detaching bound W/H, folder-aware MCP token tools; an original 13-preset shader family using Wonder's parameter model.
+- Codec: HTML/JSX import with external stylesheets, cascade, `var()` and `:root` variables, wired into the Import HTML dialog and MCP (`import_html`, `import_jsx`, `export_css`, `export_jsx`); lossless JSX and HTML/CSS round trips enforced by a schema-coverage test.
+- Cloud: accounts (magic link, passkeys), public profiles, owner/editor/commenter/viewer roles, token rotation/recovery, operation-based merging with collaborator-safe undo, and published static apps with versions/rollback.
+- Agents/workspace: multiple named accounts per provider, MCP server and tool-permission settings, a per-chat autonomy panel, global ripgrep search, template gallery with JSON/.zip packs and a shared component library, history-preserving moves.
+
+## Remaining gaps and live-credential boundaries
+
+- Needs live credentials or infrastructure, so verified only against local fixtures: real Figma OAuth and data, real image-provider APIs, real provider browser login and named-account plan limits, email delivery, production sign-in, a separate apps domain for full origin isolation. Touch ID/iCloud passkeys in Electron are unverified.
+- The Figma decoder uses field names from public sources and has not yet seen real Figma clipboard data.
+- Capture: no `@keyframes`, pseudo-elements, shadow DOM, iframes or off-viewport content; interaction variants are stored as metadata without an editing UI.
+- Codec: page scripts are not executed; `::before/::after`, `float`, relative offsets and some background options are reported as warnings rather than represented.
+- Inspector: no on-canvas mask handles or editable mask stops, picker shader previews are static, no Wonder-style single border-side selector, and agent `update_elements` on bound properties is reverted by the next binding sync.
+- Merging is server-sequenced rather than peer-to-peer CRDT. Published apps run sandboxed without cookies/localStorage.
+- `npm run package:mac` was not rerun after adding `@vscode/ripgrep`.
+- Known flaky tests that also fail on a clean HEAD: `tests/capture-live-state.cjs` (intermittent preview reload) and `tests/mcp-shell.cjs` (preview click).
 
 ## Evidence boundaries
 

@@ -3,6 +3,10 @@
 import { validateDocument } from "./design-store.mjs";
 import { ensureShortIds, elementCode, getPage } from "./design-edit.mjs";
 import { cssVarForToken } from "./jsx-codec.mjs";
+import { layerRecord } from "./export-html.mjs";
+import { styleSignature } from "./codec-html.mjs";
+import { sourceMeta } from "./codec-source.mjs";
+import { documentFontCss } from "./font-faces.mjs";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const decode = (s) =>
@@ -25,11 +29,19 @@ const component = (name) =>
       .replace(/^[^a-zA-Z]+/, "") || "Export"
   ).replace(/^./, (c) => c.toUpperCase());
 
-/** `:root` custom properties for the document's colour variables. */
-function rootVariables(tokens = {}) {
-  const lines = Object.entries(tokens).map(
-    ([name, value]) => `  ${cssVarForToken(name)}: ${value};`,
-  );
+/**
+ * `:root` custom properties for the document's variables: colours, typed variables (dimensions in px,
+ * numbers, font families and weights) and aliases as var() references to their target.
+ */
+function rootVariables(tokens = {}, variables = {}, aliases = {}) {
+  const value = (name) => {
+    if (aliases && Object.hasOwn(aliases, name)) return `var(${cssVarForToken(aliases[name])})`;
+    if (Object.hasOwn(tokens, name)) return tokens[name];
+    const v = variables[name];
+    return v.type === "dimension" ? `${v.value}px` : String(v.value);
+  };
+  const names = [...Object.keys(tokens), ...Object.keys(variables || {})];
+  const lines = names.map((name) => `  ${cssVarForToken(name)}: ${value(name)};`);
   return lines.length ? `:root {\n${lines.join("\n")}\n}\n` : "";
 }
 
@@ -50,28 +62,51 @@ export function tailwindCode(document, pageId, nodeIds, name = "Export") {
   const code = nodes
     .filter((n) => !covered(n))
     .map((n) => elementCode(d, page, n))
-    // Editor bookkeeping (short ids, canvas position) is meaningless outside the editor.
+    // Short ids are editor bookkeeping and are dropped. The artboard's canvas position is kept as
+    // data-canvas-x/y (inert in React) so import_jsx / jsxToDocument put the artboard back where it was.
     .map((c) =>
-      c.replace(/ data-node-id="[^"]*"/g, "").replace(/ data-component-[xy]="[^"]*"/g, ""),
+      c
+        .replace(/ data-node-id="[^"]*"/g, "")
+        .replace(/ data-component-([xy])="/g, ' data-canvas-$1="'),
     )
     .join("\n");
   const body = code
     .split("\n")
     .map((line) => "      " + line)
     .join("\n");
-  const vars = rootVariables(d.tokens);
-  return `${vars ? `/* Colour variables used by the classes below:\n${vars}*/\n` : ""}export default function ${component(name)}() {\n  return (\n    <>\n${body}\n    </>\n  );\n}\n`;
+  const vars = rootVariables(d.tokens, d.variables, d.aliases);
+  // The @verynize header lets the importer (codec-source.mjs jsxToDocument) restore variables and the page.
+  const header = `/* @verynize ${JSON.stringify(sourceMeta(d, page)).replace(/\*\//g, "*\\/")} */\n`;
+  // Embedded (captured) custom fonts used by the classes: the same @font-face rules as the HTML export.
+  const fonts = documentFontCss(d, code);
+  return `${vars ? `/* Colour variables${d.variables && Object.keys(d.variables).length ? " and typed variables" : ""} used by the classes below:\n${vars}*/\n` : ""}${fonts ? `/* Embedded fonts used by the classes below (add to your global CSS):\n${fonts}\n*/\n` : ""}${header}export default function ${component(name)}() {\n  return (\n    <>\n${body}\n    </>\n  );\n}\n`;
 }
 
-/** Plain HTML + CSS: every inline style of the artwork HTML becomes a class rule. */
-export function cssCode(html, tokens = {}) {
+/**
+ * Plain HTML + CSS: every inline style of the artwork HTML becomes a class rule. With `document`, each
+ * layer (matched by data-id) also carries data-vn-node/data-vn-sig and the page carries a verynize-meta
+ * block, so codec-html.mjs reads the export back losslessly (layers whose CSS was edited are rebuilt
+ * from their declarations).
+ */
+export function cssCode(html, tokens = {}, { document = null, pageId } = {}) {
   if (typeof html !== "string" || !html.includes("<body")) throw new Error("Expected artwork HTML");
   const rules = [],
     used = new Map();
+  const page = document ? getPage(document, pageId) : null;
+  const layers = new Map((page?.nodes || []).map((n) => [n.id, n]));
+  const escapeAttr = (v) =>
+    String(v).replace(
+      /[&<>"']/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+    );
   const out = html.replace(
     /<([a-zA-Z][\w-]*)([^<>]*?)\sstyle="([^"]*)"([^<>]*)>/g,
     (all, tag, before, style, after) => {
-      const attrs = before + after;
+      let attrs = before + after;
+      const id = /\sdata-id="([^"]*)"/.exec(attrs)?.[1];
+      const layer = id !== undefined ? layers.get(decode(id)) : null;
+      if (layer && !/\sdata-vn-node=/.test(attrs))
+        attrs += ` data-vn-node="${escapeAttr(layerRecord(layer))}" data-vn-sig="${styleSignature(decode(style))}"`;
       const name = /data-name="([^"]*)"/.exec(attrs)?.[1];
       const base = slug(decode(name || "")) || (tag === "span" ? "text" : tag);
       const n = (used.get(base) || 0) + 1;
@@ -94,6 +129,11 @@ export function cssCode(html, tokens = {}) {
       return `<${tag}${rest}>`;
     },
   );
-  const sheet = `<style>\n${rootVariables(tokens)}${rules.join("\n")}\n</style>`;
+  const meta = document
+    ? `<script type="application/json" id="verynize-meta">${JSON.stringify(sourceMeta(document, page)).replace(/</g, "\\u003c")}</script>`
+    : "";
+  // Embedded custom fonts: kept when the artwork HTML already carries them, otherwise from `document`.
+  const fonts = document && !/@font-face/.test(html) ? documentFontCss(document, html) : "";
+  const sheet = `${meta}<style>\n${fonts ? fonts + "\n" : ""}${rootVariables(tokens, document?.variables, document?.aliases)}${rules.join("\n")}\n</style>`;
   return out.includes("</head>") ? out.replace("</head>", `${sheet}</head>`) : sheet + out;
 }

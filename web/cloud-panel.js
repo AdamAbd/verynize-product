@@ -1,47 +1,1448 @@
+// Share & collaborate panel: rooms, live operation-based sync, presence, accounts, roles,
+// link rotation, comments, design snapshots and published apps. API: cloud/README.md.
 (() => {
- const root=document.createElement('section');root.id='cloud-panel';
- root.innerHTML=`<button id="cloud-toggle">Share & collaborate</button><dialog id="cloud-dialog"><header><strong>Shared design</strong><button id="cloud-close">Close</button></header><label>Server URL<input id="cloud-server" placeholder="https://your-app.workers.dev"></label><label>Your name<input id="cloud-name" maxlength="80" placeholder="Designer"></label><p>Create a private room, then share its invite link with collaborators. Anyone with that link can edit.</p><div class="cloud-actions"><button id="cloud-create">Create room</button><button id="cloud-connect">Join invite</button><button id="cloud-leave">Disconnect</button></div><label>Invite link<input id="cloud-invite" placeholder="Paste a private invite URL to join"></label><div class="cloud-actions"><button id="cloud-copy">Copy invite</button><button id="cloud-publish">Publish snapshot</button><button id="cloud-unpublish">Unpublish</button></div><a id="cloud-public" target="_blank" rel="noopener noreferrer"></a><p id="cloud-status" role="status">Not connected</p><div id="cloud-conflict" hidden><p>A collaborator changed the design while you were editing. Your work has not been overwritten.</p><button id="cloud-reload">Load shared version</button><button id="cloud-overwrite">Replace shared version with mine</button></div></dialog><span id="cloud-presence"></span>`;
- document.body.append(root);
- const $=id=>document.getElementById(id);
- let connection=null,socket=null,revision=0,applying=false,pending=false,inflight=null,conflict=false,timer,retryTimer,unsub,generation=0,retries=0,lastLocal='',submitted='';
- let peerList=[],selfId=null,lastPointerAt=0,cursor=null;
- const status=text=>{$('cloud-status').textContent=text;};
- const action=fn=>async()=>{let epoch=generation;try{const operation=fn();epoch=generation;await operation;}catch(e){if(epoch===generation)status(e.message);}};
- function drawPeers(){document.getElementById('cloud-cursors')?.remove();const canvas=document.getElementById('canvas');if(!canvas||!connection)return;const overlay=document.createElement('div');overlay.id='cloud-cursors';Object.assign(overlay.style,{position:'absolute',inset:'0',pointerEvents:'none',zIndex:'2147483646'});const activePage=window.design.getDocument().activePage;for(const peer of peerList){if(peer.id===selfId||!peer.cursor||(peer.pageId&&peer.pageId!==activePage))continue;const marker=document.createElement('div');marker.className='collaborator-cursor';marker.dataset.peer=peer.id;marker.textContent='↖ '+peer.name;Object.assign(marker.style,{position:'absolute',left:peer.cursor.x+'px',top:peer.cursor.y+'px',color:'#fff',background:'#6953c9',padding:'3px 6px',borderRadius:'4px',font:'12px system-ui',whiteSpace:'nowrap'});overlay.append(marker)}canvas.append(overlay);}
- function sendPresence(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'presence',name:$('cloud-name').value.trim()||'Designer',cursor,pageId:window.design.getDocument().activePage}));}
- $('cloud-name').value='Designer '+Math.floor(Math.random()*900+100);$('cloud-name').onchange=sendPresence;
- document.getElementById('canvas').addEventListener('pointermove',event=>{if(!connection)return;const box=event.currentTarget.getBoundingClientRect();cursor={x:(event.clientX-box.left)*1000/box.width,y:(event.clientY-box.top)*700/box.height};if(Date.now()-lastPointerAt>80){lastPointerAt=Date.now();sendPresence();}});
- document.getElementById('canvas').addEventListener('pointerleave',()=>{cursor=null;sendPresence();});
- function base(){const u=new URL($('cloud-server').value||location.origin);if(!['http:','https:'].includes(u.protocol))throw Error('Use an HTTP or HTTPS server URL');if(u.username||u.password)throw Error('Credentials do not belong in the server URL');return u.origin;}
- $('cloud-server').value=location.protocol.startsWith('http')?location.origin:'';
- async function request(path,options={},info=connection){const response=await fetch((info?.server||base())+path,{...options,headers:{'Content-Type':'application/json',...(info?.token?{Authorization:`Bearer ${info.token}`} :{}),...options.headers}});const data=response.status===204?null:await response.json();if(!response.ok){const e=new Error(response.status===409?'Shared document changed; resolve the conflict below.':data?.error||`Server returned ${response.status}`);e.status=response.status;e.data=data;throw e;}return data;}
- function updateInvite(){const url=new URL(connection.server);url.hash=new URLSearchParams({room:connection.id,token:connection.token}).toString();$('cloud-invite').value=url.href;}
- function markConflict(){conflict=true;$('cloud-conflict').hidden=false;status('Concurrent edits need your choice. Local work has been retained.');}
- function apply(doc){applying=true;try{window.design.setDocument(doc);lastLocal=JSON.stringify(window.design.getDocument());drawPeers();}finally{applying=false;}}
- function receiveSnapshot(message){if(!message.document||message.revision<=revision)return;const remote=JSON.stringify(message.document),local=JSON.stringify(window.design.getDocument());if(remote===local||remote===submitted){revision=message.revision;return;}if(pending||inflight){markConflict();return;}revision=message.revision;apply(message.document);status(`Synced revision ${revision}`);}
- async function flush(){if(inflight)return inflight;if(!pending||conflict||!connection)return;const epoch=generation,info=connection,doc=window.design.getDocument();submitted=JSON.stringify(doc);pending=false;
-  inflight=(async()=>{try{const result=await request(`/api/rooms/${info.id}`,{method:'PUT',body:JSON.stringify({document:doc,baseRevision:revision})},info);if(epoch!==generation)return;revision=Math.max(revision,result.revision);status(`Saved shared revision ${revision}`);}catch(e){if(epoch!==generation)return;pending=true;if(e.status===409)markConflict();else status(e.message);}finally{if(epoch===generation){inflight=null;submitted='';if(pending&&!conflict)timer=setTimeout(flush,1000);}}})();return inflight;
- }
- function disconnect(){generation++;clearTimeout(timer);clearTimeout(retryTimer);unsub?.();unsub=null;const old=socket;socket=null;if(old){old.onclose=null;old.close();}connection=null;peerList=[];selfId=null;document.getElementById('cloud-cursors')?.remove();pending=false;inflight=null;submitted='';conflict=false;retries=0;$('cloud-conflict').hidden=true;$('cloud-presence').textContent='';status('Disconnected. Local design retained.');}
- function scheduleReconnect(epoch){if(epoch!==generation||!connection)return;clearTimeout(retryTimer);const delay=Math.min(15000,500*2**Math.min(retries++,5));status(`Live connection interrupted. Reconnecting in ${Math.ceil(delay/1000)}s…`);retryTimer=setTimeout(()=>openSocket(epoch),delay);}
- function openSocket(epoch){if(epoch!==generation||!connection)return;const info=connection,url=new URL(`/api/rooms/${info.id}/socket`,info.server);url.protocol=url.protocol==='https:'?'wss:':'ws:';url.searchParams.set('token',info.token);const ws=new WebSocket(url);socket=ws;
-  ws.onopen=()=>{if(epoch!==generation){ws.close();return;}retries=0;sendPresence();if(!conflict)status(`Connected · revision ${revision}`);};
-  ws.onmessage=event=>{if(epoch!==generation)return;try{const message=JSON.parse(event.data);if(message.type==='welcome'){selfId=message.id;return;}if(message.type==='presence'){peerList=message.peers||[];$('cloud-presence').textContent=`${peerList.length} connected`;drawPeers();return;}if(message.type==='snapshot')receiveSnapshot(message);else if(message.type==='conflict')markConflict();else if(message.type==='error')status(message.error);}catch(e){status('Unable to apply remote document: '+e.message);}};
-  ws.onclose=()=>scheduleReconnect(epoch);ws.onerror=()=>{if(epoch===generation)status('Live connection unavailable; changes will retry.');};
- }
- async function connect(info,load=true,expected){const u=new URL(info.server);if(!['http:','https:'].includes(u.protocol)||!/^[0-9a-f-]{36}$/.test(info.id)||!/^[0-9a-f]{64}$/.test(info.token))throw Error('Invalid room invite');info={...info,server:u.origin};if(expected!==undefined&&expected!==generation)return;if(expected===undefined)disconnect();const epoch=generation;const current=await request(`/api/rooms/${info.id}`,{},info);if(epoch!==generation)return;if(load&&window.fileLibrary?.createFromDocument){await window.fileLibrary.createFromDocument(current.document,{cloudJoinEpoch:epoch,isCurrent:()=>epoch===generation});if(epoch!==generation)return;load=false;}else if(load&&window.documentLifecycle){await window.documentLifecycle.prepareSwitch({cloudJoinEpoch:epoch});if(epoch!==generation)return;}connection=info;$('cloud-server').value=info.server;updateInvite();revision=current.revision;if(load)apply(current.document);lastLocal=JSON.stringify(window.design.getDocument());unsub=window.design.subscribe(()=>{drawPeers();if(applying)return;const next=JSON.stringify(window.design.getDocument());if(next===lastLocal)return;lastLocal=next;pending=true;clearTimeout(timer);timer=setTimeout(flush,500);});openSocket(epoch);status(`Connected · revision ${revision}`);}
- window.cloudWorkspace={disconnect,isConnected:()=>!!connection};window.addEventListener('document-will-change',event=>{if(event.detail?.cloudJoinEpoch!==generation)disconnect();});
- $('cloud-toggle').onclick=()=>$('cloud-dialog').showModal();$('cloud-close').onclick=()=>$('cloud-dialog').close();
- $('cloud-create').onclick=action(async()=>{if(connection)throw Error('Disconnect before creating another room');const server=base();disconnect();const epoch=generation,result=await request('/api/rooms',{method:'POST',body:JSON.stringify({document:window.design.getDocument()})},{server});if(epoch!==generation)return;await connect({server,id:result.id,token:result.token},false,epoch);});
- $('cloud-connect').onclick=action(async()=>{const input=$('cloud-invite').value;if(!input)return;const u=new URL(input),p=new URLSearchParams(u.hash.slice(1));if(!p.get('room')||!p.get('token'))throw Error('Invite must contain room and token');if(!window.confirm('Open this shared design as a separate file?'))return;await connect({server:u.origin,id:p.get('room'),token:p.get('token')});});
- $('cloud-leave').onclick=disconnect;
- $('cloud-public').onclick=event=>{if(window.desktop?.openExternal){event.preventDefault();window.desktop.openExternal(event.currentTarget.href).catch(e=>status(e.message));}};
- $('cloud-copy').onclick=action(async()=>{const epoch=generation;await navigator.clipboard.writeText($('cloud-invite').value);if(epoch===generation)status('Invite copied');});
- $('cloud-publish').onclick=action(async()=>{if(!connection)throw Error('Create or join a room first');const epoch=generation,info=connection;await flush();if(epoch!==generation)return;if(inflight)await inflight;if(epoch!==generation)return;if(pending||conflict)throw Error('Resolve pending edits before publishing');const result=await request(`/api/rooms/${info.id}/publish`,{method:'POST'},info);if(epoch!==generation)return;const u=new URL(info.server);u.hash=new URLSearchParams({public:result.publicId}).toString();$('cloud-public').href=u.href;$('cloud-public').textContent=u.href;window.dispatchEvent(new CustomEvent('design-publication-changed',{detail:{published:true,url:u.href,publicId:result.publicId,revision:result.revision}}));status('Published read-only snapshot. Anyone with the public link can view it.');});
- $('cloud-unpublish').onclick=action(async()=>{if(!connection)throw Error('Join a room first');const epoch=generation,info=connection;await request(`/api/rooms/${info.id}/publish`,{method:'DELETE'},info);if(epoch!==generation)return;$('cloud-public').removeAttribute('href');$('cloud-public').textContent='';window.dispatchEvent(new CustomEvent('design-publication-changed',{detail:{published:false}}));status('Public snapshot removed');});
- $('cloud-reload').onclick=action(async()=>{if(!connection)throw Error('Join a room first');const epoch=generation,info=connection;if(inflight)await inflight;if(epoch!==generation)return;const current=await request(`/api/rooms/${info.id}`,{},info);if(epoch!==generation)return;pending=false;revision=current.revision;apply(current.document);conflict=false;$('cloud-conflict').hidden=true;status('Loaded shared version');});
- $('cloud-overwrite').onclick=action(async()=>{if(!connection)throw Error('Join a room first');const epoch=generation,info=connection;if(inflight)await inflight;if(epoch!==generation)return;const current=await request(`/api/rooms/${info.id}`,{},info);if(epoch!==generation)return;revision=current.revision;conflict=false;$('cloud-conflict').hidden=true;pending=true;await flush();});
- const params=new URLSearchParams(location.hash.slice(1));
- if(params.has('room')&&params.has('token')){$('cloud-dialog').showModal();status('Invite detected. Join invite to load this shared design.');$('cloud-connect').onclick=action(async()=>{if(!window.confirm('Load this shared design?'))return;await connect({server:location.origin,id:params.get('room'),token:params.get('token')});});}
- if(params.has('public')){const epoch=generation;fetch(`/api/public/${encodeURIComponent(params.get('public'))}`).then(async r=>{if(!r.ok)throw Error('Published design not found');const data=await r.json();if(epoch!==generation)return;apply(data.document);const frame=document.createElement('iframe');frame.title='Published design';frame.sandbox=window.design.getDocument().pages.some(p=>p.nodes.some(n=>n.type==='shader'))?'allow-scripts':'';frame.srcdoc=window.design.exportHTML();Object.assign(frame.style,{position:'fixed',inset:'0',width:'100vw',height:'100vh',border:'0',zIndex:1000,background:'white'});document.body.append(frame);}).catch(e=>{if(epoch!==generation)return;status(e.message);$('cloud-dialog').showModal();});}
+  const Ops = window.VerynizeOps;
+  const LOCAL_KEYS = ["activePage"];
+  const ACCOUNT_KEY = "verynize.cloud.account";
+  const ROLE_LABEL = { owner: "Owner", editor: "Editor", commenter: "Commenter", viewer: "Viewer" };
+  const root = document.createElement("section");
+  root.id = "cloud-panel";
+  root.innerHTML = `<button id="cloud-toggle">Share & collaborate</button><dialog id="cloud-dialog"><header><strong>Shared design</strong><button id="cloud-close">Close</button></header>
+<label>Server URL<input id="cloud-server" placeholder="https://your-app.workers.dev"></label><label>Your name<input id="cloud-name" maxlength="80" placeholder="Designer"></label>
+<p>Create a private room, then share its invite link with collaborators. Anyone with an owner or editor link can edit.</p>
+<div class="cloud-actions"><button id="cloud-create">Create room</button><button id="cloud-connect">Join invite</button><button id="cloud-leave">Disconnect</button></div>
+<label>Invite link<input id="cloud-invite" placeholder="Paste a private invite URL to join"></label>
+<div class="cloud-actions"><button id="cloud-copy">Copy invite</button><button id="cloud-publish">Publish snapshot</button><button id="cloud-unpublish">Unpublish</button></div>
+<a id="cloud-public" target="_blank" rel="noopener noreferrer"></a><p id="cloud-status" role="status">Not connected</p>
+<div id="cloud-conflict" hidden><p>A collaborator changed the design while you were editing. Your work has not been overwritten.</p><button id="cloud-reload">Load shared version</button><button id="cloud-overwrite">Replace shared version with mine</button></div>
+<details class="cloud-section" id="cloud-account-section"><summary>Account</summary>
+ <div id="cloud-signed-out"><label>Email<input id="cloud-email" type="email" autocomplete="email" placeholder="you@studio.com"></label><div class="cloud-actions"><button id="cloud-signin-start">Email me a sign-in link</button></div>
+  <label>Sign-in link or code<input id="cloud-signin-code" placeholder="Paste the link from the email"></label><div class="cloud-actions"><button id="cloud-signin-verify">Sign in</button></div><div class="cloud-actions"><button id="cloud-passkey-signin">Sign in with a passkey</button></div></div>
+ <div id="cloud-signed-in" hidden><p id="cloud-account"></p>
+  <label>Handle<input id="cloud-handle" maxlength="30" autocomplete="off"></label><label>Display name<input id="cloud-display-name" maxlength="80"></label><label>Avatar URL<input id="cloud-avatar" placeholder="https://…"></label>
+  <div class="cloud-actions"><button id="cloud-profile-save">Save profile</button><button id="cloud-profile-open">View public profile</button></div>
+  <div class="cloud-actions"><button id="cloud-signout">Sign out</button><button id="cloud-signout-all">Sign out everywhere</button></div>
+  <p class="cloud-subhead">Passkeys</p><ul id="cloud-passkeys" class="cloud-list"></ul><div class="cloud-actions"><button id="cloud-passkey-add">Add a passkey</button></div>
+  <p class="cloud-subhead">Your rooms</p><ul id="cloud-my-rooms" class="cloud-list"></ul><div class="cloud-actions"><button id="cloud-rooms-refresh">Refresh rooms</button></div></div>
+</details>
+<details class="cloud-section" id="cloud-access-section"><summary>People & access</summary>
+ <p>Your role: <strong id="cloud-role">Not connected</strong></p>
+ <ul id="cloud-members" class="cloud-list"></ul>
+ <div id="cloud-owner-tools" hidden>
+  <label>Invite by email<input id="cloud-member-email" type="email" placeholder="teammate@studio.com"></label>
+  <div class="cloud-row"><select id="cloud-member-role" aria-label="Role for the invited person"><option value="editor">Editor</option><option value="commenter">Commenter</option><option value="viewer">Viewer</option><option value="owner">Owner</option></select><button id="cloud-member-add">Invite</button></div>
+  <p class="cloud-subhead">Links</p><ul id="cloud-links" class="cloud-list"></ul>
+  <div class="cloud-row"><select id="cloud-link-role" aria-label="Role for the new link"><option value="viewer">Viewer</option><option value="commenter">Commenter</option><option value="editor">Editor</option><option value="owner">Owner</option></select><button id="cloud-link-create">Create link</button></div>
+  <input id="cloud-link-output" readonly aria-label="New link" hidden>
+  <div class="cloud-actions"><button id="cloud-rotate">Rotate all links</button></div>
+ </div>
+ <div class="cloud-actions"><button id="cloud-claim" hidden>Add this room to my account</button><button id="cloud-access-refresh">Refresh</button></div>
+</details>
+<details class="cloud-section" id="cloud-comments-section"><summary>Comments</summary>
+ <ul id="cloud-comments" class="cloud-list"></ul>
+ <label>Comment<textarea id="cloud-comment-text" rows="2" maxlength="4000" placeholder="Comment on the selected layer"></textarea></label>
+ <div class="cloud-actions"><button id="cloud-comment-send">Post comment</button></div>
+</details>
+<details class="cloud-section" id="cloud-app-section"><summary>Publish app</summary>
+ <p id="cloud-app-project">Open a code project to publish its built web app.</p>
+ <label>App name<input id="cloud-app-name" maxlength="63" placeholder="my-site"></label>
+ <label>Output folder<input id="cloud-app-output" maxlength="200" placeholder="Detected after build (dist, build, out)"></label>
+ <div class="cloud-actions"><button id="cloud-app-publish">Build & publish</button><button id="cloud-app-unpublish">Unpublish app</button></div>
+ <p id="cloud-app-status" role="status"></p><a id="cloud-app-url" target="_blank" rel="noopener noreferrer"></a>
+ <ul id="cloud-app-versions" class="cloud-list"></ul>
+</details>
+</dialog><span id="cloud-presence"></span>`;
+  document.body.append(root);
+  const $ = (id) => document.getElementById(id);
+
+  // Room state. `confirmed` is the server document; `pending` holds local operation batches
+  // not yet acknowledged. The editor shows confirmed + pending.
+  let connection = null,
+    socket = null,
+    revision = 0,
+    protocol = 1,
+    role = null,
+    applying = false;
+  let confirmed = null,
+    pending = [],
+    batchNumber = 0,
+    clientId = "",
+    clock = null,
+    sendTimer,
+    rotating = false;
+  let legacyPending = false,
+    inflight = null,
+    conflict = false,
+    timer,
+    retryTimer,
+    unsub,
+    generation = 0,
+    retries = 0,
+    lastLocal = "",
+    lastLocalDoc = null,
+    submitted = "";
+  let peerList = [],
+    selfId = null,
+    lastPointerAt = 0,
+    cursor = null,
+    app = null;
+  const status = (text) => {
+    $("cloud-status").textContent = text;
+  };
+  const action = (fn) => async () => {
+    let epoch = generation;
+    try {
+      const operation = fn();
+      epoch = generation;
+      await operation;
+    } catch (e) {
+      if (epoch === generation) status(e.message);
+    }
+  };
+  const canEdit = () => role === "owner" || role === "editor";
+  const randomId = () =>
+    Array.from(crypto.getRandomValues(new Uint8Array(9)), (n) => n.toString(36).padStart(2, "0"))
+      .join("")
+      .slice(0, 16);
+  const shared = (doc) => {
+    const copy = { ...doc };
+    for (const key of LOCAL_KEYS) delete copy[key];
+    return JSON.stringify(copy);
+  };
+
+  // ---- presence -------------------------------------------------------------------------------
+  function drawPeers() {
+    document.getElementById("cloud-cursors")?.remove();
+    const canvas = document.getElementById("canvas");
+    if (!canvas || !connection) return;
+    const overlay = document.createElement("div");
+    overlay.id = "cloud-cursors";
+    Object.assign(overlay.style, {
+      position: "absolute",
+      inset: "0",
+      pointerEvents: "none",
+      zIndex: "2147483646",
+    });
+    const activePage = window.design.getDocument().activePage;
+    for (const peer of peerList) {
+      if (peer.id === selfId || !peer.cursor || (peer.pageId && peer.pageId !== activePage))
+        continue;
+      const marker = document.createElement("div");
+      marker.className = "collaborator-cursor";
+      marker.dataset.peer = peer.id;
+      marker.textContent = "↖ " + peer.name;
+      Object.assign(marker.style, {
+        position: "absolute",
+        left: peer.cursor.x + "px",
+        top: peer.cursor.y + "px",
+        color: "#fff",
+        background: "#6953c9",
+        padding: "3px 6px",
+        borderRadius: "4px",
+        font: "12px system-ui",
+        whiteSpace: "nowrap",
+      });
+      overlay.append(marker);
+    }
+    canvas.append(overlay);
+  }
+  function sendPresence() {
+    if (socket?.readyState === WebSocket.OPEN)
+      socket.send(
+        JSON.stringify({
+          type: "presence",
+          name: $("cloud-name").value.trim() || "Designer",
+          cursor,
+          pageId: window.design.getDocument().activePage,
+        }),
+      );
+  }
+  $("cloud-name").value = "Designer " + Math.floor(Math.random() * 900 + 100);
+  $("cloud-name").onchange = sendPresence;
+  document.getElementById("canvas").addEventListener("pointermove", (event) => {
+    if (!connection) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    cursor = {
+      x: ((event.clientX - box.left) * 1000) / box.width,
+      y: ((event.clientY - box.top) * 700) / box.height,
+    };
+    if (Date.now() - lastPointerAt > 80) {
+      lastPointerAt = Date.now();
+      sendPresence();
+    }
+  });
+  document.getElementById("canvas").addEventListener("pointerleave", () => {
+    cursor = null;
+    sendPresence();
+  });
+
+  // ---- HTTP -----------------------------------------------------------------------------------
+  function base() {
+    const u = new URL($("cloud-server").value || location.origin);
+    if (!["http:", "https:"].includes(u.protocol)) throw Error("Use an HTTP or HTTPS server URL");
+    if (u.username || u.password) throw Error("Credentials do not belong in the server URL");
+    return u.origin;
+  }
+  $("cloud-server").value = location.protocol.startsWith("http") ? location.origin : "";
+  const loadAccount = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(ACCOUNT_KEY) || "null");
+      return value && /^vs_[0-9a-f]{64}$/.test(value.session) ? value : null;
+    } catch {
+      return null;
+    }
+  };
+  let account = loadAccount();
+  const sessionFor = (server) => (account && account.server === server ? account.session : null);
+  async function request(path, options = {}, info = connection) {
+    const server = info?.server || base();
+    const session = info?.session === false ? null : sessionFor(server);
+    const response = await fetch(server + path, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(info?.token ? { Authorization: `Bearer ${info.token}` } : {}),
+        ...(session ? { "X-Verynize-Session": session } : {}),
+        ...options.headers,
+      },
+    });
+    const data = response.status === 204 ? null : await response.json();
+    if (!response.ok) {
+      const e = new Error(
+        response.status === 409 && data?.document
+          ? "Shared document changed; resolve the conflict below."
+          : data?.error || `Server returned ${response.status}`,
+      );
+      e.status = response.status;
+      e.data = data;
+      throw e;
+    }
+    return data;
+  }
+  function updateInvite() {
+    const url = new URL(connection.server);
+    url.hash = new URLSearchParams(
+      connection.token ? { room: connection.id, token: connection.token } : { room: connection.id },
+    ).toString();
+    $("cloud-invite").value = url.href;
+  }
+
+  // ---- legacy snapshot protocol (servers without operation support) ---------------------------
+  function markConflict() {
+    conflict = true;
+    $("cloud-conflict").hidden = false;
+    status("Concurrent edits need your choice. Local work has been retained.");
+  }
+  function apply(doc) {
+    applying = true;
+    try {
+      const selection = window.design.getSelection?.() || [];
+      window.design.setDocument(doc);
+      if (selection.length && window.design.setSelection) window.design.setSelection(selection);
+      lastLocalDoc = window.design.getDocument();
+      lastLocal = shared(lastLocalDoc);
+      drawPeers();
+    } finally {
+      applying = false;
+    }
+  }
+  function receiveSnapshot(message) {
+    if (!message.document || message.revision <= revision) return;
+    const remote = JSON.stringify(message.document),
+      local = JSON.stringify(window.design.getDocument());
+    if (remote === local || remote === submitted) {
+      revision = message.revision;
+      return;
+    }
+    if (legacyPending || inflight) {
+      markConflict();
+      return;
+    }
+    revision = message.revision;
+    apply(message.document);
+    status(`Synced revision ${revision}`);
+  }
+  async function flush() {
+    if (protocol >= 2) return flushOps();
+    if (inflight) return inflight;
+    if (!legacyPending || conflict || !connection) return;
+    const epoch = generation,
+      info = connection,
+      doc = window.design.getDocument();
+    submitted = JSON.stringify(doc);
+    legacyPending = false;
+    inflight = (async () => {
+      try {
+        const result = await request(
+          `/api/rooms/${info.id}`,
+          { method: "PUT", body: JSON.stringify({ document: doc, baseRevision: revision }) },
+          info,
+        );
+        if (epoch !== generation) return;
+        revision = Math.max(revision, result.revision);
+        status(`Saved shared revision ${revision}`);
+      } catch (e) {
+        if (epoch !== generation) return;
+        legacyPending = true;
+        if (e.status === 409) markConflict();
+        else status(e.message);
+      } finally {
+        if (epoch === generation) {
+          inflight = null;
+          submitted = "";
+          if (legacyPending && !conflict) timer = setTimeout(flush, 1000);
+        }
+      }
+    })();
+    return inflight;
+  }
+
+  // ---- operation protocol ---------------------------------------------------------------------
+  /** Editor document = confirmed server state + local unacknowledged operations. */
+  function rebuild() {
+    if (!confirmed) return;
+    let doc = confirmed;
+    for (const batch of pending) doc = Ops.apply(doc, batch.ops).doc;
+    const current = window.design.getDocument();
+    const next = { ...doc };
+    if (Ops.isStructured(doc) && doc.pages.some((page) => page.id === current.activePage))
+      next.activePage = current.activePage;
+    if (shared(next) === shared(current)) {
+      lastLocalDoc = current;
+      lastLocal = shared(current);
+      return;
+    }
+    try {
+      apply(next);
+    } catch (e) {
+      status("Unable to apply shared changes: " + e.message);
+    }
+  }
+  function sendPending() {
+    clearTimeout(sendTimer);
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    for (const batch of pending)
+      if (!batch.sent) {
+        socket.send(JSON.stringify({ type: "ops", batch: batch.n, ops: batch.ops }));
+        batch.sent = true;
+      }
+  }
+  function queueOps(ops) {
+    const stamped = ops.map((op) => ({ ...op, s: clock.next() }));
+    const last = pending[pending.length - 1];
+    if (last && !last.sent && last.ops.length + stamped.length <= 4000) last.ops.push(...stamped);
+    else pending.push({ n: ++batchNumber, ops: stamped, sent: false });
+    clearTimeout(sendTimer);
+    sendTimer = setTimeout(sendPending, 40);
+  }
+  function localChange() {
+    drawPeers();
+    if (applying || !connection) return;
+    const now = window.design.getDocument(),
+      text = shared(now);
+    if (text === lastLocal) return;
+    if (protocol < 2) {
+      lastLocal = text;
+      legacyPending = true;
+      clearTimeout(timer);
+      timer = setTimeout(flush, 500);
+      return;
+    }
+    if (!canEdit()) {
+      status(
+        `You are a ${ROLE_LABEL[role]?.toLowerCase() || "guest"} in this room; your edits are not shared.`,
+      );
+      rebuild();
+      return;
+    }
+    const ops = Ops.diff(lastLocalDoc, now, { ignore: LOCAL_KEYS });
+    const before = lastLocalDoc;
+    lastLocalDoc = now;
+    lastLocal = text;
+    if (ops.length) {
+      recordLocal(before, now);
+      queueOps(ops);
+    }
+  }
+
+  // ---- collaborative undo ---------------------------------------------------------------------
+  // While collaborating, undo/redo step through this client's own changes only. Each step stores
+  // the documents around the local change; undoing replays the inverse operations rebased over
+  // the remote operations received since: properties, nodes and orders a collaborator changed
+  // afterwards are left alone, and text inverses are merged range-wise into the current text.
+  const HISTORY_LIMIT = 100,
+    COALESCE_MS = 600;
+  let undoStack = [],
+    redoStack = [],
+    remoteSeq = 0;
+  const remotePaths = new Map(),
+    remoteNodes = new Map();
+  function recordLocal(from, to) {
+    const last = undoStack[undoStack.length - 1];
+    // A gesture (drag, typing) renders many times; consecutive changes with no remote edit in between form one step.
+    if (last && last.seq === remoteSeq && Date.now() - last.at < COALESCE_MS && !last.history) {
+      last.to = to;
+      last.at = Date.now();
+    } else {
+      undoStack.push({ from, to, seq: remoteSeq, at: Date.now() });
+      if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+    }
+    redoStack = [];
+    refreshHistoryButtons();
+  }
+  function markRemote(ops) {
+    if (!ops.length) return;
+    remoteSeq++;
+    for (const op of ops) {
+      const path = Ops.pathOf(op);
+      if (path) remotePaths.set(path, remoteSeq);
+      if (op.id && ["add", "remove", "node", "text"].includes(op.t))
+        remoteNodes.set(op.id, remoteSeq);
+      if ((op.t === "add" || op.t === "addPage") && op.value)
+        for (const key of Object.keys(op.value))
+          remotePaths.set(
+            Ops.pathOf({ ...op, t: op.t === "add" ? "node" : "page", page: op.page || op.id, key }),
+            remoteSeq,
+          );
+    }
+  }
+  /** Inverse of a step, minus whatever collaborators changed after it. */
+  function rebaseInverse(step, current) {
+    const touched = (path) => (remotePaths.get(path) || 0) > step.seq;
+    const nodeOf = (id) => {
+      for (const page of current.pages || []) {
+        const node = page.nodes?.find((n) => n.id === id);
+        if (node) return node;
+      }
+      return null;
+    };
+    return Ops.diff(step.to, step.from, { ignore: LOCAL_KEYS }).filter((op) => {
+      if (op.t === "text") {
+        const value = nodeOf(op.id)?.[op.key];
+        return (
+          typeof value === "string" &&
+          (value === op.base || Ops.mergeText(op.base, op.value, value) !== null)
+        );
+      }
+      if (op.t === "remove") return (remoteNodes.get(op.id) || 0) <= step.seq;
+      return !touched(Ops.pathOf(op));
+    });
+  }
+  function stepHistory(from, to, label) {
+    const step = from.pop();
+    if (!step) {
+      status(`Nothing of yours to ${label}`);
+      return;
+    }
+    const current = window.design.getDocument();
+    const ops = rebaseInverse(step, current);
+    let next = Ops.apply(current, ops).doc;
+    if (Ops.isStructured(next) && next.pages.some((page) => page.id === current.activePage))
+      next = { ...next, activePage: current.activePage };
+    const changes = Ops.diff(current, next, { ignore: LOCAL_KEYS });
+    if (!changes.length) {
+      status(`Collaborators already changed everything in that step; nothing to ${label}`);
+      refreshHistoryButtons();
+      return;
+    }
+    apply(next);
+    to.push({ from: current, to: lastLocalDoc, seq: remoteSeq, at: 0, history: true });
+    queueOps(changes);
+    status(label === "undo" ? "Undid your last change" : "Redid your change");
+    refreshHistoryButtons();
+  }
+  function refreshHistoryButtons() {
+    const undo = document.getElementById("undo"),
+      redo = document.getElementById("redo");
+    if (!historyActive()) return;
+    if (undo) undo.disabled = !undoStack.length;
+    if (redo) redo.disabled = !redoStack.length;
+  }
+  const historyActive = () => !!connection && protocol >= 2 && canEdit() && !!Ops;
+  function resetHistory() {
+    undoStack = [];
+    redoStack = [];
+    remoteSeq = 0;
+    remotePaths.clear();
+    remoteNodes.clear();
+  }
+  window.cloudHistory = {
+    active: historyActive,
+    canUndo: () => undoStack.length > 0,
+    canRedo: () => redoStack.length > 0,
+    undo: () => {
+      if (!historyActive()) return false;
+      stepHistory(undoStack, redoStack, "undo");
+      return true;
+    },
+    redo: () => {
+      if (!historyActive()) return false;
+      stepHistory(redoStack, undoStack, "redo");
+      return true;
+    },
+  };
+  function receiveOps(message) {
+    if (message.client !== clientId && message.ops?.length) markRemote(message.ops);
+    if (message.ops?.length) {
+      confirmed = Ops.apply(confirmed, message.ops).doc;
+      for (const op of message.ops) if (op.s) clock.observe(op.s);
+    }
+    if (Number.isSafeInteger(message.revision)) revision = Math.max(revision, message.revision);
+    if (message.client === clientId) {
+      pending = pending.filter((batch) => batch.n > message.batch);
+      if (message.error) status(message.error);
+      else if (message.rejected)
+        status(
+          `${message.rejected} change${message.rejected === 1 ? " was" : "s were"} superseded by newer edits`,
+        );
+      else status(`Saved shared revision ${revision}`);
+    } else if (message.ops?.length) status(`Synced revision ${revision}`);
+    rebuild();
+  }
+  /** Make sure local operations reached the server (used before publishing). */
+  async function flushOps() {
+    if (!pending.length || !connection) return;
+    const epoch = generation,
+      info = connection;
+    if (socket?.readyState === WebSocket.OPEN) {
+      sendPending();
+      const until = Date.now() + 5000;
+      while (pending.length && Date.now() < until && epoch === generation)
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      return;
+    }
+    for (const batch of pending.slice()) {
+      const result = await request(
+        `/api/rooms/${info.id}/ops`,
+        {
+          method: "POST",
+          body: JSON.stringify({ client: clientId, batch: batch.n, ops: batch.ops }),
+        },
+        info,
+      );
+      if (epoch !== generation) return;
+      receiveOps(result);
+    }
+  }
+
+  // ---- connection -----------------------------------------------------------------------------
+  function disconnect(message = "Disconnected. Local design retained.") {
+    generation++;
+    resetHistory();
+    clearTimeout(timer);
+    clearTimeout(retryTimer);
+    clearTimeout(sendTimer);
+    unsub?.();
+    unsub = null;
+    const old = socket;
+    socket = null;
+    if (old) {
+      old.onclose = null;
+      old.close();
+    }
+    connection = null;
+    peerList = [];
+    selfId = null;
+    role = null;
+    confirmed = null;
+    pending = [];
+    document.getElementById("cloud-cursors")?.remove();
+    legacyPending = false;
+    inflight = null;
+    submitted = "";
+    conflict = false;
+    retries = 0;
+    $("cloud-conflict").hidden = true;
+    $("cloud-presence").textContent = "";
+    renderAccess(null);
+    status(message);
+  }
+  function scheduleReconnect(epoch) {
+    if (epoch !== generation || !connection) return;
+    clearTimeout(retryTimer);
+    const delay = Math.min(15000, 500 * 2 ** Math.min(retries++, 5));
+    status(`Live connection interrupted. Reconnecting in ${Math.ceil(delay / 1000)}s…`);
+    retryTimer = setTimeout(() => openSocket(epoch), delay);
+  }
+  function openSocket(epoch, quiet = false) {
+    if (epoch !== generation || !connection) return;
+    const info = connection,
+      url = new URL(`/api/rooms/${info.id}/socket`, info.server);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    if (info.token) url.searchParams.set("token", info.token);
+    if (clientId) url.searchParams.set("client", clientId);
+    const session = sessionFor(info.server);
+    if (session) url.searchParams.set("session", session);
+    const ws = new WebSocket(url);
+    socket = ws;
+    ws.onopen = () => {
+      if (epoch !== generation || ws !== socket) {
+        ws.close();
+        return;
+      }
+      const reconnected = retries > 0;
+      retries = 0;
+      sendPresence();
+      if (!conflict && !quiet && reconnected) status(`Connected · revision ${revision}`);
+    };
+    ws.onmessage = (event) => {
+      if (epoch !== generation || ws !== socket) return;
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === "welcome") {
+          selfId = message.id;
+          if (message.role) setRole(message.role);
+          return;
+        }
+        if (message.type === "presence") {
+          peerList = message.peers || [];
+          $("cloud-presence").textContent = `${peerList.length} connected`;
+          drawPeers();
+          return;
+        }
+        if (message.type === "snapshot") {
+          if (protocol < 2) return receiveSnapshot(message);
+          if (confirmed) markRemote(Ops.diff(confirmed, message.document, { ignore: LOCAL_KEYS }));
+          confirmed = message.document;
+          revision = message.revision;
+          pending = pending.filter((batch) => batch.n > (message.acked || 0));
+          for (const batch of pending) batch.sent = false;
+          rebuild();
+          sendPending();
+          return;
+        }
+        if (message.type === "ops") return receiveOps(message);
+        if (message.type === "role") {
+          setRole(message.role);
+          status(`Your role changed to ${ROLE_LABEL[message.role]}`);
+          return;
+        }
+        if (message.type === "revoked") {
+          if (!rotating) disconnect("Your access to this room was revoked. Local design retained.");
+          return;
+        }
+        if (message.type === "comment") {
+          addComment(message.comment, true);
+          return;
+        }
+        if (message.type === "conflict") markConflict();
+        else if (message.type === "error") status(message.error);
+      } catch (e) {
+        status("Unable to apply remote document: " + e.message);
+      }
+    };
+    ws.onclose = () => {
+      if (ws === socket) scheduleReconnect(epoch);
+    };
+    ws.onerror = () => {
+      if (epoch === generation && ws === socket)
+        status("Live connection unavailable; changes will retry.");
+    };
+  }
+  async function connect(info, load = true, expected) {
+    const u = new URL(info.server);
+    const session = sessionFor(u.origin);
+    if (
+      !["http:", "https:"].includes(u.protocol) ||
+      !/^[0-9a-f-]{36}$/.test(info.id) ||
+      (info.token ? !/^[0-9a-f]{64}$/.test(info.token) : !session)
+    )
+      throw Error(
+        info.token || session
+          ? "Invalid room invite"
+          : "Sign in to open a room without a link token",
+      );
+    info = { id: info.id, token: info.token || null, server: u.origin };
+    if (expected !== undefined && expected !== generation) return;
+    if (expected === undefined) disconnect();
+    const epoch = generation;
+    const current = await request(`/api/rooms/${info.id}`, {}, info);
+    if (epoch !== generation) return;
+    if (load && window.fileLibrary?.createFromDocument) {
+      await window.fileLibrary.createFromDocument(current.document, {
+        cloudJoinEpoch: epoch,
+        isCurrent: () => epoch === generation,
+      });
+      if (epoch !== generation) return;
+      load = false;
+    } else if (load && window.documentLifecycle) {
+      await window.documentLifecycle.prepareSwitch({ cloudJoinEpoch: epoch });
+      if (epoch !== generation) return;
+    }
+    connection = info;
+    protocol = Number.isSafeInteger(current.protocol) && Ops ? current.protocol : 1;
+    clientId = randomId();
+    clock = Ops ? Ops.createClock(clientId) : null;
+    pending = [];
+    batchNumber = 0;
+    resetHistory();
+    confirmed = current.document;
+    setRole(current.role || "owner");
+    $("cloud-server").value = info.server;
+    updateInvite();
+    revision = current.revision;
+    if (load) apply(current.document);
+    lastLocalDoc = window.design.getDocument();
+    lastLocal = shared(lastLocalDoc);
+    unsub = window.design.subscribe(localChange);
+    openSocket(epoch);
+    status(`Connected · revision ${revision}`);
+  }
+  window.cloudWorkspace = {
+    disconnect: () => disconnect(),
+    isConnected: () => !!connection,
+    role: () => role,
+    account: () => (account ? { ...account.account } : null),
+  };
+  window.addEventListener("document-will-change", (event) => {
+    if (event.detail?.cloudJoinEpoch !== generation) disconnect();
+  });
+
+  $("cloud-toggle").onclick = () => {
+    $("cloud-dialog").showModal();
+    renderAccount();
+  };
+  $("cloud-close").onclick = () => $("cloud-dialog").close();
+  $("cloud-create").onclick = action(async () => {
+    if (connection) throw Error("Disconnect before creating another room");
+    const server = base();
+    disconnect();
+    const epoch = generation,
+      result = await request(
+        "/api/rooms",
+        { method: "POST", body: JSON.stringify({ document: window.design.getDocument() }) },
+        { server },
+      );
+    if (epoch !== generation) return;
+    await connect({ server, id: result.id, token: result.token }, false, epoch);
+  });
+  function parseInvite(input) {
+    const u = new URL(input),
+      p = new URLSearchParams(u.hash.slice(1));
+    if (!p.get("room")) throw Error("Invite must contain a room");
+    if (!p.get("token") && !sessionFor(u.origin))
+      throw Error(
+        "Invite must contain room and token, or sign in to open a room shared with your account",
+      );
+    return { server: u.origin, id: p.get("room"), token: p.get("token") };
+  }
+  $("cloud-connect").onclick = action(async () => {
+    const input = $("cloud-invite").value;
+    if (!input) return;
+    const info = parseInvite(input);
+    if (!window.confirm("Open this shared design as a separate file?")) return;
+    await connect(info);
+  });
+  $("cloud-leave").onclick = () => disconnect();
+  const openLink = (event) => {
+    if (window.desktop?.openExternal) {
+      event.preventDefault();
+      window.desktop.openExternal(event.currentTarget.href).catch((e) => status(e.message));
+    }
+  };
+  $("cloud-public").onclick = openLink;
+  $("cloud-app-url").onclick = openLink;
+  $("cloud-copy").onclick = action(async () => {
+    const epoch = generation;
+    await navigator.clipboard.writeText($("cloud-invite").value);
+    if (epoch === generation) status("Invite copied");
+  });
+  $("cloud-publish").onclick = action(async () => {
+    if (!connection) throw Error("Create or join a room first");
+    const epoch = generation,
+      info = connection;
+    await flush();
+    if (epoch !== generation) return;
+    if (inflight) await inflight;
+    if (epoch !== generation) return;
+    if (legacyPending || conflict || pending.length)
+      throw Error("Resolve pending edits before publishing");
+    const result = await request(`/api/rooms/${info.id}/publish`, { method: "POST" }, info);
+    if (epoch !== generation) return;
+    const u = new URL(info.server);
+    u.hash = new URLSearchParams({ public: result.publicId }).toString();
+    $("cloud-public").href = u.href;
+    $("cloud-public").textContent = u.href;
+    window.dispatchEvent(
+      new CustomEvent("design-publication-changed", {
+        detail: {
+          published: true,
+          url: u.href,
+          publicId: result.publicId,
+          revision: result.revision,
+        },
+      }),
+    );
+    status(
+      sessionFor(info.server)
+        ? "Published read-only snapshot and listed it on your profile."
+        : "Published read-only snapshot. Anyone with the public link can view it.",
+    );
+  });
+  $("cloud-unpublish").onclick = action(async () => {
+    if (!connection) throw Error("Join a room first");
+    const epoch = generation,
+      info = connection;
+    await request(`/api/rooms/${info.id}/publish`, { method: "DELETE" }, info);
+    if (epoch !== generation) return;
+    $("cloud-public").removeAttribute("href");
+    $("cloud-public").textContent = "";
+    window.dispatchEvent(
+      new CustomEvent("design-publication-changed", { detail: { published: false } }),
+    );
+    status("Public snapshot removed");
+  });
+  $("cloud-reload").onclick = action(async () => {
+    if (!connection) throw Error("Join a room first");
+    const epoch = generation,
+      info = connection;
+    if (inflight) await inflight;
+    if (epoch !== generation) return;
+    const current = await request(`/api/rooms/${info.id}`, {}, info);
+    if (epoch !== generation) return;
+    legacyPending = false;
+    pending = [];
+    confirmed = current.document;
+    revision = current.revision;
+    apply(current.document);
+    conflict = false;
+    $("cloud-conflict").hidden = true;
+    status("Loaded shared version");
+  });
+  $("cloud-overwrite").onclick = action(async () => {
+    if (!connection) throw Error("Join a room first");
+    const epoch = generation,
+      info = connection;
+    if (inflight) await inflight;
+    if (epoch !== generation) return;
+    const current = await request(`/api/rooms/${info.id}`, {}, info);
+    if (epoch !== generation) return;
+    revision = current.revision;
+    conflict = false;
+    $("cloud-conflict").hidden = true;
+    if (protocol >= 2) {
+      confirmed = current.document;
+      pending = [];
+      const ops = Ops.diff(current.document, window.design.getDocument(), { ignore: LOCAL_KEYS });
+      if (ops.length) queueOps(ops);
+      await flushOps();
+      return;
+    }
+    legacyPending = true;
+    await flush();
+  });
+
+  // ---- roles & access -------------------------------------------------------------------------
+  function setRole(next) {
+    role = next;
+    $("cloud-role").textContent = ROLE_LABEL[next] || "Not connected";
+    $("cloud-owner-tools").hidden = next !== "owner";
+    $("cloud-claim").hidden = !(
+      next === "owner" &&
+      connection?.token &&
+      sessionFor(connection.server)
+    );
+    document.body.classList.toggle("cloud-read-only", !!connection && !!next && !canEdit());
+  }
+  function listItem(text, buttons = []) {
+    const li = document.createElement("li");
+    const span = document.createElement("span");
+    span.textContent = text;
+    li.append(span);
+    for (const [label, handler, extra] of buttons) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      if (extra) Object.assign(button.dataset, extra);
+      button.onclick = action(handler);
+      li.append(button);
+    }
+    return li;
+  }
+  function renderAccess(data) {
+    const members = $("cloud-members"),
+      links = $("cloud-links");
+    members.replaceChildren();
+    links.replaceChildren();
+    if (!data) {
+      setRole(null);
+      return;
+    }
+    for (const member of data.members || []) {
+      const self = account && member.accountId === account.account.id;
+      const buttons = [];
+      if (role === "owner") {
+        const select = document.createElement("select");
+        select.setAttribute("aria-label", `Role for ${member.email}`);
+        select.dataset.member = member.email;
+        for (const value of ["owner", "editor", "commenter", "viewer"])
+          select.append(new Option(ROLE_LABEL[value], value, false, value === member.role));
+        select.onchange = action(() => invite(member.email, select.value));
+        const li = listItem(`${member.email}${self ? " (you)" : ""}`, [
+          ["Remove", () => removeMember(member.accountId), { removeMember: member.email }],
+        ]);
+        li.insertBefore(select, li.querySelector("button"));
+        members.append(li);
+        continue;
+      }
+      if (self) buttons.push(["Leave", () => removeMember(member.accountId)]);
+      members.append(
+        listItem(`${member.email} · ${ROLE_LABEL[member.role]}${self ? " (you)" : ""}`, buttons),
+      );
+    }
+    if (!members.children.length)
+      members.append(listItem("No account members yet. People with a link can still join."));
+    for (const link of data.links || [])
+      links.append(
+        listItem(`${ROLE_LABEL[link.role]} link${link.label ? " · " + link.label : ""}`, [
+          ["Revoke", () => revokeLink(link.id), { revokeLink: link.role }],
+        ]),
+      );
+  }
+  async function refreshAccess() {
+    if (!connection) throw Error("Create or join a room first");
+    const epoch = generation,
+      info = connection;
+    const data = await request(`/api/rooms/${info.id}/access`, {}, info);
+    if (epoch !== generation) return;
+    setRole(data.role);
+    renderAccess(data);
+  }
+  async function invite(email, memberRole) {
+    if (!connection) throw Error("Create or join a room first");
+    if (!sessionFor(connection.server)) throw Error("Sign in to invite people by email");
+    const result = await request(`/api/rooms/${connection.id}/members`, {
+      method: "POST",
+      body: JSON.stringify({ email, role: memberRole }),
+    });
+    status(
+      `${result.member.email} is now ${ROLE_LABEL[result.member.role].toLowerCase()}${result.emailed ? " and was emailed an invitation" : ""}`,
+    );
+    await refreshAccess();
+  }
+  async function removeMember(accountId) {
+    await request(`/api/rooms/${connection.id}/members/${accountId}`, { method: "DELETE" });
+    if (account && accountId === account.account.id && !connection.token) {
+      disconnect("You left the room. Local design retained.");
+      return;
+    }
+    await refreshAccess();
+  }
+  async function revokeLink(id) {
+    await request(`/api/rooms/${connection.id}/tokens/${id}`, { method: "DELETE" });
+    status("Link revoked");
+    await refreshAccess();
+  }
+  $("cloud-access-refresh").onclick = action(refreshAccess);
+  $("cloud-access-section").addEventListener("toggle", () => {
+    if ($("cloud-access-section").open && connection)
+      refreshAccess().catch((e) => status(e.message));
+  });
+  $("cloud-member-add").onclick = action(async () => {
+    const email = $("cloud-member-email").value.trim();
+    if (!email) throw Error("Enter an email address to invite");
+    await invite(email, $("cloud-member-role").value);
+    $("cloud-member-email").value = "";
+  });
+  $("cloud-link-create").onclick = action(async () => {
+    if (!connection) throw Error("Create or join a room first");
+    const info = connection,
+      linkRole = $("cloud-link-role").value;
+    const result = await request(
+      `/api/rooms/${info.id}/tokens`,
+      {
+        method: "POST",
+        body: JSON.stringify({ role: linkRole, label: `${ROLE_LABEL[linkRole]} link` }),
+      },
+      info,
+    );
+    const url = new URL(info.server);
+    url.hash = new URLSearchParams({ room: info.id, token: result.token }).toString();
+    $("cloud-link-output").value = url.href;
+    $("cloud-link-output").hidden = false;
+    status(`${ROLE_LABEL[linkRole]} link created`);
+    await refreshAccess();
+  });
+  $("cloud-rotate").onclick = action(async () => {
+    if (!connection) throw Error("Create or join a room first");
+    if (
+      !window.confirm(
+        "Rotate links? Every existing invite link stops working, including the ones you shared. Account members keep access.",
+      )
+    )
+      return;
+    const epoch = generation,
+      info = connection;
+    rotating = true;
+    try {
+      const result = await request(`/api/rooms/${info.id}/tokens/rotate`, { method: "POST" }, info);
+      if (epoch !== generation) return;
+      connection = { ...info, token: result.token };
+      updateInvite();
+      const old = socket;
+      socket = null;
+      if (old) {
+        old.onclose = null;
+        old.close();
+      }
+      openSocket(epoch, true);
+      $("cloud-link-output").hidden = true;
+      status(
+        `Rotated links: ${result.revoked} old link${result.revoked === 1 ? "" : "s"} revoked. Share the new invite.`,
+      );
+      await refreshAccess();
+    } finally {
+      rotating = false;
+    }
+  });
+  $("cloud-claim").onclick = action(async () => {
+    if (!connection) throw Error("Create or join a room first");
+    await request(`/api/rooms/${connection.id}/claim`, { method: "POST" });
+    status("Room added to your account. You can recover it from Account › Your rooms.");
+    await refreshAccess();
+    await refreshRooms();
+  });
+
+  // ---- comments -------------------------------------------------------------------------------
+  function addComment(comment, prepend) {
+    const list = $("cloud-comments");
+    if (list.querySelector(`[data-comment="${CSS.escape(comment.id)}"]`)) return;
+    const li = listItem(`${comment.author}: ${comment.text}`);
+    li.dataset.comment = comment.id;
+    if (prepend) list.prepend(li);
+    else list.append(li);
+  }
+  async function loadComments() {
+    if (!connection) return;
+    const epoch = generation;
+    const data = await request(`/api/rooms/${connection.id}/comments`);
+    if (epoch !== generation) return;
+    $("cloud-comments").replaceChildren();
+    for (const comment of data.comments) addComment(comment, false);
+  }
+  $("cloud-comments-section").addEventListener("toggle", () => {
+    if ($("cloud-comments-section").open) loadComments().catch((e) => status(e.message));
+  });
+  $("cloud-comment-send").onclick = action(async () => {
+    if (!connection) throw Error("Join a room first");
+    const text = $("cloud-comment-text").value.trim();
+    if (!text) throw Error("Write a comment first");
+    const selected = window.design.getSelection?.()[0] || null;
+    const result = await request(`/api/rooms/${connection.id}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        text,
+        author: $("cloud-name").value.trim(),
+        nodeId: selected,
+        pageId: window.design.getDocument().activePage,
+      }),
+    });
+    addComment(result.comment, true);
+    $("cloud-comment-text").value = "";
+  });
+
+  // ---- account --------------------------------------------------------------------------------
+  function saveAccount(next) {
+    account = next;
+    if (next) localStorage.setItem(ACCOUNT_KEY, JSON.stringify(next));
+    else localStorage.removeItem(ACCOUNT_KEY);
+    renderAccount();
+    window.dispatchEvent(
+      new CustomEvent("cloud-account-changed", { detail: next ? { ...next.account } : null }),
+    );
+  }
+  function renderAccount() {
+    const signedIn = !!account;
+    $("cloud-signed-out").hidden = signedIn;
+    $("cloud-signed-in").hidden = !signedIn;
+    if (signedIn) {
+      $("cloud-account").textContent =
+        `Signed in as ${account.account.email} on ${new URL(account.server).host}`;
+      $("cloud-handle").value = account.account.handle;
+      $("cloud-display-name").value = account.account.displayName;
+      $("cloud-avatar").value = account.account.avatarUrl || "";
+    }
+    if (connection) setRole(role);
+  }
+  const accountRequest = (path, options = {}) => {
+    if (!account) throw Error("Sign in first");
+    return request(path, options, { server: account.server });
+  };
+  async function verify(code, server) {
+    let token = code.trim();
+    if (/^https?:/.test(token)) {
+      const url = new URL(token);
+      server = url.origin;
+      token = new URLSearchParams(url.hash.slice(1)).get("signin") || "";
+    }
+    if (!/^[0-9a-f]{64}$/.test(token)) throw Error("Paste the sign-in link from the email");
+    const result = await request(
+      "/api/auth/verify",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          token,
+          label: window.desktop ? "Verynize desktop" : "Verynize web",
+        }),
+      },
+      { server, session: false },
+    );
+    saveAccount({ server, session: result.session, account: result.account });
+    $("cloud-signin-code").value = "";
+    status(`Signed in as ${result.account.email}`);
+    refreshRooms().catch(() => {});
+  }
+  $("cloud-signin-start").onclick = action(async () => {
+    const email = $("cloud-email").value.trim();
+    if (!email) throw Error("Enter your email address");
+    await request(
+      "/api/auth/start",
+      { method: "POST", body: JSON.stringify({ email }) },
+      { server: base(), session: false },
+    );
+    status(
+      `Check ${email} for a sign-in link, then paste it below. It works once, for 15 minutes.`,
+    );
+  });
+  $("cloud-signin-verify").onclick = action(() => verify($("cloud-signin-code").value, base()));
+  $("cloud-profile-save").onclick = action(async () => {
+    const result = await accountRequest("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify({
+        handle: $("cloud-handle").value,
+        displayName: $("cloud-display-name").value,
+        avatarUrl: $("cloud-avatar").value,
+      }),
+    });
+    saveAccount({ ...account, account: result.account });
+    status(`Profile saved · ${account.server}${result.profilePath}`);
+  });
+  $("cloud-profile-open").onclick = action(async () => {
+    const href = `${account.server}/u/${account.account.handle}`;
+    if (window.desktop?.openExternal) await window.desktop.openExternal(href);
+    else window.open(href, "_blank", "noopener");
+  });
+  async function signOut(everywhere) {
+    if (!account) return;
+    passkeyRun++;
+    $("cloud-passkeys").replaceChildren();
+    const ended = account;
+    try {
+      await request(
+        everywhere ? "/api/auth/signout-all" : "/api/auth/signout",
+        { method: "POST" },
+        { server: ended.server },
+      );
+    } finally {
+      saveAccount(null);
+      $("cloud-my-rooms").replaceChildren();
+      if (connection && !connection.token) disconnect("Signed out. Local design retained.");
+    }
+    status(everywhere ? "Signed out on every device" : "Signed out");
+  }
+  $("cloud-signout").onclick = action(() => signOut(false));
+  $("cloud-signout-all").onclick = action(() => signOut(true));
+  // ---- passkeys ---------------------------------------------------------------------------------
+  // The ceremony runs on the server's /passkey page (a file:// renderer cannot be a WebAuthn relying
+  // party). Sign-in uses a handoff: this window keeps the secret and claims the session afterwards.
+  let passkeyRun = 0;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function openPasskeyPage(server, hash) {
+    const url = `${server}/passkey#${hash}`;
+    if (window.desktop?.cloudPasskeyOpen) await window.desktop.cloudPasskeyOpen({ url });
+    else window.open(url, "verynize-passkey", "popup,width=440,height=520");
+  }
+  const closePasskeyPage = () => window.desktop?.cloudPasskeyClose?.().catch(() => {});
+  async function waitFor(run, check) {
+    const until = Date.now() + 5 * 60 * 1000;
+    while (Date.now() < until) {
+      if (run !== passkeyRun) return null;
+      const result = await check();
+      if (result) return result;
+      await sleep(800);
+    }
+    throw Error("The passkey request timed out");
+  }
+  function renderPasskeys(list) {
+    const target = $("cloud-passkeys");
+    target.replaceChildren();
+    for (const item of list)
+      target.append(
+        listItem(
+          `${item.label}${item.lastUsedAt ? " · used " + new Date(item.lastUsedAt).toLocaleDateString() : ""}`,
+          [
+            [
+              "Remove",
+              async () => {
+                if (!window.confirm("Remove this passkey? It will no longer sign you in.")) return;
+                await accountRequest(`/api/me/passkeys/${item.id}`, { method: "DELETE" });
+                await refreshPasskeys();
+              },
+              { removePasskey: item.id },
+            ],
+          ],
+        ),
+      );
+    if (!list.length) target.append(listItem("No passkeys yet."));
+  }
+  async function refreshPasskeys() {
+    if (!account) return [];
+    const data = await accountRequest("/api/me/passkeys");
+    renderPasskeys(data.passkeys);
+    return data.passkeys;
+  }
+  $("cloud-passkey-add").onclick = action(async () => {
+    const run = ++passkeyRun,
+      before = (await refreshPasskeys()).length;
+    const { ticket } = await accountRequest("/api/auth/passkeys/ticket", {
+      method: "POST",
+      body: "{}",
+    });
+    await openPasskeyPage(account.server, `mode=register&ticket=${ticket}`);
+    status("Create the passkey in the new window…");
+    const list = await waitFor(run, async () => {
+      const items = await refreshPasskeys();
+      return items.length > before ? items : null;
+    });
+    if (!list) return;
+    closePasskeyPage();
+    status("Passkey added. You can now sign in with it.");
+  });
+  $("cloud-passkey-signin").onclick = action(async () => {
+    const run = ++passkeyRun,
+      server = base();
+    const email = $("cloud-email").value.trim();
+    // Embedded windows have no passkey chooser, so the desktop names the account by email.
+    if (window.desktop && !email) throw Error("Enter your email, then sign in with a passkey");
+    const handoff = await request(
+      "/api/auth/handoff",
+      { method: "POST", body: "{}" },
+      { server, session: false },
+    );
+    await openPasskeyPage(
+      server,
+      `mode=signin&handoff=${handoff.id}${email ? `&email=${encodeURIComponent(email)}` : ""}`,
+    );
+    status("Use your passkey in the new window…");
+    const result = await waitFor(run, async () => {
+      const response = await fetch(server + "/api/auth/handoff/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: handoff.id,
+          secret: handoff.secret,
+          label: window.desktop ? "Verynize desktop (passkey)" : "Verynize web (passkey)",
+        }),
+      });
+      const data = await response.json();
+      if (response.status === 200) return data;
+      if (response.status !== 202) throw Error(data.error || "Passkey sign-in failed");
+      return null;
+    });
+    if (!result) return;
+    closePasskeyPage();
+    saveAccount({ server, session: result.session, account: result.account });
+    status(`Signed in with a passkey as ${result.account.email}`);
+    refreshRooms().catch(() => {});
+    refreshPasskeys().catch(() => {});
+  });
+
+  async function refreshRooms() {
+    if (!account) return;
+    const server = account.server;
+    const data = await accountRequest("/api/me/rooms");
+    const list = $("cloud-my-rooms");
+    list.replaceChildren();
+    for (const item of data.rooms) {
+      const buttons = [
+        [
+          "Open",
+          async () => {
+            if (!window.confirm("Open this shared design as a separate file?")) return;
+            await connect({ server, id: item.id });
+          },
+          { openRoom: item.id },
+        ],
+      ];
+      if (item.role === "owner")
+        buttons.push([
+          "New owner link",
+          async () => {
+            // Recovery: the owner account replaces every capability link, then opens the room with the new one.
+            if (
+              !window.confirm(
+                "Create a new owner link? Existing invite links for this room stop working.",
+              )
+            )
+              return;
+            const result = await request(
+              `/api/rooms/${item.id}/tokens/rotate`,
+              { method: "POST" },
+              { server },
+            );
+            await connect({ server, id: item.id, token: result.token });
+            status("Recovered owner access with a new link. Old links were revoked.");
+          },
+          { recoverRoom: item.id },
+        ]);
+      list.append(listItem(`${item.title} · ${ROLE_LABEL[item.role]}`, buttons));
+    }
+    if (!data.rooms.length)
+      list.append(listItem("No rooms yet. Rooms you create while signed in appear here."));
+  }
+  $("cloud-rooms-refresh").onclick = action(refreshRooms);
+  $("cloud-account-section").addEventListener("toggle", () => {
+    if ($("cloud-account-section").open && account) {
+      refreshRooms().catch((e) => status(e.message));
+      refreshPasskeys().catch((e) => status(e.message));
+    }
+  });
+  renderAccount();
+
+  // ---- published apps -------------------------------------------------------------------------
+  const appStatus = (text) => {
+    $("cloud-app-status").textContent = text;
+  };
+  async function detectApp() {
+    if (!window.desktop?.cloudAppDetect) {
+      $("cloud-app-project").textContent = "App publishing runs in the Verynize desktop app.";
+      return;
+    }
+    try {
+      const info = await window.desktop.cloudAppDetect();
+      $("cloud-app-project").textContent = info.command
+        ? `Builds with “${info.command}”.`
+        : "No build script found; the output folder is published as is.";
+      if (!$("cloud-app-name").value) $("cloud-app-name").value = info.name;
+      if (!$("cloud-app-output").value && info.outputDir)
+        $("cloud-app-output").placeholder = info.outputDir;
+    } catch (e) {
+      $("cloud-app-project").textContent = e.message;
+    }
+  }
+  function renderVersions(data) {
+    const list = $("cloud-app-versions");
+    list.replaceChildren();
+    for (const version of data.versions) {
+      const live = data.app.activeVersion === version.version;
+      const buttons = live
+        ? []
+        : [
+            [
+              "Make live",
+              async () => {
+                await accountRequest(`/api/apps/${data.app.id}/activate`, {
+                  method: "POST",
+                  body: JSON.stringify({ version: version.version }),
+                });
+                appStatus(`Version ${version.version} is live`);
+                await loadVersions(data.app.id);
+              },
+              { activateVersion: String(version.version) },
+            ],
+          ];
+      list.append(
+        listItem(
+          `v${version.version}${live ? " · live" : ""} · ${version.files} files · ${Math.max(1, Math.round(version.bytes / 1024))} KB`,
+          buttons,
+        ),
+      );
+    }
+  }
+  async function loadVersions(id) {
+    const data = await accountRequest(`/api/apps/${id}`);
+    app = data.app;
+    renderVersions(data);
+    const href = data.app.activeVersion ? `${account.server}${data.app.path}` : "";
+    $("cloud-app-url").textContent = href;
+    if (href) $("cloud-app-url").href = href;
+    else $("cloud-app-url").removeAttribute("href");
+  }
+  $("cloud-app-section").addEventListener("toggle", () => {
+    if ($("cloud-app-section").open) detectApp();
+  });
+  $("cloud-app-publish").onclick = action(async () => {
+    if (!window.desktop?.cloudAppPublish)
+      throw Error("App publishing runs in the Verynize desktop app");
+    if (!account) throw Error("Sign in (Account) before publishing an app");
+    appStatus("Building and uploading…");
+    try {
+      const result = await window.desktop.cloudAppPublish({
+        server: account.server,
+        session: account.session,
+        name: $("cloud-app-name").value.trim(),
+        outputDir: $("cloud-app-output").value.trim() || undefined,
+      });
+      // Status last, so the URL and version list are already shown when it reports success.
+      await loadVersions(result.app.id);
+      appStatus(
+        `Published version ${result.version} (${result.files} files from ${result.outputDir})`,
+      );
+    } catch (e) {
+      appStatus(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
+      throw e;
+    }
+  });
+  $("cloud-app-unpublish").onclick = action(async () => {
+    if (!app) throw Error("Publish an app first");
+    if (!window.confirm(`Unpublish ${app.name}? Its public URL stops working; versions are kept.`))
+      return;
+    await accountRequest(`/api/apps/${app.id}/publish`, { method: "DELETE" });
+    appStatus("App unpublished");
+    await loadVersions(app.id);
+  });
+
+  // ---- links opened in a browser ----------------------------------------------------------------
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (params.has("signin") && location.protocol.startsWith("http")) {
+    $("cloud-dialog").showModal();
+    verify(params.get("signin"), location.origin)
+      .then(() => history.replaceState(null, "", location.pathname))
+      .catch((e) => status(e.message));
+  }
+  if (params.has("room") && (params.has("token") || sessionFor(location.origin))) {
+    $("cloud-dialog").showModal();
+    status("Invite detected. Join invite to load this shared design.");
+    $("cloud-connect").onclick = action(async () => {
+      if (!window.confirm("Load this shared design?")) return;
+      await connect({
+        server: location.origin,
+        id: params.get("room"),
+        token: params.get("token"),
+      });
+    });
+  }
+  if (params.has("public")) {
+    const epoch = generation;
+    fetch(`/api/public/${encodeURIComponent(params.get("public"))}`)
+      .then(async (r) => {
+        if (!r.ok) throw Error("Published design not found");
+        const data = await r.json();
+        if (epoch !== generation) return;
+        apply(data.document);
+        const frame = document.createElement("iframe");
+        frame.title = "Published design";
+        frame.sandbox = window.design
+          .getDocument()
+          .pages.some((p) => p.nodes.some((n) => n.type === "shader"))
+          ? "allow-scripts"
+          : "";
+        frame.srcdoc = window.design.exportHTML();
+        Object.assign(frame.style, {
+          position: "fixed",
+          inset: "0",
+          width: "100vw",
+          height: "100vh",
+          border: "0",
+          zIndex: 1000,
+          background: "white",
+        });
+        document.body.append(frame);
+      })
+      .catch((e) => {
+        if (epoch !== generation) return;
+        status(e.message);
+        $("cloud-dialog").showModal();
+      });
+  }
 })();

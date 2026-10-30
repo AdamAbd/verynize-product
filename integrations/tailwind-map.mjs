@@ -2,11 +2,27 @@
 // Tailwind v4 engine (tailwind-engine.mjs). Every class that cannot be represented is reported
 // with a reason; nothing is dropped silently.
 import { compileClass, sortClasses, resolveValue } from './tailwind-engine.mjs';
-import { lengthOf, cssColorToHex, normalizeColorsIn, splitTop } from './codec-css.mjs';
+import { lengthOf, cssColorToHex, normalizeColorsIn, splitTop, matchMedia } from './codec-css.mjs';
 import { BLEND_MODES, FILTERS } from './node-style.mjs';
 
 const FILTER_TYPES = { blur: 'blur', brightness: 'brightness', contrast: 'contrast', grayscale: 'grayscale', 'hue-rotate': 'hueRotate', invert: 'invert', saturate: 'saturate', sepia: 'sepia' };
 
+// Mask layers with embedded images (url("data:image/…;base64,…")) become structured masks: image layers
+// keep their data URL, other layers stay CSS gradients (type 'custom'). Anything else stays unsafe.
+const MASK_DATA_URL = /^url\(\s*(["']?)(data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+)\1\s*\)$/;
+function maskLayersOf(value) {
+  const parts = []; let depth = 0, start = 0;
+  for (let i = 0; i < value.length; i++) { const ch = value[i]; if (ch === '(') depth++; else if (ch === ')') depth--; else if (ch === ',' && depth === 0) { parts.push(value.slice(start, i).trim()); start = i + 1; } }
+  parts.push(value.slice(start).trim());
+  const out = [];
+  for (const part of parts) {
+    const image = part.match(MASK_DATA_URL);
+    if (image) out.push({ type: 'image', src: image[2] });
+    else if (/^(repeating-)?(linear|radial|conic)-gradient\(/i.test(part) && SAFE_CSS(part)) out.push({ type: 'custom', css: normalizeColorsIn(part) });
+    else return null;
+  }
+  return out.some(m => m.type === 'image') && out.length <= 8 ? out : null;
+}
 export const cssVarForToken = name => '--' + String(name).trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 export const SAFE_CSS = value => typeof value === 'string' && value.length <= 4000 && !/[;{}<>\\]/.test(value) && !/url\s*\(/i.test(value);
 const round = value => Math.round(Number(value) * 1000) / 1000;
@@ -41,8 +57,10 @@ const CORNERS = { 'border-radius': [0, 1, 2, 3], 'border-top-left-radius': [0], 
  * Geometry entries are {px} | {frac} | {frac, px} | {auto} | {fit}. Color-like props are split into
  * `fill` (background) and `ink` (text color) so callers can apply them by node type.
  */
-export function parseClasses(className, { tokens = {} } = {}) {
+export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
   const out = { props: {}, has: new Set(), ignored: [], warnings: [] };
+  const variantClasses = [];
+  let hiddenBy = null;
   const set = (key, value) => { out.props[key] = value; out.has.add(key); };
   const ignore = (cls, why) => { if (!out.ignored.includes(cls)) out.ignored.push(cls); out.warnings.push(`${cls}: ${why}`); };
   const tokenVars = new Map(Object.entries(tokens).map(([name, value]) => [cssVarForToken(name), value]));
@@ -63,9 +81,21 @@ export function parseClasses(className, { tokens = {} } = {}) {
   for (const cls of sortClasses(tailwind)) {
     const result = compileClass(cls);
     if (result.kind === 'invalid') { ignore(cls, 'not a Tailwind v4 class (unknown utility or invalid value)'); continue; }
-    if (result.kind === 'variant') { ignore(cls, `variant ${result.variants.join(':')}: is ignored — responsive, state and dark-mode variants are not represented on the canvas; only base classes apply`); continue; }
+    if (result.kind === 'variant') {
+      // Variant classes are kept on the layer (variantClasses) and written back on export. Responsive
+      // variants whose media conditions match the import viewport also apply, after the base classes.
+      variantClasses.push(cls);
+      const applies = viewport && result.plain && result.media.length > 0 && result.media.every(q => matchMedia(q, viewport));
+      if (!applies) { ignore(cls, `variant ${result.variants.join(':')}: is ignored — ${viewport ? 'its condition does not match the import viewport or it is a state variant' : 'responsive, state and dark-mode variants are not represented on the canvas'}; only base classes apply (the class is kept on the layer and written back on export)`); continue; }
+    }
     if (result.kind === 'unsupported') { ignore(cls, `produces only ${result.extras.join(', ')} rules, which the canvas does not represent`); continue; }
     for (const decl of result.decls) {
+      // `hidden` (display:none) hides the layer without discarding its layout class (flex, grid…);
+      // a matching responsive variant that sets a display value shows it again (hidden md:flex).
+      if (decl.property === 'display') {
+        if (decl.value.trim() === 'none') { hiddenBy = cls; continue; }
+        else if (result.kind === 'variant') hiddenBy = null;
+      }
       const prev = decls.get(decl.property);
       if (prev && prev.important && !decl.important) continue;
       decls.set(decl.property, { ...decl, cls });
@@ -270,7 +300,22 @@ export function parseClasses(className, { tokens = {} } = {}) {
     if (values.every(v => v === values[0])) set('strokeWidth', values[0]);
     else { set('strokeWidths', values); set('strokeWidth', Math.max(...values.map(v => v ?? 0))); }
   }
-  for (const p of ['border-color', ...SIDES.map(s => `border-${s}-color`), 'border-inline-color', 'border-block-color']) if ((d = take(p))) { const c = color(d); if (c && !c.inherit) { set('strokeColor', c.color); if (p !== 'border-color') out.warnings.push(`${d.cls}: per-side border colors are rendered with one color`); } }
+  {
+    // Border colour: one colour (strokeColor, strokeToken when it is a colour variable) plus per-side
+    // colours (strokeColors, top/right/bottom/left) when a side states its own.
+    let base = null; const sides = [null, null, null, null];
+    for (const p of ['border-color', ...SIDES.map(s => `border-${s}-color`), 'border-inline-color', 'border-block-color']) if ((d = take(p))) {
+      const c = color(d); if (!c || c.inherit) continue;
+      if (p === 'border-color') base = c;
+      else for (const i of p === 'border-inline-color' ? [1, 3] : p === 'border-block-color' ? [0, 2] : [SIDES.indexOf(p.slice(7, -6))]) sides[i] = c;
+    }
+    if (base) { set('strokeColor', base.color); set('strokeToken', base.token || ''); }
+    if (sides.some(Boolean)) {
+      const fallback = base || sides.find(Boolean);
+      if (!base) { set('strokeColor', fallback.color); set('strokeToken', ''); }
+      set('strokeColors', sides.map(c => { const v = c || fallback; return v.token ? { color: v.color, token: v.token } : { color: v.color }; }));
+    }
+  }
   const corners = [undefined, undefined, undefined, undefined];
   for (const [p, idx] of Object.entries(CORNERS)) {
     if (!(d = take(p))) continue;
@@ -322,6 +367,8 @@ export function parseClasses(className, { tokens = {} } = {}) {
       const raw = decls.has('outline-color') ? resolve(decls.get('outline-color').value).value : null;
       const hex = cssColorToHex(raw && !/^currentcolor$/i.test(raw) ? raw : ink || '#000000');
       if (hex && hex !== 'transparent') set('outlineColor', hex); else set('outlineWidth', 0);
+      const bound = String(decls.get('outline-color')?.value || '').trim().match(/^var\(\s*(--[a-zA-Z0-9_-]+)\s*\)$/);
+      set('outlineToken', bound && tokenByVar.has(bound[1]) ? tokenByVar.get(bound[1]) : '');
       const offset = decls.has('outline-offset') ? lengthOf(resolve(decls.get('outline-offset').value).value || '0')?.px : 0;
       if (Number.isFinite(offset)) set('outlineOffset', Math.max(-1000, Math.min(1000, offset)));
     }
@@ -389,7 +436,7 @@ export function parseClasses(className, { tokens = {} } = {}) {
   if (decls.has('text-wrap')) { const v = resolve(decls.get('text-wrap').value).value; if (v === 'balance' || v === 'pretty') set('textWrap', v); }
   if ((d = take('object-fit'))) { if (['cover', 'contain', 'fill', 'none', 'scale-down'].includes(d.resolved)) set('objectFit', d.resolved); }
   // Arbitrary properties that map to node fields.
-  if ((d = take('mask-image')) || (d = take('-webkit-mask-image'))) { if (d.resolved === 'none') set('mask', ''); else if (SAFE_CSS(d.resolved)) set('mask', normalizeColorsIn(d.resolved)); else ignore(d.cls, 'unsafe mask'); }
+  if ((d = take('mask-image')) || (d = take('-webkit-mask-image'))) { if (d.resolved === 'none') set('mask', ''); else if (SAFE_CSS(d.resolved)) set('mask', normalizeColorsIn(d.resolved)); else { const layers = maskLayersOf(d.resolved); if (layers) { set('mask', ''); set('maskLayers', layers); } else ignore(d.cls, 'unsafe mask'); } }
   if ((d = take('animation'))) { if (['aurora', 'sunset', 'ocean'].includes(d.resolved)) set('animated', d.resolved); else if (d.resolved === 'none') set('animated', ''); else ignore(d.cls, 'animations are not rendered on the canvas'); }
   if ((d = take('layout'))) { if (['free', 'flex', 'grid', 'block', 'inline'].includes(d.resolved)) set('layout', d.resolved); else ignore(d.cls, 'unknown layout'); }
 
@@ -399,6 +446,8 @@ export function parseClasses(className, { tokens = {} } = {}) {
     if (NO_OP.has(property)) continue;
     ignore(decl.cls, `CSS property ${property} is not supported by the canvas`);
   }
+  if (hiddenBy) set('hidden', true);
+  if (variantClasses.length) set('variantClasses', classes.filter(cls => variantClasses.includes(cls)).join(' '));
   return out;
 }
 

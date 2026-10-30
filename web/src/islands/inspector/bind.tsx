@@ -1,12 +1,14 @@
 // "Apply variable" for numeric/typography properties (design/wonder 26–27): a diamond button inside a field
 // opens the compatible Dimension/Number variables; a bound field shows the variable as a chip until detached.
 import type { ReactNode } from "react";
-import { Diamond, Unlink } from "lucide-react";
+import { Diamond, Folder, Unlink } from "lucide-react";
 import type { DesignDocument } from "@/lib/bridge";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -17,6 +19,8 @@ import {
   bindVariable,
   bindingsOf,
   createVariable,
+  groupByFolder,
+  leafOf,
   valueLabel,
   variablesOf,
   VARIABLE_TYPES,
@@ -44,17 +48,36 @@ function BindItems({ doc, node, selection, field }: BindProps) {
         Apply variable
       </div>
       <DropdownMenuSeparator />
-      {vars.map(([name, v]) => (
-        <DropdownMenuItem
-          key={name}
-          onSelect={() => bindVariable(doc, selection, field, name)}
-          data-variable={name}
+      {groupByFolder(vars).map(({ folder, items }) => (
+        <DropdownMenuGroup
+          key={folder || "/"}
+          data-variable-folder={folder}
+          aria-label={folder || undefined}
         >
-          <span className="min-w-0 flex-1 truncate">{name}</span>
-          <span className={cn("text-muted-foreground", bound === name && "text-foreground")}>
-            {valueLabel(v)}
-          </span>
-        </DropdownMenuItem>
+          {folder ? (
+            <DropdownMenuLabel>
+              <span className="flex min-w-0 items-center gap-1">
+                <Folder className="size-3.5 shrink-0" aria-hidden />
+                <span className="min-w-0 truncate">{folder}</span>
+              </span>
+            </DropdownMenuLabel>
+          ) : null}
+          {items.map(([name, v]) => (
+            <DropdownMenuItem
+              key={name}
+              onSelect={() => bindVariable(doc, selection, field, name)}
+              data-variable={name}
+              aria-label={name}
+            >
+              <span className={cn("min-w-0 flex-1 truncate", folder && "ml-4")}>
+                {folder ? leafOf(name) : name}
+              </span>
+              <span className={cn("text-muted-foreground", bound === name && "text-foreground")}>
+                {valueLabel(v)}
+              </span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
       ))}
       {!vars.length ? <DropdownMenuItem disabled>No matching variables</DropdownMenuItem> : null}
       <DropdownMenuSeparator />

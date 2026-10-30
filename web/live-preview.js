@@ -54,25 +54,75 @@
       }
     } catch (error) { paint(entry, 'error', error.message); }
   }
-  async function capture(entry) {
+  // Captured documents are inserted with fresh ids; embedded fonts merge into the document's fontFaces.
+  function insertCaptured(captured, place) {
+    const doc = window.design.getDocument(), page = doc.pages.find(p => p.id === doc.activePage);
+    const nodes = captured.document.pages.flatMap(p => p.nodes), ids = new Map(nodes.map(n => [n.id, crypto.randomUUID()]));
+    const origin = place(page);
+    page.nodes.push(...nodes.map(n => ({...n, id: ids.get(n.id), parentId: n.parentId ? ids.get(n.parentId) : null, ...(!n.parentId ? {x: n.x + origin.x, y: n.y + origin.y} : {})})));
+    const faces = [...(doc.fontFaces || [])], key = f => [f.family, f.weight, f.style, f.unicodeRange || '', f.src].join('|'), known = new Set(faces.map(key));
+    for (const face of captured.document.fontFaces || []) if (!known.has(key(face)) && faces.length < 40) { faces.push(face); known.add(key(face)); }
+    if (faces.length) doc.fontFaces = faces;
+    window.design.setDocument(doc);
+  }
+  async function capture(entry, region = null) {
     activate(entry);
     const fileId = window.fileLibrary?.currentId;
     entry.capturing=true;changed();
     try {
-      const captured = await window.desktop.captureLivePreview({url: entry.url});
+      const captured = await window.desktop.captureLivePreview({url: entry.url, ...(region ? {region} : {})});
       if (fileId !== window.fileLibrary?.currentId) throw Error('Document changed during capture.');
-      if (captured.document) {
-        const doc = window.design.getDocument(), page = doc.pages.find(p => p.id === doc.activePage);
-        const nodes = captured.document.pages.flatMap(p => p.nodes), ids = new Map(nodes.map(n => [n.id, crypto.randomUUID()]));
-        page.nodes.push(...nodes.map(n => ({...n, id: ids.get(n.id), parentId: n.parentId ? ids.get(n.parentId) : null, ...(!n.parentId ? {x: n.x + entry.node.x + entry.node.w + 80, y: n.y + entry.node.y} : {})})));
-        window.design.setDocument(doc);
-      } else window.design.importHTML(captured.html);
+      if (captured.document) insertCaptured(captured, () => ({x: entry.node.x + entry.node.w + 80, y: entry.node.y}));
+      else window.design.importHTML(captured.html);
       entry.controls.message.textContent = 'Captured editable layers beside the preview.';
     } catch (error) { entry.controls.message.textContent = error.message; }
     finally { entry.capturing=false;changed(); }
   }
+  // Interactive region picker over a page rendering (live iframe or screenshot): hovering highlights the
+  // element under the pointer, a click takes that element's box, a drag takes a free rectangle, Esc cancels.
+  // Coordinates are page viewport CSS px (`width`×`height`), independent of the canvas zoom.
+  function pickRegion(host, {width, height, elementAt}) {
+    return new Promise(resolve => {
+      const layer = document.createElement('div');
+      layer.className = 'capture-picker'; layer.tabIndex = -1;
+      layer.innerHTML = '<div class="capture-picker-hint">Click an element or drag a region · Esc to cancel</div><div class="capture-picker-highlight" hidden><span></span></div><div class="capture-picker-rect" hidden></div>';
+      host.append(layer);
+      layer.cancel = () => finish(null);
+      const [, highlight, rect] = layer.children;
+      let hovered = null, start = null, last = null, pending = false, queued = null, done = false;
+      const toPage = event => { const r = layer.getBoundingClientRect(); return {x: Math.max(0, Math.min(width, (event.clientX - r.left) * width / r.width)), y: Math.max(0, Math.min(height, (event.clientY - r.top) * height / r.height))}; };
+      const place = (el, box) => { const sx = layer.offsetWidth / width, sy = layer.offsetHeight / height; Object.assign(el.style, {left: box.x * sx + 'px', top: box.y * sy + 'px', width: box.width * sx + 'px', height: box.height * sy + 'px'}); el.hidden = false; };
+      const span = (a, b) => ({x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y)});
+      const finish = box => {
+        if (done) return; done = true; layer.remove(); document.removeEventListener('keydown', onKey, true);
+        if (!box) return resolve(null);
+        const x = Math.max(0, Math.floor(box.x)), y = Math.max(0, Math.floor(box.y));
+        resolve({x, y, width: Math.max(1, Math.min(width - x, Math.ceil(box.x + box.width) - x)), height: Math.max(1, Math.min(height - y, Math.ceil(box.y + box.height) - y))});
+      };
+      const onKey = event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(null); } };
+      async function probe(point) {
+        if (pending) { queued = point; return; }
+        pending = true;
+        try { const box = await elementAt(point); if (!done && !start) { hovered = box; if (box) { place(highlight, box); highlight.firstChild.textContent = box.label || ''; } else highlight.hidden = true; } } catch { hovered = null; }
+        pending = false;
+        if (queued) { const next = queued; queued = null; void probe(next); }
+      }
+      layer.addEventListener('pointerdown', event => { if (event.button !== 0) return; event.stopPropagation(); event.preventDefault(); layer.setPointerCapture(event.pointerId); start = last = toPage(event); });
+      layer.addEventListener('pointermove', event => { event.stopPropagation(); const point = toPage(event); if (start) { last = point; const box = span(start, point); if (box.width > 3 || box.height > 3) { highlight.hidden = true; place(rect, box); } } else void probe(point); });
+      layer.addEventListener('pointerup', event => { if (!start) return; event.stopPropagation(); const box = span(start, toPage(event)); start = null; finish(box.width > 3 || box.height > 3 ? box : hovered || null); });
+      document.addEventListener('keydown', onKey, true);
+      layer.focus();
+    });
+  }
+  async function pickAndCapture(entry) {
+    activate(entry);
+    if (entry.state !== 'running' || !entry.url) { entry.controls.message.textContent = 'Start the preview before picking a region.'; return; }
+    const wrap = entry.el.querySelector('.live-frame-wrap');
+    const region = await pickRegion(wrap, {width: entry.frame.clientWidth, height: entry.frame.clientHeight, elementAt: point => window.desktop.previewElementAt(point)});
+    if (region) await capture(entry, region);
+  }
   function create(node, el) {
-    el.innerHTML = `<div class="preview-breadcrumb"><span data-part="breadcrumb"></span><span class="preview-local">Local</span></div><section class="preview-surface"><div class="live-preview-bar"><button data-part="back" aria-label="Back">‹</button><button data-part="forward" aria-label="Forward">›</button><button data-part="live-reload" aria-label="Reload preview">↻</button><span data-part="state"></span><input data-part="live-url" aria-label="Preview path" value="/"/><button data-part="toggle">▶ Start</button><button data-part="live-expand" aria-label="Expand preview" aria-pressed="false">⤢</button></div><div class="live-frame-wrap"><iframe title="Running local application" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads"></iframe><div class="preview-placeholder" data-part="placeholder"><div class="preview-setup-card"><strong data-part="title">Ready to start your preview</strong><small data-part="project"></small><p data-part="message">Start this preview to connect to your local app.</p><button data-part="start">▶ Start preview</button></div></div></div></section><form class="preview-edit" hidden><label>Element selector<input name="selector" value="body"/></label><button type="button" data-part="inspect">Inspect</button><label>Text<input name="text"/></label><label>Text color<input name="color" placeholder="#ffffff"/></label><label>Background<input name="backgroundColor" placeholder="#171717"/></label><label>Font size<input name="fontSize" placeholder="16px"/></label><div><button type="submit">Apply</button><button type="button" data-part="undo">Undo</button></div><p role="status"></p></form>`;
+    el.innerHTML = `<div class="preview-breadcrumb"><span data-part="breadcrumb"></span><span class="preview-local">Local</span></div><section class="preview-surface"><div class="live-preview-bar"><button data-part="back" aria-label="Back">‹</button><button data-part="forward" aria-label="Forward">›</button><button data-part="live-reload" aria-label="Reload preview">↻</button><span data-part="state"></span><input data-part="live-url" aria-label="Preview path" value="/"/><button data-part="toggle">▶ Start</button><button data-part="live-pick" aria-label="Pick capture region" title="Capture a region">⬚</button><button data-part="live-expand" aria-label="Expand preview" aria-pressed="false">⤢</button></div><div class="live-frame-wrap"><iframe title="Running local application" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads"></iframe><div class="preview-placeholder" data-part="placeholder"><div class="preview-setup-card"><strong data-part="title">Ready to start your preview</strong><small data-part="project"></small><p data-part="message">Start this preview to connect to your local app.</p><button data-part="start">▶ Start preview</button></div></div></div></section><form class="preview-edit" hidden><label>Element selector<input name="selector" value="body"/></label><button type="button" data-part="inspect">Inspect</button><label>Text<input name="text"/></label><label>Text color<input name="color" placeholder="#ffffff"/></label><label>Background<input name="backgroundColor" placeholder="#171717"/></label><label>Font size<input name="fontSize" placeholder="16px"/></label><div><button type="submit">Apply</button><button type="button" data-part="undo">Undo</button></div><p role="status"></p></form>`;
     const controls = Object.fromEntries([...el.querySelectorAll('[data-part]')].map(control => [control.dataset.part, control]));
     const entry = {el, node, controls, frame: el.querySelector('iframe'), url: '', state: 'paused', mode:'select', inputToApp:false, fileId: window.fileLibrary?.currentId, identity: JSON.stringify([node.preview.root,node.preview.chatId])};
     entry.frame.style.pointerEvents='none';
@@ -87,6 +137,7 @@
     });
     el.addEventListener('pointerdown', () => activate(entry));
     controls.toggle.onclick = controls.start.onclick = () => void toggle(entry);
+    controls['live-pick'].onclick = () => void pickAndCapture(entry);
     controls['live-reload'].onclick = () => { if (entry.url) entry.frame.src = entry.url; };
     controls.back.onclick = async () => { activate(entry); try { await window.desktop.previewNavigate({direction:'back'}); } catch (error) { controls.message.textContent=error.message; } };
     controls.forward.onclick = async () => { activate(entry); try { await window.desktop.previewNavigate({direction:'forward'}); } catch (error) { controls.message.textContent=error.message; } };
@@ -140,7 +191,7 @@
   document.addEventListener('pointerdown',event=>{const entry=current();if(entry?.inputToApp&&!event.target.closest('#preview-toolbar')){releaseInput(entry);changed();}},true);
   window.addEventListener('message',event=>{const entry=current();if(entry?.inputToApp&&event.source===entry.frame.contentWindow&&event.data?.type==='verynize-preview-release-input'){releaseInput(entry);changed();}});
   window.addEventListener('bd:preview-input-released',()=>{for(const entry of entries.values())entry.inputToApp=false;changed();});
-  window.livePreview = {show, hide, reveal, ensure, renderNode, getSelectionState:selectionState,navigateMode,editMode,captureSelected:()=>{const entry=selected();return entry?capture(entry):Promise.resolve();},sendAllInput,openInBrowser, nodeElement: id => entries.get(id)?.el, getURL: () => current()?.url || '', getNodeId: () => activeId};
+  window.livePreview = {show, hide, reveal, ensure, renderNode, getSelectionState:selectionState,navigateMode,editMode,captureSelected:()=>{const entry=selected();return entry?capture(entry):Promise.resolve();},captureRegion:()=>{const entry=selected()||current();return entry?pickAndCapture(entry):Promise.resolve();},pickRegion,insertCaptured,sendAllInput,openInBrowser, nodeElement: id => entries.get(id)?.el, getURL: () => current()?.url || '', getNodeId: () => activeId};
   window.addEventListener('bd:preview-setup-state', event => {for(const entry of entries.values())if(entry.node.preview.root===event.detail.root){entry.settingUp=event.detail.state==='setting-up';paint(entry,event.detail.state==='failed'?'error':'starting',event.detail.message||'');}});
   window.design.subscribe(doc => {
     const alive = new Set(doc.pages.find(p => p.id === doc.activePage).nodes.filter(n => n.preview).map(n => n.id));
@@ -162,4 +213,80 @@
     }
   }, 1500);
   const button = document.createElement('button'); button.id = 'show-live-preview'; button.textContent = 'Running app'; button.onclick = async () => { const url = await window.askText('Local application URL', current()?.url || 'http://localhost:3000'); if (url) show(url); }; document.getElementById('preview').after(button);
+  // Embedded fonts (document.fontFaces, from web page capture) are registered in the editor page.
+  // Same rules as integrations/font-faces.mjs (exports); window.embeddedFontCss(markup) feeds app.js exports.
+  const fontFaceCss = faces => faces.map(f => `@font-face{font-family:${JSON.stringify(f.family)};font-weight:${f.weight};font-style:${f.style};font-display:block;src:url(${f.src})${f.unicodeRange ? ';unicode-range:' + f.unicodeRange : ''}}`).join('\n');
+  window.embeddedFontCss = markup => {
+    const faces = window.design.getDocument().fontFaces || [];
+    const text = markup === undefined ? null : String(markup).replace(/&quot;|&#0*34;/g, '"').replace(/&#0*39;|&apos;/g, "'").replace(/_/g, ' ').toLowerCase();
+    return fontFaceCss(text === null ? faces : faces.filter(f => text.includes(f.family.toLowerCase())));
+  };
+  let fontKey = '';
+  function syncEmbeddedFonts(doc) {
+    const faces = Array.isArray(doc.fontFaces) ? doc.fontFaces : [];
+    const key = faces.map(f => [f.family, f.weight, f.style, f.src.length, f.src.slice(-32)].join(':')).join('|');
+    if (key === fontKey) return;
+    fontKey = key;
+    let style = document.getElementById('bd-embedded-fonts');
+    if (!style) { style = document.createElement('style'); style.id = 'bd-embedded-fonts'; document.head.append(style); }
+    style.textContent = fontFaceCss(faces);
+  }
+  window.design.subscribe(syncEmbeddedFonts);
+  syncEmbeddedFonts(window.design.getDocument());
+  // Web page capture: load any http(s) page in an isolated hidden window, pick a region on its screenshot,
+  // and insert editable layers with embedded images, backgrounds, fonts, source mapping and states.
+  const web = document.createElement('section');
+  web.innerHTML = `<dialog id="capture-web-dialog" aria-labelledby="capture-web-title"><header><strong id="capture-web-title">Capture web page</strong><button id="capture-web-close" type="button">Close</button></header><p>The page opens in an isolated hidden browser session. Its images, backgrounds and custom fonts are embedded in this file.</p><form id="capture-web-form"><label>Page URL<input id="capture-web-url" type="url" required placeholder="https://example.com" autocomplete="url"></label><label>Viewport<select id="capture-web-size"><option value="1280x800">Desktop · 1280×800</option><option value="768x1024">Tablet · 768×1024</option><option value="390x844">Mobile · 390×844</option></select></label><label class="capture-web-check"><input id="capture-web-states" type="checkbox" checked> Record hover, focus and active states</label><div class="capture-web-actions"><button id="capture-web-load" type="submit">Load page</button><button id="capture-web-full" type="button" disabled>Capture whole viewport</button></div></form><div id="capture-web-stage" hidden><img id="capture-web-shot" alt="Screenshot of the loaded page"></div><p id="capture-web-status" role="status"></p></dialog>`;
+  document.body.append(web);
+  const $ = id => document.getElementById(id), dialog = $('capture-web-dialog');
+  let loaded = null;
+  const say = text => { $('capture-web-status').textContent = text; };
+  const viewport = () => { const [width, height] = $('capture-web-size').value.split('x').map(Number); return {width, height}; };
+  async function captureWeb(region) {
+    if (!loaded) return;
+    const fileId = window.fileLibrary?.currentId;
+    $('capture-web-full').disabled = $('capture-web-load').disabled = true;
+    say('Capturing editable layers…');
+    try {
+      const captured = await window.desktop.captureRemote({url: loaded.url, width: loaded.width, height: loaded.height, ...(region ? {region} : {}), interactions: $('capture-web-states').checked});
+      if (fileId !== window.fileLibrary?.currentId) throw Error('Document changed during capture.');
+      insertCaptured(captured, page => ({x: page.nodes.length ? Math.max(...page.nodes.filter(n => !n.parentId).map(n => n.x + n.w)) + 100 : 80, y: 80}));
+      const fonts = captured.document.fontFaces?.length || 0;
+      say('Captured ' + (captured.document.pages[0].nodes.length - 1) + ' layers' + (fonts ? ' and ' + fonts + ' embedded font' + (fonts > 1 ? 's' : '') : '') + '.');
+      dialog.dataset.result = 'captured';
+      dialog.close();
+    } catch (error) { say(error.message); }
+    finally { $('capture-web-full').disabled = !loaded; $('capture-web-load').disabled = false; }
+  }
+  async function pickWeb() {
+    const region = await pickRegion($('capture-web-stage'), {width: loaded.width, height: loaded.height, elementAt: point => {
+      let best = null;
+      for (const box of loaded?.boxes || []) if (point.x >= box.x && point.y >= box.y && point.x <= box.x + box.width && point.y <= box.y + box.height && (!best || box.width * box.height <= best.width * best.height)) best = box;
+      return best;
+    }});
+    if (region && dialog.open) await captureWeb(region);
+  }
+  $('capture-web-form').onsubmit = async event => {
+    event.preventDefault();
+    if (!window.desktop?.captureRemoteProbe) { say('Open the desktop app to capture web pages.'); return; }
+    const {width, height} = viewport();
+    loaded = null; $('capture-web-full').disabled = true; $('capture-web-stage').hidden = true; $('capture-web-stage').querySelector('.capture-picker')?.cancel();
+    $('capture-web-load').disabled = true; say('Loading page in an isolated session…');
+    try {
+      const probe = await window.desktop.captureRemoteProbe({url: $('capture-web-url').value, width, height});
+      loaded = {url: probe.url, width: probe.width, height: probe.height, boxes: probe.boxes};
+      $('capture-web-shot').src = probe.screenshot;
+      $('capture-web-stage').hidden = false; $('capture-web-full').disabled = false;
+      say('Click an element or drag a region on “' + (probe.title || probe.url) + '”, or capture the whole viewport.');
+      void pickWeb();
+    } catch (error) { say(error.message); }
+    finally { $('capture-web-load').disabled = false; }
+  };
+  $('capture-web-full').onclick = () => void captureWeb(null);
+  $('capture-web-close').onclick = () => dialog.close();
+  dialog.addEventListener('close', () => { loaded = null; $('capture-web-stage').querySelector('.capture-picker')?.cancel(); $('capture-web-stage').hidden = true; });
+  const webButton = document.createElement('button'); webButton.id = 'capture-webpage'; webButton.textContent = 'Capture web page';
+  webButton.onclick = () => { delete dialog.dataset.result; say(''); dialog.showModal(); $('capture-web-url').focus(); };
+  button.after(webButton);
+  window.webCapture = {open: () => webButton.click()};
 })();

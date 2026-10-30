@@ -265,11 +265,3 @@ export const FONTS = [
   "sans-serif",
 ];
 
-export const SHADER_PRESETS: [string, string][] = [
-  ["aurora", "Aurora"],
-  ["ribbon", "Glass ribbon"],
-  ["mesh", "Mesh flow"],
-  ["waves", "Waves"],
-  ["noise", "Soft noise"],
-  ["swirl", "Swirl"],
-];

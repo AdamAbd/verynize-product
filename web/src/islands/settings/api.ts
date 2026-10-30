@@ -2,7 +2,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
-export type SectionId = "account" | "preferences" | "agents" | "usage" | "models" | "connections" | "memory" | "permissions";
+export type SectionId = "account" | "preferences" | "agents" | "accounts" | "tools" | "projects" | "usage" | "models" | "connections" | "memory" | "permissions";
 
 export type Preferences = {
   theme: "system" | "light" | "dark";

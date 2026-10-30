@@ -11,6 +11,8 @@ import { cssColorToHex } from './codec-css.mjs';
 import { BINDABLE, checkVariableValue } from './design-store.mjs';
 import { syncAliases, renameAliasRefs, dropAliases, boundValue, writeBoundValue, bindingOrder } from './variables.mjs';
 import { applyPaintAttrs, renamePaintTokens, unbindPaintTokens, syncPaintTokens } from './paints.mjs';
+import { applyShaderAttrs } from './shaders.mjs';
+import { applyResidual } from './codec-residual.mjs';
 
 export { measureText };
 
@@ -98,7 +100,7 @@ export function elementCode(document, page, node, depth = Infinity) {
 //   srcRemote 'https://…' + assetStatus 'pending'|'missing'|'ready'   remote <img> not yet embedded
 
 const BOX_KEYS = ['fill', 'gradient', 'strokeWidth', 'padding', 'radius', 'shadow', 'ringWidth', 'cornerRadii'];
-const COMMON_KEYS = ['opacity', 'rotation', 'flipX', 'flipY', 'zIndex', 'clipContent', 'mask', 'animated', 'shadow', 'strokeColor', 'strokeStyle', 'ringWidth', 'ringColor', 'ringInset', 'hidden', 'aspectRatio', 'grow', 'shrink', 'basis', 'alignSelf', 'colSpan', 'rowSpan', 'blendMode', 'outlineWidth', 'outlineOffset', 'outlineColor', 'outlineStyle'];
+const COMMON_KEYS = ['variantClasses', 'opacity', 'rotation', 'flipX', 'flipY', 'zIndex', 'clipContent', 'mask', 'animated', 'shadow', 'strokeColor', 'strokeStyle', 'ringWidth', 'ringColor', 'ringInset', 'hidden', 'aspectRatio', 'grow', 'shrink', 'basis', 'alignSelf', 'colSpan', 'rowSpan', 'blendMode', 'outlineWidth', 'outlineOffset', 'outlineColor', 'outlineStyle'];
 const FRAME_KEYS = ['layout', 'direction', 'reverse', 'columns', 'rows', 'alignItems', 'justifyContent', 'justifyItems', 'flexWrap'];
 const TEXT_ONLY_KEYS = ['truncate', 'noWrap', 'lineClamp', 'textWrap'];
 const TEXT_SPEC_KEYS = ['ink', 'inkToken', 'fontSize', 'fontWeight', 'fontFamily', 'textAlign', 'lineHeight', 'lineHeightPx', 'letterSpacing', 'letterSpacingEm', 'textTransform', 'textDecoration', 'fontStyle', 'textWrap'];
@@ -142,7 +144,11 @@ export function applySpec(node, spec, tokens) {
     if (next.length) node.filters = next; else delete node.filters;
   }
   if ('mask' in p) delete node.masks;
-  if (node.outlineWidth === 0) for (const key of ['outlineWidth', 'outlineOffset', 'outlineColor', 'outlineStyle']) delete node[key];
+  if (Array.isArray(p.maskLayers)) node.masks = p.maskLayers;
+  // Colour variables of border/outline and per-side border colours follow the classes that state a colour.
+  if ('strokeColor' in p) { if (p.strokeToken) node.strokeToken = p.strokeToken; else delete node.strokeToken; if (p.strokeColors) node.strokeColors = p.strokeColors; else delete node.strokeColors; }
+  if ('outlineToken' in p) { if (p.outlineToken) node.outlineToken = p.outlineToken; else delete node.outlineToken; }
+  if (node.outlineWidth === 0) for (const key of ['outlineWidth', 'outlineOffset', 'outlineColor', 'outlineStyle', 'outlineToken']) delete node[key];
   if ('cornerRadii' in p) {
     const merged = mergeFour(Array.isArray(node.cornerRadii) ? node.cornerRadii : Array(4).fill(Number(node.radius) || 0), p.cornerRadii);
     if (merged.every(v => v === merged[0])) { node.radius = merged[0]; delete node.cornerRadii; } else { node.cornerRadii = merged; node.radius = Math.max(...merged); }
@@ -326,7 +332,7 @@ function applySvgColor(node, attrs) {
   if (!/^data:image\/svg\+xml;base64,/.test(node.src || '')) { delete node.svgColor; delete node.svgColorToken; }
 }
 
-export function buildNodes(elements, { document, page, parent = null, warnings = [], keepRootId = null, reuse = null }) {
+export function buildNodes(elements, { document, page, parent = null, warnings = [], keepRootId = null, reuse = null, viewport = null }) {
   const tokens = document.tokens || {};
   const nodes = []; const roots = [];
   const make = (el, parentNode, isTop) => {
@@ -335,7 +341,7 @@ export function buildNodes(elements, { document, page, parent = null, warnings =
     const isIcon = kind === 'icon';
     const label = typeof el.attrs['data-node-label'] === 'string' && el.attrs['data-node-label'].trim() ? el.attrs['data-node-label'].trim().slice(0, 200) : null;
     const where = `<${el.tag}${label ? ` "${label}"` : ''}>`;
-    const spec = parseClasses(isIcon ? iconClasses(el.attrs.className ?? el.attrs.class ?? '').className : el.attrs.className ?? el.attrs.class ?? '', { tokens });
+    const spec = parseClasses(isIcon ? iconClasses(el.attrs.className ?? el.attrs.class ?? '').className : el.attrs.className ?? el.attrs.class ?? '', { tokens, viewport });
     if (spec.warnings.length) warnings.push(`Classes on ${where}: ${spec.warnings.slice(0, 12).join('; ')}${spec.warnings.length > 12 ? ' …' : ''}`);
     if (el.attrs.style !== undefined) warnings.push(`style attributes are not supported on <${el.tag}>; use Tailwind classes`);
     let reused = null;
@@ -350,11 +356,7 @@ export function buildNodes(elements, { document, page, parent = null, warnings =
     node.color = type === 'frame' ? 'transparent' : type === 'text' ? TEXT_DEFAULTS.color : type === 'shader' ? '#a58bdd' : '#d9d9d9';
     if (type === 'frame') node.layout = 'block';
     if (type === 'text') node.styleOwn = [];
-    if (type === 'shader') {
-      if (['aurora', 'waves', 'noise', 'ribbon', 'mesh', 'swirl'].includes(el.attrs.preset)) node.shaderPreset = el.attrs.preset;
-      if (Number.isFinite(el.attrs.speed)) node.shaderSpeed = Math.min(5, Math.max(0, el.attrs.speed));
-      if (Number.isFinite(el.attrs.intensity)) node.shaderIntensity = Math.min(2, Math.max(0, el.attrs.intensity));
-    }
+    if (type === 'shader') applyShaderAttrs(node, el.attrs);
     if (isIcon) { node.color = 'transparent'; applyIconElement(node, el, tokens, warnings, where, { isNew: true }); }
     else if (type === 'image') {
       const src = typeof el.attrs.src === 'string' ? el.attrs.src.trim() : '';
@@ -382,6 +384,7 @@ export function buildNodes(elements, { document, page, parent = null, warnings =
       if (el.tag === 'button' && !spec.has.has('fill') && !spec.has.has('gradient')) { node.color = '#25252e'; if (!spec.has.has('ink')) node.textStyle = mergeStyle(node.textStyle, { color: '#ffffff', token: '' }); }
     }
     applyGeometry(node, spec, parentNode, { isNew: true, warnings, label: where });
+    applyResidual(node, el.attrs, { tokens, warnings, where });
     nodes.push(node);
     if (boxText) {
       const text = { ...clone(NODE_DEFAULTS), id: randomUUID(), type: 'text', parentId: node.id, name: 'Label', color: TEXT_DEFAULTS.color, styleOwn: [] };
@@ -519,11 +522,8 @@ function editNode(document, page, node, el, warnings) {
   }
   if (node.type === 'image' && !node.icon) applySvgColor(node, el.attrs);
   applyPaintAttrs(node, el.attrs, { fills: node.fills });
-  if (node.type === 'shader') {
-    if (['aurora', 'waves', 'noise', 'ribbon', 'mesh', 'swirl'].includes(el.attrs.preset)) node.shaderPreset = el.attrs.preset;
-    if (Number.isFinite(el.attrs.speed)) node.shaderSpeed = Math.min(5, Math.max(0, el.attrs.speed));
-    if (Number.isFinite(el.attrs.intensity)) node.shaderIntensity = Math.min(2, Math.max(0, el.attrs.intensity));
-  }
+  applyResidual(node, el.attrs, { tokens: document.tokens || {}, warnings, where: index.shortId(node) });
+  if (node.type === 'shader') applyShaderAttrs(node, el.attrs);
   if (node.type === 'text') {
     if (el.children.length) {
       if (!isTextOnly(el)) throw new Error(`Text element ${index.shortId(node)} can only contain text and inline tags (b, i, span, br)`);
@@ -618,13 +618,13 @@ export function runDirectives(document, pageId, script) {
 // ---------------------------------------------------------------------------------------------
 // Higher-level operations shared by the tools
 
-export function createArtboards(document, pageId, code) {
+export function createArtboards(document, pageId, code, { viewport = null } = {}) {
   const doc = clone(document); ensureShortIds(doc);
   const page = getPage(doc, pageId);
   const { elements, imports } = parseJsx(code);
   if (!elements.length) throw new Error('code must contain at least one root element');
   const warnings = imports.length ? [`Import lines were ignored (${imports.length}); icon components (<Icon name="lucide:…"/>, <ArrowRight/>, <LuX/>, <IconBrandGithub/>) are resolved by name from the bundled lucide, tabler and phosphor sets`] : [];
-  const { roots, nodes } = buildNodes(elements, { document: doc, page, parent: null, warnings });
+  const { roots, nodes } = buildNodes(elements, { document: doc, page, parent: null, warnings, viewport });
   if (!roots.length) throw new Error('No supported elements were found in code');
   const positions = new Map(roots.map(root => [root, root._pos || {}]));
   for (const root of roots) { root._placing = true; delete root._pos; }

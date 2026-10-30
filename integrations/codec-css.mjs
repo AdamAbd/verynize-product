@@ -237,3 +237,107 @@ export function normalizeColorsIn(value) {
   }
   return s.replace(/#([0-9a-f]{3,8})\b/gi, match => cssColorToHex(match) ?? match).replace(/\s+/g, ' ').trim();
 }
+
+// ---------------------------------------------------------------------------------------------
+// Media queries, evaluated for a fixed viewport (import time has no live window).
+
+/** Default environment used when importing: a light, hover-capable screen. */
+export const MEDIA_DEFAULTS = Object.freeze({ width: 1440, height: 900, colorScheme: 'light', hover: true, reducedMotion: false, type: 'screen', resolution: 1 });
+
+/** Split at a top-level keyword (" and " / " or "), ignoring parentheses. */
+function splitKeyword(text, word) {
+  const out = []; let depth = 0, start = 0;
+  const lower = text.toLowerCase(), needle = ` ${word} `;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '(') depth++; else if (text[i] === ')') depth--;
+    else if (depth === 0 && lower.startsWith(needle, i)) { out.push(text.slice(start, i)); start = i + needle.length; i += needle.length - 1; }
+  }
+  out.push(text.slice(start));
+  return out.map(part => part.trim()).filter(Boolean);
+}
+const mediaLength = value => {
+  const v = String(value).trim();
+  const ratio = v.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (ratio) return Number(ratio[1]) / Number(ratio[2]);
+  const dppx = v.match(/^(\d+(?:\.\d+)?)(dppx|x|dpi)$/);
+  if (dppx) return dppx[2] === 'dpi' ? Number(dppx[1]) / 96 : Number(dppx[1]);
+  const len = lengthOf(v);
+  if (!len) return NaN;
+  return len.px ?? len.n ?? NaN;
+};
+function featureValue(name, env) {
+  switch (name) {
+    case 'width': case 'device-width': return env.width;
+    case 'height': case 'device-height': return env.height;
+    case 'aspect-ratio': case 'device-aspect-ratio': return env.width / env.height;
+    case 'resolution': return env.resolution;
+    default: return undefined;
+  }
+}
+const compare = (a, op, b) => (op === '<' ? a < b : op === '<=' ? a <= b + 1e-9 : op === '>' ? a > b : op === '>=' ? a >= b - 1e-9 : Math.abs(a - b) < 1e-9);
+const flip = op => ({ '<': '>', '<=': '>=', '>': '<', '>=': '<=', '=': '=' })[op];
+function evalFeature(inner, env) {
+  const text = inner.trim().toLowerCase();
+  // Range syntax: (width >= 48rem), (400px <= width < 900px)
+  const range = text.match(/^(.+?)\s*(<=|>=|<|>|=)\s*(.+?)(?:\s*(<=|>=|<|>|=)\s*(.+))?$/);
+  if (range && !text.includes(':')) {
+    const [, a, op1, b, op2, c] = range;
+    if (op2) { const v = featureValue(b.trim(), env); if (v === undefined) return false; return compare(mediaLength(a), op1, v) && compare(v, op2, mediaLength(c)); }
+    const left = featureValue(a.trim(), env);
+    if (left !== undefined) return compare(left, op1, mediaLength(b));
+    const right = featureValue(b.trim(), env);
+    if (right !== undefined) return compare(right, flip(op1), mediaLength(a));
+    return false;
+  }
+  const colon = text.indexOf(':');
+  const name = (colon < 0 ? text : text.slice(0, colon)).trim(), value = colon < 0 ? null : text.slice(colon + 1).trim();
+  const prefix = name.match(/^(min|max)-(.+)$/);
+  if (prefix) { const v = featureValue(prefix[2], env); if (v === undefined || value === null) return false; return compare(v, prefix[1] === 'min' ? '>=' : '<=', mediaLength(value)); }
+  if (featureValue(name, env) !== undefined) return value === null ? true : compare(featureValue(name, env), '=', mediaLength(value));
+  switch (name) {
+    case 'prefers-color-scheme': return value === null || value === env.colorScheme;
+    case 'hover': case 'any-hover': return value === null ? env.hover : (value === 'hover') === env.hover;
+    case 'pointer': case 'any-pointer': return value === null ? true : value === (env.hover ? 'fine' : 'coarse');
+    case 'prefers-reduced-motion': return value === null ? env.reducedMotion : (value === 'reduce') === env.reducedMotion;
+    case 'orientation': return value === (env.width >= env.height ? 'landscape' : 'portrait');
+    case 'color': return true;
+    case 'prefers-contrast': case 'forced-colors': case 'inverted-colors': return value === 'no-preference' || value === 'none';
+    case 'display-mode': return value === 'browser';
+    case 'scripting': return value === 'enabled' || value === null;
+    default: return false;
+  }
+}
+function evalCondition(text, env) {
+  const t = text.trim();
+  if (/^not\s/i.test(t)) return !evalCondition(t.slice(3), env);
+  const ors = splitKeyword(t, 'or');
+  if (ors.length > 1) return ors.some(part => evalCondition(part, env));
+  const ands = splitKeyword(t, 'and');
+  if (ands.length > 1) return ands.every(part => evalCondition(part, env));
+  if (t.startsWith('(') && closing(t, 0) === t.length - 1) {
+    const inner = t.slice(1, -1).trim();
+    return inner.startsWith('(') || /^not\s/i.test(inner) ? evalCondition(inner, env) : evalFeature(inner, env);
+  }
+  return false;
+}
+
+/** Whether a media query list (the text after `@media`) matches `env` (see MEDIA_DEFAULTS). */
+export function matchMedia(query, env = MEDIA_DEFAULTS) {
+  const e = { ...MEDIA_DEFAULTS, ...env };
+  const list = splitTop(String(query || '').trim(), ',');
+  if (!list.length || (list.length === 1 && !list[0])) return true;
+  return list.some(raw => {
+    let q = raw.trim(), negate = false;
+    const lead = q.match(/^(not|only)\s+/i);
+    if (lead) { negate = lead[1].toLowerCase() === 'not'; q = q.slice(lead[0].length); }
+    let ok = true;
+    const type = q.match(/^([a-z-]+)(?:\s+and\s+|\s*$)/i);
+    if (type && !q.startsWith('(')) {
+      const name = type[1].toLowerCase();
+      ok = name === 'all' || name === e.type;
+      q = q.slice(type[0].length);
+    }
+    if (ok && q.trim()) ok = evalCondition(q, e);
+    return negate ? !ok : ok;
+  });
+}

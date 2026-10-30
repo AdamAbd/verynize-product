@@ -393,6 +393,23 @@ export const folderOf = (name: string) =>
   name.includes("/") ? name.slice(0, name.lastIndexOf("/")) : "";
 export const leafOf = (name: string) => name.slice(name.lastIndexOf("/") + 1);
 
+/**
+ * Group named entries by folder for pickers (bind menu, colour picker Variables tab): root entries first,
+ * then each folder path in name order. Order inside a group follows the input.
+ */
+export function groupByFolder<T>(
+  entries: [string, T][],
+): { folder: string; items: [string, T][] }[] {
+  const groups = new Map<string, [string, T][]>();
+  for (const entry of entries) {
+    const folder = folderOf(entry[0]);
+    groups.set(folder, [...(groups.get(folder) ?? []), entry]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)))
+    .map(([folder, items]) => ({ folder, items }));
+}
+
 /** Variables inside `folder` (nested folders included), optionally only those of one kind. */
 export function folderMembers(doc: DesignDocument, folder: string, kind?: VariableKind) {
   const prefix = folder + "/";

@@ -1,0 +1,259 @@
+// Desktop UI for cloud accounts: two real Electron clients sign in through the magic-link outbox,
+// edit profiles, share a room by email with roles, rotate and recover links, comment, and
+// build/publish/roll back/unpublish a project app against local workerd.
+import { Miniflare } from "miniflare";
+import { _electron as electron } from "@playwright/test";
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { cloudOptions } from "./cloud-harness.mjs";
+
+const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-accounts-ui-"));
+const mf = new Miniflare(await cloudOptions(path.join(dir, "state")));
+const apps = [];
+const project = path.join(dir, "ui-demo");
+async function writeProject(label) {
+  await fs.mkdir(project, { recursive: true });
+  await fs.writeFile(
+    path.join(project, "package.json"),
+    JSON.stringify({ name: "ui-demo", private: true, scripts: { build: "node build.mjs" } }),
+  );
+  await fs.writeFile(
+    path.join(project, "build.mjs"),
+    `import fs from 'node:fs';fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/index.html','<!doctype html><html><head></head><body><p>${label}</p></body></html>');fs.writeFileSync('dist/app.js','console.log(1)');`,
+  );
+}
+try {
+  const server = (await mf.ready).origin;
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  for (const label of ["a", "b"])
+    apps.push(
+      await electron.launch({ env, args: [".", `--user-data-dir=${path.join(dir, label)}`] }),
+    );
+  const [a, b] = await Promise.all(apps.map((app) => app.firstWindow()));
+  for (const page of [a, b]) {
+    await page.waitForFunction(() => !!window.design && !!window.cloudWorkspace);
+    page.on("dialog", (dialog) => dialog.accept());
+  }
+  const panel = (page, open = true) =>
+    page.evaluate((open) => {
+      const d = document.getElementById("cloud-dialog");
+      if (open && !d.open) d.showModal();
+      if (!open && d.open) d.close();
+    }, open);
+  const section = (page, id) =>
+    page.evaluate((id) => {
+      document.getElementById(id).open = true;
+    }, id);
+  const statusIncludes = (page, text) =>
+    page.waitForFunction(
+      (text) => document.getElementById("cloud-status").textContent.includes(text),
+      text,
+    );
+  async function signIn(page, email) {
+    await panel(page);
+    await page.locator("#cloud-server").fill(server);
+    await section(page, "cloud-account-section");
+    await page.locator("#cloud-email").fill(email);
+    await page.locator("#cloud-signin-start").click();
+    await statusIncludes(page, "Check " + email);
+    const { messages } = await (
+      await fetch(`${server}/api/dev/outbox?to=${encodeURIComponent(email)}`)
+    ).json();
+    await page.locator("#cloud-signin-code").fill(messages[0].link);
+    await page.locator("#cloud-signin-verify").click();
+    await page.waitForFunction(() => !document.getElementById("cloud-signed-in").hidden);
+    assert.match(await page.locator("#cloud-account").textContent(), new RegExp(email));
+  }
+
+  // Sign in and edit the public profile.
+  await signIn(a, "alice@example.test");
+  await a.locator("#cloud-handle").fill("alice-ui");
+  await a.locator("#cloud-display-name").fill("Alice Interface");
+  await a.locator("#cloud-profile-save").click();
+  await statusIncludes(a, "/u/alice-ui");
+  assert.equal(
+    (await (await fetch(`${server}/api/profiles/alice-ui`)).json()).displayName,
+    "Alice Interface",
+  );
+  await signIn(b, "bob@example.test");
+
+  // A signed-in owner creates a room and invites Bob by email as a viewer.
+  await a.locator("#cloud-create").click();
+  await statusIncludes(a, "Connected");
+  assert.equal(await a.locator("#cloud-role").textContent(), "Owner");
+  await section(a, "cloud-access-section");
+  await a.locator("#cloud-member-email").fill("bob@example.test");
+  await a.locator("#cloud-member-role").selectOption("viewer");
+  await a.locator("#cloud-member-add").click();
+  await statusIncludes(a, "bob@example.test is now viewer and was emailed");
+  await a.waitForFunction(
+    () => !!document.querySelector('#cloud-members select[data-member="bob@example.test"]'),
+  );
+  const roomId = new URLSearchParams(
+    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
+  ).get("room");
+
+  // Bob opens the room from his account without any link token; viewers cannot change it.
+  await b.locator("#cloud-rooms-refresh").click();
+  await b.locator(`[data-open-room="${roomId}"]`).click();
+  await statusIncludes(b, "Connected");
+  assert.equal(await b.locator("#cloud-role").textContent(), "Viewer");
+  assert.doesNotMatch(await b.locator("#cloud-invite").inputValue(), /token=/);
+  await a.waitForFunction(
+    () => document.getElementById("cloud-presence").textContent === "2 connected",
+  );
+  const count = (page) => page.evaluate(() => window.design.getDocument().pages[0].nodes.length);
+  const before = await count(a);
+  await panel(b, false);
+  await b.locator(".app-menu-trigger:visible").first().click();
+  await b.locator("#rectangle").click();
+  await b.waitForFunction((n) => window.design.getDocument().pages[0].nodes.length === n, before);
+  await statusIncludes(b, "viewer in this room");
+  assert.equal(await count(a), before, "viewer edits never reach the room");
+
+  // Promoting Bob to editor takes effect live.
+  await a.locator('#cloud-members select[data-member="bob@example.test"]').selectOption("editor");
+  await b.waitForFunction(() => document.getElementById("cloud-role").textContent === "Editor");
+  await b.locator(".app-menu-trigger:visible").first().click();
+  await b.locator("#rectangle").click();
+  await a.waitForFunction(
+    (n) => window.design.getDocument().pages[0].nodes.length === n + 1,
+    before,
+  );
+
+  // Role links, then rotation: old links stop working, Alice stays live, member Bob keeps access.
+  await a.locator("#cloud-link-role").selectOption("viewer");
+  await a.locator("#cloud-link-create").click();
+  await a.waitForFunction(() =>
+    document.getElementById("cloud-link-output").value.includes("token="),
+  );
+  const viewerToken = new URLSearchParams(
+    new URL(await a.locator("#cloud-link-output").inputValue()).hash.slice(1),
+  ).get("token");
+  const oldToken = new URLSearchParams(
+    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
+  ).get("token");
+  assert.equal(
+    (
+      await fetch(`${server}/api/rooms/${roomId}`, {
+        headers: { authorization: "Bearer " + viewerToken },
+      })
+    ).status,
+    200,
+  );
+  await a.locator("#cloud-rotate").click();
+  await statusIncludes(a, "Rotated links: 2 old links revoked");
+  const newToken = new URLSearchParams(
+    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
+  ).get("token");
+  assert.notEqual(newToken, oldToken);
+  for (const token of [oldToken, viewerToken])
+    assert.equal(
+      (
+        await fetch(`${server}/api/rooms/${roomId}`, {
+          headers: { authorization: "Bearer " + token },
+        })
+      ).status,
+      401,
+    );
+  await a.waitForFunction(
+    () => document.getElementById("cloud-presence").textContent === "2 connected",
+  );
+  await panel(a, false);
+  await a.locator(".app-menu-trigger:visible").first().click();
+  await a.locator("#rectangle").click();
+  await b.waitForFunction(
+    (n) => window.design.getDocument().pages[0].nodes.length === n + 2,
+    before,
+  );
+
+  // Comments from a member appear live for the owner.
+  await panel(a);
+  await section(a, "cloud-comments-section");
+  await panel(b);
+  await section(b, "cloud-comments-section");
+  await b.locator("#cloud-comment-text").fill("Tighten the spacing here");
+  await b.locator("#cloud-comment-send").click();
+  await a.waitForFunction(() =>
+    document.getElementById("cloud-comments").textContent.includes("Tighten the spacing here"),
+  );
+
+  // Recovery: after losing the link, the owner account mints a fresh owner link from Your rooms.
+  await a.locator("#cloud-leave").click();
+  await a.locator("#cloud-rooms-refresh").click();
+  await a.locator(`[data-recover-room="${roomId}"]`).click();
+  await statusIncludes(a, "Recovered owner access");
+  const recovered = new URLSearchParams(
+    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
+  ).get("token");
+  assert.notEqual(recovered, newToken);
+  assert.equal(
+    (
+      await fetch(`${server}/api/rooms/${roomId}`, {
+        headers: { authorization: "Bearer " + newToken },
+      })
+    ).status,
+    401,
+  );
+  assert.equal(await a.locator("#cloud-role").textContent(), "Owner");
+
+  // Publish the open project's built app, publish again, roll back, then unpublish.
+  await writeProject("First build");
+  await apps[0].evaluate(({ dialog }, folder) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
+  }, project);
+  await a.evaluate(() => window.desktop.openProject());
+  await section(a, "cloud-app-section");
+  await a.waitForFunction(() =>
+    document.getElementById("cloud-app-project").textContent.includes("npm run build"),
+  );
+  assert.equal(await a.locator("#cloud-app-name").inputValue(), "ui-demo");
+  await a.locator("#cloud-app-publish").click();
+  await a.waitForFunction(() =>
+    document.getElementById("cloud-app-status").textContent.startsWith("Published version 1"),
+  );
+  const appUrl = await a.locator("#cloud-app-url").textContent();
+  assert.equal(appUrl, `${server}/apps/alice-ui/ui-demo/`);
+  assert.match(await (await fetch(appUrl)).text(), /First build/);
+  assert.match(
+    await (await fetch(`${server}/u/alice-ui`)).text(),
+    /href="\/apps\/alice-ui\/ui-demo\/"/,
+  );
+  await writeProject("Second build");
+  await a.locator("#cloud-app-publish").click();
+  await a.waitForFunction(() =>
+    document.getElementById("cloud-app-status").textContent.startsWith("Published version 2"),
+  );
+  assert.match(await (await fetch(appUrl)).text(), /Second build/);
+  await a.locator('[data-activate-version="1"]').click();
+  await a.waitForFunction(
+    () => document.getElementById("cloud-app-status").textContent === "Version 1 is live",
+  );
+  assert.match(await (await fetch(appUrl)).text(), /First build/);
+  await a.locator("#cloud-app-unpublish").click();
+  await a.waitForFunction(
+    () => document.getElementById("cloud-app-status").textContent === "App unpublished",
+  );
+  assert.equal((await fetch(appUrl)).status, 404);
+
+  // Sign out everywhere ends every session for the account.
+  const session = await a.evaluate(
+    () => JSON.parse(localStorage.getItem("verynize.cloud.account")).session,
+  );
+  await a.locator("#cloud-signout-all").click();
+  await a.waitForFunction(() => !document.getElementById("cloud-signed-out").hidden);
+  assert.equal(
+    (await fetch(`${server}/api/me`, { headers: { "x-verynize-session": session } })).status,
+    401,
+  );
+  console.log(
+    "PASS desktop accounts: magic-link sign-in, profile edit, email invite with roles, token-free member join, viewer enforcement, live promotion, role links, rotation, comments, owner recovery, project app build/publish/rollback/unpublish, sign out everywhere",
+  );
+} finally {
+  await Promise.all(apps.map((app) => app.close()));
+  await mf.dispose();
+  await fs.rm(dir, { recursive: true, force: true });
+}

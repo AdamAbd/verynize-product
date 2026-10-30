@@ -87,12 +87,12 @@ function parseClaudeUsage({ account, usage } = {}) {
 }
 
 /** Opens an idle SDK session against the user's `claude`, reads account + usage, then closes it. */
-async function fetchClaudeUsage({ executable, loadSdk = () => import('@anthropic-ai/claude-agent-sdk'), cwd, timeout = FETCH_TIMEOUT } = {}) {
+async function fetchClaudeUsage({ executable, loadSdk = () => import('@anthropic-ai/claude-agent-sdk'), cwd, timeout = FETCH_TIMEOUT, env = {} } = {}) {
   const sdk = await loadSdk();
   if (typeof sdk?.query !== 'function') throw Error('The Claude Agent SDK is unavailable');
   const abort = new AbortController();
   let release; const hold = new Promise(r => { release = r; });
-  const q = sdk.query({ prompt: (async function* () { await hold; })(), options: { ...(executable ? { pathToClaudeCodeExecutable: executable } : {}), abortController: abort, env: agents.childEnv(), cwd, persistSession: false } });
+  const q = sdk.query({ prompt: (async function* () { await hold; })(), options: { ...(executable ? { pathToClaudeCodeExecutable: executable } : {}), abortController: abort, env: agents.childEnv(env), cwd, persistSession: false } });
   const timed = (promise, label) => Promise.race([promise, new Promise((_, reject) => { const t = setTimeout(() => reject(Error(label + ' timed out')), timeout); t.unref?.(); })]);
   try {
     const account = await timed(q.accountInfo(), 'Claude account');
@@ -149,9 +149,9 @@ function parseCodexUsage({ account, limits } = {}) {
 }
 
 /** Starts a short-lived `codex app-server`, reads the account and its limits, then stops it. */
-async function fetchCodexUsage({ executable, spawnProcess = spawn, timeout = FETCH_TIMEOUT } = {}) {
+async function fetchCodexUsage({ executable, spawnProcess = spawn, timeout = FETCH_TIMEOUT, env = {} } = {}) {
   const { JsonRpcChild } = require('./agent-runtime.cjs');
-  const child = spawnProcess(executable, ['app-server'], { env: agents.childEnv(), stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+  const child = spawnProcess(executable, ['app-server'], { env: agents.childEnv(env), stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
   const rpc = new JsonRpcChild(child);
   try {
     await rpc.request('initialize', { clientInfo: { name: 'verynize', title: 'Verynize', version: '0' } }, timeout);
@@ -229,13 +229,20 @@ function recordGeneratedLayers(count) { return layerLog ? layerLog.record(count)
 
 // --- IPC -----------------------------------------------------------------------------------------
 class AgentUsage {
-  constructor({ userData, discover = agents.discover, claude = fetchClaudeUsage, codex = fetchCodexUsage, disabled = process.env.VERYNIZE_DISABLE_AGENT_USAGE === '1' } = {}) {
-    Object.assign(this, { userData, discover, claude, codex, disabled });
+  // `profileEnv(agent, id)`: CLAUDE_CONFIG_DIR / CODEX_HOME of a named account (desktop/agent-profiles.cjs).
+  constructor({ userData, discover = agents.discover, claude = fetchClaudeUsage, codex = fetchCodexUsage, disabled = process.env.VERYNIZE_DISABLE_AGENT_USAGE === '1', profileEnv = null } = {}) {
+    Object.assign(this, { userData, discover, claude, codex, disabled, profileEnv });
     this.cache = new Map();
   }
-  async provider(agent, { refresh = false } = {}) {
+  /** Forget cached limits of a removed account. */
+  forget(profile) { for (const key of [...this.cache.keys()]) if (key.endsWith(':' + profile)) this.cache.delete(key); }
+  async provider(agent, { refresh = false, profile = null } = {}) {
     if (!['claude', 'codex'].includes(agent)) throw Error('Choose Claude or Codex');
-    const cached = this.cache.get(agent);
+    const named = typeof profile === 'string' && profile && profile !== 'system' ? profile : null;
+    const env = named ? (this.profileEnv ? await this.profileEnv(agent, named) : null) : {};
+    if (!env) throw Error('Named accounts are not available');
+    const cacheKey = named ? `${agent}:${named}` : agent;
+    const cached = this.cache.get(cacheKey);
     if (!refresh && cached && Date.now() - cached.at < CACHE_MS) return cached.value;
     if (cached?.pending) return cached.pending;
     const pending = (async () => {
@@ -244,23 +251,23 @@ class AgentUsage {
       const found = (await this.discover()).find(a => a.id === agent && a.available);
       if (!found) return { agent, status: 'missing', message: agent === 'claude' ? 'Claude Code isn\'t installed on this Mac.' : 'Codex isn\'t installed on this Mac.', limits: [], updatedAt };
       try {
-        const value = agent === 'claude' ? await this.claude({ executable: found.path, cwd: this.userData }) : await this.codex({ executable: found.path });
-        return { ...value, updatedAt };
+        const value = agent === 'claude' ? await this.claude({ executable: found.path, cwd: this.userData, env }) : await this.codex({ executable: found.path, env });
+        return { ...value, ...(named ? { profile: named } : {}), updatedAt };
       } catch (error) { return { agent, status: 'error', message: friendlyError(error), limits: [], updatedAt }; }
     })();
-    this.cache.set(agent, { ...(cached || {}), pending });
+    this.cache.set(cacheKey, { ...(cached || {}), pending });
     try {
       const value = await pending;
-      this.cache.set(agent, { at: Date.now(), value });
+      this.cache.set(cacheKey, { at: Date.now(), value });
       return value;
-    } catch (error) { this.cache.delete(agent); throw error; }
+    } catch (error) { this.cache.delete(cacheKey); throw error; }
   }
 }
 
-function registerAgentUsage(handle, { userData }) {
+function registerAgentUsage(handle, { userData, profiles = null }) {
   layerLog = new LayerLog(path.join(userData, 'agent-usage.json'));
-  const usage = new AgentUsage({ userData });
-  handle('agentUsage', options => usage.provider(options?.agent, { refresh: !!options?.refresh }));
+  const usage = new AgentUsage({ userData, ...(profiles ? { profileEnv: (agent, id) => profiles.envFor(agent, id) } : {}) });
+  handle('agentUsage', options => usage.provider(options?.agent, { refresh: !!options?.refresh, profile: typeof options?.profile === 'string' ? options.profile : null }));
   handle('agentLayerUsage', () => layerLog.summary());
   return usage;
 }

@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  :root { --brand: #4f46e5; --radius: 10px }
+  body { margin: 0; font-family: Georgia, serif; color: #1f2937 }
+  .card { padding: 20px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: var(--radius); width: 420px }
+  div.card { padding-left: 32px }
+  #promo { background: var(--brand) }
+  .card .title { font-size: 22px; font-weight: 700; margin: 0 0 8px }
+  .title { font-size: 12px !important }
+  .card p { margin: 0; line-height: 1.5 }
+  .muted { color: #6b7280 }
+  @media (max-width: 900px) { .card { width: 300px } }
+  @media (min-width: 1000px) { .row { display: flex; gap: 16px } }
+</style>
+</head>
+<body>
+  <div class="row" data-name="Row">
+    <div class="card" data-name="Plain"><h2 class="title">Specificity</h2><p class="muted">Inherited serif, muted override.</p></div>
+    <div class="card" id="promo" data-name="Promo"><p style="color: #ffffff; font-size: 18px">Inline wins</p></div>
+  </div>
+</body>
+</html>

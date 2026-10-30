@@ -1,0 +1,340 @@
+// Shader fill library (behaviour modelled on design/wonder/2026-10-30/30–31): a searchable preset picker,
+// the four colours of a parametric preset (each bindable to a Colors variable) and a "Shader settings" popover
+// with six sliders. The catalog, defaults and rendering live in web/shaders.js (window.BetterShaders).
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Check, Search, SlidersHorizontal, X } from "lucide-react";
+import type { DesignDocument } from "@/lib/bridge";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { Caption, IconButton } from "./controls";
+import { EffectColorField } from "./effects";
+import { patchNodes, type Node } from "./model";
+
+export type ShaderRole = "center" | "edge" | "ripple" | "background";
+export type ShaderParamKey = "aspect" | "size" | "density" | "distortion" | "grain";
+export type ShaderPreset = {
+  id: string;
+  name: string;
+  family: string;
+  kind: "legacy" | "param";
+  defaults: {
+    colors?: Record<ShaderRole, string>;
+    speed: number;
+  } & Partial<Record<ShaderParamKey, number>>;
+};
+type ShaderColors = Partial<Record<ShaderRole, { color: string; token?: string }>>;
+type ShaderNode = Node & {
+  shaderColors?: ShaderColors;
+  shaderParams?: Partial<Record<ShaderParamKey, number>>;
+};
+type Resolved = {
+  kind: "param" | "legacy";
+  colors: Record<ShaderRole, string>;
+  speed: number;
+} & Record<ShaderParamKey, number>;
+type Library = {
+  PRESETS: ShaderPreset[];
+  presetOf(id: string): ShaderPreset;
+  resolve(node: unknown, tokens: Record<string, string> | undefined): Resolved;
+};
+
+const library = () => (window as unknown as { BetterShaders?: Library }).BetterShaders;
+export const shaderPresets = (): ShaderPreset[] => library()?.PRESETS ?? [];
+export const shaderPresetName = (id: string | undefined) =>
+  shaderPresets().find((p) => p.id === id)?.name ?? "Aurora";
+export const isParam = (id: string | undefined) =>
+  shaderPresets().find((p) => p.id === id)?.kind === "param";
+
+const COLOR_ROWS: [ShaderRole, string][] = [
+  ["center", "Gradient Center"],
+  ["edge", "Gradient Edge"],
+  ["ripple", "Ripple Color"],
+  ["background", "Background"],
+];
+const SLIDERS: { key: ShaderParamKey | "speed"; label: string; max: number; step: number }[] = [
+  { key: "aspect", label: "Gradient Aspect", max: 100, step: 1 },
+  { key: "size", label: "Gradient Size", max: 100, step: 1 },
+  { key: "density", label: "Ripple Density", max: 100, step: 1 },
+  { key: "speed", label: "Animation Speed", max: 5, step: 0.1 },
+  { key: "distortion", label: "Distortion Amount", max: 100, step: 1 },
+  { key: "grain", label: "Grain Strength", max: 100, step: 1 },
+];
+
+/** Choosing a preset loads its defaults: stored colours/sliders are cleared, parametric presets set their speed. */
+export function applyShaderPreset(selection: string[], preset: ShaderPreset) {
+  patchNodes(selection, () => ({
+    type: "shader",
+    shaderPreset: preset.id,
+    shaderColors: undefined,
+    shaderParams: undefined,
+    ...(preset.kind === "param" ? { shaderSpeed: preset.defaults.speed } : {}),
+  }));
+}
+
+/* ---------- Preset picker ("Choose shader") ---------- */
+function PresetPreview({ preset, fallback }: { preset: ShaderPreset; fallback: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    const c = preset.defaults.colors;
+    ref.current.style.background = c
+      ? `radial-gradient(circle at 50% 55%, ${c.ripple} 0 4%, ${c.center} 18%, ${c.edge} 62%, ${c.background})`
+      : `linear-gradient(135deg, ${fallback}, ${fallback}55)`;
+  }, [preset, fallback]);
+  return <span ref={ref} aria-hidden className="block h-16 w-full shrink-0 rounded-md" />;
+}
+
+export function ShaderPicker({
+  node,
+  selection,
+  open,
+  onOpenChange,
+  children,
+}: {
+  node: Node;
+  selection: string[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: React.ReactNode;
+}) {
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+  const presets = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return shaderPresets().filter(
+      (p) => !q || p.name.toLowerCase().includes(q) || p.family.toLowerCase().includes(q),
+    );
+  }, [query]);
+  return (
+    <Popover open={open} onOpenChange={onOpenChange} modal={false}>
+      <PopoverAnchor asChild>{children}</PopoverAnchor>
+      <PopoverContent
+        id="shader-gallery"
+        side="left"
+        align="start"
+        sideOffset={16}
+        collisionPadding={8}
+        className="w-80"
+        onOpenAutoFocus={(event) => {
+          // Focus the search field, as Wonder's picker does (30-shader-library).
+          event.preventDefault();
+          (event.currentTarget as HTMLElement | null)
+            ?.querySelector<HTMLInputElement>("input[name=shaderSearch]")
+            ?.focus();
+        }}
+      >
+        <div className="flex max-h-120 flex-col gap-2">
+          <div className="flex h-7 items-center justify-between">
+            <strong className="text-xs font-normal text-foreground">Choose shader</strong>
+            <IconButton icon={X} label="Close shader library" onClick={() => onOpenChange(false)} />
+          </div>
+          <label className="flex h-7 items-center gap-2 rounded-md bg-input px-2 text-xs shadow-field focus-within:ring-1 focus-within:ring-ring">
+            <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <input
+              name="shaderSearch"
+              aria-label="Search shaders"
+              placeholder="Search shaders…"
+              autoComplete="off"
+              spellCheck={false}
+              value={query}
+              className="h-full min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <div
+            role="listbox"
+            aria-label="Shader presets"
+            className="grid min-h-0 auto-rows-max grid-cols-3 gap-2 overflow-y-auto"
+          >
+            {presets.map((preset) => {
+              const selected = preset.id === node.shaderPreset;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  data-shader-option={preset.id}
+                  className="relative flex min-w-0 flex-col gap-1 rounded-md p-1 text-left text-xs text-foreground-2 hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring aria-selected:ring-1 aria-selected:ring-primary"
+                  onClick={() => {
+                    applyShaderPreset(selection, preset);
+                    onOpenChange(false);
+                  }}
+                >
+                  <PresetPreview preset={preset} fallback={node.color || "#a58bdd"} />
+                  <span className="truncate">{preset.name}</span>
+                  {selected ? (
+                    <Check
+                      className="absolute top-2 right-2 size-3.5 rounded-full bg-primary text-primary-foreground"
+                      aria-hidden
+                    />
+                  ) : null}
+                </button>
+              );
+            })}
+            {!presets.length ? (
+              <p className="col-span-3 px-1 py-3 text-xs text-muted-foreground">
+                No shaders match “{query.trim()}”
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/* ---------- Shader settings sliders ---------- */
+function ParamSlider({
+  name,
+  label,
+  value,
+  max,
+  step,
+  onCommit,
+}: {
+  name: string;
+  label: string;
+  value: number;
+  max: number;
+  step: number;
+  onCommit: (value: number) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState<number | null>(null);
+  const commit = useRef(onCommit);
+  commit.current = onCommit;
+  // Commit on the native `change` event (pointer release / key press) so a drag is one undo step.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const done = () => {
+      setDraft(null);
+      const next = Number(el.value);
+      if (Number.isFinite(next)) commit.current(next);
+    };
+    el.addEventListener("change", done);
+    return () => el.removeEventListener("change", done);
+  }, []);
+  return (
+    <Caption label={label}>
+      <input
+        ref={ref}
+        type="range"
+        name={name}
+        aria-label={label}
+        min={0}
+        max={max}
+        step={step}
+        value={draft ?? value}
+        className="h-1.5 w-full cursor-pointer appearance-auto rounded-full bg-muted accent-primary"
+        onChange={(event) => setDraft(Number(event.target.value))}
+      />
+    </Caption>
+  );
+}
+
+function ShaderOptions({ selection, values }: { selection: string[]; values: Resolved }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen} modal={false}>
+      <PopoverAnchor asChild>
+        <button
+          type="button"
+          id="shader-options-open"
+          aria-expanded={open}
+          className="flex h-6 items-center justify-center gap-1.5 rounded-md bg-input text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+          onClick={() => setOpen(!open)}
+        >
+          <SlidersHorizontal className="size-3.5 text-muted-foreground" aria-hidden />
+          Shader settings
+        </button>
+      </PopoverAnchor>
+      <PopoverContent
+        id="shader-options"
+        side="left"
+        align="start"
+        sideOffset={16}
+        collisionPadding={8}
+        className="w-72"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        onInteractOutside={(event) => {
+          if ((event.target as HTMLElement | null)?.closest?.("#shader-options-open"))
+            event.preventDefault();
+        }}
+      >
+        <div className="flex flex-col gap-2">
+          <div className="flex h-7 items-center justify-between">
+            <strong className="text-xs font-normal text-foreground">Shader settings</strong>
+            <IconButton icon={X} label="Close shader settings" onClick={() => setOpen(false)} />
+          </div>
+          {SLIDERS.map(({ key, label, max, step }) => (
+            <ParamSlider
+              key={key}
+              name={"shader-" + key}
+              label={label}
+              value={key === "speed" ? values.speed : values[key]}
+              max={max}
+              step={step}
+              onCommit={(value) =>
+                patchNodes(selection, (n) =>
+                  key === "speed"
+                    ? { shaderSpeed: Math.min(5, Math.max(0, value)) }
+                    : {
+                        shaderParams: {
+                          ...(n as ShaderNode).shaderParams,
+                          [key]: Math.min(100, Math.max(0, Math.round(value))),
+                        },
+                      },
+                )
+              }
+            />
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/* ---------- Colours of a parametric preset ---------- */
+type ShaderProps = { doc: DesignDocument; node: Node; selection: string[] };
+
+export function ShaderParameters({ doc, node, selection }: ShaderProps) {
+  const lib = library();
+  if (!lib || node.type !== "shader" || !isParam(node.shaderPreset)) return null;
+  const values = lib.resolve(node, doc.tokens);
+  const stored = (node as ShaderNode).shaderColors ?? {};
+  const write = (role: ShaderRole, holder: { color: string; token?: string }) =>
+    patchNodes(selection, (n) => ({
+      shaderColors: { ...(n as ShaderNode).shaderColors, [role]: holder },
+    }));
+  return (
+    <div id="shader-parameters" className={cn("flex flex-col gap-2")}>
+      {COLOR_ROWS.map(([role, label]) => (
+        <Caption key={role} label={label}>
+          <div className="flex items-center gap-2" data-shader-color-row={role}>
+            <EffectColorField
+              name={"shader-" + role}
+              label={label}
+              value={stored[role]?.color ?? values.colors[role]}
+              tokens={doc.tokens}
+              token={stored[role]?.token}
+              onToken={(name) =>
+                write(
+                  role,
+                  name
+                    ? { color: doc.tokens?.[name] ?? values.colors[role], token: name }
+                    : { color: values.colors[role] },
+                )
+              }
+              onCommit={(color) => write(role, { color })}
+            />
+          </div>
+        </Caption>
+      ))}
+      <ShaderOptions selection={selection} values={values} />
+    </div>
+  );
+}

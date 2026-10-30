@@ -450,11 +450,11 @@ export function ConnectionsPage({ api, preferences }: PageProps) {
                 </IconTile>
               }
               title="Figma"
-              description="Import designs using a transient access token."
+              description="Import links, .fig files and pasted layers; connect your account with your own OAuth client ID."
             >
               <SettingsButton id="settings-figma" onClick={api.actions.openFigma}>
                 <FigmaIcon />
-                Import file
+                Import & account
               </SettingsButton>
             </Row>
           </Card>

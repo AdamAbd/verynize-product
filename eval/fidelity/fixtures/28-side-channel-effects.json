@@ -1,0 +1,10 @@
+{ "title": "data-vn restores structured effects (variable colours, hidden entries) only while the classes still agree",
+  "covers": ["side-channel", "effects", "round-trip"],
+  "roundTrip": true,
+  "expect": [
+    { "node": "Exact", "prop": "effects", "eq": { "shadows": 2, "hiddenShadows": 1, "filters": 2 } },
+    { "node": "Exact", "prop": "shadow", "matches": "token\":\"brand|^$" },
+    { "node": "Edited", "prop": "effects", "eq": { "shadows": 0 } },
+    { "node": "Edited", "prop": "shadow", "matches": "0 1px 2px #000000" },
+    { "rendered": "Exact", "prop": "h", "eq": 60 }
+  ] }

@@ -4,7 +4,8 @@ Tujuan: cara yang bisa diulang untuk membuktikan atau membantah bahwa taste UI h
 
 | Tier | Apa | Biaya | Perintah |
 |---|---|---|---|
-| 1 | Fidelity codec deterministik (26 fixture) | gratis, CI | `node eval/run-fidelity.mjs [--verbose]` |
+| 1 | Fidelity codec deterministik (30 fixture: JSX dan HTML+CSS) | gratis, CI | `node eval/run-fidelity.mjs [--verbose]` |
+| 1b | Fidelity import HTML/CSS vs render Chrome asli | gratis, butuh Chrome | `node eval/run-import-fidelity.mjs [--verbose]` |
 | 2 | Checklist judge multimodal per brief | 1 panggilan CLI per gambar | `node eval/run-judge.mjs --brief <id> --image <png>` lalu `node eval/summarize.mjs` |
 | 3 | Blind pairwise + Bradley-Terry | waktu reviewer | `node eval/make-pairs.mjs` → `eval/pairwise/review.html` → `node eval/score-pairs.mjs` |
 
@@ -12,7 +13,11 @@ Semua import ke modul repo hanya lewat `eval/lib/adapter.mjs`. Jika API codec be
 
 ## Tier 1 — fidelity
 
-Fixture = `eval/fidelity/fixtures/NN-nama.jsx` + `NN-nama.json` (asersi). Asersi model membaca dokumen hasil codec (padding per sisi, radius per sudut, gap x/y, warna palette + alpha, inheritance teks, hug/fill, absolute, gradient, shadow, truncate, warning kelas invalid). Asersi `rendered` mengekspor HTML lalu mengukur kotak di Chrome headless (Google Chrome sistem atau Chromium Playwright; bila tidak ada → SKIP, bukan PASS). `edits` menjalankan directive `update_elements`; `roundTrip` memeriksa serialize → parse → serialize stabil dan properti tidak berubah. Exit code ≠ 0 bila ada fixture gagal — inilah gate regresi codec. Fixture boleh ditambah; jangan longgarkan asersi agar lulus.
+Fixture = `eval/fidelity/fixtures/NN-nama.jsx` (atau `NN-nama.html` untuk HTML+CSS lewat importer `integrations/codec-html.mjs`, dengan `viewport` di JSON) + `NN-nama.json` (asersi). Asersi model membaca dokumen hasil codec (padding per sisi, radius per sudut, gap x/y, warna palette + alpha, inheritance teks, hug/fill, absolute, gradient, shadow, truncate, warning kelas invalid). Asersi `rendered` mengekspor HTML lalu mengukur kotak di Chrome headless (Google Chrome sistem atau Chromium Playwright; bila tidak ada → SKIP, bukan PASS). `edits` menjalankan directive `update_elements`; `roundTrip` memeriksa serialize → parse → serialize stabil dan properti tidak berubah. Exit code ≠ 0 bila ada fixture gagal — inilah gate regresi codec. Fixture boleh ditambah; jangan longgarkan asersi agar lulus.
+
+## Tier 1b — fidelity import HTML/CSS
+
+`run-import-fidelity.mjs` merender halaman asli di Chrome headless, mengimpornya (stylesheet eksternal, @import, @layer, media query untuk viewport, custom property, Tailwind v4), merender hasil export dokumen, lalu membandingkan kotak setiap elemen yang menjadi layer (dipasangkan lewat `data-name="eN"`). Halaman: referensi Tailwind 07/08 dan halaman CSS orisinal di `eval/fidelity/import/`. Exit code ≠ 0 bila rasio layer dalam toleransi (`--tol`, default 2px) di bawah `--min` (default 0.9), atau bila tidak ada Chrome (tidak pernah dianggap PASS). Font Inter disematkan di kedua sisi agar yang diukur hanya konversinya.
 
 ## Brief (beku)
 
