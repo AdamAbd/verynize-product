@@ -4,6 +4,10 @@ export default defineConfig({
     name: "verynize",
     entrypoint: "./cloud/worker.js",
     compatibilityDate: "2026-10-28",
+    // Better Auth imports node:async_hooks and node:crypto.
+    compatibilityFlags: ["nodejs_compat"],
+    // Workers Paid: room for scrypt password hashing (Better Auth's default) on sign-up and sign-in.
+    limits: { cpuMs: 30_000 },
     assets: {
       notFoundHandling: "single-page-application",
       runWorkerFirst: ["/api/*", "/u/*", "/apps/*", "/passkey", "/passkey.js"],
@@ -14,6 +18,10 @@ export default defineConfig({
       ROOMS: bindings.durableObject({ worker: "verynize", exportName: "DesignRoom" }),
       ACCOUNTS: bindings.durableObject({ worker: "verynize", exportName: "AccountDirectory" }),
       APPS: bindings.durableObject({ worker: "verynize", exportName: "PublishedApp" }),
+      // Better Auth users, sessions and organizations (cloud/auth.js). Schema: cloud/migrations.
+      DB: bindings.d1({ name: "verynize" }),
+      // Signs Better Auth cookies and tokens. Generate with `openssl rand -base64 32`.
+      BETTER_AUTH_SECRET: bindings.secret(),
       // Email sign-in relay (cloud/mail.js). The URL and token are deployment secrets; never use "outbox" in production.
       EMAIL_PROVIDER: bindings.text("webhook"),
       EMAIL_WEBHOOK_URL: bindings.secret(),
