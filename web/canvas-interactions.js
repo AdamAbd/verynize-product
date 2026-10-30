@@ -47,6 +47,25 @@
     hoverBox.className = 'hover-box'; hoverKids.className = 'hover-children'; dropBox.className = 'drop-target'; dropLine.className = 'drop-line';
     hoverBox.hidden = dropBox.hidden = dropLine.hidden = true;
     overlay.append(hoverKids, hoverBox, dropBox, dropLine);
+    // A clipping ancestor cuts off the selection ring and handles drawn inside the layer, so selected layers inside
+    // one get their chrome redrawn here, over the clip.
+    const clippedSelection = document.createElement('div');
+    clippedSelection.className = 'clipped-selection';
+    overlay.append(clippedSelection);
+    function drawClippedSelection() {
+      clippedSelection.replaceChildren();
+      for (const id of sel()) {
+        const n = find(id); if (!n || n.hidden || n.rotation) continue;
+        let p = n.parentId && find(n.parentId), clipped = false;
+        while (p && !clipped) { clipped = !!p.clipContent; p = p.parentId && find(p.parentId); }
+        const b = clipped && screenBox(id); if (!b) continue;
+        const ring = document.createElement('div'); ring.className = 'selection-ring'; placeBox(ring, b);
+        if (!n.locked) for (const corner of ['nw', 'ne', 'sw', 'se']) {
+          const h = document.createElement('div'); h.className = 'handle'; h.dataset.id = id; h.dataset.corner = corner; ring.append(h);
+        }
+        clippedSelection.append(ring);
+      }
+    }
     let hoverId = null, hoverPoint = null, rowHover = null;
     function screenBox(id) {
       const el = elementOf(id); if (!el) return null;
@@ -238,7 +257,7 @@
       const label = $('#zoom-reset'); if (label) label.textContent = Math.round(cam.zoom * 100) + '%';
       if (lastPage) cameras.set(lastPage, {...cam});
       ed.updateMeasurement();
-      drawFrameLabels();
+      drawFrameLabels(); drawClippedSelection();
       if (hoverId || spacingBands.length) refreshHover(true);
     }
     function setCamera(x, y, zoom, fitting = false) {
@@ -479,8 +498,8 @@
       if (spacing) { startSpacing(e, spacingBands[Number(spacing.dataset.index)], Number(spacing.dataset.index)); return; }
       if (tool === 'eyedropper') { e.preventDefault(); const hex = colorAt(e.clientX, e.clientY); if (hex) { eyedropperRun++; applyPickedColor(hex); setTool('move'); } return; }
       if (DRAW_TOOLS.has(tool)) { startDraw(e); return; }
-      const handle = e.target.closest('#canvas .handle');
-      if (handle) { startResize(e, handle.closest('.layer').dataset.id, handle.dataset.corner); return; }
+      const handle = e.target.closest('#canvas .handle, #canvas-overlay .handle');
+      if (handle) { startResize(e, handle.dataset.id || handle.closest('.layer').dataset.id, handle.dataset.corner); return; }
       const el = e.target.closest('#canvas .layer');
       if (!el) { startMarquee(e); return; }
       const hit = el.dataset.id, deep = deepSelect(e), id = resolveHit(hit, deep);
@@ -557,6 +576,16 @@
         // Live reorder inside the stack the layers came from.
         const reordered = drop.index !== undefined && !drop.parent && placeInStack(home, stacked, drop.index);
         if (free.length || reordered) ed.render();
+        // Free layers move into a free frame (or back onto the page) as soon as the pointer crosses into it, so the
+        // frame clips them and its edges and centre lines become snap targets for the rest of the drag.
+        if (drop.parent && free.length && !stacked.length && drop.index === undefined) {
+          relocate(free.map(s => s.n), drop.parent.id === '' ? null : drop.parent.id);
+          ed.render();
+          home = free[0].n.parentId || null;
+          for (const s of free) { s.x = s.n.x - dx; s.y = s.n.y - dy; }
+          targets = guideTargets(free.map(s => s.n.id));
+          drop = {};
+        }
         placeGhosts(stacked, grab, dx, dy);
         if (stacked.length) ed.updateMeasurement(); // name and size badges follow the dragged copy
         drawGuides(guides); drawDrop(drop);
@@ -1419,7 +1448,7 @@
         if (saved) setCamera(saved.x, saved.y, saved.zoom); else requestAnimationFrame(() => fit(true));
       }
       for (const id of drilled) if (!find(id)) drilled.delete(id);
-      drawFrameLabels();
+      drawFrameLabels(); drawClippedSelection();
       refreshHover(true);
     }
     applyCamera();

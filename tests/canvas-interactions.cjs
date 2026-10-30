@@ -90,6 +90,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     let list = await nodesOf(), drawn = list.at(-1);
     assert.equal(drawn.type, 'frame'); near(drawn.x, 500); near(drawn.y, 20); near(drawn.w, 200); near(drawn.h, 150);
     assert.equal(drawn.parentId, null);
+    assert.equal(drawn.clipContent, true, 'a drawn frame clips its content');
     assert.equal(await page.evaluate(() => window.design.getTool()), 'move', 'tool returns to move after drawing');
     await page.keyboard.press('r'); await drag([50, 60], [150, 120]);
     drawn = (await nodesOf()).at(-1);
@@ -162,6 +163,21 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.ok(indicator, 'a slot indicator shows while dragging into a stack');
     assert.deepEqual(await order(), ['s-a', 's-b', 's-c'], 'dropping into a stack takes the slot under the pointer');
     assert.equal(await page.locator('#canvas-overlay .drop-target').isVisible(), false, 'drop feedback clears on release');
+
+    // ---- 3c. Dragging onto a frame nests live, clips, and snaps to the frame ----
+    await seed([{id: 'F', name: 'Frame 1', type: 'frame', x: 0, y: 0, w: 400, h: 300, color: '#ffffff', layout: 'free', clipContent: true}, rect('R', 500, 100, 150, 100)]);
+    const live = await drag([575, 150], [390, 150], {steps: 12, during: () => page.evaluate(() => ({parent: window.design.getDocument().pages[0].nodes.find(n => n.id === 'R').parentId, dom: document.querySelector('#canvas [data-id=R]').parentElement.closest('.layer')?.dataset.id}))});
+    assert.deepEqual(live, {parent: 'F', dom: 'F'}, 'the layer nests while the pointer is over the frame, before release');
+    let nested = await node('R'); near(nested.x, 315, 1, 'keeps its screen x'); near(nested.y, 100);
+    assert.equal(await page.locator('#canvas [data-id=F]').evaluate(e => getComputedStyle(e).overflow), 'hidden', 'the frame clips the overhang');
+    assert.equal(await page.locator('#canvas-overlay .selection-ring > .handle').count(), 4, 'selection chrome is redrawn above the clip');
+    const guidesInFrame = await drag([390, 150], [278, 152], {steps: 12, during: () => page.locator('#canvas-overlay .guide').count()});
+    assert.ok(guidesInFrame > 0, 'guides show for the new parent'); near((await node('R')).x, 200, 0.5, 'left edge snaps to the frame centre'); near((await node('R')).y, 100, 0.5, 'centre snaps to the frame middle');
+    const se = await page.locator('#canvas-overlay .selection-ring > .handle[data-corner=se]').boundingBox(), to = await screen(400, 250);
+    await page.mouse.move(se.x + se.width / 2, se.y + se.height / 2); await page.mouse.down(); await page.mouse.move(to.x, to.y, {steps: 6}); await page.mouse.up();
+    near((await node('R')).w, 200, 1, 'the overlay handle resizes'); near((await node('R')).h, 150, 1);
+    for (let i = 0; i < 3; i++) await page.keyboard.press('Meta+z'); // resize, snap drag, nesting drag
+    nested = await node('R'); assert.equal(nested.parentId, null, 'the nesting drag is one undo step'); near(nested.x, 500);
 
     // ---- 4. Smart guides, equal spacing and Alt distances ----
     await seed([rect('s1', 0, 0), rect('s2', 500, 200), rect('g1', 0, 400), rect('g2', 150, 400), rect('mover', 530, 520)]);
@@ -272,6 +288,6 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.reload(); await page.waitForSelector('#canvas .layer');
     assert.ok((await nodesOf()).some(n => n.id === 'label'));
     assert.deepEqual(errors, []);
-    console.log('PASS canvas interactions: cursor-anchored zoom, stops, fit, space/H pan, draw tools + presets, marquee, shift toggle, parent-first selection, hover outlines, click/cmd drill-in, artboard marquee, auto-layout drag reorder + re-parent, Enter/Tab navigation, edge + equal-gap snapping with guides, Alt distances, clipboard + style, frame/unframe, auto layout, z-order, lock/hide, Fill/Hug sizing, context menu');
+    console.log('PASS canvas interactions: cursor-anchored zoom, stops, fit, space/H pan, draw tools + presets, marquee, shift toggle, parent-first selection, hover outlines, click/cmd drill-in, artboard marquee, auto-layout drag reorder + re-parent, live nesting into clipping frames with frame guides, Enter/Tab navigation, edge + equal-gap snapping with guides, Alt distances, clipboard + style, frame/unframe, auto layout, z-order, lock/hide, Fill/Hug sizing, context menu');
   } finally { await app.close(); await fs.rm(dir, {recursive: true, force: true}); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

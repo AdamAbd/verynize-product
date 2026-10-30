@@ -30,6 +30,10 @@
 #canvas-overlay .marquee[data-kind=draw]{background:transparent}
 #canvas-overlay .hover-box,#canvas-overlay .drop-target{position:absolute;box-sizing:border-box;border:1.5px solid var(--shell-accent,#b93cdb)}
 #canvas-overlay .hover-child{position:absolute;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--shell-accent,#b93cdb) 60%,transparent)}
+#canvas-overlay .selection-ring{position:absolute;box-sizing:border-box;border:1.5px solid var(--shell-accent,#9371ff)}
+#canvas-overlay .selection-ring>.handle{position:absolute;width:8px;height:8px;box-sizing:border-box;background:#fff;border:1px solid var(--shell-accent,#9371ff);pointer-events:auto}
+#canvas-overlay .selection-ring>.handle[data-corner=nw]{left:-5px;top:-5px;cursor:nwse-resize}#canvas-overlay .selection-ring>.handle[data-corner=ne]{right:-5px;top:-5px;cursor:nesw-resize}#canvas-overlay .selection-ring>.handle[data-corner=sw]{left:-5px;bottom:-5px;cursor:nesw-resize}#canvas-overlay .selection-ring>.handle[data-corner=se]{right:-5px;bottom:-5px;cursor:nwse-resize}
+.moving #canvas-overlay .clipped-selection,#canvas.spacing-measure~#canvas-overlay .clipped-selection{display:none}
 #canvas-overlay .drop-line{position:absolute;background:var(--shell-accent,#b93cdb);border-radius:1px}
 #canvas-overlay [hidden]{display:none}
 /* Spacing handles (selected auto-layout frame): gaps are red hatched bands, padding is blue; both show a value badge. */
