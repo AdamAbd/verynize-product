@@ -9,6 +9,7 @@ const path = require('node:path');
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'better-render-'));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({ args: ['.', `--user-data-dir=${profile}`], env, timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });

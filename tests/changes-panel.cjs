@@ -35,6 +35,7 @@ process.exit(2);
   await fs.chmod(path.join(bin, 'gh'), 0o755);
   const env = { ...process.env, ...identity, PATH: bin + path.delimiter + process.env.PATH, FAKE_CODEX_LOG: path.join(root, 'codex.log'), VERYNIZE_WORKSPACES_DIR: path.join(root, 'workspaces'), VERYNIZE_BRANCH_PREFIX: 'verynize' };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });

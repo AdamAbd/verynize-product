@@ -1,5 +1,7 @@
-// Account directory: one SQLite Durable Object holding accounts, magic-link sign-in,
-// hashed sessions, public creator profiles, the room membership index and published apps.
+// Credential store: one SQLite Durable Object holding magic-link sign-in, hashed legacy sessions,
+// passkeys, handoffs and the development outbox. Profiles, the room membership index,
+// publications and apps live in D1 (cloud/profiles.js); `accounts` here is a mirror of each
+// account's id, email, handle and name for passkey ceremonies, and the source of the one-time copy.
 import { DurableObject } from "cloudflare:workers";
 import { randomHex, digestHex, rpcFail, sameDigest } from "./http.js";
 import { sendMail } from "./mail.js";
@@ -8,22 +10,8 @@ import { ALGORITHMS, toBase64url, verifyRegistration, verifyAssertion } from "./
 const LINK_TTL = 15 * 60 * 1000;
 const PASSKEY_TTL = 10 * 60 * 1000;
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
-const RESERVED = new Set([
-  "api",
-  "apps",
-  "admin",
-  "u",
-  "public",
-  "verynize",
-  "support",
-  "help",
-  "settings",
-  "login",
-  "signin",
-]);
-export const EMAIL = /^[^\s@<>()",;:]{1,64}@[a-z0-9-]+(\.[a-z0-9-]+)+$/;
-export const HANDLE = /^[a-z0-9][a-z0-9-]{2,29}$/;
-export const APP_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
+export { RESERVED, EMAIL, HANDLE, APP_NAME } from "./rules.js";
+import { EMAIL } from "./rules.js";
 export const SESSION = /^vs_[0-9a-f]{64}$/;
 
 const normalizeEmail = (value) => {
@@ -72,66 +60,6 @@ export class AccountDirectory extends DurableObject {
     return this.sql.exec("SELECT * FROM accounts WHERE handle=?", handle).toArray()[0] || null;
   }
 
-  freeHandle(email) {
-    let base = email
-      .split("@")[0]
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 20);
-    if (base.length < 3 || RESERVED.has(base)) base = "designer";
-    let handle = base;
-    while (this.accountByHandle(handle)) handle = `${base}-${randomHex(2)}`;
-    return handle;
-  }
-
-  /** Account for an email address, created (unverified) when needed so it can receive invites. */
-  ensureAccount(rawEmail) {
-    const email = normalizeEmail(rawEmail);
-    let row = this.accountByEmail(email);
-    if (!row) {
-      const id = crypto.randomUUID();
-      this.sql.exec(
-        "INSERT INTO accounts (id,email,handle,display_name,created_at) VALUES (?,?,?,?,?)",
-        id,
-        email,
-        this.freeHandle(email),
-        email.split("@")[0].slice(0, 80),
-        Date.now(),
-      );
-      row = this.account(id);
-    }
-    return publicAccount(row);
-  }
-
-  /**
-   * The directory account for a Better Auth user (cloud/auth.js). Better Auth only signs in
-   * verified addresses, so the email proves ownership: an account created earlier by a magic
-   * link or an invitation is linked and marked verified. Emails cannot be changed in Better
-   * Auth, so the address stays a stable link until accounts move to D1.
-   */
-  linkVerifiedAccount(rawEmail, name) {
-    const email = normalizeEmail(rawEmail);
-    const created = !this.accountByEmail(email);
-    const account = this.ensureAccount(email);
-    this.sql.exec("UPDATE accounts SET verified=1 WHERE id=?", account.id);
-    const displayName = typeof name === "string" ? name.trim().slice(0, 80) : "";
-    if (created && displayName)
-      this.sql.exec("UPDATE accounts SET display_name=? WHERE id=?", displayName, account.id);
-    return publicAccount(this.account(account.id));
-  }
-
-  accountIdForEmail(email) {
-    return typeof email === "string"
-      ? this.accountByEmail(email.trim().toLowerCase())?.id || null
-      : null;
-  }
-  accountsById(ids) {
-    return (Array.isArray(ids) ? ids.slice(0, 64) : [])
-      .map((id) => publicAccount(this.account(String(id))))
-      .filter(Boolean);
-  }
-
   async startSignIn(rawEmail, origin) {
     const email = normalizeEmail(rawEmail);
     const token = randomHex(32),
@@ -153,6 +81,47 @@ export class AccountDirectory extends DurableObject {
     return { sent: true, expiresInSeconds: LINK_TTL / 1000 };
   }
 
+  /** Keep the passkey mirror of a D1 profile current (id, email, handle, name). */
+  mirrorAccount({ id, email, handle, displayName }) {
+    // Free the email and handle from stale mirror rows of other accounts first.
+    this.sql.exec("DELETE FROM accounts WHERE email=? AND id<>?", email, id);
+    this.sql.exec("UPDATE accounts SET handle=id WHERE handle=? AND id<>?", handle, id);
+    this.sql.exec(
+      "INSERT INTO accounts (id,email,handle,display_name,created_at,verified) VALUES (?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET email=excluded.email, handle=excluded.handle, display_name=excluded.display_name",
+      id,
+      email,
+      handle,
+      displayName,
+      Date.now(),
+    );
+    return { mirrored: true };
+  }
+
+  /** One page of a legacy table for the D1 copy (cloud/profiles.js migrateDirectory). */
+  exportRows(table, after, limit) {
+    if (!["accounts", "memberships", "publications", "apps"].includes(table))
+      rpcFail(400, "Unknown table");
+    const rows = this.sql
+      .exec(
+        `SELECT rowid AS _row, * FROM ${table} WHERE rowid>? ORDER BY rowid LIMIT ?`,
+        Number(after) || 0,
+        Math.min(500, Number(limit) || 200),
+      )
+      .toArray();
+    return { rows, last: rows.length ? rows.at(-1)._row : Number(after) || 0 };
+  }
+
+  /** The email of a valid magic link; links are single use, so a replay always fails. */
+  async consumeSignInLink(token) {
+    if (typeof token !== "string" || !/^[0-9a-f]{64}$/.test(token))
+      rpcFail(400, "Sign-in code is invalid");
+    const hash = await digestHex(token);
+    const row = this.sql.exec("SELECT * FROM sign_in_links WHERE hash=?", hash).toArray()[0];
+    this.sql.exec("DELETE FROM sign_in_links WHERE hash=?", hash);
+    if (!row || row.expires_at < Date.now()) rpcFail(401, "Sign-in link expired or already used");
+    return { email: row.email };
+  }
+
   /** Best-effort invitation email; a disabled provider never blocks the membership change. */
   async notifyInvite(email, title, role, link) {
     try {
@@ -166,19 +135,6 @@ export class AccountDirectory extends DurableObject {
     } catch {
       return false;
     }
-  }
-
-  async verifySignIn(token, label) {
-    if (typeof token !== "string" || !/^[0-9a-f]{64}$/.test(token))
-      rpcFail(400, "Sign-in code is invalid");
-    const hash = await digestHex(token);
-    const row = this.sql.exec("SELECT * FROM sign_in_links WHERE hash=?", hash).toArray()[0];
-    // Links are single use: remove before checking expiry so a replay always fails.
-    this.sql.exec("DELETE FROM sign_in_links WHERE hash=?", hash);
-    if (!row || row.expires_at < Date.now()) rpcFail(401, "Sign-in link expired or already used");
-    const account = this.ensureAccount(row.email);
-    this.sql.exec("UPDATE accounts SET verified=1 WHERE id=?", account.id);
-    return this.newSession(account.id, label);
   }
 
   async newSession(accountId, label) {
@@ -427,6 +383,7 @@ export class AccountDirectory extends DurableObject {
     return { removed: id };
   }
 
+  /** The account id of a live legacy session, or null. */
   async resolveSession(session) {
     if (typeof session !== "string" || !SESSION.test(session)) return null;
     const row = this.sql
@@ -437,7 +394,7 @@ export class AccountDirectory extends DurableObject {
       this.sql.exec("DELETE FROM sessions WHERE hash=?", row.hash);
       return null;
     }
-    return publicAccount(this.account(row.account_id));
+    return row.account_id;
   }
 
   async signOut(session) {
@@ -462,106 +419,6 @@ export class AccountDirectory extends DurableObject {
         Date.now(),
       )
       .one().n;
-  }
-
-  updateProfile(accountId, patch) {
-    const row = this.account(accountId);
-    if (!row) rpcFail(404, "Account not found");
-    if (patch.handle !== undefined) {
-      const handle = String(patch.handle).trim().toLowerCase();
-      if (!HANDLE.test(handle) || RESERVED.has(handle))
-        rpcFail(400, "Handles use 3–30 lowercase letters, numbers or dashes");
-      const owner = this.accountByHandle(handle);
-      if (owner && owner.id !== accountId) rpcFail(409, "That handle is taken");
-      this.sql.exec("UPDATE accounts SET handle=? WHERE id=?", handle, accountId);
-    }
-    if (patch.displayName !== undefined) {
-      const name = String(patch.displayName).trim().replace(/\s+/g, " ");
-      if (!name || name.length > 80) rpcFail(400, "Display names use 1–80 characters");
-      this.sql.exec("UPDATE accounts SET display_name=? WHERE id=?", name, accountId);
-    }
-    if (patch.avatarUrl !== undefined) {
-      const url = String(patch.avatarUrl).trim();
-      if (url) {
-        let parsed;
-        try {
-          parsed = new URL(url);
-        } catch {
-          rpcFail(400, "Avatar must be an HTTPS image URL");
-        }
-        if (parsed.protocol !== "https:" || parsed.username || parsed.password || url.length > 500)
-          rpcFail(400, "Avatar must be an HTTPS image URL");
-      }
-      this.sql.exec("UPDATE accounts SET avatar_url=? WHERE id=?", url || null, accountId);
-    }
-    return publicAccount(this.account(accountId));
-  }
-
-  profile(handle) {
-    const row = typeof handle === "string" ? this.accountByHandle(handle.toLowerCase()) : null;
-    if (!row || !row.verified) return null;
-    // App paths include the handle, so they are recomputed in case the handle changed since publishing.
-    const publications = this.sql
-      .exec(
-        "SELECT kind,ref,title,path,published_at FROM publications WHERE account_id=? ORDER BY published_at DESC LIMIT 200",
-        row.id,
-      )
-      .toArray()
-      .map((item) => ({
-        kind: item.kind,
-        title: item.title,
-        path: item.kind === "app" ? this.appInfo(item.ref)?.path || item.path : item.path,
-        publishedAt: item.published_at,
-      }));
-    return {
-      handle: row.handle,
-      displayName: row.display_name,
-      avatarUrl: row.avatar_url || "",
-      publications,
-    };
-  }
-
-  recordPublication(accountId, { kind, ref, title, path }) {
-    this.sql.exec(
-      "INSERT OR REPLACE INTO publications (kind,ref,account_id,title,path,published_at) VALUES (?,?,?,?,?,?)",
-      kind,
-      ref,
-      accountId,
-      String(title || "Untitled").slice(0, 120),
-      path,
-      Date.now(),
-    );
-  }
-  removePublication(kind, ref) {
-    this.sql.exec("DELETE FROM publications WHERE kind=? AND ref=?", kind, ref);
-  }
-
-  linkRoom(accountId, roomId, role, title) {
-    this.sql.exec(
-      "INSERT OR REPLACE INTO memberships (account_id,room_id,role,title,updated_at) VALUES (?,?,?,?,?)",
-      accountId,
-      roomId,
-      role,
-      title ? String(title).slice(0, 120) : null,
-      Date.now(),
-    );
-  }
-  unlinkRoom(accountId, roomId) {
-    this.sql.exec("DELETE FROM memberships WHERE account_id=? AND room_id=?", accountId, roomId);
-  }
-  rooms(accountId) {
-    return this.sql
-      .exec(
-        "SELECT room_id,role,title,updated_at FROM memberships WHERE account_id=? ORDER BY updated_at DESC LIMIT 500",
-        accountId,
-      )
-      .toArray()
-      .map((row) => ({
-        id: row.room_id,
-        role: row.role,
-        title: row.title || "Shared design",
-        updatedAt: row.updated_at,
-      }));
   }
 
   outbox(recipient) {
@@ -592,87 +449,5 @@ export class AccountDirectory extends DurableObject {
     this.sql.exec(
       "DELETE FROM outbox WHERE id NOT IN (SELECT id FROM outbox ORDER BY id DESC LIMIT 500)",
     );
-  }
-
-  // Published applications: names are unique per account and served at /apps/<handle>/<name>/.
-  ensureApp(accountId, rawName, rawTitle) {
-    const name = String(rawName || "")
-      .trim()
-      .toLowerCase();
-    if (!APP_NAME.test(name)) rpcFail(400, "App names use lowercase letters, numbers and dashes");
-    const title =
-      String(rawTitle || name)
-        .trim()
-        .slice(0, 120) || name;
-    let row = this.sql
-      .exec("SELECT * FROM apps WHERE account_id=? AND name=?", accountId, name)
-      .toArray()[0];
-    if (!row) {
-      const count = this.sql
-        .exec("SELECT COUNT(*) AS n FROM apps WHERE account_id=?", accountId)
-        .one().n;
-      if (count >= 50) rpcFail(429, "An account can publish at most 50 apps");
-      this.sql.exec(
-        "INSERT INTO apps (id,account_id,name,title,created_at) VALUES (?,?,?,?,?)",
-        crypto.randomUUID(),
-        accountId,
-        name,
-        title,
-        Date.now(),
-      );
-      row = this.sql
-        .exec("SELECT * FROM apps WHERE account_id=? AND name=?", accountId, name)
-        .toArray()[0];
-    } else if (rawTitle) this.sql.exec("UPDATE apps SET title=? WHERE id=?", title, row.id);
-    return this.appInfo(row.id);
-  }
-  appInfo(appId) {
-    const row = this.sql
-      .exec(
-        "SELECT apps.*, accounts.handle FROM apps JOIN accounts ON accounts.id=apps.account_id WHERE apps.id=?",
-        appId,
-      )
-      .toArray()[0];
-    return row
-      ? {
-          id: row.id,
-          accountId: row.account_id,
-          name: row.name,
-          title: row.title,
-          handle: row.handle,
-          activeVersion: row.active_version ?? null,
-          path: `/apps/${row.handle}/${row.name}/`,
-        }
-      : null;
-  }
-  apps(accountId) {
-    return this.sql
-      .exec("SELECT id FROM apps WHERE account_id=? ORDER BY created_at DESC", accountId)
-      .toArray()
-      .map((row) => this.appInfo(row.id));
-  }
-  resolveApp(handle, name) {
-    const row = this.sql
-      .exec(
-        "SELECT apps.id FROM apps JOIN accounts ON accounts.id=apps.account_id WHERE accounts.handle=? AND apps.name=?",
-        String(handle).toLowerCase(),
-        String(name).toLowerCase(),
-      )
-      .toArray()[0];
-    return row ? this.appInfo(row.id) : null;
-  }
-  setActiveVersion(appId, version) {
-    const app = this.appInfo(appId);
-    if (!app) rpcFail(404, "App not found");
-    this.sql.exec("UPDATE apps SET active_version=? WHERE id=?", version, appId);
-    if (version === null) this.removePublication("app", appId);
-    else
-      this.recordPublication(app.accountId, {
-        kind: "app",
-        ref: appId,
-        title: app.title,
-        path: app.path,
-      });
-    return this.appInfo(appId);
   }
 }

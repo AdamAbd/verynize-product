@@ -52,6 +52,7 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "generation-image-"));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   let logs = "";
   const launch = async () => {
     const app = await _electron.launch({
