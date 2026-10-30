@@ -8,6 +8,8 @@ Read the product `AGENTS.md`, island ownership contract, `docs/wonder-canvas-spe
 
 Screenshot 42 establishes the five creation categories: Colors, Dimensions, Numbers, Font family, and Font weight. Screenshot 41 establishes nested `brand` grouping with `on-primary` and `primary` children. These are historical screenshots; the live run should establish the current application's exact controls.
 
+The table below records the state **before** this session's fixes; later sections mark which gaps were closed.
+
 | Workflow | Verynize implementation | Evidence boundary / gap |
 |---|---|---|
 | Five variable categories | Color tokens plus four typed variable types | Present in `variables.tsx` / `vars.ts`; existing creation tests cover four typed types |
@@ -112,7 +114,7 @@ Validation after edits: `node --test integrations/variables.test.mjs` **8/8 pass
 
 ## Fresh Wonder evidence and bounded SVG Colors implementation
 
-The root agent's new [13 — Icon color variable](../../design/wonder/2026-10-30/13-icon-color-variable.png) shows a pasted SVG with its actual **Colors** property bound to `accent`, independently of its background, and its Opacity bound to `strength`. This upgrades I2's reference from the historical spec to fresh runtime evidence. Screenshot 12 establishes the number convention: `60` represents 60% opacity.
+The root agent's new [13 — Icon color variable](../../design/wonder/2026-10-30/13-icon-color-variable.png) shows a pasted SVG with its actual **Colors** property bound to `accent` and its Opacity bound to `strength`. The capture does not show the background, so independence from it is not established by this image. This upgrades I2's reference from the historical spec to fresh runtime evidence. Screenshot 12 establishes the number convention: `60` represents 60% opacity.
 
 Implemented an original, deliberately bounded equivalent for **simple monochrome imported SVG images**:
 
