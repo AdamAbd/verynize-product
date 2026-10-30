@@ -12,6 +12,7 @@
 import { betterAuth } from "better-auth";
 import { bearer, organization } from "better-auth/plugins";
 import { sendMail } from "./mail.js";
+import { organizationHooks } from "./orgs.js";
 
 export const AUTH_BASE_PATH = "/api/auth";
 
@@ -71,6 +72,8 @@ export function authOptions(env = {}, { baseURL, database } = {}) {
     plugins: [
       bearer(),
       organization({
+        // Room access follows membership (cloud/orgs.js); these push changes to live sockets.
+        organizationHooks: organizationHooks(env),
         sendInvitationEmail: async ({ email, organization: org, inviter, id }) => {
           const link = `${baseURL}/#invitation=${id}`;
           await mail({
