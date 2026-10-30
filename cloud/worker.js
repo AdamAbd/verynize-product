@@ -12,6 +12,7 @@ import {
   HttpError,
 } from "./http.js";
 import { SESSION } from "./accounts.js";
+import { AUTH_BASE_PATH, createAuth } from "./auth.js";
 import { MAX_FILE, cleanPath } from "./apps.js";
 import { profilePage, missingApp } from "./pages.js";
 import { passkeyPage, passkeyScript } from "./passkey-page.js";
@@ -81,6 +82,38 @@ function roomRequest(target, request, account, body) {
     headers,
     body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
   });
+}
+
+// Better Auth endpoints that send email or check a password are limited per IP and endpoint.
+const LIMITED_AUTH = new Set([
+  "/sign-up/email",
+  "/sign-in/email",
+  "/request-password-reset",
+  "/reset-password",
+  "/send-verification-email",
+  "/change-password",
+]);
+
+/** Better Auth (cloud/auth.js) under /api/auth/*, after the legacy account routes. */
+async function handleBetterAuth(request, env, url) {
+  if (!url.pathname.startsWith(AUTH_BASE_PATH + "/")) return null;
+  if (!env.DB) fail(503, "Accounts database is not configured on this server");
+  const endpoint = url.pathname.slice(AUTH_BASE_PATH.length);
+  if (
+    request.method === "POST" &&
+    LIMITED_AUTH.has(endpoint) &&
+    (await limited(env.AUTH_LIMIT, `${ip(request)}:ba${endpoint}`))
+  )
+    fail(429, "Too many requests. Try again in a minute.");
+  // Bearer tokens only (see cloud/auth.js): no cookies in, no cookies out.
+  const forwarded = new Request(request);
+  forwarded.headers.delete("cookie");
+  const response = await createAuth(env, request).handler(forwarded);
+  const headers = new Headers(response.headers);
+  headers.delete("set-cookie");
+  for (const [name, value] of Object.entries(corsHeaders)) headers.set(name, value);
+  headers.set("access-control-expose-headers", "set-auth-token");
+  return new Response(response.body, { status: response.status, headers });
 }
 
 async function handleAuth(request, env, url) {
@@ -371,6 +404,7 @@ export default {
       if (url.pathname.startsWith("/api/")) {
         const response =
           (await handleAuth(request, env, url)) ||
+          (await handleBetterAuth(request, env, url)) ||
           (await handleRooms(request, env, url)) ||
           (await handleApps(request, env, url));
         return response || json({ error: "Not found" }, 404);
