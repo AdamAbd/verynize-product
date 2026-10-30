@@ -23,12 +23,12 @@ export function exportHTML(document, pageId, { nodeId } = {}) {
   const tokens = document.tokens || {};
   const render = (node, parent, lastInFlow) => {
     const color = safeCss(tokens[node.token] || node.color, node.type === 'text' ? '#25252e' : 'transparent');
-    const { box, img } = nodeStyle(node, parent, { color, lastInFlow });
+    const { box, img, svgTint } = nodeStyle(node, parent, { color, svgColor: tokens[node.svgColorToken] || node.svgColor, lastInFlow });
     const shaderAttrs = node.type === 'shader' ? ` data-shader-preset="${escape(node.shaderPreset || 'aurora')}" data-shader-speed="${escape(node.shaderSpeed ?? 1)}" data-shader-intensity="${escape(node.shaderIntensity ?? 1)}" data-shader-color="${escape(color)}"` : '';
     const attrs = `${shaderAttrs} data-id="${escape(node.id)}" data-design-type="${escape(node.type)}" data-name="${escape(node.name)}"${node.icon ? ` data-icon="${escape(node.icon)}"` : ''} style="${escape(styleText(box))}"`;
     let inner = '';
     if (node.type === 'text') inner = richText(node);
-    else if (node.type === 'image') { const src = safeSrc(node.src) || safeSrc(node.srcRemote); if (src) inner = `<img src="${escape(src)}" alt="${escape(node.name)}" style="${escape(styleText(img))}">`; }
+    else if (node.type === 'image') { const src = safeSrc(node.src) || safeSrc(node.srcRemote); if (src) inner = svgTint ? `<span role="img" aria-label="${escape(node.name)}" data-svg-color="true" style="${escape(styleText(img))}"></span>` : `<img src="${escape(src)}" alt="${escape(node.name)}" style="${escape(styleText(img))}">`; }
     else if (node.type === 'frame') {
       const children = kids.get(node.id) || [];
       const last = lastInFlowId(children);

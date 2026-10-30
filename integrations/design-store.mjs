@@ -77,6 +77,8 @@ export function validateDocument(document) {
       if(node.animated!==undefined&&!['','aurora','sunset','ocean'].includes(node.animated))throw new Error('Invalid animated palette');
       if(node.layout!==undefined&&!['free','flex','grid','block','inline'].includes(node.layout))throw new Error('Invalid node layout');
       if(node.fontWeight!==undefined&&!/^(normal|bold|[1-9][0-9]{0,2}|1000)$/.test(String(node.fontWeight)))throw new Error('Invalid node fontWeight');
+      if (node.svgColor !== undefined && (node.type !== 'image' || typeof node.src !== 'string' || !/^data:image\/svg\+xml;base64,/.test(node.src) || typeof node.svgColor !== 'string' || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(node.svgColor))) throw new Error('Invalid SVG color');
+      if (node.svgColorToken !== undefined && (typeof node.svgColorToken !== 'string' || !VARIABLE_NAME.test(node.svgColorToken) || node.svgColor === undefined)) throw new Error('Invalid SVG color variable');
       validateBindings(node.bindings);
       for(const key of ['color','fontFamily','textAlign','direction','layout','token','gradient','mask','strokeColor','shadow','alignItems','justifyContent'])if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key].length>4000))throw new Error(`Invalid node ${key}`);
     }

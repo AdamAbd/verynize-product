@@ -256,7 +256,10 @@
     if (n.hidden) set('display', 'none');
 
     const img = n.type === 'image' ? [['width', '100%'], ['height', '100%'], ['object-fit', pick(n.objectFit, ['contain', 'cover', 'fill', 'none', 'scale-down'], 'contain')], ['display', 'block']] : null;
-    return {box: [...decl], img};
+    // Optional monochrome SVG paint: retain the source and recolor its alpha silhouette.
+    const svgTint = n.type === 'image' && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(ctx.svgColor || n.svgColor || '') && /^data:image\/svg\+xml;base64,[A-Za-z0-9+/=\s]+$/.test(n.src || '');
+    if (svgTint) img.push(['background-color', ctx.svgColor || n.svgColor], ['mask-image', `url("${n.src.replace(/\s/g, '')}")`], ['mask-mode', 'alpha'], ['mask-size', n.objectFit === 'cover' ? 'cover' : n.objectFit === 'none' ? 'auto' : n.objectFit === 'fill' ? '100% 100%' : 'contain'], ['mask-position', 'center'], ['mask-repeat', 'no-repeat']);
+    return {box: [...decl], img, svgTint};
   }
 
   function bordersOf(n) {

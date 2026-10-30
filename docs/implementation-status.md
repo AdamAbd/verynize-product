@@ -1,6 +1,6 @@
 # Implementation acceptance status
 
-Updated 2026-10-29. This records actual implementation and tests, not a claim that every Wonder feature is equivalent. The original vendor checklist remains in wonder-roadmap.md.
+Updated 2026-10-30. This records actual implementation and tests, not a claim that every Wonder feature is equivalent. The original vendor checklist remains in wonder-roadmap.md.
 
 ## Implemented and exercised
 
@@ -31,11 +31,25 @@ Updated 2026-10-29. This records actual implementation and tests, not a claim th
 - Canvas: layers-panel drag & drop (reorder, re-parent into/out of frames, multi-select, locked-aware, one undo step), flip ⇧H/⇧V and rotate 90°, eyedropper (I), ellipse shapes (O, `ellipse` flag carried through the codec), and context-menu Copy as PNG/HTML, Select inverse/matching. Copy as PNG falls back to an HTML image on the clipboard. See tests/canvas-layers-dnd.cjs.
 - Inspector: alpha color picker (HEX/RGB/HSL/OKLCH, eyedropper, per-fill opacity), typed variables (dimension/number/font family/font weight) with property bindings and CSS export, Fontsource/installed-font family picker with family-limited weights, 0.5×–4× and PDF artwork export through a native save dialog with a success toast. MCP token tools don't handle the new variable types yet. See tests/inspector-parity.cjs and integrations/variables.test.mjs.
 
+## Design workflow audit — 30 October 2026
+
+A new Wonder design was built through native desktop UI controls, with all five variable types, shared spacing bindings, SVG color/opacity bindings, flex/grid layout and effects experiments. The [workflow record](wonder-design-workflow-2026-10-30.md) distinguishes applied behavior from menus only observed and configurations still untested. A native 2× PNG and an editable Verynize recreation accompany the evidence.
+
+Implemented and exercised in Verynize:
+
+- Per-corner radius and per-side border width editors, mixed uniform values, binding removal on individual edits, scalar override cleanup, undo/rebind and rendered CSS checks.
+- Color detach preserves each selected layer's effective paint and alpha; color creation rejects invalid/colliding names; CSS variable export reports ambiguous identifiers; malformed SVG insertion fails without adding a layer.
+- Simple monochrome imported SVG tint and color-variable binding paint the shape independently of its background. Original source, alpha, multi-selection detach, reload, HTML export and JSX round trip are covered. Complex/multicolor SVG and catalog icon recoloring use different paths and are not covered by this control.
+- Native export applies scale after navigation. Explicit artwork pixels and layout measurements pass at 0.5×, 1×, 2× and 4×; the prior output could have scaled dimensions with unscaled artwork.
+
+Validation for this change: integration tests 116/116; codec fidelity 26 fixtures and 105/105 checks; inspector variable-library/binding, canvas-page, inspector-parity and native render-export Electron suites; syntax/asset checks, UI lint and TypeScript checks. This is targeted validation, not a rerun of every unrelated desktop/cloud suite.
+
 ## Remaining gaps against Wonder's shipped product
 
 - Native Figma clipboard conversion, OAuth account connection and full Figma fidelity; native .fig/.pen compatibility. PAT-based supported REST import is implemented but awaits a live account test.
 - Arbitrary remote webpage capture with full assets/custom fonts, interactive region selection, source mapping, and interactive behavior recovery. Local API region capture is implemented.
 - Photographic image model providers and smooth/high-fidelity curve tracing; implemented generation is agent-authored vector illustration with optional PNG rendering.
+- Remaining inspector parity: paint stacks, structured outline/filter/shadow controls, broad per-property variable binding, variable folders/rename UI and multicolor SVG replacement. See the dated audit for exact boundaries.
 - Exact Wonder shader library and parameter compatibility; the implemented WebGL presets are independently authored.
 - Full CSS/Tailwind import/export fidelity; external stylesheet resolution; general source round trips.
 - Provider-hosted multi-account management (Settings › Usage shows the plan limits of the one signed-in Claude Code and Codex account), tool/plugin configuration, comprehensive agent autonomy UI. Local CLI sign-in/switch and model defaults exist; successful provider browser login remains unverified.
@@ -45,7 +59,7 @@ Updated 2026-10-29. This records actual implementation and tests, not a claim th
 
 ## Evidence boundaries
 
-Installed Wonder and Pen were inspected statically; their hosted/account-dependent workflows were not runtime verified. The local app is independently authored. FigCraft supplies an architectural reference for a shared editor/CLI/MCP document model, not copied implementation. Tests prove the listed bounded behaviors on this machine; they do not establish full parity with any proprietary product.
+Earlier Wonder and Pen references included static inspection. The 30 October Wonder canvas workflow was additionally exercised at runtime; unrelated hosted/account-dependent workflows remain unverified. The local app is independently authored. FigCraft supplies an architectural reference for a shared editor/CLI/MCP document model, not copied implementation. Tests prove the listed bounded behaviors on this machine; they do not establish full parity with any proprietary product.
 
 ## Packaged application
 

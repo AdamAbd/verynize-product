@@ -64,6 +64,7 @@ import {
   type Node,
 } from "./model";
 import { TypographySection } from "./typography";
+import { SvgColorsSection } from "./svg-colors";
 import { LayoutSection } from "./layout";
 import { ConstraintSelect, ConstraintWidget, readConstraints } from "./constraints";
 
@@ -248,6 +249,10 @@ function InspectorCheckbox({
 
 function AppearanceSection({ doc, node, selection }: Props) {
   const set = (key: string) => (value: string) => setField(selection, node, key, value);
+  const [cornersOpen, setCornersOpen] = useOptional(node.id, Array.isArray(node.cornerRadii));
+  const cornersExpanded = cornersOpen && !node.bindings?.radius;
+  const corners = individualValues(node, "cornerRadii", "radius");
+  const radius = corners.every((value) => value === corners[0]) ? fmt(corners[0]) : "";
   const hidden = !!node.hidden;
   return (
     <Section
@@ -299,7 +304,8 @@ function AppearanceSection({ doc, node, selection }: Props) {
                 name="radius"
                 label="Corner radius"
                 numeric
-                value={fmt(node.radius)}
+                value={radius}
+                placeholder="Mixed"
                 onCommit={set("radius")}
                 prefix={<IconAffix icon={Scan} />}
                 suffix={suffix}
@@ -307,8 +313,32 @@ function AppearanceSection({ doc, node, selection }: Props) {
             )}
           </BindableField>
         </Caption>
-        <span className="size-6 shrink-0" aria-hidden />
+        <IconButton
+          icon={Scan}
+          label="Independent corner radii"
+          active={cornersExpanded}
+          aria-expanded={cornersExpanded}
+          onClick={() => {
+            if (!cornersExpanded) expandIndividual(selection, "cornerRadii", "radius");
+            setCornersOpen(!cornersExpanded);
+          }}
+        />
       </div>
+      {cornersExpanded ? (
+        <IndividualFields
+          node={node}
+          selection={selection}
+          property="cornerRadii"
+          scalar="radius"
+          labels={[
+            "Top left radius",
+            "Top right radius",
+            "Bottom right radius",
+            "Bottom left radius",
+          ]}
+          prefixes={["TL", "TR", "BR", "BL"]}
+        />
+      ) : null}
       {node.type === "frame" ? (
         <InspectorCheckbox
           name="clipContent"
@@ -318,6 +348,95 @@ function AppearanceSection({ doc, node, selection }: Props) {
         />
       ) : null}
     </Section>
+  );
+}
+
+type IndividualProperty = "cornerRadii" | "strokeWidths";
+type UniformProperty = "radius" | "strokeWidth";
+
+function individualValues(
+  node: Node,
+  property: IndividualProperty,
+  scalar: UniformProperty,
+): number[] {
+  const values = node[property];
+  const fallback =
+    typeof node[scalar] === "number" && Number.isFinite(node[scalar])
+      ? Math.max(0, node[scalar])
+      : 0;
+  if (Array.isArray(values) && values.length === 4)
+    return values.map((value) =>
+      typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : fallback,
+    );
+  return Array.from({ length: 4 }, () => fallback);
+}
+
+function individualPatch(
+  node: Node,
+  property: IndividualProperty,
+  scalar: UniformProperty,
+  values: number[],
+) {
+  const bindings = { ...node.bindings };
+  delete bindings[scalar];
+  return { [property]: values, bindings: Object.keys(bindings).length ? bindings : undefined };
+}
+
+/** Expanding a bound uniform value starts with four resolved values and detaches only that binding. */
+function expandIndividual(
+  selection: string[],
+  property: IndividualProperty,
+  scalar: UniformProperty,
+) {
+  patchNodes(selection, (node) =>
+    individualPatch(node, property, scalar, individualValues(node, property, scalar)),
+  );
+}
+
+function IndividualFields({
+  node,
+  selection,
+  property,
+  scalar,
+  labels,
+  prefixes,
+}: {
+  node: Node;
+  selection: string[];
+  property: IndividualProperty;
+  scalar: UniformProperty;
+  labels: string[];
+  prefixes: string[];
+}) {
+  const values = individualValues(node, property, scalar);
+  return (
+    <div
+      className="grid grid-cols-4 gap-2"
+      role="group"
+      aria-label={
+        property === "cornerRadii" ? "Individual corner radii" : "Individual border widths"
+      }
+    >
+      {labels.map((label, index) => (
+        <Field
+          key={label}
+          name={`${property}-${index}`}
+          label={label}
+          numeric
+          value={fmt(values[index])}
+          prefix={<Affix>{prefixes[index]}</Affix>}
+          onCommit={(raw) => {
+            const value = Number(raw.trim());
+            if (!raw.trim() || !Number.isFinite(value)) return "Enter a number.";
+            patchNodes(selection, (selected) => {
+              const next = individualValues(selected, property, scalar);
+              next[index] = Math.max(0, value);
+              return individualPatch(selected, property, scalar, next);
+            });
+          }}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -681,7 +800,13 @@ function useOptional(nodeId: string | undefined, hasValue: boolean) {
 }
 
 function BorderSection({ doc, node, selection }: Props) {
-  const [open, setOpen] = useOptional(node.id, node.strokeWidth > 0);
+  const widths = individualValues(node, "strokeWidths", "strokeWidth");
+  const [open, setOpen] = useOptional(
+    node.id,
+    widths.some((value) => value > 0),
+  );
+  const [sidesOpen, setSidesOpen] = useOptional(node.id, Array.isArray(node.strokeWidths));
+  const sidesExpanded = sidesOpen && !node.bindings?.strokeWidth;
   const [picker, setPicker] = useState(false);
   const set = (key: string) => (value: string) => setField(selection, node, key, value);
   const commit = (color: string) => setField(selection, node, "strokeColor", color);
@@ -703,7 +828,8 @@ function BorderSection({ doc, node, selection }: Props) {
                 name="strokeWidth"
                 label="Border width"
                 numeric
-                value={fmt(node.strokeWidth)}
+                value={widths.every((value) => value === widths[0]) ? fmt(widths[0]) : ""}
+                placeholder="Mixed"
                 onCommit={set("strokeWidth")}
                 prefix={<Affix>W</Affix>}
                 suffix={suffix}
@@ -751,6 +877,33 @@ function BorderSection({ doc, node, selection }: Props) {
           </ColorPopover>
         </Caption>
       </div>
+      <div className="flex justify-end">
+        <IconButton
+          icon={SquareDashed}
+          label="Independent border widths"
+          active={sidesExpanded}
+          aria-expanded={sidesExpanded}
+          onClick={() => {
+            if (!sidesExpanded) expandIndividual(selection, "strokeWidths", "strokeWidth");
+            setSidesOpen(!sidesExpanded);
+          }}
+        />
+      </div>
+      {sidesExpanded ? (
+        <IndividualFields
+          node={node}
+          selection={selection}
+          property="strokeWidths"
+          scalar="strokeWidth"
+          labels={[
+            "Top border width",
+            "Right border width",
+            "Bottom border width",
+            "Left border width",
+          ]}
+          prefixes={["T", "R", "B", "L"]}
+        />
+      ) : null}
     </OptionalSection>
   );
 }
@@ -984,6 +1137,7 @@ export function PropertiesBody({
       {node?.type === "text" ? (
         <TypographySection key={node.id} doc={doc} node={node} selection={selection} />
       ) : null}
+      {node ? <SvgColorsSection key={node.id} doc={doc} node={node} selection={selection} /> : null}
       <FillSection doc={doc} node={node} selection={selection} />
       {node ? <BorderSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <ShadowSection doc={doc} node={node} selection={selection} /> : null}

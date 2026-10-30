@@ -65,8 +65,10 @@ async function renderNow({html,width,height,scale,fonts:families,measure},parent
   window.webContents.session.webRequest.onBeforeRequest((details,cb)=>cb({cancel:!details.url.startsWith('data:')&&!details.url.startsWith('blob:')}));
   const csp='<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data: blob:; style-src \'unsafe-inline\'; script-src \'unsafe-inline\'; font-src data:">';
   try{
-   window.webContents.setZoomFactor(scale);
    await window.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(csp+html));
+   // Navigation establishes the data URL's zoom context. Set the export scale on that
+   // loaded page; setting it on the initial blank page can be reset by loadURL.
+   window.webContents.setZoomFactor(scale);
    // Inserted after load so large embedded fonts never inflate the navigation URL.
    if(fonts.css)await window.webContents.insertCSS(fonts.css);
    await window.webContents.executeJavaScript(`Promise.race([Promise.all([document.body&&document.body.offsetHeight,...[...document.fonts].map(face=>face.load().catch(()=>{}))]).then(()=>Promise.all([document.fonts.ready,...[...document.images].map(image=>image.decode().catch(()=>{}))])).then(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))),new Promise(resolve=>setTimeout(resolve,4000))])`);
