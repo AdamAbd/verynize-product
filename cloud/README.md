@@ -30,6 +30,19 @@ Redo works the same way.
 
 This is server-sequenced operation merging, not a peer-to-peer CRDT. It needs the room to order batches, and edits made while offline are merged when the socket reconnects.
 
+## Cloud files and offline edits (`web/cloud-panel.js`, `web/wonder-shell.js`)
+
+A room behaves like a file that the desktop and the web editor open:
+
+- **Identity.** A file library record can be cloud-backed: `cloud: {server, roomId, token?, role, detached?}`. The capability token is kept only for rooms joined or created with a link, in the same device-local storage as the record itself. Rooms reached through an account (direct member or organization) store no token and reconnect with the account session. Duplicating a file drops the link.
+- **Opening.** Opening a cloud-backed record (`fileLibrary.open`, which emits `library-file-opened`), or starting the app with one as the current file, reconnects to its room. Joining a room (invite, Account › Your rooms, Files home) opens the room's existing record instead of creating another copy; the first join creates it. Create room marks the open file as the room's file. Disconnect, leaving the room and revocation keep the local copy and mark it `detached`; a detached copy that was edited since is left as a separate local file when the room is joined again, and the room gets a new record.
+- **Files home.** Signed in with an email account, the Files home lists the rooms of the active workspace (`GET /api/orgs/:id/rooms`) and rooms shared with you directly (`GET /api/me/rooms` entries without an organization), merged with the device's cloud-backed records so a room appears once. Cards carry `data-room-id`, the workspace (or "Shared with you"), a cloud mark and the role. Opening a listed room joins it (`cloudWorkspace.openRoom`).
+- **Persistent outbox.** For each room the device stores, in IndexedDB (`verynize-cloud` › `outbox`, key `<server>|<roomId>`), its client id, batch counter, unacknowledged batches and the last confirmed document and revision. It is written shortly after every queued batch, acknowledgement or remote change, and immediately when the file is switched. Reopening the file (also after a restart) reuses the client id, so the socket's `acked` drops the batches the server already applied and the rest are resent; the server applies each batch at most once per client id. Edits in the file beyond the stored confirmed document and batches (made while the room was closed, or not yet stored when the app quit) are diffed and sent as one more batch. Beyond 4000 operations or about 1.5 MB of batches only the confirmed document is kept, and the file is diffed against it again (whole-document fallback).
+- **Offline.** When the server is unreachable, a file with a stored outbox opens offline: edits queue and persist, and the socket keeps retrying (backoff up to 15 s). On reconnect the server snapshot replaces the confirmed document and the pending batches are rebased onto it as usual. A file never opened on the device cannot open offline.
+- **Clearing.** Disconnect, leaving the room, revocation (`revoked`, or 401/403/404 when reopening) clear the stored outbox. Signing out keeps the record linked; it reconnects after signing in again.
+
+`window.cloudWorkspace` also exposes `room()`, `openRoom({server,id})`, `pendingCount()` and `storedOutbox(server,id)`; `window.fileLibrary` adds `findCloud(server,roomId)`, `cloudOf(id)` and `setCloud(id,cloud)`.
+
 ## API
 
 Rooms (capability `Authorization: Bearer <64 hex>` and/or session `X-Verynize-Session: vs_…`):
@@ -147,6 +160,7 @@ Rooms created by the previous snapshot-only Worker are migrated in place. Their 
 - `node tests/cloud-passkeys-desktop.mjs`: Electron with Chromium's CDP virtual authenticator. It registers a passkey from Share › Account, signs out, signs in with the passkey through the handoff, and checks that removal refuses sign-in.
 - `node tests/cloud-apps.mjs`: a real project build uploaded and served (content types, base injection, SPA fallback, ETag, versions, pinned URLs, rollback, ownership, path and manifest validation, failed builds, persistence, unpublish).
 - `node tests/cloud-desktop.mjs`: two Electron clients (invite join, cursors, sync, reconnect, conflict-free merging of layers, properties and text, local-only undo/redo rebased over remote edits, publication, and the legacy-server conflict prompt).
+- `node tests/cloud-files-desktop.mjs`: rooms as files. Create room marks the open file, a restart reconnects it without a copy, the Files home lists workspace and directly shared rooms and joins them once, edits made with the server stopped survive an app restart and reach the room exactly once with the same client id, a second device sees them, and Disconnect detaches the file and clears the outbox.
 - `node tests/cloud-accounts-desktop.mjs`: two Electron clients through the Share panel (email + password sign-up, verification and sign-in, profile, email invites, viewer enforcement, live promotion, role links, rotation, comments, recovery, app build/publish/rollback/unpublish, sign out everywhere).
 - `tests/cloud-async.cjs` (`npm run test:ux`): stale panel completions never touch a newly selected document.
 
