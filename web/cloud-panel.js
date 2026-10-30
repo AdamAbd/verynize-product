@@ -342,6 +342,7 @@
     else pending.push({ n: ++batchNumber, ops: stamped, sent: false });
     clearTimeout(sendTimer);
     sendTimer = setTimeout(sendPending, 40);
+    saveOutbox();
   }
   function localChange() {
     drawPeers();
@@ -506,6 +507,7 @@
       else status(`Saved shared revision ${revision}`);
     } else if (message.ops?.length) status(`Synced revision ${revision}`);
     rebuild();
+    saveOutbox();
   }
   /** Make sure local operations reached the server (used before publishing). */
   async function flushOps() {
@@ -533,8 +535,95 @@
     }
   }
 
+  // ---- persistent outbox ----------------------------------------------------------------------
+  // Per room (IndexedDB, so the file library's localStorage quota is untouched): this device's
+  // client id and batch counter, the unacknowledged batches and the last confirmed document. After a
+  // restart or a reconnect the same client id makes the server's `acked` say which batches it
+  // applied; the rest are resent. Beyond the limits only the confirmed document is kept and the
+  // file's own document is diffed against it again (whole-document fallback).
+  const OUTBOX_DB = "verynize-cloud",
+    OUTBOX_STORE = "outbox",
+    OUTBOX_OPS = 4000,
+    OUTBOX_BYTES = 1500000;
+  let outboxDb = null,
+    outboxTimer = null;
+  const roomKey = (info) => `${info.server}|${info.id}`;
+  function openOutbox() {
+    outboxDb ||= new Promise((resolve, reject) => {
+      const request = indexedDB.open(OUTBOX_DB, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(OUTBOX_STORE);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    }).catch(() => null);
+    return outboxDb;
+  }
+  async function outbox(mode, run) {
+    const db = await openOutbox();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(OUTBOX_STORE, mode),
+          request = run(tx.objectStore(OUTBOX_STORE));
+        tx.oncomplete = () => resolve(request.result ?? null);
+        tx.onerror = tx.onabort = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+  const readOutbox = (key) => outbox("readonly", (store) => store.get(key));
+  const clearOutbox = (key) => outbox("readwrite", (store) => store.delete(key));
+  function outboxState() {
+    if (!connection || protocol < 2 || !confirmed || !clientId) return null;
+    let batches = pending.map((batch) => ({ n: batch.n, ops: batch.ops }));
+    const count = batches.reduce((sum, batch) => sum + batch.ops.length, 0);
+    const overflow = count > OUTBOX_OPS || JSON.stringify(batches).length > OUTBOX_BYTES;
+    if (overflow) batches = [];
+    return {
+      server: connection.server,
+      id: connection.id,
+      clientId,
+      batch: batchNumber,
+      pending: batches,
+      overflow,
+      confirmed,
+      revision,
+      role,
+      savedAt: Date.now(),
+    };
+  }
+  /** Persist the outbox soon (or now): every queued batch, acknowledgement and remote change. */
+  function saveOutbox(now = false) {
+    clearTimeout(outboxTimer);
+    outboxTimer = null;
+    if (!connection) return;
+    const write = () => {
+      outboxTimer = null;
+      const state = outboxState();
+      if (state) outbox("readwrite", (store) => store.put(state, roomKey(state)));
+    };
+    if (now) write();
+    else outboxTimer = setTimeout(write, 150);
+  }
+  window.addEventListener("pagehide", () => {
+    if (outboxTimer) saveOutbox(true);
+  });
+  const library = () => window.fileLibrary || null;
+  /** Mark the room's library record as detached (left, revoked) and forget its stored outbox. */
+  function forgetRoom(info) {
+    if (!info) return;
+    clearOutbox(roomKey(info));
+    const lib = library(),
+      id = info.fileId || lib?.findCloud?.(info.server, info.id),
+      cloud = id && lib?.cloudOf?.(id);
+    if (cloud) lib.setCloud(id, { ...cloud, detached: true });
+  }
+
   // ---- connection -----------------------------------------------------------------------------
-  function disconnect(message = "Disconnected. Local design retained.") {
+  /** `leave` ends this file's link to the room (Disconnect, revocation); otherwise the file stays cloud-backed. */
+  function disconnect(message = "Disconnected. Local design retained.", leave = false) {
+    if (outboxTimer && !leave) saveOutbox(true);
+    if (leave) forgetRoom(connection);
     generation++;
     resetHistory();
     clearTimeout(timer);
@@ -617,6 +706,7 @@
           for (const batch of pending) batch.sent = false;
           rebuild();
           sendPending();
+          saveOutbox();
           return;
         }
         if (message.type === "ops") return receiveOps(message);
@@ -626,7 +716,8 @@
           return;
         }
         if (message.type === "revoked") {
-          if (!rotating) disconnect("Your access to this room was revoked. Local design retained.");
+          if (!rotating)
+            disconnect("Your access to this room was revoked. Local design retained.", true);
           return;
         }
         if (message.type === "comment") {
@@ -647,58 +738,163 @@
         status("Live connection unavailable; changes will retry.");
     };
   }
+  /**
+   * Open a room as a file. `load` opens the room's library record (creating it on first join, or
+   * reusing the open one); without it the current file becomes the room's record (Create room).
+   * A stored outbox is restored, and when the server is unreachable the file opens offline.
+   */
   async function connect(info, load = true, expected) {
     const u = new URL(info.server);
+    const lib = library();
+    let fileId = lib?.findCloud?.(u.origin, info.id) || null;
+    const record = fileId ? lib.cloudOf(fileId) : null;
+    const token = info.token || record?.token || null;
     const session = sessionFor(u.origin);
     if (
       !["http:", "https:"].includes(u.protocol) ||
       !/^[0-9a-f-]{36}$/.test(info.id) ||
-      (info.token ? !/^[0-9a-f]{64}$/.test(info.token) : !session)
+      (token ? !/^[0-9a-f]{64}$/.test(token) : !session)
     )
       throw Error(
-        info.token || session
-          ? "Invalid room invite"
-          : "Sign in to open a room without a link token",
+        token || session ? "Invalid room invite" : "Sign in to open a room without a link token",
       );
-    info = { id: info.id, token: info.token || null, server: u.origin };
+    info = { id: info.id, token, server: u.origin };
     if (expected !== undefined && expected !== generation) return;
     if (expected === undefined) disconnect();
     const epoch = generation;
-    const current = await request(`/api/rooms/${info.id}`, {}, info);
+    const [stored, fetched] = await Promise.all([
+      readOutbox(roomKey(info)),
+      request(`/api/rooms/${info.id}`, {}, info).then(
+        (value) => ({ value }),
+        (error) => ({ error }),
+      ),
+    ]);
     if (epoch !== generation) return;
-    if (load && window.fileLibrary?.createFromDocument) {
-      await window.fileLibrary.createFromDocument(current.document, {
+    let current = fetched.value,
+      offline = false;
+    if (fetched.error) {
+      const e = fetched.error;
+      if (fileId && [401, 403, 404].includes(e.status)) {
+        // Access ended (revoked, removed, deleted): the local copy stays, detached.
+        forgetRoom({ ...info, fileId });
+        throw Error(`${e.message}. The local copy of this file is kept.`);
+      }
+      // Unreachable server: a room this device has state for opens offline and reconnects.
+      if (e.status || !stored?.confirmed || !fileId) throw e;
+      offline = true;
+      current = { document: null, revision: stored.revision, role: stored.role, protocol: 2 };
+    }
+    // A detached copy edited since leaving stays a separate local file; the room gets a new record.
+    if (load && record?.detached && !offline) {
+      const file = lib.list().find((f) => f.id === fileId);
+      if (file && shared(file.document) !== shared(current.document)) {
+        lib.setCloud(fileId, null);
+        fileId = null;
+      }
+    }
+    const cloud = {
+      server: info.server,
+      roomId: info.id,
+      ...(info.token ? { token: info.token } : {}),
+      role: current.role || "owner",
+    };
+    let restoreFile = false;
+    if (load && fileId) {
+      if (lib.currentId !== fileId) {
+        await lib.open(fileId, { cloudJoinEpoch: epoch, isCurrent: () => epoch === generation });
+        if (epoch !== generation) return;
+      }
+      lib.setCloud(fileId, cloud);
+      // With stored state the file's own document is kept and rebased; otherwise the room's loads.
+      restoreFile = !!stored?.confirmed || offline;
+      load = !restoreFile;
+    } else if (load && lib?.createFromDocument) {
+      fileId = await lib.createFromDocument(current.document, {
         cloudJoinEpoch: epoch,
         isCurrent: () => epoch === generation,
+        cloud,
       });
       if (epoch !== generation) return;
       load = false;
     } else if (load && window.documentLifecycle) {
       await window.documentLifecycle.prepareSwitch({ cloudJoinEpoch: epoch });
       if (epoch !== generation) return;
+    } else if (!load && lib?.setCloud && lib.currentId) {
+      // Create room: the open file becomes the room's file.
+      fileId = lib.currentId;
+      lib.setCloud(fileId, cloud);
     }
-    connection = info;
+    connection = { ...info, fileId };
     protocol = Number.isSafeInteger(current.protocol) && Ops ? current.protocol : 1;
-    clientId = randomId();
+    const restore = restoreFile && protocol >= 2 && stored?.clientId ? stored : null;
+    if (restoreFile && !restore && current.document) load = true;
+    clientId = restore ? restore.clientId : randomId();
     clock = Ops ? Ops.createClock(clientId) : null;
-    pending = [];
-    batchNumber = 0;
+    pending = restore
+      ? (restore.pending || []).map((batch) => ({ n: batch.n, ops: batch.ops, sent: false }))
+      : [];
+    batchNumber = restore ? restore.batch || 0 : 0;
+    for (const batch of pending) for (const op of batch.ops) if (op.s) clock.observe(op.s);
     resetHistory();
-    confirmed = current.document;
+    // Restored batches were made on the stored confirmed document. The socket snapshot replaces it
+    // and drops the batches the server acknowledged for this client id.
+    confirmed = restore ? restore.confirmed : current.document;
     setRole(current.role || "owner");
     $("cloud-server").value = info.server;
     updateInvite();
-    revision = current.revision;
+    revision = restore ? restore.revision || 0 : current.revision;
     if (load) apply(current.document);
     lastLocalDoc = window.design.getDocument();
     lastLocal = shared(lastLocalDoc);
     unsub = window.design.subscribe(localChange);
+    if (restore) {
+      // Edits the file holds beyond confirmed + pending (made while the room was closed, or not yet
+      // stored when the app quit) become one more batch.
+      let base = confirmed;
+      for (const batch of pending) base = Ops.apply(base, batch.ops).doc;
+      const ops = Ops.diff(base, lastLocalDoc, { ignore: LOCAL_KEYS });
+      if (ops.length && canEdit()) queueOps(ops);
+    }
+    if (protocol >= 2) saveOutbox(true);
     openSocket(epoch);
-    status(`Connected · revision ${revision}`);
+    status(
+      offline
+        ? "Offline. Edits stay on this device and are sent when the room is reachable."
+        : `Connected · revision ${revision}`,
+    );
   }
+  /** Reconnect a cloud-backed file that was just opened (or reopened after a restart). */
+  function reconnectFile(id, cloud) {
+    if (!id || !cloud || cloud.detached) return;
+    if (connection && connection.id === cloud.roomId && connection.server === cloud.server) return;
+    connect({ server: cloud.server, id: cloud.roomId, token: cloud.token }).catch((e) => {
+      if (library()?.currentId === id) status(e.message);
+    });
+  }
+  window.addEventListener("library-file-opened", (event) => {
+    const detail = event.detail || {};
+    if (detail.cloudJoinEpoch === undefined) reconnectFile(detail.id, detail.cloud);
+  });
+  window.addEventListener("DOMContentLoaded", () => {
+    const lib = library(),
+      id = lib?.currentId;
+    if (id && !new URLSearchParams(location.hash.slice(1)).has("room"))
+      reconnectFile(id, lib.cloudOf?.(id));
+  });
   window.cloudWorkspace = {
-    disconnect: () => disconnect(),
+    disconnect: () => disconnect(undefined, true),
     isConnected: () => !!connection,
+    /** The open room ({server, id, fileId}) or null. */
+    room: () =>
+      connection
+        ? { server: connection.server, id: connection.id, fileId: connection.fileId }
+        : null,
+    /** Open a room as a file (Files home): its library record, created on first open. */
+    openRoom: (info) => connect({ server: info.server, id: info.id, token: info.token }),
+    /** Unacknowledged local batches of the open room. */
+    pendingCount: () => pending.length,
+    /** The stored outbox of a room (client id, batches, confirmed document), for diagnostics. */
+    storedOutbox: (server, id) => readOutbox(roomKey({ server, id })),
     role: () => role,
     account: () => (account ? { ...account.account } : null),
   };
@@ -749,10 +945,15 @@
     const input = $("cloud-invite").value;
     if (!input) return;
     const info = parseInvite(input);
-    if (!window.confirm("Open this shared design as a separate file?")) return;
+    // A room this device already has a file for opens that file; others become a new file.
+    if (
+      !library()?.findCloud?.(info.server, info.id) &&
+      !window.confirm("Open this shared design as a separate file?")
+    )
+      return;
     await connect(info);
   });
-  $("cloud-leave").onclick = () => disconnect();
+  $("cloud-leave").onclick = () => disconnect(undefined, true);
   const openLink = (event) => {
     if (window.desktop?.openExternal) {
       event.preventDefault();
@@ -826,6 +1027,7 @@
     apply(current.document);
     conflict = false;
     $("cloud-conflict").hidden = true;
+    saveOutbox();
     status("Loaded shared version");
   });
   $("cloud-overwrite").onclick = action(async () => {
@@ -932,7 +1134,11 @@
       account.server === connection?.server;
     row.hidden = true;
     if (!emailSession) return;
-    const organizations = await request("/api/auth/organization/list", {}, { server: account.server });
+    const organizations = await request(
+      "/api/auth/organization/list",
+      {},
+      { server: account.server },
+    );
     select.replaceChildren(
       ...organizations
         .filter((org) => org.id !== currentId)
@@ -975,7 +1181,7 @@
   async function removeMember(accountId) {
     await request(`/api/rooms/${connection.id}/members/${accountId}`, { method: "DELETE" });
     if (account && accountId === account.account.id && !connection.token) {
-      disconnect("You left the room. Local design retained.");
+      disconnect("You left the room. Local design retained.", true);
       return;
     }
     await refreshAccess();
@@ -1030,6 +1236,9 @@
       const result = await request(`/api/rooms/${info.id}/tokens/rotate`, { method: "POST" }, info);
       if (epoch !== generation) return;
       connection = { ...info, token: result.token };
+      const lib = library(),
+        cloud = info.fileId && lib?.cloudOf?.(info.fileId);
+      if (cloud) lib.setCloud(info.fileId, { ...cloud, token: result.token });
       updateInvite();
       const old = socket;
       socket = null;

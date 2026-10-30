@@ -11,6 +11,26 @@ export type LibraryFile = {
   archived: boolean;
   publication?: { url: string; publicId?: string; revision?: number };
   nativePath?: string;
+  /** Cloud-backed file: the room it opens (web/cloud-panel.js reconnects it). */
+  cloud?: CloudLink;
+  /** Set on rooms listed from the server that have no file on this device yet. */
+  room?: CloudRoom;
+};
+export type CloudLink = {
+  server: string;
+  roomId: string;
+  role?: string;
+  detached?: boolean;
+};
+/** A room from `/api/orgs/:id/rooms` or `/api/me/rooms` (cloud/README.md). */
+export type CloudRoom = {
+  id: string;
+  server: string;
+  title: string;
+  role: string;
+  updatedAt: number;
+  /** Organization that owns the room, or null when it is shared with you directly. */
+  organizationName: string | null;
 };
 export type LibraryFolder = { id: string; name: string };
 export type Filter = "all" | "public" | "private" | "archived";
