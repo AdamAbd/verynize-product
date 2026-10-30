@@ -309,6 +309,8 @@
   /** Editor document = confirmed server state + local unacknowledged operations. */
   function rebuild() {
     if (!confirmed) return;
+    // cloud-assets: while held images upload, remote state is applied once they finish.
+    if (window.cloudAssets?.holding?.()) return;
     let doc = confirmed;
     for (const batch of pending) doc = Ops.apply(doc, batch.ops).doc;
     const current = window.design.getDocument();
@@ -364,6 +366,8 @@
       rebuild();
       return;
     }
+    // cloud-assets: embedded images upload first; their URL is sent instead of the data URI.
+    if (window.cloudAssets?.hold?.(now, () => (localChange(), rebuild()))) return;
     const ops = Ops.diff(lastLocalDoc, now, { ignore: LOCAL_KEYS });
     const before = lastLocalDoc;
     lastLocalDoc = now;
@@ -897,6 +901,9 @@
     storedOutbox: (server, id) => readOutbox(roomKey({ server, id })),
     role: () => role,
     account: () => (account ? { ...account.account } : null),
+    // cloud-assets (web/cloud-assets.js): the connected room and authenticated room requests.
+    room: () => (connection ? { server: connection.server, id: connection.id } : null),
+    request: (path, options) => request(path, options),
   };
   window.addEventListener("document-will-change", (event) => {
     if (event.detail?.cloudJoinEpoch !== generation) disconnect();

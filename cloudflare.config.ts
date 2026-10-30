@@ -25,6 +25,11 @@ export default defineConfig({
       DB: bindings.d1({ name: "verynize", id: "76210bc4-d4fe-4075-a321-776c2525a828" }),
       // Signs Better Auth cookies and tokens. Generate with `openssl rand -base64 32`.
       BETTER_AUTH_SECRET: bindings.secret(),
+      // Room images (cloud/assets.js). ASSETS is the static web bundle, so the bucket is ASSETS_BUCKET.
+      ASSETS_BUCKET: bindings.r2({ name: "verynize-assets" }),
+      // Signs room image upload and read URLs. Generate with `openssl rand -base64 32`; never rotate
+      // it casually, since every image URL stored in documents depends on it.
+      ASSET_SIGNING_SECRET: bindings.secret(),
       // Native transactional email. Never use "outbox" in production.
       EMAIL_PROVIDER: bindings.text("cloudflare"),
       EMAIL_FROM: bindings.text("mada@gayaloo.app"),
