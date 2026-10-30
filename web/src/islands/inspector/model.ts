@@ -178,9 +178,16 @@ export function setField(
       if (key === "text") patch.textRuns = [];
       if (key === "w" && node.wMode && node.wMode !== "fixed") patch.wMode = "fixed";
       if (key === "h" && node.hMode && node.hMode !== "fixed") patch.hMode = "fixed";
-      // Typing a value detaches the property from its variable.
-      if (node.bindings?.[key]) {
-        const { [key]: _detached, ...rest } = node.bindings;
+      // Typing a value detaches the property from its variable (a uniform radius also replaces any
+      // per-corner radius bindings).
+      const detach =
+        key === "radius"
+          ? [key, "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft"]
+          : [key];
+      if (detach.some((k) => node.bindings?.[k])) {
+        const rest = Object.fromEntries(
+          Object.entries(node.bindings ?? {}).filter(([k]) => !detach.includes(k)),
+        );
         patch.bindings = Object.keys(rest).length ? rest : undefined;
       }
       patch[key] =

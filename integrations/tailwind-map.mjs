@@ -3,6 +3,9 @@
 // with a reason; nothing is dropped silently.
 import { compileClass, sortClasses, resolveValue } from './tailwind-engine.mjs';
 import { lengthOf, cssColorToHex, normalizeColorsIn, splitTop } from './codec-css.mjs';
+import { BLEND_MODES, FILTERS } from './node-style.mjs';
+
+const FILTER_TYPES = { blur: 'blur', brightness: 'brightness', contrast: 'contrast', grayscale: 'grayscale', 'hue-rotate': 'hueRotate', invert: 'invert', saturate: 'saturate', sepia: 'sepia' };
 
 export const cssVarForToken = name => '--' + String(name).trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 export const SAFE_CSS = value => typeof value === 'string' && value.length <= 4000 && !/[;{}<>\\]/.test(value) && !/url\s*\(/i.test(value);
@@ -17,7 +20,7 @@ const NO_OP = new Set(['cursor', 'pointer-events', 'user-select', '-webkit-user-
   'text-wrap-mode', 'text-wrap-style', 'word-break', 'overflow-wrap', 'hyphens', 'white-space-collapse', 'object-position', 'text-underline-offset', 'text-decoration-thickness',
   'text-decoration-style', 'text-decoration-color', 'font-feature-settings', 'font-variation-settings', '-webkit-box-orient', 'backface-visibility', 'perspective', 'transform-style',
   'transform-origin', 'caret-color', 'accent-color', 'scrollbar-width', 'scrollbar-color', 'scrollbar-gutter', 'overscroll-behavior', 'overscroll-behavior-x', 'overscroll-behavior-y',
-  'field-sizing', 'contain', 'container-type', 'mix-blend-mode']);
+  'field-sizing', 'contain', 'container-type', '-webkit-backdrop-filter']);
 
 const ALIGN = { start: 'flex-start', 'flex-start': 'flex-start', 'self-start': 'flex-start', end: 'flex-end', 'flex-end': 'flex-end', 'self-end': 'flex-end', center: 'center', stretch: 'stretch',
   baseline: 'baseline', 'last baseline': 'baseline', normal: 'stretch', 'safe center': 'center', 'center safe': 'center', 'safe flex-end': 'flex-end', 'flex-end safe': 'flex-end', auto: 'auto' };
@@ -303,6 +306,57 @@ export function parseClasses(className, { tokens = {} } = {}) {
       }
     } else if (d.resolved === 'none') set('shadow', '');
     else { const v = normalizeColorsIn(d.resolved); if (SAFE_CSS(v)) set('shadow', v); else ignore(d.cls, 'unsafe shadow'); }
+  }
+
+  // --- effects: blend, outline, filters (drop-shadow becomes a Drop shadow), backdrop filters, text shadow
+  if ((d = take('mix-blend-mode'))) { if (BLEND_MODES.includes(d.resolved)) set('blendMode', d.resolved); else ignore(d.cls, `blend mode ${d.resolved} is not supported`); }
+  if ((d = take('outline-width'))) {
+    const width = px(d, 'outline width');
+    const style = decls.has('outline-style') ? resolve(decls.get('outline-style').value).value?.trim() || 'solid' : 'solid';
+    if (width !== null && style === 'none') set('outlineWidth', 0);
+    else if (width !== null) {
+      set('outlineWidth', Math.min(1000, width));
+      set('outlineStyle', ['dashed', 'dotted'].includes(style) ? style : 'solid');
+      if (!['solid', 'dashed', 'dotted'].includes(style)) out.warnings.push(`${d.cls}: outline style ${style} is drawn solid`);
+      const ink = decls.get('color') ? resolve(decls.get('color').value).value : null;
+      const raw = decls.has('outline-color') ? resolve(decls.get('outline-color').value).value : null;
+      const hex = cssColorToHex(raw && !/^currentcolor$/i.test(raw) ? raw : ink || '#000000');
+      if (hex && hex !== 'transparent') set('outlineColor', hex); else set('outlineWidth', 0);
+      const offset = decls.has('outline-offset') ? lengthOf(resolve(decls.get('outline-offset').value).value || '0')?.px : 0;
+      if (Number.isFinite(offset)) set('outlineOffset', Math.max(-1000, Math.min(1000, offset)));
+    }
+    handled.add('outline-style'); handled.add('outline-color'); handled.add('outline-offset');
+  }
+  const filterList = (d, backdrop) => {
+    const list = [], drops = [];
+    for (const part of splitTop(normalizeColorsIn(d.resolved), ' ').map(v => v.trim()).filter(Boolean)) {
+      const m = part.match(/^([a-z-]+)\((.*)\)$/s);
+      const type = m && FILTER_TYPES[m[1]];
+      if (m && m[1] === 'drop-shadow' && !backdrop) {
+        const args = splitTop(m[2], ' ').filter(Boolean), lens = args.slice(0, -1).map(v => lengthOf(v)?.px), color = cssColorToHex(args.at(-1) || '');
+        if (lens.length >= 2 && lens.length <= 3 && lens.every(Number.isFinite) && color) drops.push({ type: 'drop', x: lens[0], y: lens[1], blur: Math.max(0, lens[2] ?? 0), spread: 0, color });
+        else ignore(d.cls, `drop shadow ${part} is not supported`);
+        continue;
+      }
+      if (!type) { ignore(d.cls, `filter ${part} is not supported`); continue; }
+      const arg = m[2].trim(), spec = FILTERS[type];
+      let value = type === 'blur' ? lengthOf(arg || '0')?.px : type === 'hueRotate' ? (/^-?[\d.]+(deg)?$/.test(arg) ? parseFloat(arg) : /^-?[\d.]+turn$/.test(arg) ? parseFloat(arg) * 360 : NaN) : arg === '' ? 1 : arg.endsWith('%') ? parseFloat(arg) / 100 : Number(arg);
+      if (!Number.isFinite(value)) { ignore(d.cls, `filter ${part} is not supported`); continue; }
+      if (value < spec.min || value > spec.max) { value = Math.min(spec.max, Math.max(spec.min, value)); out.warnings.push(`${d.cls}: ${m[1]} clamped to ${value}`); }
+      list.push(backdrop ? { type, value: round(value), backdrop: true } : { type, value: round(value) });
+    }
+    return { list, drops };
+  };
+  if ((d = take('filter'))) { if (d.resolved === 'none') { set('filters', []); set('dropShadows', []); } else { const { list, drops } = filterList(d, false); set('filters', list); set('dropShadows', drops); } }
+  if ((d = take('backdrop-filter'))) { if (d.resolved === 'none') set('backdropFilters', []); else set('backdropFilters', filterList(d, true).list); }
+  if ((d = take('text-shadow'))) {
+    const list = [];
+    if (d.resolved !== 'none') for (const part of splitTop(normalizeColorsIn(d.resolved), ',')) {
+      const args = splitTop(part.trim(), ' ').filter(Boolean), colorAt = args.findIndex(v => cssColorToHex(v)), lens = args.filter((_, i) => i !== colorAt).map(v => lengthOf(v)?.px);
+      if (colorAt >= 0 && lens.length >= 2 && lens.length <= 3 && lens.every(Number.isFinite)) list.push({ type: 'text', x: lens[0], y: lens[1], blur: Math.max(0, lens[2] ?? 0), spread: 0, color: cssColorToHex(args[colorAt]) });
+      else ignore(d.cls, `text shadow ${part.trim()} is not supported`);
+    }
+    set('textShadows', list);
   }
 
   // --- typography

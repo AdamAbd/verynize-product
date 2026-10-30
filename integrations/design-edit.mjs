@@ -9,6 +9,8 @@ import { cascadeText, styleFromSpec, mergeStyle, TEXT_DEFAULTS, baselineTextStyl
 import { resolveIcon, iconToNodeImage, isSafeColor } from './assets.mjs';
 import { cssColorToHex } from './codec-css.mjs';
 import { BINDABLE, checkVariableValue } from './design-store.mjs';
+import { syncAliases, renameAliasRefs, dropAliases, boundValue, writeBoundValue, bindingOrder } from './variables.mjs';
+import { applyPaintAttrs, renamePaintTokens, unbindPaintTokens, syncPaintTokens } from './paints.mjs';
 
 export { measureText };
 
@@ -96,7 +98,7 @@ export function elementCode(document, page, node, depth = Infinity) {
 //   srcRemote 'https://…' + assetStatus 'pending'|'missing'|'ready'   remote <img> not yet embedded
 
 const BOX_KEYS = ['fill', 'gradient', 'strokeWidth', 'padding', 'radius', 'shadow', 'ringWidth', 'cornerRadii'];
-const COMMON_KEYS = ['opacity', 'rotation', 'flipX', 'flipY', 'zIndex', 'clipContent', 'mask', 'animated', 'shadow', 'strokeColor', 'strokeStyle', 'ringWidth', 'ringColor', 'ringInset', 'hidden', 'aspectRatio', 'grow', 'shrink', 'basis', 'alignSelf', 'colSpan', 'rowSpan'];
+const COMMON_KEYS = ['opacity', 'rotation', 'flipX', 'flipY', 'zIndex', 'clipContent', 'mask', 'animated', 'shadow', 'strokeColor', 'strokeStyle', 'ringWidth', 'ringColor', 'ringInset', 'hidden', 'aspectRatio', 'grow', 'shrink', 'basis', 'alignSelf', 'colSpan', 'rowSpan', 'blendMode', 'outlineWidth', 'outlineOffset', 'outlineColor', 'outlineStyle'];
 const FRAME_KEYS = ['layout', 'direction', 'reverse', 'columns', 'rows', 'alignItems', 'justifyContent', 'justifyItems', 'flexWrap'];
 const TEXT_ONLY_KEYS = ['truncate', 'noWrap', 'lineClamp', 'textWrap'];
 const TEXT_SPEC_KEYS = ['ink', 'inkToken', 'fontSize', 'fontWeight', 'fontFamily', 'textAlign', 'lineHeight', 'lineHeightPx', 'letterSpacing', 'letterSpacingEm', 'textTransform', 'textDecoration', 'fontStyle', 'textWrap'];
@@ -128,6 +130,19 @@ function mergeFour(current, next) { return next.map((v, i) => (v === null || v =
 export function applySpec(node, spec, tokens) {
   const p = spec.props;
   for (const key of COMMON_KEYS) if (key in p) node[key] = p[key];
+  // Structured effects: a class that states a kind of effect replaces that kind; other kinds are kept.
+  // Box shadows round-trip through `shadow` (shadow-[…]), drop/text shadows and filters stay structured.
+  if ('shadow' in p || 'dropShadows' in p || 'textShadows' in p) {
+    const replaced = s => ('shadow' in p && s?.type === 'box') || ('dropShadows' in p && s?.type === 'drop') || ('textShadows' in p && s?.type === 'text');
+    const next = [...(Array.isArray(node.shadows) ? node.shadows : []).filter(s => !replaced(s)), ...(p.dropShadows || []), ...(node.type === 'text' ? p.textShadows || [] : [])];
+    if (next.length) node.shadows = next; else delete node.shadows;
+  }
+  if ('filters' in p || 'backdropFilters' in p) {
+    const next = [...(Array.isArray(node.filters) ? node.filters : []).filter(f => (f?.backdrop === true ? !('backdropFilters' in p) : !('filters' in p))), ...(p.filters || []), ...(p.backdropFilters || [])];
+    if (next.length) node.filters = next; else delete node.filters;
+  }
+  if ('mask' in p) delete node.masks;
+  if (node.outlineWidth === 0) for (const key of ['outlineWidth', 'outlineOffset', 'outlineColor', 'outlineStyle']) delete node[key];
   if ('cornerRadii' in p) {
     const merged = mergeFour(Array.isArray(node.cornerRadii) ? node.cornerRadii : Array(4).fill(Number(node.radius) || 0), p.cornerRadii);
     if (merged.every(v => v === merged[0])) { node.radius = merged[0]; delete node.cornerRadii; } else { node.cornerRadii = merged; node.radius = Math.max(...merged); }
@@ -356,6 +371,7 @@ export function buildNodes(elements, { document, page, parent = null, warnings =
     // Text-only keys (truncate, line-clamp) belong to the label of a box-text element.
     const ownSpec = boxText ? { ...spec, props: Object.fromEntries(Object.entries(spec.props).filter(([k]) => !TEXT_ONLY_KEYS.includes(k))) } : spec;
     applySpec(node, ownSpec, tokens);
+    applyPaintAttrs(node, el.attrs, reused);
     if (boxText) {
       // Text with a box (button, badge, pill): a flex frame that centers a text child.
       // Buttons center their label (UA behaviour); other boxes keep block flow and text-align.
@@ -502,6 +518,7 @@ function editNode(document, page, node, el, warnings) {
     else if (isRemoteSrc(src) && src !== node.srcRemote) { node.srcRemote = src; node.assetStatus = 'pending'; delete node.src; }
   }
   if (node.type === 'image' && !node.icon) applySvgColor(node, el.attrs);
+  applyPaintAttrs(node, el.attrs, { fills: node.fills });
   if (node.type === 'shader') {
     if (['aurora', 'waves', 'noise', 'ribbon', 'mesh', 'swirl'].includes(el.attrs.preset)) node.shaderPreset = el.attrs.preset;
     if (Number.isFinite(el.attrs.speed)) node.shaderSpeed = Math.min(5, Math.max(0, el.attrs.speed));
@@ -666,7 +683,7 @@ export function duplicateElements(document, pageId, ref, { count = 1, newArtboar
 // them Wonder-style with slash-separated names and a CSS variable.
 
 export function describeTokens(document) {
-  return Object.entries(document.tokens || {}).map(([name, value]) => ({ id: name, name, type: 'color', value, cssVar: `var(${cssVarForToken(name)})` }));
+  return Object.entries(document.tokens || {}).map(([name, value]) => ({ id: name, name, type: 'color', value, cssVar: `var(${cssVarForToken(name)})`, ...(document.aliases?.[name] ? { aliasOf: document.aliases[name] } : {}) }));
 }
 export function tokenColor(value) {
   // Opaque colors become #rrggbb; translucent ones keep their alpha as #rrggbbaa.
@@ -680,34 +697,32 @@ export function checkTokenName(name) {
   if (typeof name !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,99}$/.test(name) || RESERVED.has(name)) throw new Error(`Invalid token name ${JSON.stringify(name)}; use letters, digits, "-", "_", "." and "/" (e.g. color/text/primary)`);
   return name;
 }
-export function renameTokenRefs(document, from, to) { for (const page of document.pages) for (const node of page.nodes) { if (node.token === from) node.token = to; if (node.svgColorToken === from) node.svgColorToken = to; } }
-export function unbindToken(document, name) { const value = document.tokens[name]; for (const page of document.pages) for (const node of page.nodes) { if (node.token === name) { node.color = value; node.token = ''; } if (node.svgColorToken === name) { node.svgColor = value; delete node.svgColorToken; } } }
-export function syncTokenColors(document) { for (const page of document.pages) for (const node of page.nodes) { if (node.token && document.tokens[node.token]) node.color = document.tokens[node.token]; if (node.svgColorToken && document.tokens[node.svgColorToken]) node.svgColor = document.tokens[node.svgColorToken]; } syncVariables(document); }
+export function renameTokenRefs(document, from, to) { renamePaintTokens(document, from, to); for (const page of document.pages) for (const node of page.nodes) { if (node.token === from) node.token = to; if (node.svgColorToken === from) node.svgColorToken = to; } renameAliasRefs(document, from, to); }
+export function unbindToken(document, name) { unbindPaintTokens(document, name); dropAliases(document, name); const value = document.tokens[name]; for (const page of document.pages) for (const node of page.nodes) { if (node.token === name) { node.color = value; node.token = ''; } if (node.svgColorToken === name) { node.svgColor = value; delete node.svgColorToken; } } }
+export function syncTokenColors(document) { syncPaintTokens(document); syncAliases(document); for (const page of document.pages) for (const node of page.nodes) { if (node.token && document.tokens[node.token]) node.color = document.tokens[node.token]; if (node.svgColorToken && document.tokens[node.svgColorToken]) node.svgColor = document.tokens[node.svgColorToken]; } syncVariables(document); }
 
 // ---------------------------------------------------------------------------------------------
 // Typed variables (dimension / number / fontFamily / fontWeight; see design-store.mjs). Bound layer
 // properties hold the resolved value; syncVariables re-applies variable values after every write.
 
-const FIELD_LIMITS = { opacity: [0, 100], fontSize: [1, 1000], lineHeight: [0.1, 100], radius: [0, 1e6], gap: [0, 1e6], padding: [0, 1e6], strokeWidth: [0, 1e6] };
 /** Value a variable gives to a layer property, or undefined when the binding cannot apply. */
-export function variableValueFor(document, key, name) {
+export function variableValueFor(document, key, name, node) {
   const variable = document.variables?.[name];
   if (!variable || !BINDABLE[key]?.includes(variable.type) || !checkVariableValue(variable.type, variable.value)) return undefined;
-  if (variable.type === 'fontWeight') return String(variable.value);
-  if (variable.type === 'fontFamily') return variable.value.trim();
-  const [min, max] = FIELD_LIMITS[key] || [-1e6, 1e6];
-  return Math.min(max, Math.max(min, variable.value));
+  return boundValue(variable, key, node);
 }
 export function syncVariables(document) {
   if (!document.variables) return document;
-  for (const page of document.pages) for (const node of page.nodes) for (const [key, name] of Object.entries(node.bindings || {})) {
-    const value = variableValueFor(document, key, name);
-    if (value !== undefined) node[key] = value;
+  syncAliases(document);
+  for (const page of document.pages) for (const node of page.nodes) for (const key of bindingOrder(node.bindings)) {
+    const value = variableValueFor(document, key, node.bindings[key], node);
+    if (value !== undefined) writeBoundValue(node, key, value);
   }
   return document;
 }
 /** Remove every binding to `name`; layers keep the current resolved value. */
 export function unbindVariable(document, name) {
+  dropAliases(document, name);
   for (const page of document.pages) for (const node of page.nodes) if (node.bindings) {
     for (const [key, bound] of Object.entries(node.bindings)) if (bound === name) delete node.bindings[key];
     if (!Object.keys(node.bindings).length) delete node.bindings;
@@ -716,10 +731,10 @@ export function unbindVariable(document, name) {
 }
 export function renameVariableRefs(document, from, to) {
   for (const page of document.pages) for (const node of page.nodes) for (const key of Object.keys(node.bindings || {})) if (node.bindings[key] === from) node.bindings[key] = to;
-  return document;
+  return renameAliasRefs(document, from, to);
 }
 export function describeVariables(document) {
-  return Object.entries(document.variables || {}).map(([name, v]) => ({ id: name, name, type: v.type, value: v.value, cssVar: `var(${cssVarForToken(name)})` }));
+  return Object.entries(document.variables || {}).map(([name, v]) => ({ id: name, name, type: v.type, value: v.value, cssVar: `var(${cssVarForToken(name)})`, ...(document.aliases?.[name] ? { aliasOf: document.aliases[name] } : {}) }));
 }
 /** CSS custom properties for color tokens and typed variables (`:root { --name: value; }`). */
 export function variablesCss(document) {

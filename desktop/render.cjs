@@ -3,10 +3,14 @@ const path=require('node:path');
 const {pathToFileURL}=require('node:url');
 const fs=require('node:fs/promises');
 const {BrowserWindow,dialog,app}=require('electron');
+/** Output pixels for a CSS size at a scale (tolerates float noise such as 570 × 720/570). */
+const outputSize=(size,scale)=>Math.max(1,Math.ceil(Math.ceil(size)*scale-1e-6));
 function renderOptions(options){
  if(!options||typeof options.html!=='string'||Buffer.byteLength(options.html)>20*1024*1024)throw Error('Export HTML must be under 20 MB');
  const width=Number(options.width),height=Number(options.height),scale=Number(options.scale??1);
- if(![width,height,scale].every(Number.isFinite)||width<1||height<1||scale<0.1||scale>4||width>10000||height>10000||width*height*scale*scale>32e6)throw Error('Export dimensions exceed 32 megapixels or supported scale (0.1–4×)');
+ if(![width,height,scale].every(Number.isFinite)||width<1||height<1||scale<0.01||scale>100||width>10000||height>10000||
+  // Presets (720p–2160p, 512w/512h) can mean large factors for small artwork: bound the output instead.
+  outputSize(width,scale)>16384||outputSize(height,scale)>16384||outputSize(width,scale)*outputSize(height,scale)>32e6)throw Error('Export exceeds 32 megapixels or 16384 px per side');
  const fonts=Array.isArray(options.fonts)?options.fonts.slice(0,40):null;
  return {html:options.html,width:Math.ceil(width),height:Math.ceil(height),scale,fonts,measure:options.measure!==false};
 }
@@ -49,14 +53,16 @@ async function embedFonts(html,families){
 
 // Per-element layout boxes of the rendered page ([data-id] elements), in CSS px of the page
 // (zoom factor divided out). Text elements also report scroll/client sizes for overflow checks.
-const MEASURE=`(()=>{const out={};let n=0;for(const el of document.querySelectorAll('[data-id]')){if(++n>5000)break;const r=el.getBoundingClientRect();const b={x:r.left+scrollX,y:r.top+scrollY,w:r.width,h:r.height};if(el.dataset.designType==='text'){b.scrollWidth=el.scrollWidth;b.scrollHeight=el.scrollHeight;b.clientWidth=el.clientWidth;b.clientHeight=el.clientHeight;}out[el.dataset.id]=b;}return out;})()`;
+const MEASURE=`(()=>{const out={},k=parseFloat(document.documentElement.style.zoom)||1;let n=0;for(const el of document.querySelectorAll('[data-id]')){if(++n>5000)break;const r=el.getBoundingClientRect();const b={x:(r.left+scrollX)/k,y:(r.top+scrollY)/k,w:r.width/k,h:r.height/k};if(el.dataset.designType==='text'){b.scrollWidth=el.scrollWidth;b.scrollHeight=el.scrollHeight;b.clientWidth=el.clientWidth;b.clientHeight=el.clientHeight;}out[el.dataset.id]=b;}return out;})()`;
 
 // Offscreen rasterizer shared by the export handler and the MCP bridge's take_screenshot.
 // Renders are serialized so concurrent callers never share a capture window.
 let renderQueue=Promise.resolve();
 function renderHTML(input,parent=null){const options=renderOptions(input);const run=()=>renderNow(options,parent);const result=renderQueue.then(run,run);renderQueue=result.catch(()=>{});return result;}
 async function renderNow({html,width,height,scale,fonts:families,measure},parent){
-  const outputWidth=Math.ceil(width*scale),outputHeight=Math.ceil(height*scale);
+  const outputWidth=outputSize(width,scale),outputHeight=outputSize(height,scale);
+  // Chromium clamps page zoom at 5×; larger factors add CSS zoom on the root for the remainder.
+  const pageZoom=Math.min(scale,4),cssZoom=scale/pageZoom;
   const fonts=await embedFonts(html,families);
   const window=new BrowserWindow({show:false,useContentSize:true,width:outputWidth,height:outputHeight,transparent:true,frame:false,webPreferences:{partition:'render-'+Date.now(),sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});
   const close=()=>{if(!window.isDestroyed())window.destroy();};const offClosed=onWindowClosed(parent,close);
@@ -68,7 +74,8 @@ async function renderNow({html,width,height,scale,fonts:families,measure},parent
    await window.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(csp+html));
    // Navigation establishes the data URL's zoom context. Set the export scale on that
    // loaded page; setting it on the initial blank page can be reset by loadURL.
-   window.webContents.setZoomFactor(scale);
+   window.webContents.setZoomFactor(pageZoom);
+   if(cssZoom>1)await window.webContents.executeJavaScript(`document.documentElement.style.zoom=${JSON.stringify(String(cssZoom))}`);
    // Inserted after load so large embedded fonts never inflate the navigation URL.
    if(fonts.css)await window.webContents.insertCSS(fonts.css);
    await window.webContents.executeJavaScript(`Promise.race([Promise.all([document.body&&document.body.offsetHeight,...[...document.fonts].map(face=>face.load().catch(()=>{}))]).then(()=>Promise.all([document.fonts.ready,...[...document.images].map(image=>image.decode().catch(()=>{}))])).then(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))),new Promise(resolve=>setTimeout(resolve,4000))])`);
@@ -109,7 +116,7 @@ async function renderPDF(input,parent=null){
   return {dataURL:'data:application/pdf;base64,'+pdf.toString('base64'),width,height,bytes:pdf.length,fonts:{loaded:fonts.loaded,missing:fonts.missing}};
  }finally{close();offClosed();}
 }
-const EXPORT_TYPES={png:['PNG image','image/png'],jpg:['JPEG image','image/jpeg'],webp:['WebP image','image/webp'],svg:['SVG image','image/svg+xml'],pdf:['PDF document','application/pdf'],html:['HTML document','text/html'],css:['CSS stylesheet','text/css']};
+const EXPORT_TYPES={png:['PNG image','image/png'],jpg:['JPEG image','image/jpeg'],webp:['WebP image','image/webp'],svg:['SVG image','image/svg+xml'],pdf:['PDF document','application/pdf'],html:['HTML document','text/html'],css:['CSS stylesheet','text/css'],jsx:['React component','text/jsx']};
 /** Validate a save request: {name, data: data URL or text, extension}. */
 function saveRequest(options){
  if(!options||typeof options.name!=='string'||typeof options.data!=='string')throw Error('Invalid export');
@@ -123,6 +130,14 @@ function saveRequest(options){
 let catalogPromise=null;
 function registerArtworkExport(handle,parent){
  handle('renderPDF',input=>renderPDF(input,parent));
+ // Code export: Tailwind JSX from the document (codec) or HTML + CSS classes from the artwork HTML.
+ handle('exportCode',async options=>{
+  if(!options||!['tailwind','css'].includes(options.flavor))throw Error('Unknown code flavor');
+  const code=await import(pathToFileURL(path.join(__dirname,'../integrations/export-code.mjs')).href);
+  if(options.flavor==='css'){if(typeof options.html!=='string'||Buffer.byteLength(options.html)>20*1024*1024)throw Error('Export HTML must be under 20 MB');return {content:code.cssCode(options.html,options.tokens||{}),extension:'html'};}
+  if(!Array.isArray(options.nodeIds)||options.nodeIds.length>5000)throw Error('Invalid export selection');
+  return {content:code.tailwindCode(options.document,options.pageId,options.nodeIds,options.name),extension:'jsx'};
+ });
  handle('saveExport',async options=>{
   const {name,extension,bytes}=saveRequest(options);
   const result=await dialog.showSaveDialog(parent,{title:'Export',defaultPath:path.join(app.getPath('downloads'),name),filters:[{name:EXPORT_TYPES[extension][0],extensions:[extension]}]});

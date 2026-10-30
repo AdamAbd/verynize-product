@@ -88,9 +88,11 @@ const num = (v: unknown, fallback = 0) => {
 };
 const isFlow = (n: Node | undefined) => !!n && n.type === "frame" && n.layout !== "free";
 /** Patch that drops a variable binding, so typing a value detaches the property (as in model.setField). */
-function unbind(node: Node, key: string): Patch {
-  if (!node.bindings?.[key]) return {};
-  const { [key]: _detached, ...rest } = node.bindings;
+function unbind(node: Node, ...keys: string[]): Patch {
+  if (!keys.some((key) => node.bindings?.[key])) return {};
+  const rest = Object.fromEntries(
+    Object.entries(node.bindings ?? {}).filter(([key]) => !keys.includes(key)),
+  );
   return { bindings: Object.keys(rest).length ? rest : undefined };
 }
 /** Parse a typed length; `min` clamps (padding and gap cannot go negative). */
@@ -173,37 +175,54 @@ type LimitKey = (typeof LIMITS)[number]["key"];
 const hasLimit = (node: Node, key: LimitKey) => node[key] !== undefined && node[key] !== null;
 
 function SizeField({
+  doc,
   node,
   parent,
   axis,
   selection,
 }: Props & { parent: Node | undefined; axis: "w" | "h" }) {
   const mode = sizingMode(node, axis, parent);
+  const label = axis === "w" ? "Width" : "Height";
+  // A Dimension variable can drive a fixed width/height; binding switches the axis to fixed.
   return (
-    <Field
-      name={axis}
-      label={axis === "w" ? "Width" : "Height"}
-      numeric
-      value={fmt(node[axis])}
-      onCommit={(value) => setField(selection, node, axis, value)}
+    <BindableField
+      doc={doc}
+      node={node}
+      selection={selection}
+      field={axis}
+      label={label}
       prefix={<Affix>{axis.toUpperCase()}</Affix>}
-      className="pr-1"
-      suffix={
-        <NativeSelect
-          bare
-          name={axis + "Mode"}
-          label={(axis === "w" ? "Width" : "Height") + " sizing"}
-          value={mode}
-          className="text-muted-foreground"
-          options={(["fixed", "hug", "fill"] as SizingMode[]).map((m) => ({
-            value: m,
-            label: UNIT_LABEL[m],
-            disabled: !sizingAllowed(node, parent, m),
-          }))}
-          onChange={(value) => setField(selection, node, axis + "Mode", value)}
+    >
+      {(bind) => (
+        <Field
+          name={axis}
+          label={label}
+          numeric
+          value={fmt(node[axis])}
+          onCommit={(value) => setField(selection, node, axis, value)}
+          prefix={<Affix>{axis.toUpperCase()}</Affix>}
+          className="pr-1"
+          suffix={
+            <span className="flex items-center gap-1">
+              <NativeSelect
+                bare
+                name={axis + "Mode"}
+                label={label + " sizing"}
+                value={mode}
+                className="text-muted-foreground"
+                options={(["fixed", "hug", "fill"] as SizingMode[]).map((m) => ({
+                  value: m,
+                  label: UNIT_LABEL[m],
+                  disabled: !sizingAllowed(node, parent, m),
+                }))}
+                onChange={(value) => setField(selection, node, axis + "Mode", value)}
+              />
+              {bind}
+            </span>
+          }
         />
-      }
-    />
+      )}
+    </BindableField>
   );
 }
 
@@ -242,7 +261,7 @@ function SizeMenu({ node, parent, selection }: Props & { parent: Node | undefine
 }
 
 /** One row per min/max limit that is set: value + which limit (switch or remove). */
-function LimitRows({ node, selection }: Props) {
+function LimitRows({ doc, node, selection }: Props) {
   const rows = LIMITS.filter((l) => hasLimit(node, l.key));
   if (!rows.length) return null;
   return (
@@ -251,42 +270,71 @@ function LimitRows({ node, selection }: Props) {
         const value = node[l.key] as number | string;
         return (
           <Row key={l.key}>
-            <Field
-              name={l.key}
+            <BindableField
+              doc={doc}
+              node={node}
+              selection={selection}
+              field={l.key}
               label={l.label}
-              numeric={typeof value === "number"}
-              value={String(value)}
-              className="col-span-2 pr-1"
               prefix={<IconAffix icon={l.icon} />}
-              onCommit={(raw) => {
-                const pct = /^\s*\d+(\.\d+)?%\s*$/.test(raw) ? raw.trim() : null;
-                const v = pct ?? parseLength(raw, 0);
-                if (v !== null) patchNodes(selection, () => ({ [l.key]: v }));
-              }}
-              suffix={
-                <NativeSelect
-                  bare
-                  name={l.key + "Kind"}
-                  label={l.label + " limit"}
-                  value={l.key}
-                  options={[
-                    ...LIMITS.map((o) => ({
-                      value: o.key,
-                      label: o.label,
-                      disabled: o.key !== l.key && hasLimit(node, o.key),
-                    })),
-                    { value: "remove", label: "Remove" },
-                  ]}
-                  onChange={(next) =>
-                    patchNodes(selection, (n) =>
-                      next === "remove"
-                        ? { [l.key]: undefined }
-                        : { [l.key]: undefined, [next]: n[l.key] },
-                    )
+              className="col-span-2"
+            >
+              {(bind) => (
+                <Field
+                  name={l.key}
+                  label={l.label}
+                  numeric={typeof value === "number"}
+                  value={String(value)}
+                  className="col-span-2 pr-1"
+                  prefix={<IconAffix icon={l.icon} />}
+                  onCommit={(raw) => {
+                    const pct = /^\s*\d+(\.\d+)?%\s*$/.test(raw) ? raw.trim() : null;
+                    const v = pct ?? parseLength(raw, 0);
+                    // Typing a limit detaches its variable.
+                    if (v !== null)
+                      patchNodes(selection, (n) => ({ [l.key]: v, ...unbind(n, l.key) }));
+                  }}
+                  suffix={
+                    <span className="flex items-center gap-1">
+                      <NativeSelect
+                        bare
+                        name={l.key + "Kind"}
+                        label={l.label + " limit"}
+                        value={l.key}
+                        options={[
+                          ...LIMITS.map((o) => ({
+                            value: o.key,
+                            label: o.label,
+                            disabled: o.key !== l.key && hasLimit(node, o.key),
+                          })),
+                          { value: "remove", label: "Remove" },
+                        ]}
+                        onChange={(next) =>
+                          patchNodes(selection, (n) => {
+                            // Switching the limit kind carries its variable along; removing detaches it.
+                            const bound = n.bindings?.[l.key];
+                            const bindings = unbind(n, l.key);
+                            const moved =
+                              bound && next !== "remove"
+                                ? {
+                                    bindings: {
+                                      ...(bindings.bindings ?? n.bindings),
+                                      [next]: bound,
+                                    },
+                                  }
+                                : bindings;
+                            return next === "remove"
+                              ? { [l.key]: undefined, ...moved }
+                              : { [l.key]: undefined, [next]: n[l.key], ...moved };
+                          })
+                        }
+                      />
+                      {bind}
+                    </span>
                   }
                 />
-              }
-            />
+              )}
+            </BindableField>
           </Row>
         );
       })}
@@ -733,12 +781,18 @@ function PaddingGroup({ doc, node, selection }: Props) {
   const [t, r, b, l] = padsOf(node);
   const [split, setSplit] = useState(() => t !== b || l !== r);
   // Sides are [top, right, bottom, left]; equal sides collapse back to the single `padding` value.
+  // Typing a side detaches the uniform binding and the axis binding that drove that side.
   const edit = (sides: number[]) => (raw: string) => {
     const v = parseLength(raw, 0);
     if (v === null) return;
     patchNodes(selection, (n) => {
       const next = padsOf(n).map((p, i) => (sides.includes(i) ? v : p));
-      const binding = unbind(n, "padding");
+      const binding = unbind(
+        n,
+        "padding",
+        ...(sides.some((i) => i % 2) ? ["paddingX"] : []),
+        ...(sides.some((i) => i % 2 === 0) ? ["paddingY"] : []),
+      );
       return next.every((p) => p === next[0])
         ? {
             padding: next[0],
@@ -760,30 +814,37 @@ function PaddingGroup({ doc, node, selection }: Props) {
       onCommit={edit(sides)}
     />
   );
-  const uniform = t === r && r === b && b === l;
-  const horizontal = uniform ? (
+  // Horizontal / vertical padding each bind a Dimension (Wonder 06); a uniform `padding` binding from
+  // older files still renders as one chip.
+  const axisField = (
+    key: "paddingX" | "paddingY",
+    label: string,
+    icon: IconType,
+    value: string,
+    sides: number[],
+  ) => (
     <BindableField
       doc={doc}
       node={node}
       selection={selection}
-      field="padding"
-      label="Padding"
-      prefix={<IconAffix icon={PaddingXIcon} />}
+      field={key}
+      label={label}
+      prefix={<IconAffix icon={icon} />}
     >
       {(suffix) => (
         <NumberField
-          name="paddingX"
-          label="Horizontal padding"
-          icon={PaddingXIcon}
-          value={fmt(l)}
+          name={key}
+          label={label}
+          icon={icon}
+          value={value}
+          placeholder="Mixed"
           unit={<span className="flex items-center gap-1">px{suffix}</span>}
-          onCommit={edit([1, 3])}
+          onCommit={edit(sides)}
         />
       )}
     </BindableField>
-  ) : (
-    field("paddingX", "Horizontal padding", PaddingXIcon, mixed(l, r), [1, 3])
   );
+  const horizontal = axisField("paddingX", "Horizontal padding", PaddingXIcon, mixed(l, r), [1, 3]);
   const bound = !!node.bindings?.padding;
   return (
     <Caption label="Padding">
@@ -806,11 +867,22 @@ function PaddingGroup({ doc, node, selection }: Props) {
             {field("paddingBottom", "Bottom padding", PaddingBottomIcon, fmt(b), [2])}
           </>
         ) : bound ? (
-          <div className="col-span-2">{horizontal}</div>
+          <div className="col-span-2">
+            <BindableField
+              doc={doc}
+              node={node}
+              selection={selection}
+              field="padding"
+              label="Padding"
+              prefix={<IconAffix icon={PaddingXIcon} />}
+            >
+              {() => null}
+            </BindableField>
+          </div>
         ) : (
           <>
             {horizontal}
-            {field("paddingY", "Vertical padding", PaddingYIcon, mixed(t, b), [0, 2])}
+            {axisField("paddingY", "Vertical padding", PaddingYIcon, mixed(t, b), [0, 2])}
           </>
         )}
       </Row>

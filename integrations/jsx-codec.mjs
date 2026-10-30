@@ -6,6 +6,8 @@
 import { parseClasses as mapClasses, cssVarForToken, GENERIC_FAMILIES } from './tailwind-map.mjs';
 import { paletteName, fontSizeName, fontSizeLineHeight, radiusName, shadowName, weightName, trackingName, leadingName, containerName } from './tailwind-engine.mjs';
 import { cssColorToHex } from './codec-css.mjs';
+import { effectsOf } from './node-style.mjs';
+import { paintAttrs } from './paints.mjs';
 import { baselineTextStyle, TEXT_DEFAULTS } from './codec-text.mjs';
 
 export { cssVarForToken };
@@ -303,10 +305,23 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
   }
   if (node.strokeStyle && node.strokeStyle !== 'solid' && Number(node.strokeWidth) > 0) c.push(`border-${node.strokeStyle}`);
   if (Number(node.ringWidth) > 0) { const w = Number(node.ringWidth); c.push(Number.isInteger(w) ? (w === 1 ? 'ring-1' : `ring-${w}`) : `ring-[${round(w)}px]`, colorClass('ring', node.ringColor || '#000000', '', tokens)); if (node.ringInset) c.push('ring-inset'); }
-  if (node.shadow) { const name = shadowName(node.shadow); c.push(name ? `shadow-${name}` : `shadow-[${toArbitrary(node.shadow)}]`); }
+  // Structured effects (web/node-style.js effectsOf): hidden entries are not written; colors are resolved.
+  const fx = effectsOf(node, tokens);
+  if (fx.boxShadow.length) c.push(`shadow-[${toArbitrary([...fx.boxShadow, node.shadow].filter(Boolean).join(', '))}]`);
+  else if (node.shadow) { const name = shadowName(node.shadow); c.push(name ? `shadow-${name}` : `shadow-[${toArbitrary(node.shadow)}]`); }
+  if (fx.outline) {
+    const { width: w, style, color, offset } = fx.outline;
+    c.push(w === 1 ? 'outline' : Number.isInteger(w) ? `outline-${w}` : `outline-[${round(w)}px]`, colorClass('outline', color, '', tokens));
+    if (style !== 'solid') c.push(`outline-${style}`);
+    if (offset) c.push(Number.isInteger(offset) ? `${offset < 0 ? '-' : ''}outline-offset-${Math.abs(offset)}` : `outline-offset-[${round(offset)}px]`);
+  }
+  if (fx.filter.length || fx.drop.length) c.push(`[filter:${toArbitrary([...fx.filter, ...fx.drop].join(' '))}]`);
+  if (fx.backdrop.length) c.push(`[backdrop-filter:${toArbitrary(fx.backdrop.join(' '))}]`);
+  if (fx.textShadow.length) c.push(`[text-shadow:${toArbitrary(fx.textShadow.join(', '))}]`);
+  if (fx.blend) c.push(`mix-blend-${fx.blend}`);
   if (node.clipContent && !(node.type === 'text' && (node.truncate || Number(node.lineClamp) > 0))) c.push('overflow-hidden');
   if (Number(node.zIndex)) c.push(Number(node.zIndex) < 0 ? `-z-${-node.zIndex}` : `z-${node.zIndex}`);
-  if (node.mask) c.push(`[mask-image:${toArbitrary(node.mask)}]`);
+  if (fx.masks.length || node.mask) c.push(`[mask-image:${toArbitrary([...fx.masks, node.mask].filter(Boolean).join(', '))}]`);
   if (node.animated) c.push(`animate-[${node.animated}]`);
   return c.join(' ');
 }
@@ -361,6 +376,7 @@ export function serializeNode(node, index, { depth = Infinity, tokens = {}, inde
     if (node.svgColorToken) attrs.push(`data-svg-color-token="${escapeAttr(node.svgColorToken)}"`);
     attrs.push(`src="${escapeAttr(src.length > MAX_INLINE_SRC ? `[embedded image ${Math.round(src.length / 1024)} KB]` : src)}"`, `alt="${escapeAttr(node.name || '')}"`);
   }
+  attrs.push(...paintAttrs(node, escapeAttr));
   if (node.type === 'shader') attrs.push(`preset="${escapeAttr(node.shaderPreset || 'aurora')}"`, `speed={${node.shaderSpeed ?? 1}}`, `intensity={${node.shaderIntensity ?? 1}}`);
   const ancestors = isRoot ? [] : typeof index.ancestors === 'function' ? index.ancestors(node) : parent ? [parent] : [];
   const classes = classesFor(node, { parent, isRoot, tokens, ancestors });

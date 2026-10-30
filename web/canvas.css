@@ -7,7 +7,9 @@
 /* Promoted only while panning (see applyCamera in canvas-interactions.js): a permanent layer keeps a stale raster scale and exhausts tile memory. */
 #canvas.camera-moving{will-change:transform}
 #canvas .layer{cursor:default}
-#canvas .layer.selected{outline-width:calc(1.5px * var(--iz))!important;outline-offset:0!important}
+#canvas .layer.selected:not([data-outline]){outline-width:calc(1.5px * var(--iz))!important;outline-offset:0!important}
+/* A layer with its own outline keeps it while selected; the selection ring is drawn inside the box instead. */
+#canvas .layer.selected[data-outline]::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:inherit;outline:calc(1.5px * var(--iz)) solid var(--shell-accent,#9371ff);outline-offset:calc(-1.5px * var(--iz));z-index:2147483647}
 
 #canvas .layer>.handle{width:calc(8px * var(--iz))!important;height:calc(8px * var(--iz))!important;border-width:calc(1px * var(--iz))!important}
 #canvas .layer>.handle[data-corner=nw]{left:calc(-4px * var(--iz))!important;top:calc(-4px * var(--iz))!important}

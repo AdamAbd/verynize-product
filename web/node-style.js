@@ -123,6 +123,373 @@
     return out;
   }
 
+  // ---------- Effects ----------
+  // Structured effects (all optional; documents without them render exactly as before):
+  //   blendMode     one of BLEND_MODES -> mix-blend-mode (plus-darker falls back to color-burn where unsupported)
+  //   outlineWidth/outlineOffset/outlineColor/outlineStyle -> a real CSS outline (drawn outside the border box)
+  //   shadows [{type: 'box'|'drop'|'text', inset?, x, y, blur, spread, color, token?, hidden?}]
+  //     box -> box-shadow (inset = inner shadow), drop -> filter drop-shadow(), text -> text-shadow (text layers only)
+  //     `token` binds the color to a Colors variable; `color` keeps the resolved fallback.
+  //   filters [{type: keyof FILTERS, value, backdrop?, hidden?}] -> filter / backdrop-filter, in list order
+  //   masks [{type: 'linear'|'radial'|'conic', rotation, alpha, invert?, hidden?}] -> gradient mask-image layers
+  const BLEND_MODES = ['normal', 'darken', 'multiply', 'plus-darker', 'color-burn', 'lighten', 'screen', 'plus-lighter', 'color-dodge', 'overlay', 'soft-light', 'hard-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
+  const FILTERS = {
+    blur: {fn: 'blur', unit: 'px', min: 0, max: 1000, value: 4},
+    brightness: {fn: 'brightness', unit: '', min: 0, max: 3, value: 1.2},
+    contrast: {fn: 'contrast', unit: '', min: 0, max: 3, value: 1.2},
+    grayscale: {fn: 'grayscale', unit: '', min: 0, max: 1, value: 1},
+    hueRotate: {fn: 'hue-rotate', unit: 'deg', min: -360, max: 360, value: 90},
+    invert: {fn: 'invert', unit: '', min: 0, max: 1, value: 1},
+    saturate: {fn: 'saturate', unit: '', min: 0, max: 3, value: 1.5},
+    sepia: {fn: 'sepia', unit: '', min: 0, max: 1, value: 1},
+  };
+  const SHADOW_TYPES = ['box', 'drop', 'text'];
+  const MASK_TYPES = ['linear', 'radial', 'conic'];
+  const OUTLINE_STYLES = ['solid', 'dashed', 'dotted'];
+  const FX_HEX = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
+  const FX_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,99}$/;
+  const r3 = v => Math.round(num(v) * 1000) / 1000;
+  const visible = list => (Array.isArray(list) ? list.filter(item => item && typeof item === 'object' && item.hidden !== true) : []);
+  /** Shadow color: the bound Colors variable when it resolves, else the stored color. */
+  const shadowColor = (s, tokens) => (s.token && tokens && FX_HEX.test(tokens[s.token] || '') ? tokens[s.token] : FX_HEX.test(s.color || '') ? s.color : '#00000040');
+  function shadowCss(s, tokens) {
+    const base = `${px(r3(s.x))} ${px(r3(s.y))} ${px(Math.max(0, r3(s.blur)))}`, color = shadowColor(s, tokens);
+    if (s.type === 'drop') return `drop-shadow(${base} ${color})`;
+    if (s.type === 'text') return `${base} ${color}`;
+    return `${s.inset === true ? 'inset ' : ''}${base} ${px(r3(s.spread))} ${color}`;
+  }
+  const filterCss = f => { const d = FILTERS[f.type]; return `${d.fn}(${r3(Math.min(d.max, Math.max(d.min, num(f.value, d.value))))}${d.unit})`; };
+  function maskCss(m) {
+    const a = Math.min(100, Math.max(0, num(m.alpha, 100))) / 100, solid = `rgba(0, 0, 0, ${r3(a)})`, clear = 'rgba(0, 0, 0, 0)';
+    const [from, to] = m.invert === true ? [clear, solid] : [solid, clear];
+    if (m.type === 'radial') return `radial-gradient(${from}, ${to})`;
+    if (m.type === 'conic') return `conic-gradient(from ${r3(m.rotation)}deg, ${from}, ${to})`;
+    return `linear-gradient(${r3(m.rotation)}deg, ${from}, ${to})`;
+  }
+  /**
+   * Effect values for one layer, shared by the canvas, HTML export and the JSX codec.
+   * Returns {blend, outline, boxShadow[], drop[], textShadow[], filter[], backdrop[], masks[]} (CSS strings).
+   */
+  function effectsOf(n, tokens) {
+    const shadows = visible(n.shadows), filters = visible(n.filters).filter(f => FILTERS[f.type]);
+    const width = Math.max(0, num(n.outlineWidth));
+    return {
+      blend: BLEND_MODES.includes(n.blendMode) && n.blendMode !== 'normal' ? n.blendMode : '',
+      outline: width > 0 ? {width, style: pick(n.outlineStyle, OUTLINE_STYLES, 'solid'), color: FX_HEX.test(n.outlineColor || '') ? n.outlineColor : '#000000', offset: num(n.outlineOffset)} : null,
+      boxShadow: shadows.filter(s => s.type === 'box').map(s => shadowCss(s, tokens)),
+      drop: shadows.filter(s => s.type === 'drop').map(s => shadowCss(s, tokens)),
+      textShadow: n.type === 'text' ? shadows.filter(s => s.type === 'text').map(s => shadowCss(s, tokens)) : [],
+      filter: filters.filter(f => f.backdrop !== true).map(filterCss),
+      backdrop: filters.filter(f => f.backdrop === true).map(filterCss),
+      masks: visible(n.masks).filter(m => MASK_TYPES.includes(m.type)).map(maskCss),
+    };
+  }
+  const isBool = v => v === undefined || typeof v === 'boolean';
+  const finite = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+  /** Validate the structured effect fields of a layer. Returns an error message, or '' when valid. */
+  function validateEffects(n) {
+    if (n.blendMode !== undefined && !BLEND_MODES.includes(n.blendMode)) return 'Invalid blend mode';
+    if (n.outlineWidth !== undefined && !finite(n.outlineWidth, 0, 1000)) return 'Invalid outline width';
+    if (n.outlineOffset !== undefined && !finite(n.outlineOffset, -1000, 1000)) return 'Invalid outline offset';
+    if (n.outlineColor !== undefined && !FX_HEX.test(String(n.outlineColor))) return 'Invalid outline color';
+    if (n.outlineStyle !== undefined && !OUTLINE_STYLES.includes(n.outlineStyle)) return 'Invalid outline style';
+    const list = (v, max) => v === undefined || (Array.isArray(v) && v.length <= max && v.every(item => item && typeof item === 'object' && !Array.isArray(item) && isBool(item.hidden)));
+    if (!list(n.shadows, 20)) return 'Invalid shadows';
+    for (const s of n.shadows || []) {
+      if (!SHADOW_TYPES.includes(s.type) || (s.type === 'text' && n.type !== 'text')) return 'Invalid shadow type';
+      if (!['x', 'y', 'spread'].every(k => finite(s[k], -10000, 10000)) || !finite(s.blur, 0, 10000)) return 'Invalid shadow geometry';
+      if (!FX_HEX.test(String(s.color)) || (s.token !== undefined && (typeof s.token !== 'string' || !FX_NAME.test(s.token)))) return 'Invalid shadow color';
+      if (!isBool(s.inset) || (s.inset === true && s.type !== 'box')) return 'Invalid inner shadow';
+    }
+    if (!list(n.filters, 20)) return 'Invalid filters';
+    for (const f of n.filters || []) if (!Object.hasOwn(FILTERS, f.type) || !finite(f.value, FILTERS[f.type].min, FILTERS[f.type].max) || !isBool(f.backdrop)) return 'Invalid filter';
+    if (!list(n.masks, 8)) return 'Invalid masks';
+    for (const m of n.masks || []) if (!MASK_TYPES.includes(m.type) || !finite(m.rotation ?? 0, -3600, 3600) || !finite(m.alpha ?? 100, 0, 100) || !isBool(m.invert)) return 'Invalid mask';
+    return '';
+  }
+
+  // ---------- Paints ----------
+  // Optional paint stack `fills` (index 0 paints on top), used by Background Fill and Text Fill:
+  //   {type: 'solid', color, token?, opacity?, hidden?}
+  //   {type: 'linear' | 'radial' | 'conic', angle?, stops: [{position 0–100, color, token?}], opacity?, hidden?}
+  //   {type: 'image', src (embedded data URL), fit: 'fill' | 'cover' | 'contain' | 'none', imageWidth?, imageHeight?, opacity?, hidden?}
+  // Without `fills` a layer keeps the single `color`/`token` fill (older documents). Colours are #rrggbb[aa];
+  // `token` names a colour variable and wins over `color` while it exists (color keeps the resolved value).
+  // `svgPaints` ({'#original': '#replacement'}) recolours individual paints of a multicolour SVG image.
+  const HEX_COLOR = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
+  const TOKEN_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,99}$/;
+  const PAINT_TYPES = ["solid", "linear", "radial", "conic", "image"];
+  const GRADIENT_TYPES = ["linear", "radial", "conic"];
+  const IMAGE_FITS = ["fill", "cover", "contain", "none"];
+  const PAINT_IMAGE = /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
+  const SVG_SOURCE = /^data:image\/svg\+xml;base64,([A-Za-z0-9+/=\s]+)$/;
+  const inRange = (v, min, max) => isNum(v) && v >= min && v <= max;
+  function colorError(c, label) {
+    if (!c || typeof c !== "object" || !HEX_COLOR.test(c.color || ""))
+      return `${label} needs a six- or eight-digit hex colour`;
+    if (
+      c.token !== undefined &&
+      (typeof c.token !== "string" || (c.token !== "" && !TOKEN_NAME.test(c.token)))
+    )
+      return `${label} has an invalid colour variable`;
+    return "";
+  }
+  function onePaintError(p) {
+    if (!p || typeof p !== "object" || Array.isArray(p) || !PAINT_TYPES.includes(p.type))
+      return "Paint type must be solid, linear, radial, conic or image";
+    if (p.hidden !== undefined && typeof p.hidden !== "boolean")
+      return "Paint visibility must be true or false";
+    if (p.opacity !== undefined && !inRange(p.opacity, 0, 100))
+      return "Paint opacity must be 0–100";
+    if (p.type === "solid") return colorError(p, "Solid paint");
+    if (GRADIENT_TYPES.includes(p.type)) {
+      if (p.angle !== undefined && !inRange(p.angle, -3600, 3600))
+        return "Gradient angle must be a number of degrees";
+      if (!Array.isArray(p.stops) || p.stops.length < 2 || p.stops.length > 16)
+        return "Gradients need 2–16 stops";
+      for (const s of p.stops) {
+        const e = colorError(s, "Gradient stop");
+        if (e) return e;
+        if (!inRange(s.position, 0, 100)) return "Gradient stop position must be 0–100";
+      }
+      return "";
+    }
+    if (typeof p.src !== "string" || p.src.length > 15e6 || !PAINT_IMAGE.test(p.src))
+      return "Image paint needs an embedded base64 image";
+    if (p.fit !== undefined && !IMAGE_FITS.includes(p.fit))
+      return "Image fit must be fill, cover, contain or none";
+    for (const k of ["imageWidth", "imageHeight"])
+      if (p[k] !== undefined && !inRange(p[k], 1, 1e5)) return "Invalid image paint size";
+    return "";
+  }
+  /** Validation shared by validate() in web/app.js and validateDocument in integrations/design-store.mjs. */
+  function paintError(n) {
+    if (n.fills !== undefined) {
+      if (!Array.isArray(n.fills) || n.fills.length > 16)
+        return "fills must be a list of at most 16 paints";
+      for (const p of n.fills) {
+        const e = onePaintError(p);
+        if (e) return e;
+      }
+    }
+    if (n.svgPaints !== undefined) {
+      const map = n.svgPaints;
+      if (
+        n.type !== "image" ||
+        !SVG_SOURCE.test(n.src || "") ||
+        !map ||
+        typeof map !== "object" ||
+        Array.isArray(map) ||
+        Object.keys(map).length > 64
+      )
+        return "svgPaints needs an SVG image and at most 64 colours";
+      for (const [from, to] of Object.entries(map))
+        if (
+          !/^#[0-9a-f]{6}([0-9a-f]{2})?$/.test(from) ||
+          typeof to !== "string" ||
+          !HEX_COLOR.test(to)
+        )
+          return "svgPaints maps lower-case hex colours to hex colours";
+    }
+    return "";
+  }
+  /** Call fn on every colour holder ({color, token}) of the paint stack: solid paints and gradient stops. */
+  function eachPaintColor(n, fn) {
+    if (!Array.isArray(n?.fills)) return;
+    for (const p of n.fills) {
+      if (p?.type === "solid") fn(p);
+      else if (Array.isArray(p?.stops)) for (const s of p.stops) if (s) fn(s);
+    }
+  }
+  const resolveColor = (c, tokens) =>
+    c.token && tokens && HEX_COLOR.test(tokens[c.token] || "") ? tokens[c.token] : c.color;
+  /** #rrggbb[aa] × opacity percent → CSS colour. */
+  function paintColor(hex, opacity = 100) {
+    if (!HEX_COLOR.test(hex)) return "transparent";
+    const a =
+      ((hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1) *
+        Math.max(0, Math.min(100, num(opacity, 100)))) /
+      100;
+    if (a >= 1) return hex.slice(0, 7).toLowerCase();
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    return `rgba(${r}, ${g}, ${b}, ${Math.round(a * 1000) / 1000})`;
+  }
+  const visibleFills = (n) =>
+    Array.isArray(n.fills) ? n.fills.filter((p) => p && !p.hidden) : null;
+  const IMAGE_SIZE = { fill: "100% 100%", cover: "cover", contain: "contain", none: "auto" };
+  const ASPECT = { fill: "none", cover: "xMidYMid slice", contain: "xMidYMid meet" };
+  /** One paint → a CSS background layer {image, size, position, repeat}. */
+  function paintLayer(p, tokens) {
+    const o = num(p.opacity, 100);
+    if (p.type === "solid") {
+      const c = paintColor(resolveColor(p, tokens), o);
+      return {
+        image: `linear-gradient(${c}, ${c})`,
+        size: "auto",
+        position: "0% 0%",
+        repeat: "repeat",
+      };
+    }
+    if (GRADIENT_TYPES.includes(p.type)) {
+      const stops = [...p.stops]
+        .sort((a, b) => a.position - b.position)
+        .map((s) => `${paintColor(resolveColor(s, tokens), o)} ${num(s.position)}%`)
+        .join(", ");
+      const angle = num(p.angle, p.type === "linear" ? 180 : 0);
+      const image =
+        p.type === "linear"
+          ? `linear-gradient(${angle}deg, ${stops})`
+          : p.type === "radial"
+            ? `radial-gradient(ellipse farthest-corner at 50% 50%, ${stops})`
+            : `conic-gradient(from ${angle}deg at 50% 50%, ${stops})`;
+      return { image, size: "auto", position: "0% 0%", repeat: "repeat" };
+    }
+    const fit = pick(p.fit, IMAGE_FITS, "fill");
+    let url = p.src,
+      size = IMAGE_SIZE[fit];
+    if (o < 100) {
+      // CSS has no per-layer opacity: wrap the bitmap in an SVG image that applies it.
+      const w = num(p.imageWidth),
+        h = num(p.imageHeight),
+        alpha = Math.round(o) / 100;
+      if (fit !== "none") {
+        url =
+          "data:image/svg+xml," +
+          encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><image width="100%" height="100%" preserveAspectRatio="${ASPECT[fit]}" opacity="${alpha}" xlink:href="${p.src}"/></svg>`,
+          );
+        size = "100% 100%";
+      } else if (w && h)
+        url =
+          "data:image/svg+xml," +
+          encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}"><image width="${w}" height="${h}" opacity="${alpha}" xlink:href="${p.src}"/></svg>`,
+          );
+    }
+    return { image: `url("${url}")`, size, position: "center", repeat: "no-repeat" };
+  }
+  /** CSS for a paint stack: {layers, solid} where solid is the colour when the stack is one visible solid paint. */
+  function fillsCss(n, tokens) {
+    const paints = visibleFills(n);
+    if (!paints) return null;
+    const only =
+      paints.length === 1 && paints[0].type === "solid"
+        ? paintColor(resolveColor(paints[0], tokens), num(paints[0].opacity, 100))
+        : null;
+    return { solid: only, layers: paints.map((p) => paintLayer(p, tokens)) };
+  }
+
+  // ---------- SVG paints ----------
+  const NAMED = {
+    black: "#000000",
+    white: "#ffffff",
+    red: "#ff0000",
+    green: "#008000",
+    blue: "#0000ff",
+    yellow: "#ffff00",
+    cyan: "#00ffff",
+    aqua: "#00ffff",
+    magenta: "#ff00ff",
+    fuchsia: "#ff00ff",
+    gray: "#808080",
+    grey: "#808080",
+    orange: "#ffa500",
+    purple: "#800080",
+    silver: "#c0c0c0",
+    maroon: "#800000",
+    navy: "#000080",
+    teal: "#008080",
+    olive: "#808000",
+    lime: "#00ff00",
+  };
+  /** An SVG paint value → lower-case #rrggbb[aa], or null for none/currentColor/url()/unknown. */
+  function svgColorKey(value) {
+    let v = String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s*!important$/, "");
+    if (NAMED[v]) return NAMED[v];
+    if (/^#[0-9a-f]{3,4}$/.test(v)) v = "#" + [...v.slice(1)].map((c) => c + c).join("");
+    if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/.test(v))
+      return v.length === 9 && v.endsWith("ff") ? v.slice(0, 7) : v;
+    const m =
+      /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/.exec(v);
+    if (!m) return null;
+    const hex = [m[1], m[2], m[3]]
+      .map((x) => Math.min(255, +x).toString(16).padStart(2, "0"))
+      .join("");
+    const a =
+      m[4] === undefined ? 1 : m[4].endsWith("%") ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
+    return (
+      "#" +
+      hex +
+      (a >= 1
+        ? ""
+        : Math.round(Math.max(0, a) * 255)
+            .toString(16)
+            .padStart(2, "0"))
+    );
+  }
+  const SVG_PAINT_PROPS = "fill|stroke|stop-color|flood-color|lighting-color";
+  const SVG_ATTR = new RegExp(`(?<![\\w-])(${SVG_PAINT_PROPS})(\\s*=\\s*)(["'])([^"']*)\\3`, "gi");
+  const SVG_DECL = new RegExp(`(?<![\\w-])(${SVG_PAINT_PROPS})(\\s*:\\s*)([^;"'}<>]+)`, "gi");
+  function svgMarkup(src) {
+    const m = SVG_SOURCE.exec(src || "");
+    if (!m) return null;
+    try {
+      return new TextDecoder().decode(
+        Uint8Array.from(atob(m[1].replace(/\s/g, "")), (c) => c.charCodeAt(0)),
+      );
+    } catch {
+      return null;
+    }
+  }
+  /** Distinct explicit paints of an SVG, in document order. */
+  function svgPaintList(src) {
+    const markup = svgMarkup(src);
+    if (!markup) return [];
+    const out = new Set();
+    for (const m of markup.matchAll(SVG_ATTR)) {
+      const k = svgColorKey(m[4]);
+      if (k) out.add(k);
+    }
+    for (const m of markup.matchAll(SVG_DECL)) {
+      const k = svgColorKey(m[3]);
+      if (k) out.add(k);
+    }
+    return [...out];
+  }
+  const recolorCache = new Map();
+  /** Source with every paint listed in `map` replaced (the stored source is never changed). */
+  function recolorSvg(src, map) {
+    if (!map || typeof map !== "object" || !Object.keys(map).length) return src;
+    const key = JSON.stringify(map) + src;
+    if (recolorCache.has(key)) return recolorCache.get(key);
+    const markup = svgMarkup(src);
+    if (!markup) return src;
+    const swap = (v) => {
+      const k = svgColorKey(v);
+      return k && HEX_COLOR.test(map[k] || "") ? map[k] : null;
+    };
+    const next = markup
+      .replace(SVG_ATTR, (all, prop, eq, q, v) => {
+        const c = swap(v);
+        return c ? `${prop}${eq}${q}${c}${q}` : all;
+      })
+      .replace(SVG_DECL, (all, prop, sep, v) => {
+        const c = swap(v);
+        return c ? `${prop}${sep}${c}${/!important\s*$/i.test(v) ? " !important" : ""}` : all;
+      });
+    const bytes = new TextEncoder().encode(next);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000)
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    const out = "data:image/svg+xml;base64," + btoa(binary);
+    if (recolorCache.size > 64) recolorCache.clear();
+    recolorCache.set(key, out);
+    return out;
+  }
+
   function nodeStyle(n, parent, ctx = {}) {
     const decl = new Map();
     // Later writes win and move to the end, so shorthands never clobber longhands set after them.
@@ -159,6 +526,31 @@
     set('flex-shrink', '0');
     set('background', n.type === 'text' ? 'transparent' : color);
     if (n.type !== 'text' && safe(n.gradient)) set('background-image', safe(n.gradient));
+    const paints = n.type === "shader" ? null : fillsCss(n, ctx.tokens);
+    if (paints && n.type === "text" && paints.solid) set("color", paints.solid);
+    else if (paints) {
+      // A legacy CSS gradient string stays on top of the stack.
+      const layers = [
+        ...(n.type !== "text" && safe(n.gradient)
+          ? [{ image: safe(n.gradient), size: "auto", position: "0% 0%", repeat: "repeat" }]
+          : []),
+        ...paints.layers,
+      ];
+      set("background", "transparent");
+      if (layers.length)
+        for (const [prop, key] of [
+          ["background-image", "image"],
+          ["background-size", "size"],
+          ["background-position", "position"],
+          ["background-repeat", "repeat"],
+        ])
+          set(prop, layers.map((l) => l[key]).join(", "));
+      if (n.type === "text") {
+        set("color", "transparent");
+        set("-webkit-background-clip", "text");
+        set("background-clip", "text");
+      }
+    }
     if (PALETTES[n.animated]) { set('background-image', `linear-gradient(120deg,${PALETTES[n.animated]})`); set('background-size', '250% 250%'); set('animation', 'design-gradient 8s ease infinite'); }
     if (safe(n.mask)) set('mask-image', safe(n.mask));
     if (parent?.layout === 'inline') { set('display', 'inline-block'); set('vertical-align', 'top'); }
@@ -242,6 +634,18 @@
       const ring = (n.ringInset ? 'inset ' : '') + `0 0 0 ${num(n.ringWidth)}px ${safe(n.ringColor, '#000000')}`;
       set('box-shadow', safe(n.shadow) ? ring + ', ' + safe(n.shadow) : ring);
     }
+    // Structured effects (inspector Shadow / Outline / Filters / Mask / blend).
+    const fx = effectsOf(n, ctx.tokens);
+    if (fx.boxShadow.length) {
+      const ring = num(n.ringWidth) > 0 ? (n.ringInset ? 'inset ' : '') + `0 0 0 ${num(n.ringWidth)}px ${safe(n.ringColor, '#000000')}` : '';
+      set('box-shadow', [ring, ...fx.boxShadow, safe(n.shadow)].filter(Boolean).join(', '));
+    }
+    if (fx.outline) { set('outline', `${fx.outline.width}px ${fx.outline.style} ${fx.outline.color}`); set('outline-offset', px(fx.outline.offset)); }
+    if (fx.filter.length || fx.drop.length) set('filter', [...fx.filter, ...fx.drop].join(' '));
+    if (fx.backdrop.length) set('backdrop-filter', fx.backdrop.join(' '));
+    if (fx.textShadow.length) set('text-shadow', fx.textShadow.join(', '));
+    if (fx.masks.length) set('mask-image', [...fx.masks, safe(n.mask)].filter(Boolean).join(', '));
+    if (fx.blend) set('mix-blend-mode', fx.blend);
 
     // Text.
     if (n.type === 'text') {
@@ -259,7 +663,22 @@
     // Optional monochrome SVG paint: retain the source and recolor its alpha silhouette.
     const svgTint = n.type === 'image' && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(ctx.svgColor || n.svgColor || '') && /^data:image\/svg\+xml;base64,[A-Za-z0-9+/=\s]+$/.test(n.src || '');
     if (svgTint) img.push(['background-color', ctx.svgColor || n.svgColor], ['mask-image', `url("${n.src.replace(/\s/g, '')}")`], ['mask-mode', 'alpha'], ['mask-size', n.objectFit === 'cover' ? 'cover' : n.objectFit === 'none' ? 'auto' : n.objectFit === 'fill' ? '100% 100%' : 'contain'], ['mask-position', 'center'], ['mask-repeat', 'no-repeat']);
-    return {box: [...decl], img, svgTint};
+    const box = [...decl];
+    // plus-darker is not implemented by every engine: declare the closest standard mode first, so an
+    // engine that rejects the second declaration keeps the fallback (inline style and setProperty alike).
+    if (fx.blend === 'plus-darker') box.splice(box.findIndex(([k]) => k === 'mix-blend-mode'), 0, ['mix-blend-mode', 'color-burn']);
+    // Per-colour SVG replacement (multicolour artwork): render a recoloured copy of the source.
+    const src =
+      n.type === "image" && n.svgPaints && SVG_SOURCE.test(n.src || "")
+        ? recolorSvg(n.src, n.svgPaints)
+        : null;
+    if (src && svgTint)
+      img.splice(
+        img.findIndex(([k]) => k === "mask-image"),
+        1,
+        ["mask-image", `url("${src}")`],
+      );
+    return {box, img, svgTint, src: src !== n.src ? src : null};
   }
 
   function bordersOf(n) {
@@ -290,5 +709,5 @@
   /** Index of the last in-flow (not hidden, not absolute) child in a list of siblings. */
   const lastInFlowId = children => children.filter(c => !c.hidden && c.position !== 'absolute').at(-1)?.id;
 
-  root.BetterNodeStyle = {nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss: safe, PALETTES};
+  root.BetterNodeStyle = {nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss: safe, PALETTES, paintError, eachPaintColor, paintColor, fillsCss, svgPaintList, svgColorKey, recolorSvg, PAINT_TYPES, IMAGE_FITS, BLEND_MODES, FILTERS, SHADOW_TYPES, MASK_TYPES, OUTLINE_STYLES, effectsOf, validateEffects};
 })(typeof globalThis !== 'undefined' ? globalThis : window);

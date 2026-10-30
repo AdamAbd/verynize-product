@@ -1,0 +1,59 @@
+# Implementasi inspector EFFECTS — 2026-10-30
+
+Agen: implementasi effects (blend, border/outline, shadow, filter, mask). Acuan: `docs/wonder-design-workflow-2026-10-30.md` (P13, P14, P25–P29, jurnal 15–21 dan 27–28, gap "outline/filter inspector"), `docs/audits/2026-10-30-validation-source-agent.md`, `docs/audits/2026-10-30-properties-agent.md`, serta screenshot `design/wonder/2026-10-30/15–21, 27, 28` dan `validation/v06, v07, v09, v10, v30`. Yang ditiru adalah perilakunya. Kode dan teks UI ditulis sendiri.
+
+## Yang diimplementasikan
+
+Model data dan pemetaan CSS hanya ada di satu tempat, `web/node-style.js` (`effectsOf`, `validateEffects`). Canvas, export HTML headless, dan codec JSX semuanya memakai fungsi yang sama. Semua field bersifat opsional, sehingga dokumen lama dirender persis seperti sebelumnya.
+
+| Fitur | Model | Render | UI |
+|---|---|---|---|
+| Blend mode, 18 mode (P14) | `blendMode` | `mix-blend-mode`. Untuk `plus-darker` dideklarasikan fallback `color-burn` lebih dulu bila engine tidak mendukungnya. `plus-lighter` native | Ikon tetes di header Appearance (`#blend-mode`). Menu dikelompokkan seperti Wonder 27 (`[data-blend=…]`) |
+| Border (P25) | Field lama `strokeWidth`/`strokeWidths`/`strokeColor` (alpha lewat hex 8 digit), ditambah `strokeStyle` | `border-style` | Select **Solid/Dashed/Dotted** (`[name=strokeStyle]`) di samping toggle per-side |
+| Outline (P26) | `outlineWidth`, `outlineOffset`, `outlineColor`, `outlineStyle` | Properti CSS `outline` dan `outline-offset` asli, tanpa box-shadow. Di canvas, ring seleksi pada layer ber-outline digambar lewat `::after`, sehingga outline milik pengguna tetap terlihat saat layer terpilih (`web/canvas.css`) | Section **Outline** (`#outline-section`): width, offset, warna dan alpha, style, hapus |
+| Shadow (P27) | `shadows: [{type: box\|drop\|text, inset?, x, y, blur, spread, color, token?, hidden?}]` | box dan inner → `box-shadow` (digabung dengan ring dan `shadow` CSS lama), drop → `filter: drop-shadow()`, text → `text-shadow` (khusus layer teks) | List dengan `+`, baris berisi tombol editor, visibility, dan hapus. Popover (`#shadow-editor`) memuat segmented Box/Drop/Text (Text hanya untuk node teks), X/Y/Blur/Spread (spread hanya untuk Box), warna dengan alpha, checkbox **Inner shadow**. Warna dapat di-bind ke variable Colors melalui tab Variables pada color picker (`token`). Field CSS shadow lama tetap tampil bila layer memakainya |
+| Filters (P28) | `filters: [{type, value, backdrop?, hidden?}]`. Tipe: blur (px), brightness/contrast/saturate (0–3), grayscale/invert/sepia (0–1), hueRotate (°) | `filter` dan `backdrop-filter`, sesuai urutan list. Drop shadow bukan filter, melainkan tipe Drop pada Shadow (sesuai temuan audit sumber) | List `#filter-section` dengan select ber-optgroup **Layer**/**Backdrop**, nilai (di-clamp), visibility, hapus. Default Blur 4 |
+| Mask (P29) | `masks: [{type: linear\|radial\|conic, rotation, alpha, invert?, hidden?}]` | Lapisan `mask-image` (gradient hitam→transparan, dibalik bila invert), ditumpuk bersama `mask` CSS lama | List `#mask-section`. `+` menambah Linear 180°. Popover (`#mask-editor`) berisi tipe, Alpha, Rotation (kecuali Radial), Invert, plus visibility dan hapus. Field CSS mask lama (`[name=mask]`) tetap ada sebagai "Custom mask" |
+
+Validasi: `validateEffects` dipanggil dari `validate()` di `web/app.js` dan dari `validateDocument` di `integrations/design-store.mjs`, sehingga keduanya identik. Skema MCP `integrations/design-tools.mjs` juga menerima field baru ini.
+
+Codec JSX/Tailwind:
+- Export: `mix-blend-*`, `outline-*`/`outline-offset-*`/`outline-dashed`, `shadow-[…]` (box dan inner), `[filter:…]` (filter layer dan drop shadow, urutan tetap), `[backdrop-filter:…]`, `[text-shadow:…]`, `[mask-image:…]`.
+- Import (`tailwind-map.mjs` dan `applySpec`): `mix-blend-mode` → `blendMode`; outline → field outline; `filter`/`backdrop-filter` dibaca menjadi `filters` (utility Tailwind seperti `brightness-110` dan `grayscale` juga dikenali); `drop-shadow()` → shadow Drop; `text-shadow` → shadow Text. Box shadow kembali sebagai string `shadow` (render identik). Mask kembali sebagai string `mask`.
+
+## File
+
+- Baru: `web/src/islands/inspector/effects.tsx`, `shadows.tsx`, `filters.tsx`, `masks.tsx`, `integrations/effects.test.mjs`, `tests/inspector-effects.cjs`, dokumen ini.
+- Edit kecil: `web/node-style.js` (blok Effects, integrasi di `nodeStyle`, export API), `integrations/node-style.mjs`, `web/app.js` (validasi, `tokens` ke `nodeStyle`, `data-outline` saat editing), `web/canvas.css`, `integrations/design-store.mjs`, `integrations/export-html.mjs` (`tokens`), `integrations/jsx-codec.mjs`, `integrations/tailwind-map.mjs`, `integrations/design-edit.mjs` (`applySpec`), `integrations/design-tools.mjs`, `web/src/islands/inspector/properties.tsx` (wiring: BlendMenu, BorderStyleSelect, Outline/Shadow/Filter/Mask sections; ShadowSection/MaskSection lama dihapus), `package.json` (`test:canvas`).
+
+## Test dan hasil
+
+- `node --test integrations/effects.test.mjs`: 8/8 lulus (pemetaan CSS 18 blend, outline, shadow termasuk token/hidden/text, filter dan clamp, mask, validasi, export HTML, round-trip codec).
+- `node --test integrations/*.test.mjs`: 138/138 lulus.
+- `node eval/run-fidelity.mjs`: 26/26 fixture, 105/105 check lulus. Tidak ada assertion yang dilonggarkan.
+- `node tests/inspector-effects.cjs` (Electron asli): lulus. Mencakup menu 18 mode, Multiply dan undo, fallback plus-darker, border dashed, outline asli (width/offset/warna terlihat saat layer terpilih, box-shadow `none`), undo outline, shadow box 0/12/4/−4 25%, inner dan undo, drop dengan warna mengikuti variable, hide/remove, text shadow pada teks, filter Blur→Brightness 1.1, clamp 0–3, backdrop blur, keenam filter lainnya, mask Linear→Conic 45° alpha 80 invert, visibility, export HTML, serta penolakan validasi.
+- Regresi terkait lulus: `canvas.cjs`, `canvas-advanced.cjs` (kontrak `#mask-section .insp-add` dan `[name=mask]`), `canvas-codec.cjs`, `canvas-compositing.cjs`, `inspector-parity.cjs`, `inspector-variable-binding.cjs`, `render-export.cjs`.
+- `npm run build:ui`, `lint:ui` (0 error dan 0 warning), `typecheck:ui`, `npm run check`: bersih.
+
+## Insiden saat pengerjaan
+
+Agen ini sempat menjalankan `npm run format` (`vp fmt`) untuk seluruh repo, dan sekitar 386 file ikut terformat ulang. Penanganannya:
+
+- 368 file yang hanya berubah format dikembalikan persis ke byte HEAD.
+- 13 file yang memiliki edit nyata (milik agen ini maupun agen lain) disusun ulang dalam gaya aslinya, lalu diverifikasi dengan syarat `fmt(rekonstruksi) == isi terformat`, sehingga semantik edit semua agen tetap utuh. Daftarnya: `desktop/render.cjs`, `desktop/preload.cjs`, `desktop/README.md`, `integrations/design-edit.mjs`, `design-store.mjs`, `design-tools.mjs`, `jsx-codec.mjs`, `tailwind-map.mjs`, `export-html.mjs`, `node-style.mjs`, `web/node-style.js`, `web/app.js`, `web/canvas.css`.
+
+Sisa dampak yang tidak bisa dipulihkan ke format aslinya, tetapi semantiknya tidak berubah:
+- File untracked milik agen lain: `integrations/export-code.mjs`, `paints.mjs`, `paints.test.mjs`, `variables.mjs`.
+- Baris baru agen lain di file `.tsx` inspector yang memang sudah terformat.
+- Blok paint di `web/node-style.js` kini bergaya terformat.
+
+Main session sudah diberi tahu.
+
+## Gap yang tersisa
+
+- Binding variable untuk warna outline dan border (per sisi) belum ada. Yang sudah ada baru binding warna shadow.
+- Mask: belum ada mask Image/Custom, Mode Alpha/Luminance, Repeat/Position/Size (Advanced), komposit Add/Subtract/Intersect/Exclude, *Detach mask as shape*, maupun handle gradient di canvas. Stop gradient mask masih tetap (hitam ke transparan).
+- Shadow: belum ada pratinjau mini di popover. Inner diwujudkan sebagai checkbox pada Box, sesuai temuan audit sumber.
+- Codec: binding token warna shadow dan item yang di-hide tidak ikut ditulis ke JSX (warna di-resolve, item hidden dilewati). Box shadow terstruktur kembali sebagai string `shadow`. Urutan filter dari utility Tailwind mengikuti urutan Tailwind (bukan urutan kelas), kecuali bila ditulis sebagai `[filter:…]`.
+- `plus-darker` belum didukung Chromium. Canvas dan export menampilkan fallback `color-burn` di sana, dan nilai aslinya tetap dipakai pada engine yang mendukung (Safari).
+- Belum ada bukti visual baru yang disandingkan dengan Wonder untuk P14 (17 mode lainnya) dan P27–P29. Yang ada saat ini adalah verifikasi CSS terkomputasi.

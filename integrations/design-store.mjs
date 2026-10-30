@@ -1,6 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { validateEffects } from './node-style.mjs';
+import { paintError } from './node-style.mjs';
+import { validateAliases } from './variables.mjs';
 
 const TYPES = new Set(['rectangle', 'text', 'frame', 'image', 'shader']);
 const LIMIT = 20 * 1024 * 1024;
@@ -11,7 +14,9 @@ function requireString(value, label, max=200) { if(typeof value !== 'string' || 
 // `bindings: {property: name}`; the property itself always holds the resolved value, so every reader that
 // ignores variables still renders correctly. Keep in sync with validate() in web/app.js.
 export const VARIABLE_TYPES = ['dimension', 'number', 'fontFamily', 'fontWeight'];
-export const BINDABLE = { radius: ['dimension', 'number'], gap: ['dimension', 'number'], padding: ['dimension', 'number'], strokeWidth: ['dimension', 'number'], fontSize: ['dimension', 'number'], letterSpacing: ['dimension', 'number'], lineHeight: ['number'], opacity: ['number'], fontFamily: ['fontFamily'], fontWeight: ['fontWeight'] };
+// Dimensions also drive size, min/max size, axis padding and each corner radius (see variables.mjs for how
+// derived keys are written); a Dimension bound to line height is converted from pixels to a multiplier.
+export const BINDABLE = { radius: ['dimension', 'number'], gap: ['dimension', 'number'], padding: ['dimension', 'number'], strokeWidth: ['dimension', 'number'], fontSize: ['dimension', 'number'], letterSpacing: ['dimension', 'number'], lineHeight: ['number', 'dimension'], opacity: ['number'], fontFamily: ['fontFamily'], fontWeight: ['fontWeight'], w: ['dimension'], h: ['dimension'], minW: ['dimension'], maxW: ['dimension'], minH: ['dimension'], maxH: ['dimension'], paddingX: ['dimension'], paddingY: ['dimension'], radiusTopLeft: ['dimension'], radiusTopRight: ['dimension'], radiusBottomRight: ['dimension'], radiusBottomLeft: ['dimension'] };
 export const VARIABLE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,99}$/;
 const RESERVED_NAMES = ['__proto__', 'prototype', 'constructor'];
 export function checkVariableValue(type, value) {
@@ -54,6 +59,7 @@ export function validateDocument(document) {
   if(!document.tokens || Array.isArray(document.tokens) || typeof document.tokens!=='object') throw new Error('tokens must be an object');
   for(const [key,value] of Object.entries(document.tokens)) { requireString(key,'Token name'); requireString(value,'Token value',1000); if(!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value))throw new Error('Token values must be six- or eight-digit hex colors'); if(['__proto__','prototype','constructor'].includes(key)) throw new Error('Reserved token name'); }
   validateVariables(document);
+  validateAliases(document);
   validateIcons(document);
   const ids=new Set(); let total=0;
   for(const page of document.pages) {
@@ -80,6 +86,8 @@ export function validateDocument(document) {
       if (node.svgColor !== undefined && (node.type !== 'image' || typeof node.src !== 'string' || !/^data:image\/svg\+xml;base64,/.test(node.src) || typeof node.svgColor !== 'string' || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(node.svgColor))) throw new Error('Invalid SVG color');
       if (node.svgColorToken !== undefined && (typeof node.svgColorToken !== 'string' || !VARIABLE_NAME.test(node.svgColorToken) || node.svgColor === undefined)) throw new Error('Invalid SVG color variable');
       validateBindings(node.bindings);
+      { const fx = validateEffects(node); if (fx) throw new Error(fx); } // structured effects, shared with validate() in web/app.js
+      { const pe = paintError(node); if (pe) throw new Error(pe); } // paint stack + SVG paints, shared with validate() in web/app.js
       for(const key of ['color','fontFamily','textAlign','direction','layout','token','gradient','mask','strokeColor','shadow','alignItems','justifyContent'])if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key].length>4000))throw new Error(`Invalid node ${key}`);
     }
     for(const node of page.nodes) {

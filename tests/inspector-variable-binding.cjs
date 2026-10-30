@@ -247,10 +247,21 @@ const path = require("node:path");
       "typing a uniform width replaces individual sides",
     );
     await bind("strokeWidth");
-    await bind("padding");
+    // Horizontal and vertical padding bind separately (Wonder 06) and replace imported per-side values.
+    await bind("paddingX");
+    await bind("paddingY");
     for (const side of ["Top", "Right", "Bottom", "Left"])
-      assert.equal((await node("card"))[`padding${side}`], undefined);
+      assert.equal((await node("card"))[`padding${side}`], 24);
     assert.equal((await styles("card")).padding, "24px");
+    // Detaching vertical padding keeps its value and leaves the horizontal binding in place.
+    await page.locator('[data-bound="paddingY"]').click();
+    await page.getByRole("menuitem", { name: "Detach variable", exact: true }).click();
+    assert.equal((await node("card")).bindings.paddingY, undefined);
+    assert.equal((await styles("card")).padding, "24px");
+    await page.locator('[name="paddingY"]').fill("10");
+    await page.locator('[name="paddingY"]').press("Enter");
+    assert.equal((await node("card")).bindings.paddingX, "space");
+    assert.equal((await styles("card")).padding, "10px 24px");
     await bind("gap");
     assert.equal((await styles("card")).x, "24px");
     assert.equal(
