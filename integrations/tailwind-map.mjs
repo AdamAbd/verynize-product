@@ -97,7 +97,7 @@ export function parseClasses(className, { tokens = {} } = {}) {
     else if (v === '-webkit-box' && decls.has('-webkit-line-clamp')) { /* line-clamp */ }
     else ignore(d.cls, `display:${v} is not supported`);
   }
-  if ((d = take('flex-direction'))) { set('direction', d.resolved.startsWith('column') ? 'column' : 'row'); if (d.resolved.endsWith('reverse')) ignore(d.cls, 'reversed direction is not supported; children keep source order'); }
+  if ((d = take('flex-direction'))) { set('direction', d.resolved.startsWith('column') ? 'column' : 'row'); if (d.resolved.endsWith('reverse')) set('reverse', true); }
   if ((d = take('flex-wrap'))) { set('flexWrap', d.resolved !== 'nowrap'); if (d.resolved === 'wrap-reverse') ignore(d.cls, 'wrap-reverse is rendered as wrap'); }
   if ((d = take('flex'))) {
     const v = d.resolved, parts = splitTop(v, ' ');
@@ -118,6 +118,7 @@ export function parseClasses(className, { tokens = {} } = {}) {
   if ((d = take('justify-content'))) { if (JUSTIFY[d.resolved]) set('justifyContent', JUSTIFY[d.resolved]); else ignore(d.cls, `justify-content:${d.resolved} is not supported`); }
   for (const p of ['place-items', 'place-content', 'place-self', 'justify-items', 'justify-self', 'align-content']) if ((d = take(p))) {
     if (p === 'place-items' && ALIGN[d.resolved]) { set('alignItems', ALIGN[d.resolved]); set('justifyItems', ALIGN[d.resolved]); }
+    else if (p === 'justify-items' && ALIGN[d.resolved] && ALIGN[d.resolved] !== 'auto') set('justifyItems', ALIGN[d.resolved]);
     else if (p === 'place-content' && JUSTIFY[d.resolved]) { set('justifyContent', JUSTIFY[d.resolved]); }
     else if (p === 'align-content' && d.resolved === 'normal') { /* default */ }
     else ignore(d.cls, `${p}:${d.resolved} is not supported`);
@@ -150,7 +151,15 @@ export function parseClasses(className, { tokens = {} } = {}) {
     const span = d.resolved.match(/^span (\d+) \/ span \1$/);
     if (span) set('colSpan', Number(span[1])); else if (d.resolved === '1 / -1') set('colSpan', 'full'); else ignore(d.cls, `grid-column:${d.resolved} is not supported`);
   }
-  for (const p of ['grid-template-rows', 'grid-row', 'grid-auto-flow', 'grid-auto-rows', 'grid-auto-columns', 'grid-column-start', 'grid-column-end', 'grid-row-start', 'grid-row-end', 'order']) if ((d = take(p))) ignore(d.cls, `${p} is not supported`);
+  if ((d = take('grid-template-rows'))) {
+    const rep = d.resolved.match(/^repeat\(\s*(\d+)\s*,\s*minmax\(\s*0(?:px)?\s*,\s*1fr\s*\)\s*\)$/);
+    if (rep) set('rows', Math.max(1, Math.min(100, Number(rep[1])))); else ignore(d.cls, `grid-template-rows:${d.resolved} is not supported`);
+  }
+  if ((d = take('grid-row'))) {
+    const span = d.resolved.match(/^span (\d+) \/ span \1$/);
+    if (span) set('rowSpan', Number(span[1])); else ignore(d.cls, `grid-row:${d.resolved} is not supported`);
+  }
+  for (const p of ['grid-auto-flow', 'grid-auto-rows', 'grid-auto-columns', 'grid-column-start', 'grid-column-end', 'grid-row-start', 'grid-row-end', 'order']) if ((d = take(p))) ignore(d.cls, `${p} is not supported`);
 
   // --- padding / margin
   const padding = {};

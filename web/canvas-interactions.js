@@ -18,6 +18,7 @@
     ['Presentation', [['Slide 16:9', 1920, 1080], ['Slide 4:3', 1024, 768]]],
   ];
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const IS_MAC = /Mac/.test(navigator.platform);
   const typing = target => !!target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable);
 
   function install(ed) {
@@ -40,6 +41,185 @@
     wrap.append(overlay);
     const guideSvg = overlay.querySelector('.guide-layer'), guideLabels = overlay.querySelector('.guide-labels'), frameLabels = overlay.querySelector('.frame-labels'), marqueeBox = overlay.querySelector('.marquee');
 
+
+    // ---------- Hover: outline what a click would select, with its children dashed ----------
+    const hoverBox = document.createElement('div'), hoverKids = document.createElement('div'), dropBox = document.createElement('div'), dropLine = document.createElement('div');
+    hoverBox.className = 'hover-box'; hoverKids.className = 'hover-children'; dropBox.className = 'drop-target'; dropLine.className = 'drop-line';
+    hoverBox.hidden = dropBox.hidden = dropLine.hidden = true;
+    overlay.append(hoverKids, hoverBox, dropBox, dropLine);
+    let hoverId = null, hoverPoint = null, rowHover = null;
+    function screenBox(id) {
+      const el = elementOf(id); if (!el) return null;
+      const r = el.getBoundingClientRect(), v = viewport(); if (!r.width && !r.height) return null;
+      return {left: r.left - v.left, top: r.top - v.top, width: r.width, height: r.height};
+    }
+    function placeBox(el, b) { Object.assign(el.style, {left: b.left + 'px', top: b.top + 'px', width: b.width + 'px', height: b.height + 'px'}); }
+    function showHover(id, children = true) {
+      hoverId = id || null; overlay.dataset.hover = hoverId || '';
+      const b = hoverId && screenBox(hoverId);
+      hoverBox.hidden = !b; hoverKids.replaceChildren();
+      if (!b) return;
+      placeBox(hoverBox, b);
+      if (children) for (const k of ed.nodes().filter(n => n.parentId === hoverId && !n.hidden).slice(0, 200)) {
+        const kb = screenBox(k.id); if (!kb) continue;
+        const d = document.createElement('div'); d.className = 'hover-child'; placeBox(d, kb); hoverKids.append(d);
+      }
+    }
+    // Recompute the hover from the last pointer position (after a move, camera change, render or modifier change).
+    function refreshHover(force = false) {
+      let id = null, children = true;
+      if (rowHover) { id = find(rowHover) && !sel().has(rowHover) ? rowHover : null; children = false; }
+      else if (hoverPoint && !space && !spacingDrag && (tool === 'move' || tool === 'scale') && !workspace.classList.contains('panning') && !workspace.classList.contains('moving')) {
+        const hit = document.elementFromPoint(hoverPoint.x, hoverPoint.y), label = hit?.closest?.('#canvas-overlay .frame-label');
+        if (label) { id = label.dataset.id; children = false; }
+        else if (hit && canvas.contains(hit) && !hit.closest('.handle')) { const el = hit.closest('.layer'); if (el) id = clickTarget(el.dataset.id, hoverPoint.deep); }
+        if (id && (sel().has(id) || find(id)?.locked)) id = null;
+      }
+      if (force || id !== hoverId) showHover(id, children);
+      drawSpacing();
+    }
+    wrap.addEventListener('pointerleave', () => { hoverPoint = null; refreshHover(); });
+    // Hovering a row in the layers panel outlines its layer on the canvas.
+    document.addEventListener('pointerover', e => {
+      const row = e.target.closest?.('.layer-row[data-id]'), id = row?.dataset.id || null;
+      if (id !== rowHover) { rowHover = id; refreshHover(true); }
+    });
+
+
+    // ---------- Spacing handles: drag the padding and gaps of the selected auto-layout frame ----------
+    // Gaps are hatched bands between children; padding bands sit inside the border. Both edit live with a value badge.
+    const spacingLayer = document.createElement('div'); spacingLayer.className = 'spacing-layer';
+    overlay.append(spacingLayer);
+    const PAD_KEYS = ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'];
+    let spacingBands = [], spacingKey = '', spacingDrag = null;
+    function spacingFrame() {
+      if (sel().size !== 1 || space || !(tool === 'move' || tool === 'scale')) return null;
+      const n = find([...sel()][0]);
+      return n && n.type === 'frame' && isFlow(n) && !n.locked && !n.hidden ? n : null;
+    }
+    // Screen-space bands from the live layout: padding per side, then gaps between children (rows for wrap/grid).
+    function spacingGeometry(n) {
+      const el = elementOf(n.id), b = screenBox(n.id); if (!el || !b) return [];
+      const z = cam.zoom, cs = getComputedStyle(el), px = v => parseFloat(v) || 0, MIN = 6, CORNER = 8;
+      const inner = {left: b.left + el.clientLeft * z, top: b.top + el.clientTop * z, width: el.clientWidth * z, height: el.clientHeight * z};
+      const pad = [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].map(px), p = pad.map(v => Math.max(MIN, v * z));
+      const long = (start, size) => ({start: start + CORNER, size: Math.max(0, size - 2 * CORNER)}); // keep corner handles reachable
+      const h = long(inner.left, inner.width), v = long(inner.top, inner.height);
+      const bands = [
+        {kind: 'padding', side: 0, axis: 'y', value: pad[0], rect: {left: h.start, top: inner.top, width: h.size, height: p[0]}},
+        {kind: 'padding', side: 1, axis: 'x', value: pad[1], rect: {left: inner.left + inner.width - p[1], top: v.start, width: p[1], height: v.size}},
+        {kind: 'padding', side: 2, axis: 'y', value: pad[2], rect: {left: h.start, top: inner.top + inner.height - p[2], width: h.size, height: p[2]}},
+        {kind: 'padding', side: 3, axis: 'x', value: pad[3], rect: {left: inner.left, top: v.start, width: p[3], height: v.size}},
+      ];
+      const content = {left: inner.left + pad[3] * z, top: inner.top + pad[0] * z, width: inner.width - (pad[1] + pad[3]) * z, height: inner.height - (pad[0] + pad[2]) * z};
+      const kids = ed.nodes().filter(k => k.parentId === n.id && !k.hidden && k.position !== 'absolute').map(k => screenBox(k.id)).filter(Boolean);
+      const auto = n.layout === 'flex' && /^space-/.test(n.justifyContent || '');
+      const gapValue = axis => (n.layout === 'block' ? Number(n.gapY) || 0 : px(axis === 'x' ? cs.columnGap : cs.rowGap));
+      const gap = (axis, from, to, cross) => {
+        const size = Math.max(0, to - from), thick = Math.max(MIN, size), at = from + size / 2 - thick / 2;
+        bands.push({kind: 'gap', axis, auto: auto && axis === (n.direction === 'column' ? 'y' : 'x'), value: auto && axis === (n.direction === 'column' ? 'y' : 'x') ? size / z : gapValue(axis),
+          rect: axis === 'x' ? {left: at, top: cross.start, width: thick, height: cross.size} : {left: cross.start, top: at, width: cross.size, height: thick}});
+      };
+      const rowMain = (n.layout === 'flex' && n.direction !== 'column') || n.layout === 'grid';
+      if (!rowMain) {
+        for (let i = 1; i < kids.length; i++) gap('y', kids[i - 1].top + kids[i - 1].height, kids[i].top, {start: content.left, size: content.width});
+        return bands;
+      }
+      // Group children into lines (a new line starts below the current one), then gaps within and between lines.
+      const lines = [];
+      for (const k of kids) {
+        const line = lines.at(-1);
+        if (line && k.top < line.bottom - 1) { line.kids.push(k); line.top = Math.min(line.top, k.top); line.bottom = Math.max(line.bottom, k.top + k.height); }
+        else lines.push({kids: [k], top: k.top, bottom: k.top + k.height});
+      }
+      const single = lines.length === 1;
+      for (const line of lines) {
+        const cross = single ? {start: content.top, size: content.height} : {start: line.top, size: line.bottom - line.top};
+        for (let i = 1; i < line.kids.length; i++) gap('x', line.kids[i - 1].left + line.kids[i - 1].width, line.kids[i].left, cross);
+      }
+      for (let i = 1; i < lines.length; i++) gap('y', lines[i - 1].bottom, lines[i].top, {start: content.left, size: content.width});
+      return bands;
+    }
+    function drawSpacing() {
+      const n = !workspace.classList.contains('moving') && !workspace.classList.contains('panning') ? spacingFrame() : null;
+      let bands = [];
+      if (n && (spacingDrag || (hoverPoint && (() => { const b = screenBox(n.id); return b && hoverPoint.x - viewport().left >= b.left && hoverPoint.x - viewport().left <= b.left + b.width && hoverPoint.y - viewport().top >= b.top && hoverPoint.y - viewport().top <= b.top + b.height; })()))) bands = spacingGeometry(n);
+      const key = JSON.stringify([bands, spacingDrag?.index]);
+      if (key === spacingKey) return;
+      spacingKey = key; spacingBands = bands; spacingLayer.replaceChildren();
+      overlay.dataset.spacing = String(bands.length);
+      bands.forEach((band, index) => {
+        const el = document.createElement('div');
+        el.className = `spacing-band spacing-${band.kind}` + (spacingDrag?.index === index ? ' active' : '');
+        el.dataset.index = String(index); el.dataset.axis = band.axis; el.dataset.kind = band.kind; if (band.kind === 'padding') el.dataset.side = String(band.side);
+        placeBox(el, band.rect);
+        const label = band.auto ? 'Auto' : String(Math.round(band.value * 100) / 100);
+        el.innerHTML = `<i class="spacing-bar"></i><b class="spacing-badge">${label}</b>`;
+        spacingLayer.append(el);
+      });
+    }
+    function startSpacing(e, band, index) {
+      const n = spacingFrame(); if (!n || !band) return;
+      const g = gesture(), start = {x: e.clientX, y: e.clientY}, z = cam.zoom, el = elementOf(n.id), cs = el ? getComputedStyle(el) : null;
+      const pads = cs ? [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].map(v => Math.round(parseFloat(v) || 0)) : [0, 0, 0, 0];
+      const from = Math.round(band.value);
+      // Which field a gap drag writes: the main-axis `gap` of a flex stack (or its own gapX/gapY when set), gapX/gapY on grids.
+      const main = n.direction === 'column' ? 'y' : 'x';
+      const gapKey = n.layout === 'block' ? 'gapY' : n.layout === 'flex' && band.axis === main ? (n['gap' + main.toUpperCase()] !== undefined ? 'gap' + main.toUpperCase() : 'gap') : 'gap' + band.axis.toUpperCase();
+      spacingDrag = {index}; workspace.dataset.spacingDrag = band.axis; showHover(null); spacingKey = ''; drawSpacing();
+      // The handle follows the pointer. Top/left padding always pushes content down/right. Bottom/right padding on a
+      // hugging axis grows the frame outward (drag down/right = more); on a fixed or fill axis it eats into the content
+      // (drag up/left = more).
+      const hugs = axis => window.BetterNodeStyle?.sizingMode?.(n, axis === 'x' ? 'w' : 'h', find(n.parentId)) === 'hug';
+      const sign = band.kind !== 'padding' || band.side === 0 || band.side === 3 || hugs(band.axis) ? 1 : -1;
+      // A drag never breaks the layout: a value that makes this frame or an ancestor overflow (beyond what already
+      // overflowed), or squeezes a child below its longest word / smallest content, is refused and the last value that
+      // fits stays. A grid gap counts once per track, so this is what keeps a 12-column gap from pushing cells off the
+      // page. Typing a value in the inspector still allows anything.
+      // Resize handles hang outside the frame and would count as overflow, so they hide for the drag.
+      canvas.classList.add('spacing-measure');
+      const chain = []; for (let a = n; a; a = find(a.parentId)) chain.push(a.id);
+      const overflow = id => { const x = elementOf(id); return x ? [x.scrollWidth - x.clientWidth, x.scrollHeight - x.clientHeight] : [0, 0]; };
+      const baseline = new Map(chain.map(id => [id, overflow(id)]));
+      const kids = ed.nodes().filter(k => k.parentId === n.id && !k.hidden && k.position !== 'absolute');
+      canvas.classList.add('measuring-min');
+      const smallest = new Map(kids.map(k => {
+        const x = elementOf(k.id); if (!x) return [k.id, 0];
+        const width = x.offsetWidth, css = x.style.cssText;
+        x.style.cssText = css + ';width:min-content!important;flex:none!important;min-width:0!important';
+        const min = x.offsetWidth; x.style.cssText = css;
+        return [k.id, Math.min(min, width)];
+      }));
+      canvas.classList.remove('measuring-min');
+      const fits = () => chain.every(id => overflow(id).every((o, i) => o <= Math.max(0, baseline.get(id)[i]) + 1))
+        && kids.every(k => { const x = elementOf(k.id); return !x || x.offsetWidth >= smallest.get(k.id) - 1; });
+      let good = from;
+      const apply = (value, ev) => {
+        if (band.kind === 'padding') {
+          if (n.bindings) delete n.bindings.padding;
+          if (ev.shiftKey) { n.padding = value; for (const k of PAD_KEYS) delete n[k]; }
+          else { const sides = ev.altKey ? [band.side, (band.side + 2) % 4] : [band.side]; PAD_KEYS.forEach((k, i) => { n[k] = sides.includes(i) ? value : pads[i]; }); }
+        } else {
+          if (n.bindings && gapKey === 'gap') delete n.bindings.gap;
+          if (band.auto) n.justifyContent = 'flex-start'; // dragging an auto gap makes it fixed
+          n[gapKey] = value;
+        }
+        ed.render();
+      };
+      track(e, ev => {
+        const d = band.axis === 'x' ? (ev.clientX - start.x) / z : (ev.clientY - start.y) / z;
+        const value = Math.max(0, Math.round(from + sign * d));
+        if (!g.committed && value === from) return;
+        g.commit();
+        apply(value, ev);
+        if (value <= good || fits()) { good = value; workspace.dataset.spacingLimit = ''; return; }
+        // Past the limit: step back toward the last fitting value (the largest one that still fits, between the two).
+        let lo = good, hi = value;
+        while (hi - lo > 1) { const mid = Math.floor((lo + hi) / 2); apply(mid, ev); if (fits()) lo = mid; else hi = mid; }
+        apply(lo, ev); good = lo; workspace.dataset.spacingLimit = '1';
+      }, () => { canvas.classList.remove('spacing-measure'); delete workspace.dataset.spacingLimit; spacingDrag = null; delete workspace.dataset.spacingDrag; spacingKey = ''; refreshHover(true); });
+    }
+
     // ---------- Camera ----------
     const viewport = () => wrap.getBoundingClientRect();
     function applyCamera() {
@@ -49,6 +229,7 @@
       if (lastPage) cameras.set(lastPage, {...cam});
       ed.updateMeasurement();
       drawFrameLabels();
+      if (hoverId || spacingBands.length) refreshHover(true);
     }
     function setCamera(x, y, zoom, fitting = false) {
       cam.x = x; cam.y = y; cam.zoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM); autoFit = fitting; applyCamera();
@@ -217,17 +398,29 @@
 
     // ---------- Selection helpers ----------
     function pathTo(id) { const path = []; let n = find(id); while (n) { path.unshift(n); n = n.parentId ? find(n.parentId) : null; } return path; }
-    function resolveHit(hitId) {
-      const deep = window.appPreferences?.get?.().selection !== 'classic';
+    // Deep selection: the preference, or ⌘-click (Ctrl elsewhere) for one click.
+    const deepSelect = e => window.appPreferences?.get?.().selection === 'deep' || !!(e && (IS_MAC ? e.metaKey : e.ctrlKey));
+    function resolveHit(hitId, deep = deepSelect()) {
       if (deep) return hitId;
       const scope = new Set(drilled);
       for (const n of selectedNodes()) if (n.parentId) scope.add(n.parentId);
       const path = pathTo(hitId);
+      // Top-level frames are artboards: a click inside one picks its direct child, never the artboard itself.
+      if (path.length > 1 && path[0].type === 'frame') scope.add(path[0].id);
       // Descend from the root while the current frame is part of the drilled/selection scope.
       let depth = 0;
       while (depth < path.length - 1 && scope.has(path[depth].id)) depth++;
       return path[depth]?.id ?? hitId;
     }
+    // What a click selects: the resolved layer, or one level deeper when that layer is already selected
+    // (clicking inside a selected frame selects the child under the pointer).
+    function clickTarget(hitId, deep = deepSelect()) {
+      const id = resolveHit(hitId, deep);
+      if (deep || !sel().has(id)) return id;
+      const path = pathTo(hitId), i = path.findIndex(n => n.id === id);
+      return path[i + 1]?.id ?? id;
+    }
+    const inStack = n => !!n && isFlow(find(n.parentId)) && n.position !== 'absolute';
     // Selected nodes without any selected ancestor.
     function topSelected() {
       const list = selectedNodes();
@@ -272,25 +465,38 @@
       if (e.target.closest('.frame-label')) return;
       if (space || tool === 'hand' || e.button === 1) { startPan(e); return; }
       if (e.button !== 0) return;
+      const spacing = e.target.closest('#canvas-overlay .spacing-band');
+      if (spacing) { startSpacing(e, spacingBands[Number(spacing.dataset.index)], Number(spacing.dataset.index)); return; }
       if (tool === 'eyedropper') { e.preventDefault(); const hex = colorAt(e.clientX, e.clientY); if (hex) { eyedropperRun++; applyPickedColor(hex); setTool('move'); } return; }
       if (DRAW_TOOLS.has(tool)) { startDraw(e); return; }
       const handle = e.target.closest('#canvas .handle');
       if (handle) { startResize(e, handle.closest('.layer').dataset.id, handle.dataset.corner); return; }
       const el = e.target.closest('#canvas .layer');
       if (!el) { startMarquee(e); return; }
-      const id = resolveHit(el.dataset.id);
+      const hit = el.dataset.id, deep = deepSelect(e), id = resolveHit(hit, deep);
       if (e.shiftKey) { const next = new Set(sel()); if (next.has(id)) next.delete(id); else next.add(id); select(next); e.preventDefault(); return; }
-      if (!sel().has(id)) select([id]);
-      startMove(e);
+      const already = sel().has(id), artboard = find(id);
+      // Pressing on an artboard's own background marquee-selects its children; a plain click selects the artboard.
+      if (!already && id === hit && artboard && !artboard.parentId && artboard.type === 'frame' && ed.nodes().some(n => n.parentId === id)) {
+        startMarquee(e, id, () => select([id])); return;
+      }
+      if (!already) select([id]);
+      showHover(null);
+      // A click without a drag on an already selected layer goes one level in (or collapses a multi-selection to it).
+      startMove(e, () => {
+        if (already) {
+          const target = clickTarget(hit, deep);
+          if (target !== id) { drilled.add(id); select([target]); } else if (sel().size > 1) select([id]);
+        }
+      });
     });
+    // Double-click edits a text layer that the first click of the pair had already selected; drilling in happens per click.
+    let firstClickSelection = new Set();
+    wrap.addEventListener('click', e => { if (e.detail <= 1) firstClickSelection = new Set(sel()); });
     wrap.addEventListener('dblclick', e => {
       const el = e.target.closest('#canvas .layer'); if (!el) return;
-      const path = pathTo(el.dataset.id), current = path.findIndex(n => sel().has(n.id));
-      let target = path.at(-1);
-      if (current >= 0 && current < path.length - 1) { drilled.add(path[current].id); target = path[current + 1]; }
-      else if (current < 0) target = find(resolveHit(el.dataset.id));
-      select([target.id]);
-      if (target.type === 'text' && current === path.length - 1) editText();
+      const n = find(el.dataset.id);
+      if (n?.type === 'text' && !n.locked && sel().size === 1 && sel().has(n.id) && firstClickSelection.has(n.id)) editText();
     });
     function editText() { const t = $('#inspector')?.elements.text; if (t) { t.focus(); t.select(); } }
 
@@ -301,44 +507,146 @@
       if (first.parentId) { const p = worldRect(first.parentId); if (p) targets.push({...p, parent: true}); }
       return targets;
     }
-    // Inset [top, right, bottom, left] in px for an absolute child of a flow frame (offsets are measured
-    // inside the parent's border; % offsets resolve against it). Without offsets, left/top come from x/y.
-    function insetStart(n) {
-      const p = find(n.parentId) || {}, b = Array.isArray(p.strokeWidths) && p.strokeWidths.length === 4 ? p.strokeWidths.map(v => Number(v) || 0) : Array(4).fill(Number(p.strokeWidth) || 0);
-      const cbW = (Number(p.w) || 0) - b[1] - b[3], cbH = (Number(p.h) || 0) - b[0] - b[2];
-      const ins = (Array.isArray(n.inset) ? n.inset : [null, null, null, null]).map((v, i) => (v === null || v === undefined ? null : typeof v === 'string' ? parseFloat(v) / 100 * (i % 2 ? cbW : cbH) : Number(v) || 0));
-      if (ins[1] === null && ins[3] === null) ins[3] = n.x - b[3];
-      if (ins[0] === null && ins[2] === null) ins[0] = n.y - b[0];
-      return ins;
-    }
-    function startMove(e) {
+    // Drag-move. Free layers follow the pointer through x/y (with snapping). Auto-layout children follow it as a
+    // translated ghost and reorder live inside their stack. Dropping over another frame re-parents the layers into
+    // it (at the stack slot under the pointer when that frame is an auto layout); top-level frames stay top-level.
+    function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
-      if (!moving.length) return;
       const g = gesture(), start = {x: e.clientX, y: e.clientY};
-      let starts = null, box = null, targets = null;
+      let free = null, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null;
       const begin = ev => {
         g.commit();
         if (ev.altKey) moving = duplicateNodes(moving, 0);
-        starts = moving.map(find).filter(n => n && (!isFlow(find(n.parentId)) || n.position === 'absolute')).map(n => ({n, x: n.x, y: n.y, inset: isFlow(find(n.parentId)) ? insetStart(n) : null}));
-        box = union(moving.map(worldRect)); targets = guideTargets(moving);
+        const nodes = moving.map(find).filter(Boolean);
+        free = nodes.filter(n => !inStack(n)).map(n => ({n, x: n.x, y: n.y})); // anchored layers re-derive their insets from x/y (beforeRender)
+        stacked = nodes.filter(inStack);
+        grab = new Map(nodes.map(n => [n.id, worldRect(n.id)]));
+        box = union(free.map(s => grab.get(s.n.id))); targets = free.length ? guideTargets(free.map(s => s.n.id)) : [];
+        excluded = new Set(nodes.flatMap(n => [...ed.descendants(n.id)]));
+        const parents = new Set(nodes.map(n => n.parentId || null));
+        home = parents.size === 1 ? [...parents][0] : undefined;
+        // Artboards never get nested by a drag.
+        if (nodes.some(n => !n.parentId && n.type === 'frame')) excluded = null;
+        workspace.classList.add('moving'); showHover(null);
       };
       track(e, ev => {
+        if (!moving.length) return;
+        if (!free) { if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 3) return; begin(ev); }
         let dx = (ev.clientX - start.x) / cam.zoom, dy = (ev.clientY - start.y) / cam.zoom;
-        if (!starts) { if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 3) return; begin(ev); }
         if (ev.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
+        drop = dropTarget(ev, home, excluded, stacked);
         let guides = [];
-        if (box && $('#snap')?.checked !== false && !ev.metaKey && !ev.ctrlKey) {
+        if (box && !drop.parent && $('#snap')?.checked !== false && !ev.metaKey && !ev.ctrlKey) {
           const snapped = snapBox({...box, x: box.x + dx, y: box.y + dy}, targets);
           dx += snapped.dx; dy += snapped.dy; guides = snapped.guides;
         }
         const r2 = v => Math.round(v * 100) / 100;
-        for (const s of starts) {
+        for (const s of free) {
           s.n.x = r2(s.x + dx); s.n.y = r2(s.y + dy);
-          // Absolute child of a flow frame: the renderer places it from `inset`, so shift the offsets it uses.
-          if (s.inset) s.n.inset = s.inset.map((v, i) => (v === null ? null : r2(v + [dy, -dx, -dy, dx][i])));
         }
-        ed.render(); drawGuides(guides);
-      }, () => drawGuides([]));
+        // Live reorder inside the stack the layers came from.
+        const reordered = drop.index !== undefined && !drop.parent && placeInStack(home, stacked, drop.index);
+        if (free.length || reordered) ed.render();
+        placeGhosts(stacked, grab, dx, dy);
+        if (stacked.length) ed.updateMeasurement(); // name and size badges follow the dragged copy
+        drawGuides(guides); drawDrop(drop);
+      }, () => {
+        workspace.classList.remove('moving');
+        if (!free) { onClick?.(); return; }
+        drawGuides([]); drawDrop(null);
+        if (drop?.parent) relocate(moving.map(find).filter(Boolean), drop.parent.id === '' ? null : drop.parent.id, drop.index);
+        else if (stacked.length) clearGhosts(stacked);
+        ed.render();
+      });
+    }
+    // Where a drag lands. Stack children stay in their stack while the pointer is inside it; otherwise the deepest
+    // frame under the pointer (outside the moving layers) takes them. `parent` is set only when that changes the
+    // parent ({id: ''} = the page); `index` is the stack slot for auto-layout targets.
+    function dropTarget(e, home, excluded, stacked) {
+      const p = screenToWorld(e.clientX, e.clientY), homeNode = home ? find(home) : null;
+      let target = home;
+      if (!excluded || home === undefined) return {};
+      if (!(isFlow(homeNode) && stacked.length && (() => { const r = worldRect(home); return r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; })())) {
+        target = null;
+        for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
+          if (!canvas.contains(el) || !el.classList.contains('frame-layer') || excluded.has(el.dataset.id)) continue;
+          const n = find(el.dataset.id); if (n && !n.locked && !n.hidden) { target = n.id; break; }
+        }
+      }
+      const node = target ? find(target) : null, result = {};
+      if (target !== home) result.parent = node || {id: ''};
+      if (isFlow(node)) result.index = stackIndex(node, ed.nodes().filter(n => n.parentId === node.id && !excluded.has(n.id)), p);
+      if (node && (result.parent || stacked.length)) result.frame = node.id;
+      return result;
+    }
+    // Slot in a stack for a world point: main-axis order for single-line flex, reading order for wrap/grid/inline.
+    function stackIndex(parent, kids, p) {
+      const reading = parent.layout !== 'flex' || parent.flexWrap, column = parent.direction === 'column';
+      let index = 0;
+      kids.forEach((k, i) => {
+        if (k.hidden || k.position === 'absolute') return;
+        const r = worldRect(k.id); if (!r) return;
+        const before = reading ? p.y > r.y + r.h || (p.y >= r.y && p.x > r.x + r.w / 2) : column ? p.y > r.y + r.h / 2 : p.x > r.x + r.w / 2;
+        if (before) index = i + 1;
+      });
+      return index;
+    }
+    // Put stack children at `index` among their non-moving siblings; returns whether the order changed.
+    function placeInStack(parentId, nodes, index) {
+      const all = ed.nodes(), moving = new Set(nodes), siblings = all.filter(n => (n.parentId || null) === (parentId || null));
+      const rest = siblings.filter(n => !moving.has(n)), next = [...rest.slice(0, index), ...siblings.filter(n => moving.has(n)), ...rest.slice(index)];
+      if (next.every((n, i) => n === siblings[i])) return false;
+      reorderSiblings(parentId, () => next);
+      return true;
+    }
+    // Stack children are laid out by their parent, so the dragged copy is a translate over the slot it holds.
+    function placeGhosts(nodes, grab, dx, dy) {
+      for (const n of nodes) {
+        const el = elementOf(n.id), from = grab.get(n.id); if (!el || !from) continue;
+        el.style.translate = ''; const now = worldRect(n.id); if (!now) continue;
+        Object.assign(el.style, {translate: `${from.x + dx - now.x}px ${from.y + dy - now.y}px`, zIndex: '1000', pointerEvents: 'none'});
+      }
+    }
+    function clearGhosts(nodes) { for (const n of nodes) { const el = elementOf(n.id); if (el) Object.assign(el.style, {translate: '', zIndex: '', pointerEvents: ''}); } }
+    // Re-parent dropped layers, keeping where they appear on screen (free parents) or taking the stack slot.
+    function relocate(nodes, parentId, index) {
+      const parent = find(parentId), flowInto = isFlow(parent), origin = contentOrigin(parentId), r2 = v => Math.round(v * 100) / 100;
+      const at = new Map(nodes.map(n => [n.id, inStack(n) ? worldRect(n.id) : {...layerOrigin(n), w: elementOf(n.id)?.offsetWidth, h: elementOf(n.id)?.offsetHeight}]));
+      clearGhosts(nodes);
+      const all = ed.nodes(), moving = new Set(nodes), rest = all.filter(n => !moving.has(n));
+      const siblings = rest.filter(n => (n.parentId || null) === (parentId || null));
+      const insertAt = flowInto && index < siblings.length ? rest.indexOf(siblings[index]) : siblings.length ? rest.indexOf(siblings.at(-1)) + 1 : rest.length;
+      rest.splice(insertAt, 0, ...nodes);
+      all.splice(0, all.length, ...rest);
+      for (const n of nodes) {
+        const w = at.get(n.id);
+        n.parentId = parentId || null;
+        if (flowInto) { delete n.position; delete n.inset; continue; }
+        if (w) { n.x = r2(w.x - origin.x); n.y = r2(w.y - origin.y); }
+        if (n.wMode === 'fill') { n.wMode = 'fixed'; if (w?.w) n.w = w.w; }
+        if (n.hMode === 'fill') { n.hMode = 'fixed'; if (w?.h) n.h = w.h; }
+      }
+      ed.setSelection(new Set(nodes.map(n => n.id)));
+    }
+    // Drop feedback: the receiving frame is outlined and, for a stack, a bar marks the slot.
+    function drawDrop(drop) {
+      const target = drop?.frame, b = target && screenBox(target);
+      dropBox.hidden = !b; dropLine.hidden = true;
+      if (!b) return;
+      placeBox(dropBox, b);
+      if (!drop.parent) return;
+      const node = find(target); if (!isFlow(node)) return;
+      // Slots count every non-moving child; hidden and absolute ones have no box, so look past them.
+      const kids = ed.nodes().filter(n => n.parentId === target && !sel().has(n.id)).map(n => (n.hidden || n.position === 'absolute' ? null : screenBox(n.id)));
+      const column = node.layout === 'flex' && !node.flexWrap && node.direction === 'column', at = kids.slice(drop.index).find(Boolean), prev = kids.slice(0, drop.index).findLast(Boolean);
+      dropLine.hidden = false;
+      if (column) {
+        const y = at && prev ? (prev.top + prev.height + at.top) / 2 : at ? at.top - 2 : prev ? prev.top + prev.height + 2 : b.top + b.height / 2;
+        placeBox(dropLine, {left: b.left + 4, top: y - 1, width: Math.max(0, b.width - 8), height: 2});
+      } else {
+        const ref = at || prev, x = at && prev && Math.abs(prev.top - at.top) < 1 ? (prev.left + prev.width + at.left) / 2 : at ? at.left - 2 : prev ? prev.left + prev.width + 2 : b.left + b.width / 2;
+        placeBox(dropLine, {left: x - 1, top: ref ? ref.top : b.top + 4, width: 2, height: ref ? ref.height : Math.max(0, b.height - 8)});
+      }
     }
 
     // Snap a moving box to sibling/parent edges and centers, or to equal spacing.
@@ -432,18 +740,21 @@
       });
     }
 
-    function startMarquee(e) {
+    function startMarquee(e, scope = null, onClick) {
       const additive = e.shiftKey, base = additive ? new Set(sel()) : new Set();
       if (!additive) { drilled.clear(); if (sel().size) select([]); }
       const p0 = screenToWorld(e.clientX, e.clientY);
+      let dragged = false;
       track(e, ev => {
+        if (!dragged && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return;
+        dragged = true;
         const p1 = screenToWorld(ev.clientX, ev.clientY);
         const rect = {x: Math.min(p0.x, p1.x), y: Math.min(p0.y, p1.y), w: Math.abs(p1.x - p0.x), h: Math.abs(p1.y - p0.y)};
         showMarquee(rect);
-        const hits = ed.nodes().filter(n => !n.parentId && !n.hidden && !n.locked).filter(n => { const r = worldRect(n.id); return r && intersects(rect, r); }).map(n => n.id);
+        const hits = ed.nodes().filter(n => (n.parentId || null) === scope && !n.hidden && !n.locked).filter(n => { const r = worldRect(n.id); return r && intersects(rect, r); }).map(n => n.id);
         const next = new Set([...base, ...hits]);
         if (next.size !== sel().size || [...next].some(id => !sel().has(id))) select(next);
-      }, () => { marqueeBox.hidden = true; });
+      }, () => { marqueeBox.hidden = true; if (!dragged) onClick?.(); });
     }
     function showMarquee(rect, kind = 'select') {
       marqueeBox.hidden = false; marqueeBox.dataset.kind = kind;
@@ -490,6 +801,7 @@
     wrap.addEventListener('pointermove', e => {
       lastHover = e;
       if (e.buttons) return;
+      hoverPoint = {x: e.clientX, y: e.clientY, deep: deepSelect(e)}; refreshHover();
       if (e.altKey) measureTo(e); else if (overlay.dataset.measuring) { overlay.dataset.measuring = ''; drawGuides([]); }
     });
     function measureTo(e) {
@@ -940,10 +1252,13 @@
     document.addEventListener('keydown', e => {
       if (typing(e.target) || e.defaultPrevented) return;
       if (document.querySelector('dialog[open]') || document.body.classList.contains('files-view') || document.body.classList.contains('settings-open')) return;
-      if (e.code === 'Space') { space = true; workspace.classList.add('space-pan'); e.preventDefault(); return; }
+      if (hoverPoint && (e.key === 'Meta' || e.key === 'Control')) { hoverPoint.deep = deepSelect(e); refreshHover(); }
+      if (e.code === 'Space') { space = true; workspace.classList.add('space-pan'); refreshHover(); e.preventDefault(); return; }
       if (e.altKey && lastHover && !e.repeat) measureTo(lastHover);
       if (e.key.startsWith('Arrow')) {
         const list = selectedNodes().filter(n => !n.locked); if (!list.length) return;
+        // Auto-layout children have no x/y: arrows step them through their stack instead.
+        if (list.every(inStack)) { e.preventDefault(); arrange(e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? 'backward' : 'forward'); return; }
         e.preventDefault(); ed.checkpoint();
         const prefs = window.appPreferences?.get?.() || {}, delta = e.shiftKey ? (prefs.largeNudge || 10) : (prefs.smallNudge || 1);
         for (const n of list) { if (e.key === 'ArrowLeft') n.x -= delta; if (e.key === 'ArrowRight') n.x += delta; if (e.key === 'ArrowUp') n.y -= delta; if (e.key === 'ArrowDown') n.y += delta; }
@@ -956,6 +1271,7 @@
     });
     document.addEventListener('keyup', e => {
       if (e.code === 'Space') { space = false; workspace.classList.remove('space-pan'); }
+      if (hoverPoint && (e.key === 'Meta' || e.key === 'Control' || e.code === 'Space')) { hoverPoint.deep = deepSelect(e); refreshHover(); }
       if (e.key === 'Alt' && overlay.dataset.measuring) { overlay.dataset.measuring = ''; drawGuides([]); }
     });
     window.addEventListener('blur', () => { space = false; workspace.classList.remove('space-pan'); });
@@ -1014,8 +1330,66 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireToolbar); else queueMicrotask(wireToolbar);
     for (const [id, fn] of [['zoom-in', () => stepZoom(1)], ['zoom-out', () => stepZoom(-1)], ['zoom-reset', () => zoomCenter(1)], ['zoom-fit', () => fit()]]) { const b = document.getElementById(id); if (b) b.onclick = fn; }
 
+    // ---------- Constraints (inset anchoring) ----------
+    // An anchored layer is placed by CSS insets, so a parent resize moves it without touching the model. To keep
+    // x/y/w/h meaningful for everything else (snapping, layers, agents), every render reads the anchored geometry
+    // back into x/y/w/h (afterRender). Before a render, a layer whose x/y/w/h no longer match that read-back was
+    // edited (move, nudge, inspector, resize, undo): its insets are re-derived from the new geometry so the
+    // constraint itself is preserved. Layers never read back (just loaded, or restored by undo: new objects) keep
+    // their insets as written; the cache is keyed by node object for that reason.
+    const NS = () => window.BetterNodeStyle;
+    let synced = new WeakMap();
+    const sameBox = (a, n) => ['x', 'y', 'w', 'h'].every(k => Math.abs((Number(a[k]) || 0) - (Number(n[k]) || 0)) < 0.01);
+    const anchoredLayer = n => !!n.parentId && !!NS()?.anchored(n, find(n.parentId));
+    function bordersOf(p) { return Array.isArray(p.strokeWidths) && p.strokeWidths.length === 4 ? p.strokeWidths.map(v => Math.max(0, Number(v) || 0)) : Array(4).fill(Math.max(0, Number(p.strokeWidth) || 0)); }
+    // The parent's padding box (CSS containing block of an absolute child) and the x/y offset of that box in the
+    // child's coordinate convention: free parents measure x/y inside the border, flow parents from the border box.
+    function containing(n) {
+      const p = find(n.parentId), b = bordersOf(p), el = elementOf(p.id);
+      const fixedW = (p.wMode || 'fixed') === 'fixed' && p.wPct === undefined, fixedH = (p.hMode || 'fixed') === 'fixed' && p.hPct === undefined;
+      const w = fixedW || !el ? (Number(p.w) || 0) - b[1] - b[3] : el.clientWidth, h = fixedH || !el ? (Number(p.h) || 0) - b[0] - b[2] : el.clientHeight;
+      return {cb: {w: Math.max(0, w), h: Math.max(0, h)}, dx: isFlow(p) ? b[3] : 0, dy: isFlow(p) ? b[0] : 0};
+    }
+    // The layer's own size where its sizing mode decides it (hug reads the rendered box).
+    function ownSize(n) { const el = elementOf(n.id); return {w: n.wMode === 'hug' && el ? el.offsetWidth : Number(n.w) || 0, h: n.hMode === 'hug' && el ? el.offsetHeight : Number(n.h) || 0}; }
+    function applyPatch(n, patch) { for (const [k, v] of Object.entries(patch)) { if (v === null || v === undefined) delete n[k]; else n[k] = v; } }
+    function reanchor(n, constraints = NS().constraintsOf(n)) {
+      const {cb, dx, dy} = containing(n), size = ownSize(n);
+      applyPatch(n, NS().anchorPatch(n, constraints, {x: (Number(n.x) || 0) - dx, y: (Number(n.y) || 0) - dy, w: size.w, h: size.h}, cb));
+    }
+    function beforeRender() {
+      if (!NS()) return;
+      for (const n of ed.nodes()) { const last = synced.get(n); if (last && anchoredLayer(n) && !sameBox(last, n)) reanchor(n); }
+    }
+    function syncAnchored() {
+      if (!NS()) return;
+      synced = new WeakMap();
+      const r2 = v => Math.round(v * 100) / 100;
+      for (const n of ed.nodes()) {
+        if (!anchoredLayer(n) || !Array.isArray(n.inset) || !n.inset.some(v => v !== null && v !== undefined)) continue;
+        const {cb, dx, dy} = containing(n), box = NS().anchoredBox(n, cb, ownSize(n));
+        n.x = r2(box.x + dx); n.y = r2(box.y + dy);
+        if (n.wMode !== 'hug') n.w = r2(box.w); if (n.hMode !== 'hug') n.h = r2(box.h);
+        synced.set(n, {x: n.x, y: n.y, w: n.w, h: n.h});
+      }
+    }
+    // Inspector: set the horizontal and/or vertical constraint of layers without moving them. One undo step.
+    function setConstraints(ids, next) {
+      const list = ids.map(find).filter(n => n && !n.locked && anchorable(n)); if (!list.length) return false;
+      ed.checkpoint();
+      for (const n of list) {
+        const current = anchoredLayer(n) ? NS().constraintsOf(n) : {h: 'start', v: 'start'};
+        reanchor(n, {...current, ...next});
+      }
+      ed.render();
+      return true;
+    }
+    // Constraints apply to layers positioned inside a parent: children of free frames and absolute children.
+    const anchorable = n => !!n.parentId && (!isFlow(find(n.parentId)) || n.position === 'absolute');
+
     // ---------- Render integration ----------
     function afterRender() {
+      syncAnchored();
       const pageId = ed.page().id;
       if (lastPage !== pageId) {
         if (lastPage) drilled.clear();
@@ -1025,11 +1399,12 @@
       }
       for (const id of drilled) if (!find(id)) drilled.delete(id);
       drawFrameLabels();
+      refreshHover(true);
     }
     applyCamera();
 
     return {
-      afterRender, reveal, setTool, getTool: () => tool, fit, zoomToSelection, stepZoom, zoomAt, zoomCenter, setCamera, screenToWorld, worldRect, placeInView,
+      beforeRender, afterRender, setConstraints, constraintsOf: id => { const n = find(id); return n && anchorable(n) ? NS().constraintsOf(n) : null; }, reveal, setTool, getTool: () => tool, fit, zoomToSelection, stepZoom, zoomAt, zoomCenter, setCamera, screenToWorld, worldRect, placeInView,
       // scrollLeft/scrollTop stay non-negative for older readers; x/y carry the exact camera offset.
       getView: () => ({zoom: cam.zoom, scrollLeft: clamp(Math.round(-cam.x), 0, 1e7) || 0, scrollTop: clamp(Math.round(-cam.y), 0, 1e7) || 0, page: ed.page().id, x: cam.x || 0, y: cam.y || 0}),
       applyView: view => setCamera(Number.isFinite(view.x) ? view.x : -(Number(view.scrollLeft) || 0), Number.isFinite(view.y) ? view.y : -(Number(view.scrollTop) || 0), Number(view.zoom) || 1),

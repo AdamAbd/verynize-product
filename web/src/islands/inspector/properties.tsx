@@ -9,28 +9,21 @@ import {
   AlignStartHorizontal,
   AlignStartVertical,
   AlignVerticalDistributeCenter,
-  ArrowDown,
-  ArrowRight,
   ChevronDown,
   Copy,
   Diamond,
   Eye,
   EyeOff,
-  LayoutGrid,
-  GitCommitHorizontal,
-  Proportions,
   RotateCcw,
   RotateCw,
   RotateCwSquare,
   Scan,
-  Shapes,
-  Square,
   SquareDashed,
   Trash2,
   Check,
 } from "lucide-react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
-import { ShaderIcon, StackColumnIcon, StackRowIcon } from "@/components/icons";
+import { ShaderIcon } from "@/components/icons";
 import { activePage, type DesignDocument } from "@/lib/bridge";
 import {
   DropdownMenu,
@@ -49,7 +42,6 @@ import {
   NativeSelect,
   OptionalSection,
   Section,
-  Segmented,
   Swatch,
   type IconType,
 } from "./controls";
@@ -66,16 +58,14 @@ import {
   fmt,
   hexLabel,
   pageNodes,
-  parentOf,
   parseHex,
   patchNodes,
   setField,
-  sizingAllowed,
-  sizingMode,
   type Node,
-  type SizingMode,
 } from "./model";
 import { TypographySection } from "./typography";
+import { LayoutSection } from "./layout";
+import { ConstraintSelect, ConstraintWidget, readConstraints } from "./constraints";
 
 type Props = { doc: DesignDocument; node: Node; selection: string[] };
 
@@ -139,6 +129,7 @@ function PositionSection({ node, selection }: Props) {
   const set = (key: string) => (value: string) => setField(selection, node, key, value);
   const many = selection.length > 1;
   const align = (id: string) => formClick("precision-" + id);
+  const constraints = readConstraints(selection);
   return (
     <Section id="position-section" title="Position">
       <div className="grid grid-cols-3 gap-2">
@@ -208,227 +199,18 @@ function PositionSection({ node, selection }: Props) {
         />
       </div>
       <div className="grid grid-cols-3 gap-2">
+        <ConstraintSelect axis="h" selection={selection} list={constraints} />
+        <ConstraintSelect axis="v" selection={selection} list={constraints} />
+        <ConstraintWidget selection={selection} list={constraints} />
         <Field
           name="zIndex"
           label="Stack order"
           numeric
           className="col-span-2"
-          value={fmt(node.zIndex)}
-          onCommit={set("zIndex")}
+          value={node.zIndex ? fmt(node.zIndex) : ""}
+          placeholder="Auto"
+          onCommit={(value) => set("zIndex")(value.trim() || "0")}
           prefix={<Affix>Z</Affix>}
-        />
-      </div>
-    </Section>
-  );
-}
-
-/* ---------- Layout ---------- */
-// Flexbox uses the same stack glyph as the frame's layer row (sidebar/icons.tsx), following its direction.
-const display = (direction: string) => [
-  { value: "free", label: "Free position", icon: Shapes },
-  {
-    value: "flex",
-    label: "Flexbox",
-    icon: direction === "column" ? StackColumnIcon : StackRowIcon,
-  },
-  { value: "block", label: "Block flow", icon: Square },
-  { value: "grid", label: "Grid", icon: LayoutGrid },
-];
-const DIRECTION = [
-  { value: "row", label: "Horizontal", icon: ArrowRight },
-  { value: "column", label: "Vertical", icon: ArrowDown },
-];
-const UNIT_LABEL: Record<SizingMode, string> = { fixed: "px", hug: "Hug", fill: "Fill" };
-
-function SizeField({
-  node,
-  parent,
-  axis,
-  selection,
-}: Props & { parent: Node | undefined; axis: "w" | "h" }) {
-  const mode = sizingMode(node, axis, parent);
-  return (
-    <Field
-      name={axis}
-      label={axis === "w" ? "Width" : "Height"}
-      numeric
-      value={fmt(node[axis])}
-      onCommit={(value) => setField(selection, node, axis, value)}
-      prefix={<Affix>{axis.toUpperCase()}</Affix>}
-      className="pr-1"
-      suffix={
-        <NativeSelect
-          bare
-          name={axis + "Mode"}
-          label={(axis === "w" ? "Width" : "Height") + " sizing"}
-          value={mode}
-          className="text-muted-foreground"
-          options={(["fixed", "hug", "fill"] as SizingMode[]).map((m) => ({
-            value: m,
-            label: UNIT_LABEL[m],
-            disabled: !sizingAllowed(node, parent, m),
-          }))}
-          onChange={(value) => setField(selection, node, axis + "Mode", value)}
-        />
-      }
-    />
-  );
-}
-
-function LayoutSection(props: Props) {
-  const { doc, node, selection } = props;
-  const parent = parentOf(doc, node);
-  const set = (key: string) => (value: string) => setField(selection, node, key, value);
-  const frame = node.type === "frame";
-  const layout = node.layout === "inline" ? "block" : node.layout;
-  const flow = frame && node.layout !== "free";
-  const gapField = (
-    <BindableField
-      doc={doc}
-      node={node}
-      selection={selection}
-      field="gap"
-      label="Gap"
-      prefix={<Affix>↔</Affix>}
-    >
-      {(suffix) => (
-        <Field
-          name="gap"
-          label="Gap"
-          numeric
-          value={fmt(node.gap)}
-          onCommit={set("gap")}
-          prefix={<Affix>↔</Affix>}
-          suffix={suffix}
-        />
-      )}
-    </BindableField>
-  );
-  return (
-    <Section
-      id="layout-section"
-      title="Layout"
-      tools={
-        frame ? (
-          <IconButton
-            icon={GitCommitHorizontal}
-            label={flow ? "Remove auto layout" : "Add auto layout"}
-            active={flow}
-            onClick={() => set("layout")(flow ? "free" : "flex")}
-          />
-        ) : null
-      }
-    >
-      {frame ? (
-        <Caption label="Display">
-          <Segmented
-            label="Display"
-            hook="insp-display"
-            dataKey="layout"
-            value={layout}
-            onChange={set("layout")}
-            items={display(node.direction)}
-          />
-        </Caption>
-      ) : null}
-      {frame && node.layout === "flex" ? (
-        <div className="grid grid-cols-2 gap-2">
-          <Caption label="Direction">
-            <Segmented
-              label="Direction"
-              value={node.direction}
-              onChange={set("direction")}
-              items={DIRECTION}
-            />
-          </Caption>
-          <Caption label="Gap">{gapField}</Caption>
-        </div>
-      ) : null}
-      {flow ? (
-        <div className="grid grid-cols-2 gap-2">
-          <Caption label="Padding">
-            <BindableField
-              doc={doc}
-              node={node}
-              selection={selection}
-              field="padding"
-              label="Padding"
-              prefix={<IconAffix icon={Scan} />}
-            >
-              {(suffix) => (
-                <Field
-                  name="padding"
-                  label="Padding"
-                  numeric
-                  value={fmt(node.padding)}
-                  onCommit={set("padding")}
-                  prefix={<IconAffix icon={Scan} />}
-                  suffix={suffix}
-                />
-              )}
-            </BindableField>
-          </Caption>
-          {node.layout === "grid" ? (
-            <Caption label="Columns">
-              <Field
-                name="columns"
-                label="Grid columns"
-                numeric
-                value={fmt(node.columns)}
-                onCommit={set("columns")}
-                prefix={<Affix>#</Affix>}
-              />
-            </Caption>
-          ) : node.layout !== "flex" ? (
-            <Caption label="Gap">{gapField}</Caption>
-          ) : null}
-        </div>
-      ) : null}
-      {frame && node.layout === "grid" ? (
-        <div className="grid grid-cols-2 gap-2">
-          <Caption label="Gap">{gapField}</Caption>
-        </div>
-      ) : null}
-      {frame && (node.layout === "flex" || node.layout === "grid") ? (
-        <div className="grid grid-cols-2 gap-2">
-          <Caption label="Align">
-            <NativeSelect
-              name="alignItems"
-              label="Cross axis alignment"
-              value={node.alignItems}
-              onChange={set("alignItems")}
-              options={["stretch", "flex-start", "center", "flex-end"].map((v) => ({
-                value: v,
-                label: v.replace("flex-", ""),
-              }))}
-            />
-          </Caption>
-          <Caption label="Justify">
-            <NativeSelect
-              name="justifyContent"
-              label="Main axis alignment"
-              value={node.justifyContent}
-              onChange={set("justifyContent")}
-              options={["flex-start", "center", "flex-end", "space-between", "space-around"].map(
-                (v) => ({
-                  value: v,
-                  label: v.replace("flex-", ""),
-                }),
-              )}
-            />
-          </Caption>
-        </div>
-      ) : null}
-      <div className="flex items-center gap-2">
-        <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
-          <SizeField {...props} parent={parent} axis="w" />
-          <SizeField {...props} parent={parent} axis="h" />
-        </div>
-        <IconButton
-          icon={Proportions}
-          label="Hug contents"
-          disabled={!sizingAllowed(node, parent, "hug")}
-          onClick={() => patchNodes([node.id], () => ({ wMode: "hug", hMode: "hug" }))}
         />
       </div>
     </Section>

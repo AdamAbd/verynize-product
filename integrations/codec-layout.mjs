@@ -186,12 +186,18 @@ export function layoutPage(page, rootIds = null) {
       return Math.max(1, ...childrenOf(n.id).map(k => num(k.y) + k.h));
     }
     if (!list.length) return c.y;
-    if (n.layout === 'flex' && n.direction !== 'column') return flexRow(n, list, c, cw, innerH);
     if (n.layout === 'grid') return grid(n, list, c, cw, innerH);
-    return column(n, list, c, cw, innerH, n.layout === 'flex');
+    const row = n.layout === 'flex' && n.direction !== 'column';
+    const contentH = row ? flexRow(n, list, c, cw, innerH) : column(n, list, c, cw, innerH, n.layout === 'flex');
+    // row-reverse / column-reverse mirror the forward layout along the main axis inside the content box.
+    if (n.layout === 'flex' && n.reverse === true) {
+      const mainH = innerH ?? contentH - c.y;
+      for (const k of list) { if (row) k.x = round(2 * c.left + cw - k.x - k.w); else k.y = round(2 * c.top + mainH - k.y - k.h); }
+    }
+    return contentH;
   };
 
-  const crossAlign = (n, k) => (k.alignSelf && k.alignSelf !== 'auto' ? k.alignSelf : n.layout === 'flex' ? n.alignItems || 'stretch' : 'stretch');
+  const crossAlign = (n, k) => (k.alignSelf && k.alignSelf !== 'auto' ? k.alignSelf : n.layout === 'flex' || n.layout === 'grid' ? n.alignItems || 'stretch' : 'stretch');
 
   // Block flow and flex column share this: children stacked vertically.
   const column = (n, list, c, cw, innerH, flex) => {
@@ -330,28 +336,37 @@ export function layoutPage(page, rootIds = null) {
       row.push({ k, span, col: used }); used += span;
     }
     if (row.length) rows.push(row);
+    // Explicit equal rows (grid-template-rows: repeat(N, minmax(0, 1fr))) share a definite height; extra rows are auto.
+    const fixedRows = Math.floor(num(n.rows)), equalH = fixedRows >= 1 && innerH !== undefined ? Math.max(0, (innerH - gapY * (fixedRows - 1)) / fixedRows) : undefined;
+    const offset = (align, space) => (space > 0 ? (align === 'center' ? space / 2 : align === 'flex-end' || align === 'end' ? space : 0) : 0);
     let y = c.top;
-    for (const r of rows) {
+    for (const [ri, r] of rows.entries()) {
       for (const cell of r) {
         const area = colW * cell.span + gapX * (cell.span - 1);
         const avail = Math.max(1, area - hMarg(cell.k));
         layoutBox(cell.k, wMode(cell.k) === 'fixed' || wMode(cell.k) === 'hug' ? childWidth(cell.k, avail, false) : avail, undefined, innerH);
+        cell.area = area;
       }
-      const rowH = Math.max(...r.map(cell => cell.k.h + vMarg(cell.k)));
+      const rowH = equalH !== undefined && ri < fixedRows ? equalH : Math.max(...r.map(cell => cell.k.h + vMarg(cell.k)));
       for (const cell of r) {
-        if (hMode(cell.k) !== 'fixed' && crossAlign({ layout: 'grid' }, cell.k) === 'stretch' && !cell.k.aspectRatio) layoutBox(cell.k, cell.k.w, Math.max(1, rowH - vMarg(cell.k)), innerH);
+        const align = crossAlign(n, cell.k);
+        if (hMode(cell.k) !== 'fixed' && align === 'stretch' && !cell.k.aspectRatio) layoutBox(cell.k, cell.k.w, Math.max(1, rowH - vMarg(cell.k)), innerH);
         const m = marginOf(cell.k);
-        cell.k.x = round(c.left + cell.col * (colW + gapX) + numericMargin(m[3]));
-        cell.k.y = round(y + numericMargin(m[0]));
+        cell.k.x = round(c.left + cell.col * (colW + gapX) + numericMargin(m[3]) + offset(n.justifyItems, cell.area - cell.k.w - hMarg(cell.k)));
+        cell.k.y = round(y + numericMargin(m[0]) + offset(align, rowH - cell.k.h - vMarg(cell.k)));
       }
       y += rowH + gapY;
     }
     return y - gapY - c.top + c.y;
   };
 
+  // Absolute children of flow frames, and children of free frames with constraints (insets). Free frames
+  // measure x/y inside their border; flow frames from the border box.
   const placeAbsolute = n => {
     const b = bordersOf(n), cbW = Math.max(1, n.w - b[1] - b[3]), cbH = Math.max(1, n.h - b[0] - b[2]);
-    for (const k of childrenOf(n.id).filter(isAbsolute)) {
+    const free = n.layout === 'free', origin = free ? [0, 0, 0, 0] : b;
+    const anchoredFree = k => Array.isArray(k.inset) && k.inset.some(v => v !== null && v !== undefined);
+    for (const k of childrenOf(n.id).filter(k => (free ? anchoredFree(k) : isAbsolute(k)))) {
       const inset = Array.isArray(k.inset) ? k.inset : [null, null, null, null];
       const [t, r, bt, l] = [pctOf(inset[0], cbH), pctOf(inset[1], cbW), pctOf(inset[2], cbH), pctOf(inset[3], cbW)];
       let w;
@@ -364,8 +379,8 @@ export function layoutPage(page, rootIds = null) {
       else if (hMode(k) === 'fill') forced = cbH;
       layoutBox(k, clampW(k, w, cbW), forced, cbH);
       const p = paddingOf(n);
-      let x = l !== undefined ? b[3] + l : r !== undefined ? b[3] + cbW - r - k.w : b[3] + p[3];
-      let y = t !== undefined ? b[0] + t : bt !== undefined ? b[0] + cbH - bt - k.h : b[0] + p[0];
+      let x = l !== undefined ? origin[3] + l : r !== undefined ? origin[3] + cbW - r - k.w : origin[3] + p[3];
+      let y = t !== undefined ? origin[0] + t : bt !== undefined ? origin[0] + cbH - bt - k.h : origin[0] + p[0];
       const tr = Array.isArray(k.translate) ? k.translate : [0, 0];
       x += pctOf(tr[0], k.w) ?? 0; y += pctOf(tr[1], k.h) ?? 0;
       k.x = round(x); k.y = round(y);

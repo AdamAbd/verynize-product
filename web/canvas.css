@@ -4,6 +4,7 @@
 #workspace>footer{position:absolute;left:12px;bottom:8px;padding:0!important;z-index:6;pointer-events:none;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #canvas-wrap{position:absolute!important;inset:0;width:auto!important;height:auto!important;margin:0!important;overflow:hidden;touch-action:none}
 #canvas{--iz:1;position:absolute;left:0;top:0;width:1000px;height:700px;transform-origin:0 0;overflow:visible!important;will-change:transform}
+#canvas .layer{cursor:default}
 #canvas .layer.selected{outline-width:calc(1.5px * var(--iz))!important;outline-offset:0!important}
 
 #canvas .layer>.handle{width:calc(8px * var(--iz))!important;height:calc(8px * var(--iz))!important;border-width:calc(1px * var(--iz))!important}
@@ -23,6 +24,28 @@
 #canvas-overlay .guide-label{position:absolute;transform:translate(-50%,-50%);background:#ff3d7f;color:#fff;font:10px/14px Inter,system-ui,sans-serif;padding:0 4px;border-radius:3px;white-space:nowrap}
 #canvas-overlay .marquee{position:absolute;border:1px solid var(--shell-accent,#b93cdb);background:color-mix(in srgb,var(--shell-accent,#b93cdb) 10%,transparent)}
 #canvas-overlay .marquee[data-kind=draw]{background:transparent}
+#canvas-overlay .hover-box,#canvas-overlay .drop-target{position:absolute;box-sizing:border-box;border:1.5px solid var(--shell-accent,#b93cdb)}
+#canvas-overlay .hover-child{position:absolute;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--shell-accent,#b93cdb) 60%,transparent)}
+#canvas-overlay .drop-line{position:absolute;background:var(--shell-accent,#b93cdb);border-radius:1px}
+#canvas-overlay [hidden]{display:none}
+/* Spacing handles (selected auto-layout frame): gaps are red hatched bands, padding is blue; both show a value badge. */
+#canvas-overlay .spacing-layer{position:absolute;inset:0}
+#canvas-overlay .spacing-band{--spacing:#f2541b;position:absolute;box-sizing:border-box;pointer-events:auto;display:flex;align-items:center;justify-content:center}
+#canvas-overlay .spacing-gap{background:repeating-linear-gradient(-45deg,color-mix(in srgb,var(--spacing) 45%,transparent) 0 1px,transparent 1px 5px)}
+#canvas-overlay .spacing-padding{--spacing:#3d8bff}
+#canvas-overlay .spacing-padding:hover,#canvas-overlay .spacing-padding.active{background:repeating-linear-gradient(-45deg,color-mix(in srgb,var(--spacing) 45%,transparent) 0 1px,transparent 1px 5px)}
+#canvas-overlay .spacing-gap:hover,#canvas-overlay .spacing-gap.active{background-color:color-mix(in srgb,var(--spacing) 14%,transparent)}
+#canvas-overlay .spacing-band[data-axis=y]{cursor:row-resize}
+#canvas-overlay .spacing-band[data-axis=x]{cursor:col-resize}
+#canvas-overlay .spacing-padding[data-axis=y]{cursor:ns-resize}
+#canvas-overlay .spacing-padding[data-axis=x]{cursor:ew-resize}
+#canvas-overlay .spacing-bar{display:block;flex:none;background:var(--spacing);border-radius:1px;pointer-events:none}
+#canvas-overlay .spacing-band[data-axis=y] .spacing-bar{width:12px;height:2px}
+#canvas-overlay .spacing-band[data-axis=x] .spacing-bar{width:2px;height:12px}
+#canvas-overlay .spacing-badge{display:none;position:absolute;left:50%;top:50%;transform:translate(6px,6px);min-width:18px;padding:0 5px;border-radius:4px;background:var(--spacing);color:#fff;font:600 10px/18px Inter,system-ui,sans-serif;text-align:center;white-space:nowrap;pointer-events:none;z-index:1}
+#canvas-overlay .spacing-band:hover .spacing-badge,#canvas-overlay .spacing-band.active .spacing-badge{display:block}
+#workspace[data-spacing-drag=y] #canvas-wrap,#workspace[data-spacing-drag=y] #canvas-wrap *{cursor:row-resize!important}
+#workspace[data-spacing-drag=x] #canvas-wrap,#workspace[data-spacing-drag=x] #canvas-wrap *{cursor:col-resize!important}
 #canvas-overlay .frame-label{position:absolute;pointer-events:auto;cursor:default;color:#9a9a9a;font:11px/16px Inter,system-ui,sans-serif;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;user-select:none}
 #canvas-overlay .frame-label:hover{color:var(--shell-accent,#b93cdb)}
 
@@ -55,3 +78,7 @@
 #inspector select.sizing-mode{margin-top:4px;height:24px!important;font-size:10px!important;padding:2px 6px!important}
 html[data-ui-theme=light] #frame-presets,html[data-ui-theme=light] #canvas-menu{background:#fff;border-color:#ddd}
 html[data-ui-theme=light] #frame-presets button,html[data-ui-theme=light] #canvas-menu button{color:#333}
+
+/* Measuring a child's smallest width for spacing drags: words do not break mid-word. */
+#canvas.measuring-min .layer{overflow-wrap:normal!important;word-break:normal!important}
+#canvas.spacing-measure .layer>.handle{display:none!important}

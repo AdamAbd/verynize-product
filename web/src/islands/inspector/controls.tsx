@@ -331,9 +331,11 @@ export function NativeSelect({
   selectClassName,
   bare,
   id,
+  disabled,
 }: {
   name?: string;
   id?: string;
+  disabled?: boolean;
   label: string;
   value: string;
   options: { value: string; label: string; disabled?: boolean }[];
@@ -358,8 +360,9 @@ export function NativeSelect({
         aria-label={label}
         title={label}
         value={value}
+        disabled={disabled}
         className={cn(
-          "h-full w-full min-w-0 cursor-default appearance-none truncate bg-transparent pr-5 text-xs text-foreground outline-none",
+          "h-full w-full min-w-0 cursor-default appearance-none truncate bg-transparent pr-5 text-xs text-foreground outline-none disabled:text-muted-foreground",
           bare && "pr-4 text-right text-muted-foreground",
           selectClassName,
         )}
