@@ -2,3 +2,16 @@ node_modules/
 .cloudflare/
 docs/wonder-evidence.json
 dist/
+
+# Credentials and machine-local deployment state
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.pem
+*.key
+secrets*.json
+.cloudflare/
+.wrangler/

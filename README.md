@@ -105,3 +105,7 @@ Tests use actual Electron windows, SDK MCP subprocesses, temporary Git repositor
 - [Public Wonder repository findings](docs/wonder-repositories.md)
 
 This is a functional independent application. Exact full parity with Wonder's hosted product is not established; remaining gaps are recorded explicitly in the acceptance status.
+
+## License
+
+Original Verynize code and documentation are licensed under the [MIT License](LICENSE). Third-party materials retain their own rights and licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
