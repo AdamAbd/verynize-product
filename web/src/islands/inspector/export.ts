@@ -1,17 +1,76 @@
-// Artwork export for the inspector Export section (design/wonder 45–50): 0.5×–4× raster scales, PNG/JPG/WebP/SVG,
-// vector PDF and HTML ("Code"), saved through the native save dialog (desktop/render.cjs `saveExport`).
+// Artwork export for the inspector Export section (design/wonder 21–22, 41, 45–50).
+// Formats: PNG/JPG/WebP (pixel-accurate offscreen render, desktop/render.cjs), vector PDF, Code (Tailwind JSX
+// through the codec, or HTML with CSS classes) and — only when every exported layer is an SVG image — SVG.
+// Sizes: 0.5×–4×, a target height (720p–2160p) or a 512 px width/height. Saved through the native save dialog.
 // The artwork HTML comes from app.js `exportArtwork({format: "HTML"})`, so every format renders the same markup.
+import type { DesignDocument } from "@/lib/bridge";
 
-export type ExportFormat = "PNG" | "JPG" | "WEBP" | "SVG" | "PDF" | "HTML";
-export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
+export type ExportFormat = "SVG" | "PNG" | "JPG" | "WEBP" | "PDF" | "CODE";
+export type CodeFlavor = "tailwind" | "css";
+const RASTER: { value: ExportFormat; label: string }[] = [
   { value: "PNG", label: "PNG" },
   { value: "JPG", label: "JPG" },
   { value: "WEBP", label: "WebP" },
-  { value: "SVG", label: "SVG" },
   { value: "PDF", label: "PDF" },
-  { value: "HTML", label: "HTML" },
+  { value: "CODE", label: "Code" },
 ];
-export const EXPORT_SCALES = ["0.5", "1", "2", "3", "4"];
+/** Formats on offer: SVG leads the list only when every exported layer is an SVG image. */
+export const exportFormats = (allSvg: boolean) =>
+  allSvg ? [{ value: "SVG" as ExportFormat, label: "SVG" }, ...RASTER] : RASTER;
+export const CODE_FLAVORS: { value: CodeFlavor; label: string }[] = [
+  { value: "tailwind", label: "Tailwind" },
+  { value: "css", label: "CSS" },
+];
+export const EXPORT_SCALES: { value: string; label: string }[] = [
+  ...["0.5", "1", "2", "3", "4"].map((v) => ({ value: v, label: `${v}x` })),
+  ...["720p", "1080p", "1440p", "2160p"].map((v) => ({ value: v, label: v })),
+  { value: "512w", label: "512w" },
+  { value: "512h", label: "512h" },
+];
+/** Formats whose size is fixed by the artwork (no scale). */
+export const UNSCALED = new Set<ExportFormat>(["PDF", "CODE"]);
+
+/** Scale factor for a preset and an artwork size: "2" → 2, "1080p" → 1080/height, "512w" → 512/width. */
+export function resolveScale(preset: string, width: number, height: number): number {
+  const m = /^(\d+)(p|w|h)$/.exec(preset);
+  if (!m) {
+    const n = Number(preset);
+    if (!Number.isFinite(n) || n <= 0) throw Error("Unsupported export scale");
+    return n;
+  }
+  return Number(m[1]) / (m[2] === "w" ? width : height);
+}
+/** File name suffix a preset adds by default ("@2x", "@1080p"; nothing at 1×). */
+export const defaultSuffix = (preset: string) =>
+  preset === "1" ? "" : `@${preset}${/^\d/.test(preset) && !/[pwh]$/.test(preset) ? "x" : ""}`;
+
+const SVG_SRC = /^data:image\/svg\+xml;base64,/;
+type ExportNode = {
+  id: string;
+  type: string;
+  parentId?: string | null;
+  src?: unknown;
+  icon?: unknown;
+  svgColor?: unknown;
+  svgColorToken?: unknown;
+  svgPaints?: unknown;
+};
+/** Layers an export covers: the selection without layers inside another selected layer, or the page's top level. */
+export function exportedNodes(doc: DesignDocument, selection: string[], selectionOnly: boolean) {
+  const page = doc.pages.find((p) => p.id === doc.activePage) ?? doc.pages[0];
+  const nodes = page.nodes as ExportNode[];
+  if (!selectionOnly) return nodes.filter((n) => !n.parentId);
+  const ids = new Set(selection);
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const inside = (n: ExportNode) => {
+    for (let p = byId.get(n.parentId ?? ""); p; p = byId.get(p.parentId ?? ""))
+      if (ids.has(p.id)) return true;
+    return false;
+  };
+  return nodes.filter((n) => ids.has(n.id) && !inside(n));
+}
+export const isSvgNode = (n: ExportNode) =>
+  n.type === "image" && !n.icon && typeof n.src === "string" && SVG_SRC.test(n.src);
 
 type Artwork = { content?: string; dataURL?: string; width: number; height: number; mime?: string };
 type DesktopExport = {
@@ -32,8 +91,14 @@ type DesktopExport = {
     data: string;
     extension: string;
   }): Promise<{ path: string; name: string; bytes: number } | null>;
+  exportCode?(options: Record<string, unknown>): Promise<{ content: string; extension: string }>;
+};
+type Paints = {
+  recolorSvg(src: string, map: Record<string, string>): string;
+  svgPaintList(src: string): string[];
 };
 const desktop = () => (window as unknown as { desktop?: DesktopExport }).desktop;
+const paints = () => (window as unknown as { BetterNodeStyle: Paints }).BetterNodeStyle;
 const artwork = (options: { format: string; scale?: number; selectionOnly: boolean }) =>
   (window.design.exportArtwork as (o: typeof options) => Promise<Artwork>)(options);
 
@@ -56,34 +121,110 @@ async function convert(dataURL: string, mime: "image/jpeg" | "image/webp"): Prom
   return canvas.toDataURL(mime, 0.92);
 }
 
+const decodeSvg = (src: string) =>
+  new TextDecoder().decode(Uint8Array.from(atob(src.replace(SVG_SRC, "")), (c) => c.charCodeAt(0)));
+
+/** The SVG markup a layer shows: per-colour replacements and a single tint applied to a copy of the source. */
+export function nodeSvgMarkup(doc: DesignDocument, n: ExportNode): string {
+  const api = paints();
+  let src = n.src as string;
+  if (n.svgPaints && typeof n.svgPaints === "object")
+    src = api.recolorSvg(src, n.svgPaints as Record<string, string>);
+  const tint =
+    (typeof n.svgColorToken === "string" && doc.tokens[n.svgColorToken]) ||
+    (typeof n.svgColor === "string" ? n.svgColor : "");
+  let markup = decodeSvg(src);
+  if (tint) {
+    const map = Object.fromEntries(api.svgPaintList(src).map((c) => [c, tint]));
+    markup = decodeSvg(api.recolorSvg(src, map));
+    // Shapes without an explicit paint inherit black from the root: tint that default too.
+    markup = markup.replace(/<svg\b(?![^>]*\sfill=)/, `<svg fill="${tint}"`);
+  }
+  return markup;
+}
+
+const r2 = (v: number) => Math.round(v * 100) / 100;
+/** Vector SVG of SVG layers, positioned as in the artwork HTML (one nested <svg> per layer). */
+function svgDocument(
+  doc: DesignDocument,
+  nodes: ExportNode[],
+  html: string,
+  scale: number,
+  w: number,
+  h: number,
+) {
+  const page = new DOMParser().parseFromString(html, "text/html");
+  const shift = page.querySelector<HTMLElement>("body > div > div");
+  const dx = parseFloat(shift?.style.left || "0") || 0,
+    dy = parseFloat(shift?.style.top || "0") || 0;
+  const parts = nodes.map((n) => {
+    const el = page.querySelector<HTMLElement>(`[data-id="${CSS.escape(n.id)}"]`);
+    const svg = new DOMParser().parseFromString(
+      nodeSvgMarkup(doc, n),
+      "image/svg+xml",
+    ).documentElement;
+    if (svg.localName !== "svg") throw Error("An SVG layer has unreadable markup");
+    svg.setAttribute("x", String(r2((parseFloat(el?.style.left || "0") || 0) + dx)));
+    svg.setAttribute("y", String(r2((parseFloat(el?.style.top || "0") || 0) + dy)));
+    svg.setAttribute("width", String(r2(parseFloat(el?.style.width || "0") || w)));
+    svg.setAttribute("height", String(r2(parseFloat(el?.style.height || "0") || h)));
+    return new XMLSerializer().serializeToString(svg);
+  });
+  // Canvas measurements carry float noise (rects divided by the zoom): keep 0.01 px precision.
+  const vw = r2(w),
+    vh = r2(h);
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${r2(vw * scale)}" height="${r2(vh * scale)}" viewBox="0 0 ${vw} ${vh}">${parts.join("")}</svg>`;
+}
+
+export type ExportOptions = {
+  format: ExportFormat;
+  /** Scale preset value from EXPORT_SCALES. */
+  scale: string;
+  selectionOnly: boolean;
+  name?: string;
+  flavor?: CodeFlavor;
+};
+
 /** Render the selection (or page) in a format. Returns a data URL or text plus the output size. */
 export async function renderArtwork({
   format,
-  scale,
+  scale: preset,
   selectionOnly,
   name = "Export",
-}: {
-  format: ExportFormat;
-  scale: number;
-  selectionOnly: boolean;
-  name?: string;
-}): Promise<{ data: string; extension: string; width: number; height: number }> {
-  if (!EXPORT_SCALES.includes(String(scale))) throw Error("Unsupported export scale");
+  flavor = "tailwind",
+}: ExportOptions): Promise<{ data: string; extension: string; width: number; height: number }> {
+  if (!EXPORT_SCALES.some((s) => s.value === preset)) throw Error("Unsupported export scale");
+  const doc = window.design.getDocument();
+  const nodes = exportedNodes(doc, window.design.getSelection(), selectionOnly);
   const html = await artwork({ format: "HTML", selectionOnly });
   const width = Math.ceil(html.width - 1e-3),
     height = Math.ceil(html.height - 1e-3);
-  if (format === "HTML") return { data: html.content!, extension: "html", width, height };
-  if (format === "SVG") {
-    const svg = await artwork({ format: "SVG", scale: 1, selectionOnly });
-    const w = Math.ceil(html.width * scale),
-      h = Math.ceil(html.height * scale);
-    const content = svg.content!.replace(
-      /^<svg([^>]*?) width="[^"]*" height="[^"]*"/,
-      `<svg$1 width="${w}" height="${h}"`,
-    );
-    return { data: content, extension: "svg", width: w, height: h };
-  }
   const native = desktop();
+  if (format === "CODE") {
+    if (!native?.exportCode) throw Error("Open the desktop app for code export.");
+    const code =
+      flavor === "css"
+        ? await native.exportCode({ flavor, html: html.content, tokens: doc.tokens })
+        : await native.exportCode({
+            flavor,
+            document: doc,
+            pageId: doc.activePage,
+            nodeIds: nodes.map((n) => n.id),
+            name,
+          });
+    return { data: code.content, extension: code.extension, width, height };
+  }
+  const scale = resolveScale(preset, width, height);
+  if (format === "SVG") {
+    if (!nodes.length || !nodes.every(isSvgNode)) throw Error("SVG export needs SVG layers only.");
+    const data = svgDocument(doc, nodes, html.content!, scale, html.width, html.height);
+    return {
+      data,
+      extension: "svg",
+      width: Math.ceil(html.width * scale),
+      height: Math.ceil(html.height * scale),
+    };
+  }
   if (format === "PDF") {
     if (!native?.renderPDF) throw Error("Open the desktop app for PDF export.");
     const pdf = await native.renderPDF({ html: html.content!, width, height, title: name });
@@ -104,25 +245,25 @@ export async function renderArtwork({
 }
 
 /**
- * Render and save. Returns the saved file name, or null when the user cancelled the save dialog.
- * Without the desktop bridge (browser build) the file is downloaded instead.
+ * Render and save as `name + suffix`. Returns the saved file name, or null when the user cancelled the save
+ * dialog. Without the desktop bridge (browser build) the file is downloaded instead.
  */
-export async function exportArtwork(options: {
-  format: ExportFormat;
-  scale: number;
-  selectionOnly: boolean;
-  name: string;
-}): Promise<string | null> {
+export async function exportArtwork(
+  options: ExportOptions & { name: string; suffix?: string },
+): Promise<string | null> {
   const out = await renderArtwork(options);
   const suffix =
-    options.scale === 1 || options.format === "PDF" || options.format === "HTML"
-      ? ""
-      : `@${options.scale}x`;
+    options.suffix ?? (UNSCALED.has(options.format) ? "" : defaultSuffix(options.scale));
   const name = (options.name.trim() || "export") + suffix;
   return saveFile(name, out.data, out.extension);
 }
 
-const MIME: Record<string, string> = { svg: "image/svg+xml", html: "text/html", css: "text/css" };
+const MIME: Record<string, string> = {
+  svg: "image/svg+xml",
+  html: "text/html",
+  css: "text/css",
+  jsx: "text/jsx",
+};
 /** Save through the native dialog (desktop) or a download link (browser). */
 export async function saveFile(
   name: string,

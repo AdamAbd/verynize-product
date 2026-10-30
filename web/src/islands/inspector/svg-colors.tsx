@@ -61,7 +61,7 @@ export function SvgColorsSection({
 }) {
   const [open, setOpen] = useState(false);
   const original = monochromeSvgColor(node);
-  if (!original) return null;
+  if (!original) return <SvgPaintsSection node={node} selection={selection} />;
   const token = typeof node.svgColorToken === "string" ? node.svgColorToken : undefined;
   const color =
     (token && doc.tokens[token]) || (typeof node.svgColor === "string" ? node.svgColor : original);
@@ -69,13 +69,14 @@ export function SvgColorsSection({
     patchNodes(selection, (target) =>
       monochromeSvgColor(target) ? { svgColor: value, svgColorToken: binding } : {},
     );
-  const detach = () => patchNodes(selection, target => {
-    const fallback = monochromeSvgColor(target);
-    if (!fallback) return {};
-    const binding = typeof target.svgColorToken === "string" ? target.svgColorToken : "";
-    const own = typeof target.svgColor === "string" ? target.svgColor : fallback;
-    return { svgColor: doc.tokens[binding] || own, svgColorToken: undefined };
-  });
+  const detach = () =>
+    patchNodes(selection, (target) => {
+      const fallback = monochromeSvgColor(target);
+      if (!fallback) return {};
+      const binding = typeof target.svgColorToken === "string" ? target.svgColorToken : "";
+      const own = typeof target.svgColor === "string" ? target.svgColor : fallback;
+      return { svgColor: doc.tokens[binding] || own, svgColorToken: undefined };
+    });
   return (
     <Section
       id="svg-colors-section"
@@ -83,11 +84,7 @@ export function SvgColorsSection({
       tools={
         <>
           {token ? (
-            <IconButton
-              icon={Unlink}
-              label="Detach SVG color variable"
-              onClick={detach}
-            />
+            <IconButton icon={Unlink} label="Detach SVG color variable" onClick={detach} />
           ) : null}
           {node.svgColor ? (
             <IconButton
@@ -151,5 +148,112 @@ export function SvgColorsSection({
         </div>
       </ColorPopover>
     </Section>
+  );
+}
+
+/* ---------- Multicolour SVG: one row per distinct paint, replaced individually ---------- */
+type SvgApi = { svgPaintList(src: string): string[] };
+const svgApi = () => (window as unknown as { BetterNodeStyle: SvgApi }).BetterNodeStyle;
+const svgPaintsOf = (node: Node) =>
+  node.svgPaints && typeof node.svgPaints === "object"
+    ? (node.svgPaints as Record<string, string>)
+    : {};
+/** Distinct explicit paints of an editable SVG image (not catalog icons), in document order. */
+export function svgPaints(node: Node): string[] {
+  if (node.type !== "image" || node.icon || typeof node.src !== "string") return [];
+  if (!node.src.startsWith("data:image/svg+xml;base64,")) return [];
+  return svgApi().svgPaintList(node.src);
+}
+
+function SvgPaintsSection({ node, selection }: { node: Node; selection: string[] }) {
+  const paints = svgPaints(node);
+  const replaced = svgPaintsOf(node);
+  if (!paints.length) return null;
+  // Every selected SVG that uses the same original paint gets the same replacement.
+  const replace = (from: string, to: string | null) =>
+    patchNodes(selection, (target) => {
+      if (!svgPaints(target).includes(from)) return {};
+      const map = { ...svgPaintsOf(target) };
+      if (!to || to === from) delete map[from];
+      else map[from] = to;
+      return { svgPaints: Object.keys(map).length ? map : undefined };
+    });
+  return (
+    <Section
+      id="svg-colors-section"
+      title="Colors"
+      tools={
+        Object.keys(replaced).length ? (
+          <IconButton
+            icon={RotateCcw}
+            label="Restore original SVG colors"
+            onClick={() => patchNodes(selection, () => ({ svgPaints: undefined }))}
+          />
+        ) : null
+      }
+    >
+      <div className="flex flex-col gap-1" data-svg-paints={paints.length}>
+        {paints.map((from, i) => (
+          <SvgPaintRow
+            key={from}
+            index={i}
+            from={from}
+            color={replaced[from] ?? from}
+            onChange={(to) => replace(from, to)}
+          />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function SvgPaintRow({
+  index,
+  from,
+  color,
+  onChange,
+}: {
+  index: number;
+  from: string;
+  color: string;
+  onChange: (to: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex items-center gap-1" data-svg-paint={from}>
+      <ColorPopover open={open} onOpenChange={setOpen} value={color} onCommit={onChange}>
+        <div
+          data-color-anchor
+          className="flex h-6 min-w-0 flex-1 items-center gap-2 rounded-md bg-input px-2 text-xs shadow-field"
+        >
+          <button
+            type="button"
+            aria-label={`SVG color ${index + 1}`}
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+            className="flex size-4 shrink-0 items-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <Swatch color={color} />
+          </button>
+          <Field
+            label={`SVG color ${index + 1} hex`}
+            value={hexLabel(color)}
+            className="h-5 flex-1 bg-transparent px-1 shadow-none"
+            onCommit={(value) => {
+              const next = parseHex(value, color);
+              if (!next) return "Use a hex color such as A58BDD";
+              onChange(next);
+            }}
+          />
+        </div>
+      </ColorPopover>
+      {color !== from ? (
+        <IconButton
+          icon={RotateCcw}
+          label={`Restore SVG color ${index + 1}`}
+          onClick={() => onChange(null)}
+        />
+      ) : null}
+    </div>
   );
 }

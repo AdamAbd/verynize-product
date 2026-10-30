@@ -133,6 +133,10 @@ export type ColorPickerProps = {
   token?: string;
   onToken?: (name: string) => void;
   onClose: () => void;
+  /** Heading of the picker (default "Color"). */
+  title?: string;
+  /** Extra controls under the heading (the paint editor puts the paint type and gradient stops here). */
+  header?: ReactNode;
 };
 
 export function ColorPicker({
@@ -143,6 +147,8 @@ export function ColorPicker({
   token,
   onToken,
   onClose,
+  title = "Color",
+  header,
 }: ColorPickerProps) {
   const parsed = parseColor(value) ?? { r: 165, g: 139, b: 221, a: 1 };
   const [hsva, setHsva] = useState<Hsva>(() => rgbaToHsva(parsed));
@@ -179,9 +185,7 @@ export function ColorPicker({
   const setFromColor = (text: string) => {
     const c = parseColor(text);
     if (!c) return "Enter a colour (hex, rgb(), hsl() or oklch())";
-    const h = rgbaToHsva(
-      !hasAlpha(text) ? { ...c, a: hsva.a } : c,
-    );
+    const h = rgbaToHsva(!hasAlpha(text) ? { ...c, a: hsva.a } : c);
     update(h.s === 0 || h.v === 0 ? { ...h, h: hsva.h } : h, true);
     return null;
   };
@@ -224,9 +228,10 @@ export function ColorPicker({
   return (
     <div className="flex flex-col gap-2">
       <div ref={head} className="-mt-1 flex h-7 items-center justify-between">
-        <strong className="text-xs font-normal text-foreground">Color</strong>
+        <strong className="text-xs font-normal text-foreground">{title}</strong>
         <IconButton icon={X} label="Close colour picker" onClick={onClose} />
       </div>
+      {header}
       {onToken ? (
         <div
           role="tablist"

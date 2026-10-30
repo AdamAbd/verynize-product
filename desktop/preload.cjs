@@ -27,7 +27,7 @@ contextBridge.exposeInMainWorld('desktop',{
  // end agent-bridge hook
  renderDesign:options=>call('renderDesign',options),fontFaces:families=>call('fontFaces',families),
  // inspector export hook (desktop/render.cjs registerArtworkExport): artwork PDF, native save dialog, font catalog.
- renderPDF:options=>call('renderPDF',options),saveExport:options=>call('saveExport',options),fontCatalog:()=>call('fontCatalog'),
+ renderPDF:options=>call('renderPDF',options),saveExport:options=>call('saveExport',options),fontCatalog:()=>call('fontCatalog'),exportCode:options=>call('exportCode',options),
  // end inspector export hook
  importFigma:options=>call('importFigma',options),
  generateVector:options=>call('generateVector',options),cancelGeneration:()=>call('cancelGeneration'),

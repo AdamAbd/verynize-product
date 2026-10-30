@@ -1,0 +1,66 @@
+# Implementasi PAINT dan EXPORT (paritas perilaku Wonder) — 30 Oktober 2026
+
+Cakupan: checklist P20–P24, P30, P32, I06/I07/I11, jurnal 21–26 dan 41, serta paragraf gap pada [alur desain Wonder](../wonder-design-workflow-2026-10-30.md) (paint stack, SVG multicolor). Sumber pendukung: [validasi source](2026-10-30-validation-source-agent.md) dan [audit Variables/Icons](2026-10-30-variables-icons-agent.md). Yang ditiru hanya perilakunya. Kode dan teks UI ditulis sendiri.
+
+## Yang diimplementasikan
+
+### 1. Paint stack (Background Fill dan Text Fill) — P20, P22
+
+- Field node baru `fills` yang opsional. Isinya daftar paint dengan **indeks 0 di paling atas**. Tipe paint: `solid` (`color`, `token?`), `linear`/`radial`/`conic` (`angle?`, `stops[{position 0–100, color, token?}]`, 2–16 stop) dan `image` (`src` data URL base64, `fit`, `imageWidth/Height?`). Setiap paint dapat memiliki `opacity` (0–100) dan `hidden`.
+- **Kompatibilitas mundur:** dokumen lama yang hanya memakai `color`/`token` tetap dimuat dan dirender seperti sebelumnya. Stack berisi satu paint solid yang terlihat dengan opacity 100 disimpan kembali sebagai `color`/`token` tanpa `fills`. Karena itu, selector dan test lama (`[name=color]`, *Fill hex colour*, *Fill opacity*, *Apply variable/Detach variable*) tetap berlaku. Bila `fills` ada, `color` diisi warna teratas yang terlihat sebagai fallback untuk pembaca yang mengabaikan `fills`, misalnya kelas codec dan warna shader. Gradien CSS bebas lama (`gradient`) tetap dirender di atas stack dan field-nya hanya tampil bila masih berisi nilai.
+- **Render** (`web/node-style.js`, dipakai bersama oleh canvas dan export HTML headless): setiap paint menjadi satu layer `background-image`. Solid ditulis sebagai `linear-gradient(c, c)`. Opacity paint dikalikan ke alpha setiap warna. Image memakai `background-size` (Fill `100% 100%`, Cover, Contain, None `auto`), posisi tengah dan tanpa repeat. Image dengan opacity di bawah 100 dibungkus SVG `<image opacity>` karena CSS tidak memiliki opacity per layer. Text Fill memakai warna langsung bila hanya ada satu solid. Selain itu dipakai `background-clip: text` dengan `color: transparent`. Node shader tetap memakai satu warna.
+- **UI** (`paints.tsx`): tombol *Add paint* (+) di header Fill. Setiap baris memiliki swatch/editor, hex atau nama variable, opacity, *Hide/Show paint* dan *Remove paint*. Editor paint (`#color-dialog`) berisi pemilih *Paint type* (Solid/Linear/Radial/Conic/Image), *Move paint up/down*, serta color picker lama dengan tab Custom/Variables. Editor gradien menyediakan bar pratinjau dengan stop yang dapat diseret, field posisi per stop, *Add stop*, *Remove stop*, sudut (linear/conic), *Rotate gradient 90°* dan *Reverse gradient stops*. Setiap stop dapat di-bind ke Colors variable dan dilepas lewat *Detach stop N variable*. Editor image menyediakan pratinjau, *Replace…* (file PNG/JPEG/WebP/GIF/SVG) dan *Image fit*.
+- **Binding:** solid dan stop menyimpan `token` di samping `color` hasil resolve. Saat render, `token` yang masih ada didahulukan. Detach dan hapus variable menulis nilai resolve terakhir ke `color`, sehingga warna tidak berubah (jurnal 23). Hapus color variable di `app.js` dan helper headless `renameTokenRefs`/`unbindToken`/`syncTokenColors` (`design-edit.mjs` → `integrations/paints.mjs`) ikut memproses paint.
+
+### 2. Image fill fit — P23
+
+Fit yang tersedia: `fill`/`cover`/`contain`/`none`. *Scale down* sengaja tidak tersedia untuk image fill. Opsi itu hanya ada pada `objectFit` node image, sesuai koreksi source P23. Validator menolak `scale-down` pada paint image.
+
+### 3. SVG Colors multicolor — P30, I06/I07
+
+- Field baru `svgPaints: {'#asal': '#pengganti'}`, dengan key hex huruf kecil. Source SVG yang tersimpan tidak diubah. Renderer membuat salinan yang sudah diwarnai ulang (`recolorSvg`, dengan cache) untuk canvas, export HTML dan export SVG.
+- `svgPaintList` mendaftar paint eksplisit yang berbeda dalam urutan dokumen. Paint diambil dari atribut `fill/stroke/stop-color/flood-color/lighting-color` dan deklarasi CSS inline atau `<style>`. Nilai hex, `rgb()`/`rgba()` dan nama warna umum dinormalisasi. Penggantian berlaku pada semua kemunculan dengan nilai yang sama, misalnya `red` dan `#FF0000`.
+- Section **Colors** tetap memakai jalur monochrome lama (`svgColor`/`svgColorToken`, binding variable) untuk SVG satu warna. SVG lain mendapat satu baris per paint (*SVG color N*, hex, picker) dan dapat dipulihkan per warna atau sekaligus. Seperti Wonder, warna multicolor **tidak dapat di-bind** ke variable. Binding hanya berlaku untuk SVG satu paint.
+
+### 4. Export — P32, jurnal 21–22 dan 41
+
+- Format: PNG, JPG, WebP, PDF dan **Code** (Tailwind atau CSS). **SVG** hanya ditawarkan dan menjadi opsi pertama bila **semua** layer yang diekspor adalah node image SVG. Bila seleksi berubah, format kembali ke PNG.
+- Ukuran: 0.5×, 1×, 2×, 3×, 4×, 720p, 1080p, 1440p, 2160p (tinggi target), 512w dan 512h. PDF dan Code tidak memiliki skala.
+- Nama file dan **suffix**. Suffix default adalah `@2x`, `@720p`, `@512w`, atau kosong pada 1×, dan dapat diubah.
+- `desktop/render.cjs` sekarang menerima skala 0.01–100× selama output tidak melebihi 16384 px per sisi dan 32 MP. Chromium membatasi zoom halaman sampai 5×, jadi faktor di atas 4× memakai zoom halaman 4× ditambah CSS `zoom` pada root. Hasil `boxes` tetap dalam CSS px.
+- Code: IPC baru `exportCode` (`integrations/export-code.mjs`). **Tailwind** menghasilkan komponen React melalui JSX codec. Atribut bookkeeping editor (`data-node-id`, `data-component-x/y`) dihapus dan variable ditulis sebagai komentar `:root`. **CSS** menghasilkan HTML artwork dengan setiap style inline dipindahkan ke rule class yang dinamai dari layer, ditambah `:root` variable.
+- Ekspor SVG menyusun `<svg>` asli per layer (warna pengganti dan tint monochrome sudah diterapkan) pada posisi artwork. Ekspor ini tidak lagi memakai `foreignObject`.
+
+### Codec dan validasi
+
+- JSX: `data-fills` (JSON paint; image di atas 2 KB ditulis `[embedded image N KB]` lalu dipulihkan dari paint pada posisi yang sama saat edit, dan dibuang bila elemen baru tidak dapat memulihkannya) serta `data-svg-paints="#asal:#baru …"`. Roundtrip diuji.
+- `paintError` di `node-style.js` dipakai bersama oleh `validate()` di `web/app.js` dan `validateDocument` di `integrations/design-store.mjs`, sehingga kedua validator konsisten.
+
+## File yang disentuh
+
+Milik agent ini atau baru: `web/src/islands/inspector/paints.tsx` (baru), `export-section.tsx` (baru), `export.ts`, `svg-colors.tsx`, `color-picker.tsx` (prop `title`/`header`), `desktop/render.cjs`, `integrations/paints.mjs` (baru), `integrations/export-code.mjs` (baru), `integrations/paints.test.mjs` (baru) dan `tests/inspector-paints.cjs` (baru).
+
+File bersama, dengan edit kecil: `web/node-style.js` (blok Paints/SVG paints, layer background, `src` hasil recolor), `integrations/node-style.mjs` (export tambahan), `web/app.js` (hook validasi, `css.src`, detach paint saat token dihapus), `integrations/design-store.mjs` (`paintError`), `integrations/export-html.mjs` (src hasil recolor), `integrations/jsx-codec.mjs` (`paintAttrs`), `integrations/design-edit.mjs` (`applyPaintAttrs`, hook token), `web/src/islands/inspector/properties.tsx` (Fill memakai `FillTools`/`PaintStack`, Export dipindah ke `export-section.tsx`), `desktop/preload.cjs` (`exportCode`), `desktop/README.md`, `package.json` (`test:canvas` + `inspector-paints.cjs`) dan `tests/inspector-parity.cjs`. Ekspektasi test terakhir diperbarui: daftar skala baru, dan SVG tidak lagi ditawarkan untuk frame, sehingga uji batal memakai JPG. Maksud assertion tetap sama.
+
+## Test dan hasil
+
+| Perintah | Hasil |
+|---|---|
+| `node --test integrations/paints.test.mjs` | 8/8 lulus: back-compat, layer/opacity/hidden/fit, Text Fill, validator, token rename/sync/detach, SVG multicolor + export HTML, roundtrip JSX, Code Tailwind/CSS |
+| `node --test integrations/*.test.mjs` | 139/139 lulus |
+| `node tests/inspector-paints.cjs` | Lulus. Mencakup edit stack lewat UI; piksel PNG native untuk opacity per paint dan paint hidden, dibandingkan dengan komposisi referensi dari pipeline yang sama karena macOS mencampur warna di ruang warna layar; fit Fill/Cover/Contain/None dan opacity image pada piksel; gradien Text Fill; SVG multicolor pada PNG dan SVG; preset 720p (900×720), 512w (512×410), 512h (640×512), 2160p (2700×2160), dan 0.5×, termasuk cakupan tepi; suffix; signature, dimensi, dan piksel JPG/WebP; Code Tailwind/CSS; persistensi setelah reload; validasi |
+| `node tests/render-export.cjs` | Lulus pada 0.5/1/2/4/5.12/7.2/27×. Perbandingan box sekarang memakai toleransi 0.01 CSS px karena pembagian CSS zoom menghasilkan noise float. Batas output ditolak dengan pesan yang benar |
+| `inspector-parity`, `inspector-variable-binding`, `canvas`, `canvas-advanced`, `canvas-precision`, `canvas-codec`, `canvas-roundtrip` | Lulus |
+| `node tests/inspector-variable-library.cjs` | **Gagal** di baris 100: tombol *Close colour picker* pada picker yang dibuka dari baris Variables berada di luar viewport. Area ini milik `variables.tsx`, yang sedang dirombak agent Variables. Picker SVG monochrome di baris 88 lulus. Perubahan `color-picker.tsx` dari agent ini hanya menambah prop opsional, jadi kegagalan dicatat untuk agent tersebut |
+| `npm run build:ui`, `lint:ui` (0 error/warning untuk file ini), `typecheck:ui`, `npm run check` | Lulus |
+| `node eval/run-fidelity.mjs` | 26/26 fixture, 105/105 check lulus. Tidak ada assertion yang dilonggarkan |
+
+## Gap yang tersisa
+
+- **Rename color variable di renderer** (`vars.ts`, milik agent Variables) belum memperbarui `token` di dalam `fills`. Delete di `app.js` dan seluruh helper headless sudah menangani paint. Helper `BetterNodeStyle.eachPaintColor` tersedia untuk dipanggil dari `vars.ts`. Sampai itu ditambahkan, rename membuat paint jatuh ke `color` tersimpan, yang merupakan nilai resolve saat terakhir diedit.
+- Pusat radial/conic tetap di tengah dan bentuk radial berupa elips farthest-corner. Handle gradien langsung di canvas belum ada, sehingga pengeditan hanya lewat inspector.
+- Paint image `none` dengan opacity di bawah 100 memerlukan `imageWidth/imageHeight`. Paint dari UI selalu memilikinya, tetapi paint dari codec tanpa ukuran mengabaikan opacity.
+- Pada SVG multicolor, paint implisit (default hitam tanpa atribut `fill`) dan `currentColor` tidak didaftar. Paint di dalam `url(#gradient)` hanya dapat diganti lewat `stop-color` eksplisit.
+- Ekspor SVG mengabaikan rotasi dan flip layer. Ekspor Code Tailwind memakai `data-fills` (JSON) untuk stack yang tidak dapat diwakili kelas Tailwind.
+- I11 (Replace SVG, Copy SVG/name, Select occurrences, Change/Link icon, Detach from library) **tidak** dikerjakan karena berada di luar cakupan PAINT/EXPORT.
+- Belum ada perbandingan screenshot sesi Wonder dengan Verynize untuk editor gradien. Paritas yang diklaim terbatas pada perilaku yang diuji di atas.

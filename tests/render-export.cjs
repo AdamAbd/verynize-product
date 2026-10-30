@@ -13,7 +13,9 @@ const path = require('node:path');
   try {
     const page = await app.firstWindow({ timeout: 20000 });
     await page.waitForSelector('#canvas');
-    for (const scale of [0.5, 1, 2, 4]) {
+    // 7.2 / 27 cover the 720p and 2160p presets of 100×80 artwork: past Chromium's 5× page zoom cap the
+    // renderer adds CSS zoom, which must still fill the whole output and keep measurements in CSS px.
+    for (const scale of [0.5, 1, 2, 4, 5.12, 7.2, 27]) {
       const result = await page.evaluate(async scale => {
         // Deliberately transparent body: propagating a body background over the viewport can
         // hide an unscaled drawing surrounded by empty space. Only these explicit boxes paint.
@@ -35,16 +37,22 @@ const path = require('node:path');
           boxes: result.boxes,
         };
       }, scale);
-      assert.equal(result.width, 100 * scale, `${scale}× PNG width`);
-      assert.equal(result.height, 80 * scale, `${scale}× PNG height`);
+      assert.equal(result.width, Math.ceil(100 * scale - 1e-6), `${scale}× PNG width`);
+      assert.equal(result.height, Math.ceil(80 * scale - 1e-6), `${scale}× PNG height`);
       assert.deepEqual(result.leftTop, [255, 0, 0, 255], `${scale}× artwork's left half scales horizontally`);
       assert.deepEqual(result.leftBottom, [255, 0, 0, 255], `${scale}× artwork scales vertically`);
       assert.deepEqual(result.rightTop, [0, 0, 255, 255], `${scale}× right half fills the output`);
       assert.deepEqual(result.rightBottom, [0, 0, 255, 255], `${scale}× lower-right artwork is not empty or clipped`);
-      assert.deepEqual(result.boxes.art, { x: 0, y: 0, w: 100, h: 80 }, 'layout boxes stay in document CSS pixels');
-      assert.deepEqual(result.boxes.right, { x: 50, y: 0, w: 50, h: 80 }, 'zoom does not leak into measured positions');
+      const near = (b, e) => Object.entries(e).every(([k, v]) => Math.abs(b[k] - v) < 0.01);
+      assert.ok(near(result.boxes.art, { x: 0, y: 0, w: 100, h: 80 }), `${scale}× layout boxes stay in document CSS pixels: ${JSON.stringify(result.boxes.art)}`);
+      assert.ok(near(result.boxes.right, { x: 50, y: 0, w: 50, h: 80 }), `${scale}× zoom does not leak into measured positions: ${JSON.stringify(result.boxes.right)}`);
     }
-    console.log('PASS native export at 0.5×/1×/2×/4×: artwork pixels, full output coverage and unscaled layout measurements');
+    // Output limits replace the old 4× cap: 16384 px per side, 32 MP.
+    const rejected = await page.evaluate(async () => {
+      try { await window.desktop.renderDesign({ html: '<div></div>', width: 100, height: 80, scale: 200 }); return null; } catch (error) { return String(error.message || error); }
+    });
+    assert.match(rejected || '', /32 megapixels|16384/);
+    console.log('PASS native export at 0.5×/1×/2×/4×/5.12×/7.2×/27×: artwork pixels, full output coverage, unscaled layout measurements and output limits');
   } finally {
     await app.close();
     await fs.rm(profile, { recursive: true, force: true });

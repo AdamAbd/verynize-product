@@ -30,6 +30,7 @@ import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { applyOperations, BINDABLE, checkVariableValue } from './design-store.mjs';
+import { setAlias, detachAlias } from './variables.mjs';
 import { exportHTML } from './export-html.mjs';
 import {
   clone, ensureShortIds, indexPage, getPage, elementCode, runDirectives, createArtboards, duplicateElements, removeSubtree,
@@ -161,6 +162,13 @@ const layoutFields = {
   fontStyle: z.enum(['normal', 'italic']).optional(), truncate: z.boolean().optional(), noWrap: z.boolean().optional(), lineClamp: z.number().int().min(0).max(100).optional(),
   textWrap: z.enum(['balance', 'pretty']).optional(), objectFit: z.enum(['cover', 'contain', 'fill', 'none', 'scale-down']).optional(), hidden: z.boolean().optional(),
   htmlTag: z.string().regex(/^[a-z][a-z0-9]{0,20}$/).optional(),
+  // Structured effects (validated in full by validateEffects in web/node-style.js).
+  blendMode: z.enum(['normal', 'darken', 'multiply', 'plus-darker', 'color-burn', 'lighten', 'screen', 'plus-lighter', 'color-dodge', 'overlay', 'soft-light', 'hard-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity']).optional(),
+  outlineWidth: z.number().finite().min(0).max(1000).optional(), outlineOffset: z.number().finite().min(-1000).max(1000).optional(),
+  outlineColor: z.string().regex(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i).optional(), outlineStyle: z.enum(['solid', 'dashed', 'dotted']).optional(),
+  shadows: z.array(z.object({ type: z.enum(['box', 'drop', 'text']), inset: z.boolean().optional(), x: z.number().finite(), y: z.number().finite(), blur: z.number().finite().min(0), spread: z.number().finite(), color: z.string().regex(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i), token: z.string().max(100).optional(), hidden: z.boolean().optional() }).strict()).max(20).describe('box = box-shadow (inset = inner), drop = filter drop-shadow, text = text-shadow (text layers only); token binds the color to a color variable').optional(),
+  filters: z.array(z.object({ type: z.enum(['blur', 'brightness', 'contrast', 'grayscale', 'hueRotate', 'invert', 'saturate', 'sepia']), value: z.number().finite(), backdrop: z.boolean().optional(), hidden: z.boolean().optional() }).strict()).max(20).describe('blur px; hueRotate deg; brightness/contrast/saturate 0–3; grayscale/invert/sepia 0–1. backdrop = backdrop-filter').optional(),
+  masks: z.array(z.object({ type: z.enum(['linear', 'radial', 'conic']), rotation: z.number().finite().optional(), alpha: z.number().finite().min(0).max(100).optional(), invert: z.boolean().optional(), hidden: z.boolean().optional() }).strict()).max(8).describe('gradient fade masks').optional(),
   textStyle: z.record(z.string().regex(/^[a-zA-Z]{1,40}$/), z.union([z.string().max(400), z.number().finite(), z.boolean()])).refine(v => Object.keys(v).length <= 30, 'At most 30 textStyle keys').optional(),
 };
 const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(['aurora', 'waves', 'noise', 'ribbon', 'mesh', 'swirl']).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields };
@@ -601,17 +609,20 @@ function toolTable(backend, context = {}) {
     },
   };
   t.update_design_tokens = {
-    description: 'Change token values and/or rename tokens (colors and typed variables; the type stays the same). Elements bound to a token follow the change.',
-    inputSchema: { document: documentArg, tokens: z.array(z.object({ name: tokenName, newName: tokenName.optional(), value: tokenValue.optional() })).min(1).max(200) },
+    description: 'Change token values and/or rename tokens (colors and typed variables; the type stays the same). Elements bound to a token follow the change. aliasOf makes a token reference another token of the same type (its value follows that token); aliasOf: null or a new value detaches the reference.',
+    inputSchema: { document: documentArg, tokens: z.array(z.object({ name: tokenName, newName: tokenName.optional(), value: tokenValue.optional(), aliasOf: tokenName.nullable().optional() })).min(1).max(200) },
     run: async ({ document: ref, tokens }) => {
       const out = await write(backend, ref, document => {
         for (const token of tokens) {
           const isColor = Object.hasOwn(document.tokens, token.name), variable = document.variables?.[token.name];
           if (!isColor && !variable) throw new Error(`Token ${token.name} does not exist`);
           if (token.value !== undefined) {
+            detachAlias(document, token.name);
             if (isColor) document.tokens[token.name] = tokenColor(String(token.value));
             else variable.value = variableValue(variable.type, token.value, token.name);
           }
+          if (token.aliasOf === null) detachAlias(document, token.name);
+          else if (token.aliasOf !== undefined) setAlias(document, token.name, token.aliasOf);
           if (token.newName && token.newName !== token.name) {
             checkTokenName(token.newName); if (tokenExists(document, token.newName)) throw new Error(`Token ${token.newName} already exists`);
             if (isColor) { document.tokens[token.newName] = document.tokens[token.name]; delete document.tokens[token.name]; renameTokenRefs(document, token.name, token.newName); }

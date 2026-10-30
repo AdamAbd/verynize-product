@@ -135,7 +135,7 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
   const saveAs=async file=>{target=path.join(out,file);await app.evaluate(({dialog},t)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:t})},target);};
   await page.locator('#export-section .insp-add').click();
   const scales=await page.locator('#artwork-scale option').evaluateAll(els=>els.map(el=>el.value));
-  assert.deepEqual(scales,['0.5','1','2','3','4']);
+  assert.deepEqual(scales,['0.5','1','2','3','4','720p','1080p','1440p','2160p','512w','512h']);
   const formats=await page.locator('#artwork-format option').evaluateAll(els=>els.map(el=>el.value));
   assert.ok(formats.includes('PDF'));
   await saveAs('card@4x.png');
@@ -157,7 +157,9 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
   assert.match(pdf.toString('latin1'),/\/MediaBox \[0 0 75(\.\d+)? 60(\.\d+)?\]/,'one page at the artwork size (100×80 px = 75×60 pt)');assert.equal((pdf.toString('latin1').match(/\/Type \/Page\b/g)||[]).length,1,'single page');assert.match(pdf.toString('latin1'),/\/Title \(Card\)/,'PDF title is the export name, not the HTML');
   // Cancelling the save dialog writes nothing and shows no error.
   await app.evaluate(({dialog})=>{dialog.showSaveDialog=async()=>({canceled:true})});
-  await page.locator('#artwork-format').selectOption('SVG');await page.locator('#artwork-download').click();
+  // SVG is offered only when every exported layer is an SVG image (a frame is not).
+  assert.equal(formats.includes('SVG'),false);
+  await page.locator('#artwork-format').selectOption('JPG');await page.locator('#artwork-download').click();
   await page.waitForTimeout(500);
   assert.equal(await page.locator('#artwork-status').textContent(),'');
   console.log('PASS export 0.5×/4× PNG, PDF and native save dialog with success toast');

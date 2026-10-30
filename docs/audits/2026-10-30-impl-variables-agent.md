@@ -1,0 +1,52 @@
+# Implementasi Variables setara Wonder — agen variables (2026-10-30)
+
+Sumber spesifikasi: [Wonder design workflow](../wonder-design-workflow-2026-10-30.md) (bagian "Binding yang sudah diterapkan", "Peta tipe variable → properti (dari source)", Checklist Variables V02/V06/V07/V12/V20/V21 dan paragraf gaps), [audit Variables/Icons](2026-10-30-variables-icons-agent.md) (gap V3) dan [validasi source](2026-10-30-validation-source-agent.md). Perilaku mengikuti Wonder. Kode dan teks UI ditulis sendiri.
+
+## Yang diimplementasikan
+
+| # | Fitur | Perilaku |
+|---|---|---|
+| 1 | Folder dari nama ber-slash (V02, V21) | Di setiap grup tipe, termasuk Colors, `surface/base` tampil sebagai folder `surface` yang dapat dilipat, dengan baris `base`. Folder bertingkat didukung. Baris folder memiliki menu konteks **Rename folder** dan **Delete folder (n)**, serta tombol hapus saat hover. Rename folder mengganti nama semua anggota bertipe sama. Referensi layer (`token`, `svgColorToken`, `bindings`) dan alias ikut diganti. Delete folder menghapus semua anggota. Layer yang terikat mempertahankan nilai hasil resolve sebagai literal, dan alias yang menunjuk ke anggota folder ikut dilepas. Keduanya menjadi satu langkah undo. |
+| 2 | Rename color variable (V3) | Double-click nama atau menu konteks **Rename**. Berlaku untuk Colors dan tipe lain. Fill (`token`), warna SVG (`svgColorToken`) dan alias tetap terikat. |
+| 3 | Alias variable (V20) | Menu konteks baris memuat Rename, **Reference variable** (submenu berisi variable bertipe sama yang tidak membentuk siklus), atau **Change reference** dan **Detach reference** bila sudah alias, lalu Delete. Tidak ada Duplicate (V07). Disimpan di `document.aliases = {nama: target}`. Entri alias tetap menyimpan nilai resolve sehingga canvas, codec, ekspor HTML dan CSS tidak perlu mengetahui alias. Resolusi mengikuti rantai alias. Siklus, self-reference dan beda tipe ditolak. Alias yang target-nya hilang ditoleransi, dan variable mempertahankan nilai terakhirnya. Mengubah nilai literal atau memilih **Detach** mengembalikan nilai literal hasil resolve. Baris alias menampilkan chip ◆ nama target sebagai pengganti nilai. |
+| 4 | Peta binding | Dimensions dapat di-bind ke W/H (binding mengubah sumbu ke fixed), min/max W/H, padding horizontal (`paddingX`) dan vertikal (`paddingY`) secara terpisah seperti capture 06, gap, radius uniform dan per-corner (`radiusTopLeft`…`radiusBottomLeft` → `cornerRadii`), font size, line height (px dibagi font size menjadi multiplier) dan letter spacing. Numbers → opacity (skala 0–100). Binding lama (`padding` uniform, Numbers ke radius/gap/stroke) tetap valid demi kompatibilitas. |
+| 5 | Pencarian (V06) | Hanya mencocokkan nama, termasuk path folder (`surface/ra`), bukan nilai. Selama mencari, semua folder dibuka. Pesan kosong: “No variable names contain “…””. |
+| — | MCP | `update_design_tokens` menerima `aliasOf` (nama target, atau `null` untuk detach). Nilai baru juga melepas alias. `get_design_tokens` menampilkan `aliasOf`. Rename dan delete token memperbarui atau melepas alias. |
+
+## Skema (konsisten di tiga tempat)
+
+- `integrations/variables.mjs` (baru, tanpa dependensi): `validateAliases`, `aliasRoot`, `aliasCycle`, `syncAliases`, `setAlias`, `detachAlias`, `renameAliasRefs`, `dropAliases`, helper folder, dan `boundValue`/`writeBoundValue`/`bindingOrder` untuk binding turunan.
+- `integrations/design-store.mjs`: `BINDABLE` diperluas dan `validateDocument` memanggil `validateAliases`.
+- `web/app.js` `validate()`: daftar kunci binding diperluas, dan alias divalidasi serta di-resolve saat dokumen dimuat atau di-set.
+- `web/src/islands/inspector/vars.ts`: mirror TypeScript untuk resolusi, rename/delete, folder, binding dan ekspor CSS dengan alias yang sudah di-resolve.
+- `integrations/design-edit.mjs`: `syncTokenColors` dan `syncVariables` me-resolve alias dulu. `syncVariables` menerapkan font size sebelum line height. `renameTokenRefs`, `renameVariableRefs`, `unbindToken` dan `unbindVariable` memperbarui atau melepas alias. `describe*` menambahkan `aliasOf`.
+
+## File yang diubah
+
+- Milik agen ini: `web/src/islands/inspector/variables.tsx` (ditulis ulang: tree folder, menu konteks, chip referensi, search nama), `vars.ts`, `layout.tsx` (W/H, min/max, padding X/Y dapat di-bind), `integrations/variables.mjs` (baru), `integrations/variables-library.test.mjs` (baru), `tests/inspector-variable-folders.cjs` (baru).
+- Edit kecil pada file bersama: `web/app.js` (validate), `integrations/design-store.mjs`, `integrations/design-edit.mjs`, `integrations/design-tools.mjs` (`aliasOf`), `web/src/islands/inspector/properties.tsx` (field per-corner dapat di-bind), `web/src/islands/inspector/model.ts` (mengetik radius uniform melepas binding per-corner), `tests/inspector-variable-binding.cjs` (padding uniform → padding X/Y), `package.json` (`test:canvas` + test baru).
+- `typography.tsx` dan `bind.tsx` tidak perlu diubah. Line height memakai `BINDABLE` yang sudah diperluas.
+
+## Tes dan hasil
+
+| Perintah | Hasil |
+|---|---|
+| `npm run build:ui` | OK |
+| `npm run lint:ui` | 0 error. Ada 2 warning di `shadows.tsx`/`masks.tsx` (milik agen effects) |
+| `npm run typecheck:ui` | OK |
+| `npm run check` | OK |
+| `node --test integrations/*.test.mjs` | 130/130 lulus, termasuk 7 tes baru `variables-library.test.mjs` (rantai alias, siklus/tipe, detach/delete, rename, folder, peta binding, ekspor CSS/HTML/JSX) |
+| `node tests/inspector-variable-folders.cjs` (baru) | PASS: collapse folder, search nama, rename color + undo, rename/delete folder + undo, referensi (rantai ke canvas, siklus disabled, detach), binding W/min W/corner/line height, tidak ada Duplicate, reload |
+| `node tests/inspector-variable-binding.cjs` | PASS |
+| `node tests/inspector-parity.cjs` | Bagian variables PASS. Gagal pada daftar export scale (`720p`, `512w`…), yaitu area export milik agen lain |
+| `node tests/inspector-variable-library.cjs` | Pembuatan color, undo dan error ekspor CSS PASS. Gagal di alur SVG color (`#color-dialog` tidak tertutup). `svg-colors.tsx` dan `color-picker.tsx` sedang diubah oleh agen paints/svg-colors |
+| `node eval/run-fidelity.mjs` | 26/26 fixture, 105/105 check lulus |
+
+## Gap yang tersisa
+
+- Resize lewat drag di canvas tidak melepas binding W/H. Nilai bound akan ditimpa lagi saat variable berikutnya diubah. Mengetik di field sudah melepas binding.
+- Picker binding (◆) dan tab Variables pada color picker masih berupa daftar datar, belum dikelompokkan per folder. Color picker milik agen paints.
+- Ekspor CSS menulis nilai alias sebagai literal hasil resolve, bukan `var(--target)`.
+- Header Variables belum memiliki *Collapse all*. Drag variable ke folder belum ada. Folder kosong tidak dapat dibuat karena folder hanya ada lewat nama.
+- Letter spacing negatif tetap dapat diwakili Dimensions di Verynize. Wonder membatasinya ke min 0. Batas ini sengaja tidak ditiru agar dokumen lama tetap valid.
+- Path legacy tersembunyi di `#tokens` (`app.js`) menghapus token tanpa membersihkan alias. Validator mentoleransi alias yang menggantung sehingga tidak terjadi error.

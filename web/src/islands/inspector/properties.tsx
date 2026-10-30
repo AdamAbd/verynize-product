@@ -11,7 +11,6 @@ import {
   AlignVerticalDistributeCenter,
   ChevronDown,
   Copy,
-  Diamond,
   Eye,
   EyeOff,
   RotateCcw,
@@ -23,15 +22,7 @@ import {
   Check,
 } from "lucide-react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
-import { ShaderIcon } from "@/components/icons";
 import { activePage, type DesignDocument } from "@/lib/bridge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import {
   Affix,
@@ -48,11 +39,11 @@ import {
 import { formClick, notify } from "./legacy";
 import { ColorPopover } from "./color-picker";
 import { BindableField } from "./bind";
-import { EXPORT_FORMATS, EXPORT_SCALES, exportArtwork, type ExportFormat } from "./export";
-import { toast } from "sonner";
-import { alphaPercent, parseColor, toHex, withAlpha } from "./color";
+import { CORNER_KEYS } from "./vars";
+import { ExportSection } from "./export-section";
+import { FillTools, PaintStack } from "./paints";
+import { alphaPercent, parseColor, toHex } from "./color";
 import {
-  HEX,
   SHADER_PRESETS,
   descendants,
   fmt,
@@ -67,6 +58,10 @@ import { TypographySection } from "./typography";
 import { SvgColorsSection } from "./svg-colors";
 import { LayoutSection } from "./layout";
 import { ConstraintSelect, ConstraintWidget, readConstraints } from "./constraints";
+import { BlendMenu, BorderStyleSelect, OutlineSection } from "./effects";
+import { ShadowSection } from "./shadows";
+import { FilterSection } from "./filters";
+import { MaskSection } from "./masks";
 
 type Props = { doc: DesignDocument; node: Node; selection: string[] };
 
@@ -259,12 +254,15 @@ function AppearanceSection({ doc, node, selection }: Props) {
       id="appearance-section"
       title="Appearance"
       tools={
-        <IconButton
-          id="appearance-visibility"
-          icon={hidden ? EyeOff : Eye}
-          label={hidden ? "Show layer" : "Hide layer"}
-          onClick={() => patchNodes(selection, () => ({ hidden: !hidden }))}
-        />
+        <>
+          <IconButton
+            id="appearance-visibility"
+            icon={hidden ? EyeOff : Eye}
+            label={hidden ? "Show layer" : "Hide layer"}
+            onClick={() => patchNodes(selection, () => ({ hidden: !hidden }))}
+          />
+          <BlendMenu doc={doc} node={node} selection={selection} />
+        </>
       }
     >
       <div className="flex items-end gap-2">
@@ -326,6 +324,7 @@ function AppearanceSection({ doc, node, selection }: Props) {
       </div>
       {cornersExpanded ? (
         <IndividualFields
+          doc={doc}
           node={node}
           selection={selection}
           property="cornerRadii"
@@ -376,9 +375,11 @@ function individualPatch(
   property: IndividualProperty,
   scalar: UniformProperty,
   values: number[],
+  detach: string[] = [],
 ) {
   const bindings = { ...node.bindings };
   delete bindings[scalar];
+  for (const key of detach) delete bindings[key];
   return { [property]: values, bindings: Object.keys(bindings).length ? bindings : undefined };
 }
 
@@ -394,6 +395,7 @@ function expandIndividual(
 }
 
 function IndividualFields({
+  doc,
   node,
   selection,
   property,
@@ -401,6 +403,7 @@ function IndividualFields({
   labels,
   prefixes,
 }: {
+  doc?: DesignDocument;
   node: Node;
   selection: string[];
   property: IndividualProperty;
@@ -417,164 +420,51 @@ function IndividualFields({
         property === "cornerRadii" ? "Individual corner radii" : "Individual border widths"
       }
     >
-      {labels.map((label, index) => (
-        <Field
-          key={label}
-          name={`${property}-${index}`}
-          label={label}
-          numeric
-          value={fmt(values[index])}
-          prefix={<Affix>{prefixes[index]}</Affix>}
-          onCommit={(raw) => {
-            const value = Number(raw.trim());
-            if (!raw.trim() || !Number.isFinite(value)) return "Enter a number.";
-            patchNodes(selection, (selected) => {
-              const next = individualValues(selected, property, scalar);
-              next[index] = Math.max(0, value);
-              return individualPatch(selected, property, scalar, next);
-            });
-          }}
-        />
-      ))}
+      {labels.map((label, index) => {
+        // Each corner radius can bind a Dimension variable; typing a corner detaches only that corner.
+        const corner = property === "cornerRadii" ? CORNER_KEYS[index] : undefined;
+        const field = (suffix?: ReactNode) => (
+          <Field
+            name={`${property}-${index}`}
+            label={label}
+            numeric
+            value={fmt(values[index])}
+            prefix={<Affix>{prefixes[index]}</Affix>}
+            suffix={suffix}
+            onCommit={(raw) => {
+              const value = Number(raw.trim());
+              if (!raw.trim() || !Number.isFinite(value)) return "Enter a number.";
+              patchNodes(selection, (selected) => {
+                const next = individualValues(selected, property, scalar);
+                next[index] = Math.max(0, value);
+                return individualPatch(selected, property, scalar, next, corner ? [corner] : []);
+              });
+            }}
+          />
+        );
+        return corner && doc ? (
+          <BindableField
+            key={label}
+            doc={doc}
+            node={node}
+            selection={selection}
+            field={corner}
+            label={label}
+            prefix={<Affix>{prefixes[index]}</Affix>}
+          >
+            {field}
+          </BindableField>
+        ) : (
+          <div key={label} className="contents">
+            {field()}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 /* ---------- Fill ---------- */
-function VariableMenu({ doc, node, selection }: Props) {
-  const tokens = Object.entries(doc.tokens ?? {});
-  return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
-        <IconButton icon={ShaderIcon} label="Apply variable" active={!!node.token} />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="left" align="start" sideOffset={12} className="w-48">
-        <div className="flex h-7 items-center gap-2 px-2 text-xs text-foreground-3">
-          <Diamond className="size-3.5" aria-hidden />
-          Apply variable
-        </div>
-        <DropdownMenuSeparator />
-        {tokens.map(([name, color]) => (
-          <DropdownMenuItem key={name} onSelect={() => setField(selection, node, "token", name)}>
-            <Swatch color={color} className="size-3.5" />
-            <span className="flex-1 truncate">{name}</span>
-            {node.token === name ? <Check className="size-3.5" aria-hidden /> : null}
-          </DropdownMenuItem>
-        ))}
-        {!tokens.length ? (
-          <DropdownMenuItem disabled>No colour variables yet</DropdownMenuItem>
-        ) : null}
-        {node.token ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={() => {
-                const colors = window.design.getDocument().tokens ?? {};
-                patchNodes(selection, (n) => ({ color: colors[n.token] ?? n.color, token: "" }));
-              }}
-            >
-              Detach variable
-            </DropdownMenuItem>
-          </>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/** Live canvas preview while dragging in the colour picker (committed on release through updateNodes). */
-function previewFill(nodes: Node[], color: string) {
-  for (const n of nodes) {
-    const el = document.querySelector<HTMLElement>(`#canvas [data-id="${CSS.escape(n.id)}"]`);
-    if (!el) continue;
-    if (n.type === "text") el.style.color = color;
-    else el.style.backgroundColor = color;
-  }
-}
-
-function PaintRow({ doc, node, selection }: Props) {
-  const [open, setOpen] = useState(false);
-  const tokenColor = node.token ? doc.tokens?.[node.token] : undefined;
-  const color = tokenColor || node.color;
-  const hidden = !!node.hidden;
-  const selected = pageNodes(doc).filter((n) => selection.includes(n.id));
-  const commit = (next: string) => patchNodes(selection, () => ({ color: next, token: "" }));
-  return (
-    <div className="flex items-center gap-2">
-      <ColorPopover
-        open={open}
-        onOpenChange={setOpen}
-        value={color}
-        onPreview={(next) => previewFill(selected, next)}
-        onCommit={commit}
-        tokens={doc.tokens}
-        token={node.token}
-        onToken={(name) => setField(selection, node, "token", name)}
-      >
-        <div
-          data-color-anchor
-          className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field focus-within:ring-1 focus-within:ring-ring"
-        >
-          <button
-            type="button"
-            name="color"
-            aria-label="Fill colour"
-            aria-expanded={open}
-            title="Pick colour"
-            className="flex size-4.5 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
-            onClick={() => setOpen(!open)}
-          >
-            <Swatch color={color} className="size-4.5 rounded-sm" />
-          </button>
-          {node.token ? (
-            <span
-              className="min-w-0 flex-1 truncate pl-1 text-foreground"
-              title={`Variable: ${node.token}`}
-            >
-              {node.token}
-            </span>
-          ) : (
-            <Field
-              label="Fill hex colour"
-              value={hexLabel(node.color)}
-              placeholder={HEX.test(node.color) ? "" : node.color}
-              className="h-5 flex-1 bg-transparent px-1 shadow-none focus-within:ring-0"
-              inputClassName="uppercase"
-              onCommit={(value) => {
-                const hex =
-                  parseHex(value, node.color) ??
-                  (parseColor(value) ? toHex(parseColor(value)!) : null);
-                if (!hex) return "Use a hex colour such as A58BDD";
-                commit(hex);
-              }}
-            />
-          )}
-          <Field
-            label="Fill opacity"
-            numeric
-            disabled={!!node.token}
-            value={String(alphaPercent(color))}
-            className="h-5 w-12 shrink-0 bg-transparent px-0 shadow-none focus-within:ring-0"
-            inputClassName="text-right"
-            suffix="%"
-            onCommit={(value) => {
-              const n = Number(value);
-              const next = Number.isFinite(n) ? withAlpha(node.color, n) : null;
-              if (!next) return "Enter a percentage";
-              commit(next);
-            }}
-          />
-        </div>
-      </ColorPopover>
-      <IconButton
-        icon={hidden ? EyeOff : Eye}
-        label={hidden ? "Show layer" : "Hide layer"}
-        onClick={() => patchNodes(selection, () => ({ hidden: !hidden }))}
-      />
-    </div>
-  );
-}
-
 const ANIMATED = [
   { value: "", label: "None" },
   { value: "aurora", label: "Aurora" },
@@ -665,23 +555,26 @@ function FillSection({
               ? "Shader Fill"
               : "Background Fill"}
         </h3>
-        {node ? <VariableMenu doc={doc} node={node} selection={selection} /> : null}
+        {node ? <FillTools doc={doc} node={node} selection={selection} /> : null}
       </div>
       <div className="flex flex-col gap-2 px-3 pt-1 pb-2.75">
         <ShaderSettings node={node} selection={selection} />
         {node ? (
           <>
-            <PaintRow doc={doc} node={node} selection={selection} />
+            <PaintStack doc={doc} node={node} selection={selection} />
             <div className="grid grid-cols-2 gap-2">
-              <Caption label="Gradient">
-                <Field
-                  name="gradient"
-                  label="Gradient (CSS)"
-                  value={node.gradient}
-                  placeholder="linear-gradient(…)"
-                  onCommit={set("gradient")}
-                />
-              </Caption>
+              {/* Free-form CSS gradients (older documents, codec input) stay editable until cleared. */}
+              {node.gradient ? (
+                <Caption label="CSS gradient">
+                  <Field
+                    name="gradient"
+                    label="Gradient (CSS)"
+                    value={node.gradient}
+                    placeholder="linear-gradient(…)"
+                    onCommit={set("gradient")}
+                  />
+                </Caption>
+              ) : null}
               <Caption label="Animated">
                 <NativeSelect
                   name="animated"
@@ -877,7 +770,8 @@ function BorderSection({ doc, node, selection }: Props) {
           </ColorPopover>
         </Caption>
       </div>
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-2">
+        <BorderStyleSelect node={node} selection={selection} />
         <IconButton
           icon={SquareDashed}
           label="Independent border widths"
@@ -904,137 +798,6 @@ function BorderSection({ doc, node, selection }: Props) {
           prefixes={["T", "R", "B", "L"]}
         />
       ) : null}
-    </OptionalSection>
-  );
-}
-
-function ShadowSection({ node, selection }: Props) {
-  const [open, setOpen] = useOptional(node.id, !!node.shadow);
-  return (
-    <OptionalSection id="shadow-section" title="Shadow" open={open} onOpenChange={setOpen}>
-      <Field
-        name="shadow"
-        label="Box shadow (CSS)"
-        value={node.shadow}
-        placeholder="0 8px 24px #0003"
-        onCommit={(value) => setField(selection, node, "shadow", value)}
-      />
-    </OptionalSection>
-  );
-}
-
-function MaskSection({ node, selection }: Props) {
-  const [open, setOpen] = useOptional(node.id, !!node.mask);
-  return (
-    <OptionalSection id="mask-section" title="Mask" open={open} onOpenChange={setOpen}>
-      <Field
-        name="mask"
-        label="Mask gradient (CSS)"
-        value={node.mask}
-        placeholder="linear-gradient(black, transparent)"
-        onCommit={(value) => setField(selection, node, "mask", value)}
-      />
-    </OptionalSection>
-  );
-}
-
-function ExportSection({ node, selection }: Props) {
-  const [open, setOpen] = useOptional(node.id, false);
-  const [format, setFormat] = useState<ExportFormat>("PNG");
-  const [scale, setScale] = useState("2");
-  const [scope, setScope] = useState("selection");
-  const [name, setName] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("");
-  const fileName = name ?? node.name;
-  useEffect(() => {
-    setName(null);
-    setStatus("");
-  }, [node.id]);
-  const label = EXPORT_FORMATS.find((f) => f.value === format)!.label;
-  const run = async () => {
-    setBusy(true);
-    setStatus("");
-    try {
-      const count = scope === "selection" ? selection.length : 1;
-      const saved = await exportArtwork({
-        format,
-        scale: Number(scale),
-        selectionOnly: scope === "selection",
-        name: fileName,
-      });
-      if (!saved) return; // save dialog cancelled
-      const message = `Exported ${count} ${count === 1 ? "element" : "elements"}`;
-      setStatus(`${message} · ${saved}`);
-      toast.success(message, { id: "artwork-export", description: saved });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setStatus(message);
-      toast.error("Export failed", { id: "artwork-export", description: message });
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <OptionalSection id="export-section" title="Export" open={open} onOpenChange={setOpen}>
-      <div className="grid grid-cols-3 gap-2">
-        <Field
-          label="Export file name"
-          className="col-span-2"
-          value={fileName}
-          onCommit={(value) => setName(value.trim() || null)}
-        />
-        <NativeSelect
-          id="artwork-scope"
-          label="Export scope"
-          value={scope}
-          onChange={setScope}
-          options={[
-            { value: "selection", label: "Selection" },
-            { value: "page", label: "Page" },
-          ]}
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <NativeSelect
-          id="artwork-scale"
-          label="Export scale"
-          value={scale}
-          onChange={setScale}
-          options={EXPORT_SCALES.map((v) => ({
-            value: v,
-            label: v + "x",
-            disabled: format === "PDF" || format === "HTML" ? v !== "1" : false,
-          }))}
-        />
-        <NativeSelect
-          id="artwork-format"
-          label="Export format"
-          value={format}
-          onChange={(v) => {
-            setFormat(v as ExportFormat);
-            if (v === "PDF" || v === "HTML") setScale("1");
-          }}
-          options={EXPORT_FORMATS}
-        />
-      </div>
-      <button
-        type="button"
-        id="artwork-download"
-        disabled={busy}
-        className="flex h-6 items-center justify-center rounded-md bg-input text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-        onClick={run}
-      >
-        {busy ? "Exporting…" : `Export as ${label}`}
-      </button>
-      <p
-        id="artwork-status"
-        role="status"
-        className="truncate text-2xs text-subtle-foreground empty:hidden"
-        title={status}
-      >
-        {status}
-      </p>
     </OptionalSection>
   );
 }
@@ -1140,8 +903,10 @@ export function PropertiesBody({
       {node ? <SvgColorsSection key={node.id} doc={doc} node={node} selection={selection} /> : null}
       <FillSection doc={doc} node={node} selection={selection} />
       {node ? <BorderSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <ShadowSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <MaskSection doc={doc} node={node} selection={selection} /> : null}
+      {node ? <OutlineSection doc={doc} node={node} selection={selection} /> : null}
+      {node ? <ShadowSection key={"shadow-" + node.id} doc={doc} node={node} selection={selection} /> : null}
+      {node ? <FilterSection doc={doc} node={node} selection={selection} /> : null}
+      {node ? <MaskSection key={"mask-" + node.id} doc={doc} node={node} selection={selection} /> : null}
       {node ? <ExportSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <LayerSection doc={doc} node={node} selection={selection} /> : null}
       {!node ? <PageSection doc={doc} /> : null}
