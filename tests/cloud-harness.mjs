@@ -1,23 +1,92 @@
 // Local workerd configuration shared by the cloud tests (mirrors cloudflare.config.ts, with the
 // development email outbox instead of a live provider).
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
+import { Miniflare } from "miniflare";
 const root = new URL("../", import.meta.url);
-const MODULES = [
-  "cloud/worker.js",
-  "cloud/http.js",
-  "cloud/rooms.js",
-  "cloud/accounts.js",
-  "cloud/apps.js",
-  "cloud/mail.js",
-  "cloud/pages.js",
-  "cloud/webauthn.js",
-  "cloud/passkey-page.js",
-  "web/cloud-ops.js",
-];
+const BUNDLE = new URL(".cloudflare/output/v0/workers/default/bundle/", root);
+const MIGRATIONS = new URL("cloud/migrations/", root);
+const D1 = { type: "d1", id: "verynize-local", name: "verynize" };
+export const AUTH_SECRET = "local-test-secret-not-for-production-0000";
+
+// The Worker imports npm packages (Better Auth), so tests run the same bundle that
+// `cf deploy --prebuilt` uploads. It is built once per test process.
+let built;
+function buildWorker() {
+  built ||= Promise.resolve().then(async () => {
+    execFileSync(
+      process.execPath,
+      [new URL("node_modules/vite-plus/bin/vp", root).pathname, "build"],
+      {
+        cwd: root,
+        stdio: "pipe",
+      },
+    );
+    const modules = {};
+    for (const file of await fs.readdir(BUNDLE, { recursive: true }))
+      if (file.endsWith(".js"))
+        modules[file] = { type: "esm", contents: await fs.readFile(new URL(file, BUNDLE), "utf8") };
+    return modules;
+  });
+  return built;
+}
+
+/**
+ * Applies cloud/migrations to the persisted local D1 database, recording them in d1_migrations
+ * like `cf d1 migrations apply`, so tests that restart Miniflare on the same state keep their data.
+ */
+async function migrate(persistence) {
+  const mf = new Miniflare({
+    resourcePersistencePath: persistence,
+    workers: [
+      {
+        config: {
+          name: "migrations",
+          compatibilityDate: "2026-10-28",
+          manifest: {
+            mainModule: "index.js",
+            modules: {
+              "index.js": {
+                type: "esm",
+                contents: "export default {fetch(){return new Response()}}",
+              },
+            },
+          },
+          env: { DB: D1 },
+        },
+      },
+    ],
+  });
+  try {
+    const db = await mf.getD1Database("DB");
+    await db.exec(
+      "CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)",
+    );
+    const applied = new Set(
+      (await db.prepare("SELECT name FROM d1_migrations").all()).results.map((row) => row.name),
+    );
+    for (const name of (await fs.readdir(MIGRATIONS))
+      .filter((file) => file.endsWith(".sql"))
+      .sort()) {
+      if (applied.has(name)) continue;
+      const sql = await fs.readFile(new URL(name, MIGRATIONS), "utf8");
+      const statements = sql
+        .replace(/^--.*$/gm, "")
+        .split(";")
+        .map((statement) => statement.trim())
+        .filter(Boolean);
+      await db.batch([
+        ...statements.map((statement) => db.prepare(statement)),
+        db.prepare("INSERT INTO d1_migrations (name) VALUES (?)").bind(name),
+      ]);
+    }
+  } finally {
+    await mf.dispose();
+  }
+}
+
 export async function cloudOptions(persistence, extra = {}) {
-  const modules = {};
-  for (const name of MODULES)
-    modules[name] = { type: "esm", contents: await fs.readFile(new URL(name, root), "utf8") };
+  const [modules] = await Promise.all([buildWorker(), migrate(persistence)]);
   return {
     resourcePersistencePath: persistence,
     ...extra,
@@ -26,7 +95,8 @@ export async function cloudOptions(persistence, extra = {}) {
         config: {
           name: "verynize",
           compatibilityDate: "2026-10-28",
-          manifest: { mainModule: "cloud/worker.js", modules },
+          compatibilityFlags: ["nodejs_compat"],
+          manifest: { mainModule: "index.js", modules },
           env: {
             ROOM_CREATION: {
               type: "rate-limit",
@@ -45,6 +115,8 @@ export async function cloudOptions(persistence, extra = {}) {
               exportName: "AccountDirectory",
             },
             APPS: { type: "durable-object", worker: "verynize", exportName: "PublishedApp" },
+            DB: D1,
+            BETTER_AUTH_SECRET: { type: "text", value: AUTH_SECRET },
             EMAIL_PROVIDER: { type: "text", value: "outbox" },
           },
           exports: {

@@ -21,6 +21,7 @@ Updated 2026-10-30. This records actual implementation and tests, not a claim th
 - Collaboration: private capability rooms, persisted SQLite snapshots, WebSocket updates, names/cursors, reconnect, explicit conflict choice. Two real Electron clients exercised these against local workerd.
 - Publishing: frozen read-only snapshots, access checks, unpublish/revocation. Tested locally, not deployed.
 - Cloudflare: cf build/deployment dry run passes with Durable Object and rate-limit bindings. No production deployment occurred.
+- Better Auth foundation (phase 0): email + password accounts, required email verification, password reset, bearer-only sessions and organizations with invitations, stored in D1 (`cloud/auth.js`, `cloud/migrations`). Verified on local workerd by tests/cloud-auth.mjs. It runs beside the legacy `AccountDirectory` accounts; the desktop UI and room roles do not use it yet. Real email delivery and a live D1 database are unverified.
 
 - Figma REST adapter: supported file/selection hierarchy, text, layout, paints and bitmap fills; conversion/request tests pass. Live authenticated import remains unverified.
 - Illustration generation: actual Codex produced a valid SVG through the app generation service. SVG sanitization and PNG/raster tracing are tested in Electron. Raster tracing emits real quantized vector paths, not embedded images.
