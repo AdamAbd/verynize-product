@@ -1,3 +1,4 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 // Session-based chat runtime for the in-app agent panel.
 //
 //  * Claude runs through @anthropic-ai/claude-agent-sdk `query()` using the user's installed Claude
@@ -1291,7 +1292,7 @@ function registerAgentRuntime(handle, win, { userData, getProject, resolveProjec
   handle('designPreferencesSave', async text => (await preferenceStore()).save(validPreference(text)));
   handle('designPreferencesUpdate', async (id, text) => (await preferenceStore()).update(validPreferenceId(id), validPreference(text)));
   handle('designPreferencesRemove', async id => (await preferenceStore()).remove(validPreferenceId(id)));
-  win.on('closed', () => runtime.close());
+  onWindowClosed(win, () => runtime.close());
   return runtime;
 }
 function validPreference(text) {

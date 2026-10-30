@@ -1,3 +1,4 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 const path=require('node:path');
 const fs=require('node:fs');
 const {promises:fsp}=fs;
@@ -27,6 +28,6 @@ function registerDesignFiles(handle,parent){const {dialog}=require('electron');c
   if(generation!==files.generation)return null;return files.save(options.document,destination,generation);
  });
  handle('designDetach',()=>{files.detach();return true;});
- handle('designReload',()=>files.reload());parent.once('closed',()=>files.close());return files;
+ handle('designReload',()=>files.reload());onWindowClosed(parent,()=>files.close());return files;
 }
 module.exports={DesignFileSession,registerDesignFiles};

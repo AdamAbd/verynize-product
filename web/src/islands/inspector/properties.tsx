@@ -348,7 +348,12 @@ function VariableMenu({ doc, node, selection }: Props) {
         {node.token ? (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => setField(selection, node, "token", "")}>
+            <DropdownMenuItem
+              onSelect={() => {
+                const colors = window.design.getDocument().tokens ?? {};
+                patchNodes(selection, (n) => ({ color: colors[n.token] ?? n.color, token: "" }));
+              }}
+            >
               Detach variable
             </DropdownMenuItem>
           </>

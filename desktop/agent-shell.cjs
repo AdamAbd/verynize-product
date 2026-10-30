@@ -1,3 +1,4 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 /**
  * Agent shell host (desktop main process)
  * =======================================
@@ -41,7 +42,7 @@ const projects = new Map(); // webContents.id -> getProject
 function registerShellWindow(win, { getProject } = {}) {
   const id = win.webContents.id;
   projects.set(id, typeof getProject === 'function' ? getProject : () => null);
-  win.on('closed', () => projects.delete(id));
+  onWindowClosed(win, () => projects.delete(id));
 }
 
 let manager = null;

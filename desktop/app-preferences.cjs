@@ -1,3 +1,4 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 /**
  * Native side of Settings › Preferences (desktop main process)
  * ============================================================
@@ -81,7 +82,7 @@ const looksLikeMp3 = bytes => bytes.length >= 3 && ((bytes[0] === 0x49 && bytes[
 function registerAppPreferences(handle, win, { app, dialog, registry, userData }) {
   if (!appRef) appRef = app;
   const soundFile = path.join(userData, 'sounds', 'custom.mp3');
-  win.on('closed', () => ready.delete(win));
+  onWindowClosed(win, () => ready.delete(win));
 
   handle('soundChoose', async () => {
     const result = await dialog.showOpenDialog(win, { title: 'Choose an MP3 file', properties: ['openFile'], filters: [{ name: 'MP3 audio', extensions: ['mp3'] }] });

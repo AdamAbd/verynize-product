@@ -4,7 +4,7 @@
 // codecs and MCP keep working unchanged. Mirrors integrations/design-store.mjs + design-edit.mjs (syncVariables).
 import type { DesignDocument } from "@/lib/bridge";
 import { notify } from "./legacy";
-import { patchNodes, type Node } from "./model";
+import { patchNodes, scalarOverrides, type Node } from "./model";
 
 export type VariableType = "dimension" | "number" | "fontFamily" | "fontWeight";
 export type Variable = { type: VariableType; value: number | string };
@@ -225,7 +225,13 @@ export function bindVariable(
     const b = { ...bindingsOf(n) };
     if (name) b[key] = name;
     else delete b[key];
-    return { bindings: Object.keys(b).length ? b : undefined, ...(name ? { [key]: value } : {}) };
+    // Per-side/axis values take precedence in the renderer. A newly bound scalar must become
+    // visible immediately, just as entering a scalar value does. Preserve the independent
+    // cross-axis gap; the bindable gap field edits the flex main axis (columns for a grid).
+    return {
+      bindings: Object.keys(b).length ? b : undefined,
+      ...(name ? { [key]: value, ...scalarOverrides(n, key) } : {}),
+    };
   });
 }
 
@@ -242,8 +248,18 @@ export function variablesCss(doc: DesignDocument): string {
       .replace(/[^a-zA-Z0-9_-]+/g, "-")
       .replace(/^-+|-+$/g, "");
   const lines: string[] = [];
-  for (const [name, value] of Object.entries(doc.tokens ?? {}))
-    lines.push(`  ${cssVar(name)}: ${value};`);
+  const names = new Map<string, string>();
+  const add = (name: string, value: string) => {
+    const identifier = cssVar(name);
+    const previous = names.get(identifier);
+    if (previous !== undefined)
+      throw new Error(
+        `Variables “${previous}” and “${name}” both export as ${identifier}. Rename one before exporting CSS.`,
+      );
+    names.set(identifier, name);
+    lines.push(`  ${identifier}: ${value};`);
+  };
+  for (const [name, value] of Object.entries(doc.tokens ?? {})) add(name, value);
   for (const [name, v] of Object.entries(variablesOf(doc))) {
     if (!validValue(v.type, v.value)) continue;
     const family = String(v.value).trim();
@@ -255,7 +271,7 @@ export function variablesCss(doc: DesignDocument): string {
             ? family
             : `'${family.replace(/['\\]/g, "")}'`
           : String(v.value);
-    lines.push(`  ${cssVar(name)}: ${value};`);
+    add(name, value);
   }
   return lines.length ? `:root {\n${lines.join("\n")}\n}\n` : "";
 }

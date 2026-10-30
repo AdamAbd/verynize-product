@@ -1,3 +1,4 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 /**
  * Verynize live MCP bridge (desktop main process)
  * ====================================================
@@ -85,7 +86,7 @@ function registerWindow(win, { designFiles = null, entryURL } = {}) {
     entry.pending.delete(requestId); clearTimeout(pending.timer);
     if (payload.ok) pending.resolve(payload.result); else pending.reject(new Error(typeof payload.error === 'string' ? payload.error.slice(0, 2000) : 'Editor request failed'));
   });
-  win.on('closed', () => { for (const pending of entry.pending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Editor window closed')); } windows.delete(id); if (lastFocused === id) lastFocused = null; });
+  onWindowClosed(win, () => { for (const pending of entry.pending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Editor window closed')); } windows.delete(id); if (lastFocused === id) lastFocused = null; });
 }
 
 function activeEditor() {

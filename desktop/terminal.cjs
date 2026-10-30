@@ -1,3 +1,4 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 /**
  * Integrated terminal (desktop main process)
  * ==========================================
@@ -256,7 +257,7 @@ function registerTerminal(handle, win, { getProject } = {}) {
     return { id: term.id, cwd: term.cwd, text: plainTerminalText(term.recent).slice(-RECENT_LIMIT) };
   });
 
-  win.on('closed', () => { killTerminals(terminals.values()); terminals.clear(); });
+  onWindowClosed(win, () => { killTerminals(terminals.values()); terminals.clear(); });
   return { count: () => terminals.size, killAll: () => killTerminals(terminals.values()) };
 }
 

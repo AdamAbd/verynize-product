@@ -1,3 +1,4 @@
+const {onWindowClosed}=require('./window-cleanup.cjs');
 const {BrowserWindow, dialog, webFrameMain, shell} = require('electron');
 const fs = require('node:fs/promises');
 function localURL(value) {
@@ -70,7 +71,7 @@ async function finishSnapshot(snapshot,origin,extraWarnings=[]){
 }
 function registerPreview(handle, parent) {
   const windows = new Set();
-  parent.on('closed',()=>{for(const window of windows)if(!window.isDestroyed())window.destroy();});
+  onWindowClosed(parent,()=>{for(const window of windows)if(!window.isDestroyed())window.destroy();});
   handle('previewApp', async ({url,width=1200,height=800,capture=false,region=null}) => {
     const target=localURL(url);
     width=Math.max(320,Math.min(1920,Number(width)||1200));height=Math.max(320,Math.min(1400,Number(height)||800));

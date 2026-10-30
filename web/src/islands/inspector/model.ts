@@ -139,6 +139,21 @@ export function normalize(
 /** Keys that only make sense on one layer at a time. */
 const SINGLE = new Set(["name", "text", "parentId"]);
 
+/** Clear values that override a uniform property in the renderer. Keep the independent gap axis. */
+export function scalarOverrides(node: Node, key: string): Record<string, undefined> {
+  const overrides =
+    key === "radius"
+      ? ["cornerRadii"]
+      : key === "strokeWidth"
+        ? ["strokeWidths"]
+        : key === "padding"
+          ? ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"]
+          : key === "gap"
+            ? [node.layout === "flex" && node.direction === "column" ? "gapY" : "gapX"]
+            : [];
+  return Object.fromEntries(overrides.map((override) => [override, undefined]));
+}
+
 /**
  * Write one field to the selection through `window.design.updateNodes` (validated, one undo step).
  * Returns an error message when the value is rejected.
@@ -159,7 +174,7 @@ export function setField(
   try {
     window.design.updateNodes(ids, (n) => {
       const node = n as Node;
-      const patch: Record<string, unknown> = {};
+      const patch: Record<string, unknown> = scalarOverrides(node, key);
       if (key === "text") patch.textRuns = [];
       if (key === "w" && node.wMode && node.wMode !== "fixed") patch.wMode = "fixed";
       if (key === "h" && node.hMode && node.hMode !== "fixed") patch.hMode = "fixed";
