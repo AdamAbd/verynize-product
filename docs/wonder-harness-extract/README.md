@@ -4,9 +4,9 @@ Extracted 2026-10-30 from local evidence only (Wonder 0.2.190). These texts are 
 
 | File | Content | Source |
 |---|---|---|
-| `01-design-fundamentals.md` | Design Fundamentals (Direction, Layout, Spacing, Typography, Color, Contrast, Content) | `get_design_context` results in saved Wonder sessions (`~/.claude/projects/*wonder*`) |
+| `01-design-fundamentals.md` | Design Fundamentals (Direction, Layout, Spacing, Typography, Color, Contrast, Content) | `get_design_context` results in saved Wonder agent transcripts |
 | `02-skills.md` | Full text of the `new-design`, `edit-design`, `design-to-code`, `code-to-design` and `design-library` skills | `get_skills` results in the same sessions |
-| `03-persona-and-preferences.md` | The always-on persona rules, design-preference tools and blocks, and agent memory blocks | `~/Library/Application Support/Wonder/agent-text.json` |
+| `03-persona-and-preferences.md` | The always-on persona rules, design-preference tools and blocks, and agent memory blocks | Wonder's cached `agent-text.json` |
 | `04-chat-suggestion-style-briefs.md` | 13 sample starter prompts (style briefs, not rules) | same `agent-text.json` |
 | `05-design-guidelines-catalog.md` | `get_design_guidelines` and `get_skills` tool definitions (description + input schema), the 31 style slugs, and how a style result is put together | live call through the Wonder app agent, 2026-10-30; schemas from the session's `deferred_tools_record` |
 | `06-design-styles/<slug>.md` | Style section of `get_design_guidelines` for each of the 31 styles, verbatim (the live result is the 01 fundamentals + `---` + this section) | same live session |

@@ -1,6 +1,6 @@
 # Wonder Weekly AI layers — research report
 
-Investigated 2026-10-30. Installed and extracted desktop versions both verified as **0.2.190**. During the investigation, no application, profile, or repository files were modified; no GUI interaction or canvas mutation was performed. Public assets and this report were saved only under `/tmp/wonder-quota-research/`. Target JavaScript was read as data, never executed.
+Investigated 2026-10-30. Installed and extracted desktop versions both verified as **0.2.190**. During the investigation, no application, profile, or repository files were modified; no GUI interaction or canvas mutation was performed. Public assets and this report were saved only in a temporary local folder. Target JavaScript was read as data, never executed.
 
 **Main result:** The quota is workspace-scoped, server-reported, and enforced by remote MCP refusals. The UI data flow and Free/Pro limits are confirmed. The exact server-side increment algorithm is **not recovered**; calling an operation “layer-related” or observing it blocked does not prove it consumes a layer.
 
@@ -17,7 +17,7 @@ Transcript correlation was attempted. The portfolio transcript has one `create_a
 
 ## B. Endpoint → store → UI
 
-All asset paths below are under `/tmp/wonder-quota-research/`; public originals use `https://app.wonder.so/assets/<filename>`.
+Asset filenames below refer to public originals at `https://app.wonder.so/assets/<filename>`.
 
 1. **Confirmed:** `env-DcYs8r-c.js:1` defines `https://api.wonder.so/api/v1`.
 2. **Confirmed:** `paths-dSUDceng.js:1` exports the organization path builder: `` `/organizations/${encodeURIComponent(e)}` ``.
@@ -58,14 +58,14 @@ All asset paths below are under `/tmp/wonder-quota-research/`; public originals 
 - **Confirmed wording; inferred inclusion:** Enterprise says **“Everything in Pro, plus”** on https://wonder.design/pricing. This supports unlimited layers for Enterprise, but no separate Enterprise quota configuration or contract was inspected.
 - **Confirmed:** Allowance is workspace/organization scoped, not the Claude account quota. Billing fetches use `orgSlug`; refusals carry `organizationId`. Claude usage and context usage are separate sources.
 - **Strong inference:** Weekly windows are anchored to workspace creation, not a universal weekday or the first recorded generation. Two independent anchors match to the minute:
-  - Exhausted workspace UUIDv7 `01a180c4-585f-77c2-82ee-455264451f7e` embeds 2026-10-28 11:28:33.759 Asia/Jakarta. Its server error names reset **2026-11-04 11:28 Asia/Jakarta**, seven days later.
-  - Portfolio workspace UUIDv7 `01a1869b-a6b9-7930-bebe-92e5ee4a6a41` embeds 2026-10-29 14:41:50.137 Asia/Jakarta, matching the reported **Thu 2:41 PM**. Its first recorded `create_artboard` was 15:52:58 that day, later than the apparent anchor.
+  - Exhausted workspace's UUIDv7 ID embeds 2026-10-28 11:28:33.759 Asia/Jakarta. Its server error names reset **2026-11-04 11:28 Asia/Jakarta**, seven days later.
+  - Portfolio workspace's UUIDv7 ID embeds 2026-10-29 14:41:50.137 Asia/Jakarta, matching the reported **Thu 2:41 PM**. Its first recorded `create_artboard` was 15:52:58 that day, later than the apparent anchor.
   UUID timestamps establish ID-generation times, not a formal `createdAt` field. Recurrence across multiple reset cycles, missed weeks, timezone/DST behavior, and server initialization logic remain unverified. Do not call this a continuously rolling seven-day lookback.
 
 ## D. Exhaustion and agent-facing text
 
 **Confirmed runtime evidence:**
-`/Users/adamabdurrahman/.claude/projects/-Users-adamabdurrahman-wonder-workspaces-belajar-wonder-piranha/e85c1bff-f0f7-47b6-a99d-3b745cb43274.jsonl`, lines **1137–1146**: three `update_elements` calls containing only delete/edit directives were refused with `is_error: true`.
+A saved Wonder agent transcript (workspace that hit the limit), lines **1137–1146**: three `update_elements` calls containing only delete/edit directives were refused with `is_error: true`.
 
 Exact error:
 > Your agents have made 3,000 layers this week on the Free plan. Upgrade this workspace to Pro for unlimited layers, or wait until November 4, 2026 at 11:28 Asia/Jakarta time.
@@ -80,7 +80,7 @@ Structured metadata at `mcpMeta._meta["so.wonder/refusal"]`:
 **Do not infer an observed HTTP 402 status:** the transcript records an MCP tool error and classification, not the transport's HTTP status.
 
 A second transcript confirms an insert attempt was also blocked:
-`/Users/adamabdurrahman/.claude/projects/-Users-adamabdurrahman-Library-Application-Support-Wonder-agent-workdirs-63fa385d-890f-4906-b0c5-6fd4dbe6671c/787119cd-6879-41f6-8571-efbc5096159d.jsonl`, lines **44–45**. A button div and label span could not be inserted. Prior token creation had succeeded in that session; no blanket block on all MCP tools is established.
+A saved Wonder agent transcript (desktop agent workdir), lines **44–45**. A button div and label span could not be inserted. Prior token creation had succeeded in that session; no blanket block on all MCP tools is established.
 
 **Confirmed UI:** shows `You've used this week's AI layers` and `Keep chatting, or get unlimited layers with Pro.` Warning begins at 80%; exhausted meter says `Limit reached`. Client rechecks a refusal at the server-provided reset time plus roughly one minute; it does not locally reset the server counter. Source: renderer line 18 and `cmd-sTqBjYnv.js:7`, `md` / notice manager.
 
