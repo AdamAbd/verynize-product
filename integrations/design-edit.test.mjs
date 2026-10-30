@@ -324,3 +324,54 @@ test('remote <img> keeps its URL as srcRemote with a pending asset status', () =
   const next = changed.document.pages[0].nodes.find(n => n.id === img.id);
   assert.equal(next.srcRemote, 'https://images.example.com/other.jpg'); assert.equal(next.assetStatus, 'pending'); assert.equal(next.src, undefined);
 });
+
+test('reversed flex, grid rows, cell alignment and row spans round-trip and lay out', () => {
+  const JSX = `<div data-node-label="Board" data-component-x="0" data-component-y="0" className="flex flex-col gap-0 w-[400px]">
+  <div className="flex flex-row-reverse gap-[10px] w-[300px] h-[50px]">
+    <div className="w-[50px] h-[50px] bg-[#ff0000]" />
+    <div className="w-[50px] h-[50px] bg-[#00ff00]" />
+  </div>
+  <div className="grid grid-cols-2 grid-rows-2 justify-items-center items-end gap-[0px] w-[200px] h-[200px]">
+    <div className="w-[40px] h-[40px] bg-[#0000ff]" />
+    <div className="row-span-2 w-[40px] h-[40px] bg-[#ffff00]" />
+  </div>
+</div>`;
+  const { document, roots, warnings, page } = createArtboards(blank(), 'p1', JSX);
+  validateDocument(document);
+  assert.doesNotMatch(warnings.join('\n'), /reverse|grid-template-rows|grid-row|justify-items/);
+  const index = indexPage(page), [row, grid] = index.children(roots[0].id), [a, b] = index.children(row.id), [cell, tall] = index.children(grid.id);
+  assert.equal(row.reverse, true); assert.equal(row.direction, 'row');
+  assert.deepEqual([grid.rows, grid.justifyItems, grid.alignItems, tall.rowSpan], [2, 'center', 'flex-end', 2]);
+  // row-reverse mirrors the forward layout: the first child sits at the right edge.
+  assert.deepEqual([a.x, b.x], [250, 190]);
+  // Cell alignment: centered in its 100px column, at the bottom of the first 100px row.
+  assert.deepEqual([cell.x, cell.y], [30, 60]);
+  const code = stripIds(elementCode(document, page, roots[0]));
+  assert.match(code, /flex-row-reverse/); assert.match(code, /grid-rows-2/); assert.match(code, /justify-items-center/); assert.match(code, /row-span-2/);
+});
+
+test('constraints in free frames round-trip as insets and lay out', async () => {
+  const { constraintsOf } = await import('./node-style.mjs');
+  const JSX = `<div data-node-label="Board" data-component-x="0" data-component-y="0" className="layout-free w-[400px] h-[300px]">
+  <div className="absolute right-[16px] top-[20px] w-[80px] h-[40px] bg-[#ff0000]" />
+  <div className="absolute left-1/2 -translate-x-1/2 top-[10px] w-[100px] h-[20px] bg-[#00ff00]" />
+  <div className="absolute left-[10px] right-[10px] bottom-[0px] h-[30px] bg-[#0000ff]" />
+  <div className="absolute left-[25%] top-[50%] w-[50%] h-[10px] bg-[#ffff00]" />
+  <div className="absolute left-[5px] top-[6px] w-[10px] h-[10px] bg-[#00ffff]" />
+</div>`;
+  const { document, roots, warnings, page } = createArtboards(blank(), 'p1', JSX);
+  validateDocument(document);
+  assert.doesNotMatch(warnings.join('\n'), /approximated/);
+  const index = indexPage(page), [right, center, stretch, scale, plain] = index.children(roots[0].id);
+  assert.deepEqual([right, center, stretch, scale, plain].map(n => constraintsOf(n)), [
+    { h: 'end', v: 'start' }, { h: 'center', v: 'start' }, { h: 'stretch', v: 'end' }, { h: 'scale', v: 'scale' }, { h: 'start', v: 'start' }]);
+  assert.equal(plain.inset, undefined, 'plain left/top stays x/y');
+  assert.deepEqual([plain.x, plain.y], [5, 6]);
+  assert.deepEqual([right.x, right.y], [304, 20], 'right-pinned layers lay out from the right edge');
+  assert.deepEqual([center.x, stretch.x, stretch.w, stretch.y], [150, 10, 380, 270]);
+  assert.deepEqual([scale.x, scale.y, scale.w], [100, 150, 200]);
+  const code = stripIds(elementCode(document, page, roots[0]));
+  assert.match(code, /right-4/); assert.match(code, /left-1\/2/); assert.match(code, /-translate-x-1\/2/); assert.match(code, /right-2\.5 bottom-0 left-2\.5 h-\[30px\]/, 'Left & Right exports both insets and no width'); assert.match(code, /left-1\/4/);
+  const again = createArtboards(blank(), 'p1', code), [r2, c2, s2, sc2, p2] = indexPage(again.page).children(again.roots[0].id);
+  assert.deepEqual([r2, c2, s2, sc2, p2].map(n => constraintsOf(n)), [right, center, stretch, scale, plain].map(n => constraintsOf(n)), 'constraints survive export and import');
+});

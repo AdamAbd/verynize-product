@@ -70,7 +70,9 @@ export function defaultSizing(node, parent) {
   const canHug = node.type === 'text' || node.type === 'frame';
   const h = canHug ? 'hug' : 'fixed';
   if (!parent) return { w: 'fixed', h };
-  if (node.position === 'absolute') {
+  const freeParent = !parent.layout || parent.layout === 'free';
+  // Absolute children of flow frames, and children of free frames anchored by insets (constraints).
+  if (freeParent ? Array.isArray(node.inset) && node.inset.some(v => v !== null && v !== undefined) : node.position === 'absolute') {
     const inset = Array.isArray(node.inset) ? node.inset : [];
     const set = i => inset[i] !== null && inset[i] !== undefined;
     return { w: set(1) && set(3) ? 'fill' : canHug ? 'hug' : 'fixed', h: set(0) && set(2) ? 'fill' : h };
@@ -195,8 +197,11 @@ function declaredTextClasses(style, tokens) {
 
 function classesFor(node, { parent, isRoot, tokens, ancestors }) {
   const c = [];
-  const positionedFree = !isRoot && (!parent || !parent.layout || parent.layout === 'free');
-  const absolute = !isRoot && !positionedFree && node.position === 'absolute';
+  const freeParent = !isRoot && (!parent || !parent.layout || parent.layout === 'free');
+  // Children of free frames with constraints (insets) export their anchoring; the rest keep left/top from x/y.
+  const anchoredFree = freeParent && !!parent && Array.isArray(node.inset) && node.inset.some(v => v !== null && v !== undefined);
+  const positionedFree = freeParent && !anchoredFree;
+  const absolute = !isRoot && !positionedFree && (anchoredFree || node.position === 'absolute');
   if (positionedFree) c.push('absolute', `left-[${round(node.x)}px]`, `top-[${round(node.y)}px]`);
   if (absolute) {
     c.push('absolute');
@@ -211,8 +216,8 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
   // Layout
   if (node.type === 'frame') {
     const layout = node.layout || 'free';
-    if (layout === 'flex') { c.push('flex'); if (node.direction === 'column') c.push('flex-col'); if (node.flexWrap) c.push('flex-wrap'); }
-    else if (layout === 'grid') c.push('grid', `grid-cols-${Math.max(1, Math.floor(node.columns) || 2)}`);
+    if (layout === 'flex') { c.push('flex'); if (node.direction === 'column') c.push(node.reverse ? 'flex-col-reverse' : 'flex-col'); else if (node.reverse) c.push('flex-row-reverse'); if (node.flexWrap) c.push('flex-wrap'); }
+    else if (layout === 'grid') { c.push('grid', `grid-cols-${Math.max(1, Math.floor(node.columns) || 2)}`); if (Number(node.rows) >= 1) c.push(`grid-rows-${Math.floor(node.rows)}`); }
     else if (layout === 'inline') c.push('inline-flow');
     else if (layout === 'free') c.push('layout-free');
     if (layout !== 'free') {
@@ -222,6 +227,7 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
       if (layout === 'flex' || layout === 'grid') {
         const items = { 'flex-start': 'start', 'flex-end': 'end', center: 'center', baseline: 'baseline' }[node.alignItems]; if (items) c.push(`items-${items}`);
         const justify = { 'flex-end': 'end', center: 'center', 'space-between': 'between', 'space-around': 'around', 'space-evenly': 'evenly' }[node.justifyContent]; if (justify) c.push(`justify-${justify}`);
+        const cells = { 'flex-start': 'start', start: 'start', 'flex-end': 'end', end: 'end', center: 'center', stretch: 'stretch' }[node.justifyItems]; if (layout === 'grid' && cells) c.push(`justify-items-${cells}`);
       }
       c.push(...sides('p', [node.paddingTop, node.paddingRight, node.paddingBottom, node.paddingLeft].map(v => Number(v ?? node.padding) || 0), (p, v) => `${p}-${space(v)}`));
     }
@@ -249,6 +255,7 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
     const self = { 'flex-start': 'start', 'flex-end': 'end', center: 'center', stretch: 'stretch', baseline: 'baseline' }[node.alignSelf]; if (self) c.push(`self-${self}`);
   }
   if (node.colSpan !== undefined && parent?.layout === 'grid') c.push(node.colSpan === 'full' ? 'col-span-full' : `col-span-${node.colSpan}`);
+  if (node.rowSpan !== undefined && parent?.layout === 'grid') c.push(`row-span-${node.rowSpan}`);
   for (const [key, prefix] of [['minW', 'min-w'], ['maxW', 'max-w'], ['minH', 'min-h'], ['maxH', 'max-h']]) {
     const v = node[key]; if (v === undefined || v === null) continue;
     if (typeof v === 'string') c.push(`${prefix}-${pctSuffix(Number(v.slice(0, -1)))}`);

@@ -14,7 +14,7 @@
 //   block  CSS block flow (display: flow-root, so child margins never escape the frame; adjacent
 //          sibling margins collapse like CSS); gapY = space-y
 //   flex   flexbox with gap/gapX/gapY, wrap, grow/shrink/basis, align-self, auto margins
-//   grid   equal columns with col-span
+//   grid   equal columns (optional equal rows) with col-span / row-span; justifyItems aligns cells
 //   inline children are inline-block
 (function (root) {
   'use strict';
@@ -40,9 +40,88 @@
   }
   function sizingMode(n, axis, parent) {
     const mode = n[axis === 'w' ? 'wMode' : 'hMode'] || 'fixed';
+    // A Left & Right (Top & Bottom) constraint stretches the layer between both insets, in any parent.
+    if (mode === 'fill' && anchored(n, parent) && pinnedBoth(n, axis)) return 'fill';
     return sizingAllowed(n, parent, mode) ? mode : 'fixed';
   }
   const inFlow = (n, parent) => !!parent && parent.layout !== 'free' && n.position !== 'absolute';
+
+  // ---------- Constraints ----------
+  // Constraints are CSS anchoring of an absolutely positioned child (a child of a free frame, or an
+  // absolute child of a flow frame). They live in the same fields the Tailwind codec uses, so they
+  // export and re-import as written: `inset` [top, right, bottom, left] (px or 'N%') and `translate`.
+  //   start   (Left/Top)          left inset, or no insets at all (x/y)
+  //   end     (Right/Bottom)      right inset only
+  //   stretch (Left & Right)      both insets, sizing mode fill (width auto between them)
+  //   center  (Center)            left 50% + translate (-50% when exactly centered, else a px offset)
+  //   scale   (Scale)             percentage inset + wPct/hPct
+  // Insets are measured inside the parent's border (its padding box, the CSS containing block).
+  const isSet = v => v !== null && v !== undefined;
+  const isPct = v => typeof v === 'string' && v.endsWith('%');
+  const hasInset = n => Array.isArray(n.inset) && n.inset.some(isSet);
+  /** Whether a layer is positioned by insets (and so has constraints). */
+  function anchored(n, parent) {
+    if (!parent) return false;
+    return parent.layout !== 'free' ? n.position === 'absolute' : hasInset(n);
+  }
+  const AXES = {h: {start: 3, end: 1, t: 0, size: 'w', pct: 'wPct', mode: 'wMode'}, v: {start: 0, end: 2, t: 1, size: 'h', pct: 'hPct', mode: 'hMode'}};
+  const pinnedBoth = (n, axis) => { const a = AXES[axis === 'w' ? 'h' : 'v']; return Array.isArray(n.inset) && isSet(n.inset[a.start]) && isSet(n.inset[a.end]); };
+  /** The constraint per axis: {h, v} each 'start' | 'end' | 'stretch' | 'center' | 'scale'. */
+  function constraintsOf(n) {
+    const ins = Array.isArray(n.inset) ? n.inset : [], tr = Array.isArray(n.translate) ? n.translate : [];
+    const read = a => {
+      const s = ins[a.start], e = ins[a.end];
+      if (s === '50%' && !isSet(e) && isSet(tr[a.t])) return 'center';
+      if (isPct(s) || isPct(e)) return 'scale';
+      if (isSet(s) && isSet(e)) return 'stretch';
+      return isSet(e) ? 'end' : 'start';
+    };
+    return {h: read(AXES.h), v: read(AXES.v)};
+  }
+  /**
+   * Insets for constraints that keep a layer where it is. `box` is its geometry inside the parent's
+   * padding box ({x, y, w, h}); `cb` the padding box size ({w, h}). Returns a patch (null = remove).
+   */
+  function anchorPatch(n, constraints, box, cb) {
+    const r2 = v => Math.round(v * 100) / 100, pct = (v, total) => r2(total ? v / total * 100 : 0) + '%';
+    const inset = [null, null, null, null], translate = [null, null], patch = {};
+    for (const key of ['h', 'v']) {
+      const a = AXES[key], c = constraints[key] || 'start', pos = key === 'h' ? box.x : box.y, size = box[a.size], total = cb[a.size];
+      patch[a.pct] = null;
+      if (c === 'stretch') patch[a.mode] = 'fill';
+      else if (n[a.mode] === 'fill' || (c === 'scale' && n[a.mode] !== 'fixed')) { patch[a.mode] = 'fixed'; patch[a.size] = r2(size); }
+      if (c === 'start') inset[a.start] = r2(pos);
+      else if (c === 'end') inset[a.end] = r2(total - pos - size);
+      else if (c === 'stretch') { inset[a.start] = r2(pos); inset[a.end] = r2(total - pos - size); }
+      else if (c === 'center') { inset[a.start] = '50%'; const off = pos + size / 2 - total / 2; translate[a.t] = Math.abs(off) < 0.5 ? '-50%' : r2(pos - total / 2); }
+      else if (c === 'scale') { inset[a.start] = pct(pos, total); patch[a.pct] = r2(total ? size / total * 100 : 100); }
+    }
+    // Plain Left/Top is the x/y default: no insets at all.
+    const plain = constraints.h === 'start' && constraints.v === 'start';
+    patch.inset = plain ? null : inset;
+    patch.translate = translate.some(isSet) ? translate : null;
+    return patch;
+  }
+  /**
+   * Where the insets place a layer inside its parent's padding box (the inverse of anchorPatch):
+   * {x, y, w, h}. `size` is the layer's own size for axes the insets don't decide.
+   */
+  function anchoredBox(n, cb, size) {
+    const ins = Array.isArray(n.inset) ? n.inset : [], tr = Array.isArray(n.translate) ? n.translate : [], out = {};
+    const resolve = (v, total) => (isPct(v) ? parseFloat(v) / 100 * total : num(v));
+    for (const key of ['h', 'v']) {
+      const a = AXES[key], total = cb[a.size], s = ins[a.start], e = ins[a.end], t = tr[a.t];
+      let w = isSet(n[a.pct]) && (n[a.mode] || 'fixed') === 'fixed' ? num(n[a.pct]) / 100 * total : size[a.size];
+      let pos;
+      if (isSet(s) && isSet(e) && (n[a.mode] === 'fill')) { pos = resolve(s, total); w = Math.max(0, total - pos - resolve(e, total)); }
+      else if (isSet(s)) pos = resolve(s, total);
+      else if (isSet(e)) pos = total - resolve(e, total) - w;
+      else pos = key === 'h' ? num(n.x) : num(n.y);
+      if (isSet(t)) pos += isPct(t) ? parseFloat(t) / 100 * w : num(t);
+      out[key === 'h' ? 'x' : 'y'] = pos; out[a.size] = w;
+    }
+    return out;
+  }
 
   function nodeStyle(n, parent, ctx = {}) {
     const decl = new Map();
@@ -50,13 +129,14 @@
     const set = (k, v) => { if (v === undefined || v === null || v === '') return; decl.delete(k); decl.set(k, String(v)); };
     const color = safe(ctx.color ?? n.color, n.type === 'text' ? '#25252e' : 'transparent');
     const flowParent = !!parent && parent.layout !== 'free';
-    const absoluteInFlow = flowParent && n.position === 'absolute';
+    // Positioned by insets: an absolute child of a flow frame, or a child of a free frame with constraints.
+    const absoluteInFlow = anchored(n, parent);
     const flow = flowParent && !absoluteInFlow;
 
     // Base box.
     set('box-sizing', 'border-box');
     set('position', flow ? 'relative' : 'absolute');
-    if (!flowParent) { set('left', px(n.x)); set('top', px(n.y)); }
+    if (!flowParent && !absoluteInFlow) { set('left', px(n.x)); set('top', px(n.y)); }
     set('width', px(n.w)); set('height', px(n.h));
     set('border-radius', px(n.radius));
     set('font-size', px(num(n.fontSize, 16)));
@@ -98,8 +178,12 @@
         set('align-items', pick(n.alignItems, ALIGN, 'stretch'));
         set('justify-content', pick(n.justifyContent, JUSTIFY, 'flex-start'));
       }
-      if (layout === 'flex') { set('flex-direction', n.direction === 'column' ? 'column' : 'row'); if (n.flexWrap) set('flex-wrap', 'wrap'); }
-      if (layout === 'grid') set('grid-template-columns', `repeat(${Math.max(1, Math.min(100, Math.floor(num(n.columns, 2)) || 2))}, minmax(0, 1fr))`);
+      if (layout === 'flex') { set('flex-direction', (n.direction === 'column' ? 'column' : 'row') + (n.reverse === true ? '-reverse' : '')); if (n.flexWrap) set('flex-wrap', 'wrap'); }
+      if (layout === 'grid') {
+        set('grid-template-columns', `repeat(${Math.max(1, Math.min(100, Math.floor(num(n.columns, 2)) || 2))}, minmax(0, 1fr))`);
+        if (num(n.rows) >= 1) set('grid-template-rows', `repeat(${Math.min(100, Math.floor(num(n.rows)))}, minmax(0, 1fr))`);
+        if (n.justifyItems !== undefined) set('justify-items', pick(n.justifyItems, ALIGN, 'stretch'));
+      }
     }
 
     // Sizing modes (hug = fit content, fill = stretch into the parent).
@@ -139,6 +223,7 @@
       if (parent.layout === 'block' && num(parent.gapY) && !ctx.lastInFlow && margin[2] === '0px') margin[2] = px(parent.gapY);
       if (margin.some(v => v !== '0px')) set('margin', margin.join(' '));
       if (n.colSpan !== undefined && parent.layout === 'grid') set('grid-column', n.colSpan === 'full' ? '1 / -1' : `span ${Math.max(1, Math.floor(num(n.colSpan, 1)))} / span ${Math.max(1, Math.floor(num(n.colSpan, 1)))}`);
+      if (n.rowSpan !== undefined && parent.layout === 'grid') set('grid-row', `span ${Math.max(1, Math.floor(num(n.rowSpan, 1)))} / span ${Math.max(1, Math.floor(num(n.rowSpan, 1)))}`);
     }
     if (parent) {
       if (n.wPct !== undefined && w === 'fixed') set('width', num(n.wPct) + '%');
@@ -202,5 +287,5 @@
   /** Index of the last in-flow (not hidden, not absolute) child in a list of siblings. */
   const lastInFlowId = children => children.filter(c => !c.hidden && c.position !== 'absolute').at(-1)?.id;
 
-  root.BetterNodeStyle = {nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, safeCss: safe, PALETTES};
+  root.BetterNodeStyle = {nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss: safe, PALETTES};
 })(typeof globalThis !== 'undefined' ? globalThis : window);

@@ -84,7 +84,8 @@ export function elementCode(document, page, node, depth = Infinity) {
 //   gapX/gapY                                       when they differ (equal -> `gap`)
 //   cornerRadii [tl,tr,br,bl], strokeWidths [t,r,b,l], strokeStyle, ringWidth/ringColor/ringInset
 //   ellipse (rounded-[50%]), flipX/flipY (-scale-x-100 / -scale-y-100)
-//   flexWrap, grow, shrink, basis, alignSelf, colSpan, margin [t,r,b,l] (number|'auto')
+//   flexWrap, reverse (row-/column-reverse), grow, shrink, basis, alignSelf, colSpan, rowSpan, margin [t,r,b,l] (number|'auto')
+//   rows (equal grid rows), justifyItems (grid cell alignment)
 //   minW/maxW/minH/maxH (px number or 'N%'), aspectRatio
 //   position 'absolute' + inset [t,r,b,l] (px|'N%'|null) + translate [x,y] (px|'N%')
 //   textTransform, textDecoration, fontStyle, truncate, noWrap, lineClamp, textWrap, objectFit, hidden
@@ -95,8 +96,8 @@ export function elementCode(document, page, node, depth = Infinity) {
 //   srcRemote 'https://…' + assetStatus 'pending'|'missing'|'ready'   remote <img> not yet embedded
 
 const BOX_KEYS = ['fill', 'gradient', 'strokeWidth', 'padding', 'radius', 'shadow', 'ringWidth', 'cornerRadii'];
-const COMMON_KEYS = ['opacity', 'rotation', 'flipX', 'flipY', 'zIndex', 'clipContent', 'mask', 'animated', 'shadow', 'strokeColor', 'strokeStyle', 'ringWidth', 'ringColor', 'ringInset', 'hidden', 'aspectRatio', 'grow', 'shrink', 'basis', 'alignSelf', 'colSpan'];
-const FRAME_KEYS = ['layout', 'direction', 'columns', 'alignItems', 'justifyContent', 'flexWrap'];
+const COMMON_KEYS = ['opacity', 'rotation', 'flipX', 'flipY', 'zIndex', 'clipContent', 'mask', 'animated', 'shadow', 'strokeColor', 'strokeStyle', 'ringWidth', 'ringColor', 'ringInset', 'hidden', 'aspectRatio', 'grow', 'shrink', 'basis', 'alignSelf', 'colSpan', 'rowSpan'];
+const FRAME_KEYS = ['layout', 'direction', 'reverse', 'columns', 'rows', 'alignItems', 'justifyContent', 'justifyItems', 'flexWrap'];
 const TEXT_ONLY_KEYS = ['truncate', 'noWrap', 'lineClamp', 'textWrap'];
 const TEXT_SPEC_KEYS = ['ink', 'inkToken', 'fontSize', 'fontWeight', 'fontFamily', 'textAlign', 'lineHeight', 'lineHeightPx', 'letterSpacing', 'letterSpacingEm', 'textTransform', 'textDecoration', 'fontStyle', 'textWrap'];
 const OWN_KEY = { ink: 'color', inkToken: 'color', fontSize: 'fontSize', fontWeight: 'fontWeight', fontFamily: 'fontFamily', textAlign: 'textAlign', lineHeight: 'lineHeight', lineHeightPx: 'lineHeight',
@@ -181,12 +182,21 @@ function applyGeometry(node, spec, parent, { isNew, warnings, label }) {
   const free = parent && (!parent.layout || parent.layout === 'free');
   const inset = [spec.top, spec.right, spec.bottom, spec.left];
   if (free) {
-    // Legacy free frames position children by x/y.
-    if (spec.left?.px !== undefined) node.x = spec.left.px; else if (isNew) node.x = 0;
-    if (spec.top?.px !== undefined) node.y = spec.top.px; else if (isNew) node.y = 0;
-    if (spec.right || spec.bottom) warnings.push(`${label}: right/bottom offsets inside a free frame are approximated from the frame size`);
-    if (spec.right?.px !== undefined && spec.left === undefined) node._freeRight = spec.right.px;
-    if (spec.bottom?.px !== undefined && spec.top === undefined) node._freeBottom = spec.bottom.px;
+    // Free frames position children by x/y (Left/Top). Right/bottom, percentage and centring offsets are
+    // constraints: kept as `inset`/`translate` so the renderer anchors them (see constraintsOf in node-style.js).
+    const plainPx = len => len === undefined || (len.px !== undefined && len.frac === undefined);
+    const constrained = spec.right || spec.bottom || spec.translate || !plainPx(spec.left) || !plainPx(spec.top);
+    if (constrained) {
+      node.inset = mergeFour(Array.isArray(node.inset) ? node.inset : [null, null, null, null], inset.map(v => (v ? lengthValue(v) : null)));
+      if (spec.translate) node.translate = [spec.translate.x, spec.translate.y];
+      // Keep an explicit start inset on axes the classes don't anchor, so x/y-less axes stay where they are.
+      if (node.inset[1] === null && node.inset[3] === null) node.inset[3] = spec.left?.px ?? node.x ?? 0;
+      if (node.inset[0] === null && node.inset[2] === null) node.inset[0] = spec.top?.px ?? node.y ?? 0;
+    } else {
+      if (Array.isArray(node.inset) && (spec.left || spec.top)) { delete node.inset; delete node.translate; }
+      if (spec.left?.px !== undefined) node.x = spec.left.px; else if (isNew) node.x = 0;
+      if (spec.top?.px !== undefined) node.y = spec.top.px; else if (isNew) node.y = 0;
+    }
   } else if (parent) {
     if (spec.absolute) node.position = 'absolute';
     else if (inset.some(Boolean) && node.position !== 'absolute') warnings.push(`${label}: top/right/bottom/left offsets only apply to absolute elements; add "absolute"`);
@@ -392,8 +402,6 @@ export function reflow(page, nodes = null, warnings = [], document = null) {
   refreshIcons(page, document || {});
   // Legacy free frames: right/bottom offsets resolve against the frame size.
   for (const n of page.nodes) {
-    if (n._freeRight !== undefined) { const p = index.byId.get(n.parentId); if (p) n.x = Math.round((p.w - n._freeRight - n.w) * 100) / 100; delete n._freeRight; }
-    if (n._freeBottom !== undefined) { const p = index.byId.get(n.parentId); if (p) n.y = Math.round((p.h - n._freeBottom - n.h) * 100) / 100; delete n._freeBottom; }
   }
   return warnings;
 }

@@ -102,7 +102,8 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
 
     // ---- 3. Marquee, shift toggle, drill-in, keyboard navigation ----
     await seed([rect('m1', 0, 0), rect('m2', 150, 0), rect('m3', 300, 0),
-      {id: 'group', name: 'Group', type: 'frame', x: 0, y: 200, w: 300, h: 150, color: '#ffffff', layout: 'free'},
+      {id: 'board', name: 'Board', type: 'frame', x: 0, y: 200, w: 400, h: 200, color: '#eeeeee', layout: 'free'},
+      {id: 'group', name: 'Group', type: 'frame', parentId: 'board', x: 0, y: 0, w: 300, h: 150, color: '#ffffff', layout: 'free'},
       rect('c1', 10, 10, 50, 50, {parentId: 'group'}), rect('c2', 100, 10, 50, 50, {parentId: 'group'})]);
     await drag([-20, -20], [200, 50]);
     assert.deepEqual(await selection(), ['m1', 'm2'], 'marquee selects intersecting top-level layers');
@@ -111,17 +112,56 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await click(170, 20, {modifiers: ['Shift']});
     assert.deepEqual(await selection(), ['m1', 'm3'], 'shift-click toggles off');
     await click(600, 600); assert.deepEqual(await selection(), [], 'empty click clears');
-    await page.evaluate(() => window.appPreferences.set({selection: 'classic'}));
-    await click(30, 230); assert.deepEqual(await selection(), ['group'], 'classic click picks the outermost frame');
-    await page.mouse.dblclick((await screen(30, 230)).x, (await screen(30, 230)).y);
-    assert.deepEqual(await selection(), ['c1'], 'double-click drills into the child');
+    assert.equal(await page.evaluate(() => window.appPreferences.get().selection), 'classic', 'parent-first selection is the default');
+    assert.equal(await page.locator('#canvas [data-id=c1]').evaluate(e => getComputedStyle(e).cursor), 'default', 'layers show the arrow cursor, not a move cursor');
+    // Hover outlines what a click would pick (the artboard's direct child) and dashes its children.
+    const hoverAt = async (x, y) => { const p = await screen(x, y); await page.mouse.move(p.x, p.y, {steps: 2}); return page.locator('#canvas-overlay').getAttribute('data-hover'); };
+    assert.equal(await hoverAt(30, 230), 'group', 'hover targets the outermost layer inside the artboard');
+    assert.equal(await page.locator('#canvas-overlay .hover-child').count(), 2, 'hovered frame children are outlined');
+    await click(30, 230); assert.deepEqual(await selection(), ['group'], 'a click inside an artboard picks its direct child, not the deep leaf');
+    assert.equal(await hoverAt(120, 230), 'c2', 'with the frame selected, hover shows the child a click would pick');
+    await click(30, 230); assert.deepEqual(await selection(), ['c1'], 'clicking inside the selected frame drills one level in');
     await click(120, 230); assert.deepEqual(await selection(), ['c2'], 'siblings stay directly selectable inside the drilled frame');
+    await click(600, 600);
+    await page.mouse.dblclick((await screen(30, 230)).x, (await screen(30, 230)).y);
+    assert.deepEqual(await selection(), ['c1'], 'double-click from nothing reaches the child');
     await page.keyboard.press('Shift+Enter'); assert.deepEqual(await selection(), ['group'], 'shift+enter selects parent');
     await page.keyboard.press('Enter'); assert.deepEqual(await selection(), ['c1', 'c2'], 'enter selects children');
     await page.evaluate(() => window.design.setSelection(['c1']));
     await page.keyboard.press('Tab'); assert.deepEqual(await selection(), ['c2'], 'tab cycles siblings');
     await page.keyboard.press('Escape'); assert.deepEqual(await selection(), [], 'escape deselects');
+    await click(130, 230, {modifiers: ['Meta']}); assert.deepEqual(await selection(), ['c2'], 'cmd-click deep-selects the leaf');
+    await click(600, 600);
+    await click(350, 380); assert.deepEqual(await selection(), ['board'], 'clicking an artboard background selects the artboard');
+    await click(600, 600);
+    await drag([350, 380], [200, 300]); assert.deepEqual(await selection(), ['group'], 'dragging on an artboard background marquee-selects its children');
+    assert.equal((await node('board')).x, 0, 'the unselected artboard does not move');
     await page.evaluate(() => window.appPreferences.set({selection: 'deep'}));
+    await click(600, 600); await click(30, 230); assert.deepEqual(await selection(), ['c1'], 'deep preference picks the leaf');
+    await page.evaluate(() => window.appPreferences.set({selection: 'classic'}));
+
+    // ---- 3b. Drag inside and out of auto layout ----
+    await seed([{id: 'stack', name: 'Stack', type: 'frame', x: 0, y: 0, w: 120, h: 160, color: '#ffffff', layout: 'flex', direction: 'column', gap: 10, padding: 10, wMode: 'fixed', hMode: 'hug'},
+      rect('s-a', 0, 0, 100, 40, {parentId: 'stack'}), rect('s-b', 0, 0, 100, 40, {parentId: 'stack'}), rect('s-c', 0, 0, 100, 40, {parentId: 'stack'}),
+      {id: 'side', name: 'Side', type: 'frame', x: 400, y: 0, w: 200, h: 200, color: '#eeeeee', layout: 'free'}]);
+    const order = async () => (await nodesOf()).filter(n => n.parentId === 'stack').map(n => n.id);
+    await click(50, 30); assert.deepEqual(await selection(), ['s-a']);
+    const ghost = await drag([50, 30], [50, 140], {steps: 10, during: () => page.locator('#canvas [data-id=s-a]').evaluate(e => e.style.translate)});
+    assert.ok(ghost && ghost !== 'none', 'the dragged stack child follows the pointer');
+    assert.deepEqual(await order(), ['s-b', 's-c', 's-a'], 'dragging a stack child reorders it live');
+    assert.equal(await page.locator('#canvas [data-id=s-a]').evaluate(e => e.style.translate), '', 'the drag offset clears on drop');
+    await page.keyboard.press('ArrowUp'); assert.deepEqual(await order(), ['s-b', 's-a', 's-c'], 'arrow keys step a stack child through the stack');
+    await page.keyboard.press('Meta+z'); assert.deepEqual(await order(), ['s-b', 's-c', 's-a']);
+    await page.keyboard.press('Meta+z'); assert.deepEqual(await order(), ['s-a', 's-b', 's-c'], 'a drag is one undo step');
+    await click(50, 80); assert.deepEqual(await selection(), ['s-b']);
+    await drag([50, 80], [470, 90], {steps: 10});
+    let moved = await node('s-b');
+    assert.equal(moved.parentId, 'side', 'dropping on a frame re-parents into it');
+    near(moved.x, 30, 1, 'keeps its screen x'); near(moved.y, 70, 1, 'keeps its screen y');
+    const indicator = await drag([470, 90], [50, 65], {steps: 10, during: () => page.locator('#canvas-overlay .drop-line').isVisible()});
+    assert.ok(indicator, 'a slot indicator shows while dragging into a stack');
+    assert.deepEqual(await order(), ['s-a', 's-b', 's-c'], 'dropping into a stack takes the slot under the pointer');
+    assert.equal(await page.locator('#canvas-overlay .drop-target').isVisible(), false, 'drop feedback clears on release');
 
     // ---- 4. Smart guides, equal spacing and Alt distances ----
     await seed([rect('s1', 0, 0), rect('s2', 500, 200), rect('g1', 0, 400), rect('g2', 150, 400), rect('mover', 530, 520)]);
@@ -232,6 +272,6 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.reload(); await page.waitForSelector('#canvas .layer');
     assert.ok((await nodesOf()).some(n => n.id === 'label'));
     assert.deepEqual(errors, []);
-    console.log('PASS canvas interactions: cursor-anchored zoom, stops, fit, space/H pan, draw tools + presets, marquee, shift toggle, drill-in, Enter/Tab navigation, edge + equal-gap snapping with guides, Alt distances, clipboard + style, frame/unframe, auto layout, z-order, lock/hide, Fill/Hug sizing, context menu');
+    console.log('PASS canvas interactions: cursor-anchored zoom, stops, fit, space/H pan, draw tools + presets, marquee, shift toggle, parent-first selection, hover outlines, click/cmd drill-in, artboard marquee, auto-layout drag reorder + re-parent, Enter/Tab navigation, edge + equal-gap snapping with guides, Alt distances, clipboard + style, frame/unframe, auto layout, z-order, lock/hide, Fill/Hug sizing, context menu');
   } finally { await app.close(); await fs.rm(dir, {recursive: true, force: true}); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

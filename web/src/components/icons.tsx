@@ -131,6 +131,40 @@ export function PlusIcon(props: IconProps) {
   );
 }
 
+/**
+ * Box-model glyphs of the Layout section (Wonder's Padding / Margin fields). Padding draws the inset edge(s) inside a
+ * rounded square; margin draws them outside a smaller square. `sides` lists the edges: t, r, b, l.
+ */
+function BoxSides({ sides, outside, ...props }: IconProps & { sides: string; outside?: boolean }) {
+  const inner = outside ? { x: 7.25, y: 7.25, s: 9.5 } : { x: 4.25, y: 4.25, s: 15.5 };
+  const at = outside ? [4, 20] : [7.5, 16.5];
+  const lo = outside ? 8.5 : 7.5,
+    hi = outside ? 15.5 : 16.5;
+  return (
+    <Glyph {...props}>
+      <rect x={inner.x} y={inner.y} width={inner.s} height={inner.s} rx={outside ? 2 : 3.5} />
+      {sides.includes("l") ? <path d={`M${at[0]} ${lo}v${hi - lo}`} /> : null}
+      {sides.includes("r") ? <path d={`M${at[1]} ${lo}v${hi - lo}`} /> : null}
+      {sides.includes("t") ? <path d={`M${lo} ${at[0]}h${hi - lo}`} /> : null}
+      {sides.includes("b") ? <path d={`M${lo} ${at[1]}h${hi - lo}`} /> : null}
+    </Glyph>
+  );
+}
+export const PaddingXIcon = (props: IconProps) => <BoxSides sides="lr" {...props} />;
+export const PaddingYIcon = (props: IconProps) => <BoxSides sides="tb" {...props} />;
+export const PaddingLeftIcon = (props: IconProps) => <BoxSides sides="l" {...props} />;
+export const PaddingTopIcon = (props: IconProps) => <BoxSides sides="t" {...props} />;
+export const PaddingRightIcon = (props: IconProps) => <BoxSides sides="r" {...props} />;
+export const PaddingBottomIcon = (props: IconProps) => <BoxSides sides="b" {...props} />;
+export const PaddingSidesIcon = (props: IconProps) => <BoxSides sides="tlrb" {...props} />;
+export const MarginXIcon = (props: IconProps) => <BoxSides sides="lr" outside {...props} />;
+export const MarginYIcon = (props: IconProps) => <BoxSides sides="tb" outside {...props} />;
+export const MarginLeftIcon = (props: IconProps) => <BoxSides sides="l" outside {...props} />;
+export const MarginTopIcon = (props: IconProps) => <BoxSides sides="t" outside {...props} />;
+export const MarginRightIcon = (props: IconProps) => <BoxSides sides="r" outside {...props} />;
+export const MarginBottomIcon = (props: IconProps) => <BoxSides sides="b" outside {...props} />;
+export const MarginSidesIcon = (props: IconProps) => <BoxSides sides="tlrb" outside {...props} />;
+
 /** Claude agent mark (chat model chip, settings Agents). */
 export function ClaudeMark({ className }: { className?: string }) {
   return (

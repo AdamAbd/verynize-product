@@ -161,5 +161,86 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
   await page.waitForTimeout(500);
   assert.equal(await page.locator('#artwork-status').textContent(),'');
   console.log('PASS export 0.5×/4× PNG, PDF and native save dialog with success toast');
+
+  // --- Layout section per display (Wonder Layout panel): flex matrix/distribution/reverse/wrap/gaps, padding
+  // axes and sides, grid tracks + cell alignment, grid child spans, margin auto, block spacing, min/max limits ------
+  await page.evaluate(()=>{const d=window.design.getDocument();d.pages[0].nodes=[
+   {id:'fx',name:'Flex',type:'frame',x:0,y:0,w:300,h:120,color:'#ffffff',layout:'flex',direction:'row',gap:4,padding:8,alignItems:'stretch',justifyContent:'flex-start'},
+   {id:'fa',name:'A',type:'rectangle',parentId:'fx',x:0,y:0,w:40,h:40,color:'#ff0000'},
+   {id:'gd',name:'Grid',type:'frame',x:0,y:200,w:400,h:300,color:'#ffffff',layout:'grid',columns:2,gap:10,padding:0},
+   {id:'gc',name:'Cell',type:'frame',parentId:'gd',x:0,y:0,w:80,h:60,color:'#eeeeee',layout:'free'},
+   {id:'bk',name:'Block',type:'frame',x:500,y:0,w:200,h:200,color:'#ffffff',layout:'block',padding:0}];
+   window.design.setDocument(d);window.design.setSelection(['fx']);});
+  const styleOf=(id,prop)=>page.locator(`#canvas [data-id=${id}]`).evaluate((el,p)=>getComputedStyle(el)[p],prop);
+  const typeIn=async(name,value)=>{const f=page.locator(`#layout-section [name=${name}]`);await f.fill(value);await f.press('Enter');};
+  const matrix=label=>page.locator(`#layout-section [role=group][aria-label="${label}"]`);
+  // Row direction: the matrix column is the main axis (justify), the row is the cross axis (align).
+  await matrix('Alignment').locator('[data-cell="1-2"]').click();
+  assert.deepEqual([(await node('fx')).justifyContent,(await node('fx')).alignItems],['flex-end','center'],'matrix sets justify + align');
+  assert.equal(await matrix('Alignment').locator('[aria-pressed=true]').getAttribute('data-cell'),'1-2');
+  await page.locator('#layout-section [data-distribute=space-between]').click();
+  assert.equal((await node('fx')).justifyContent,'space-between');
+  assert.equal(await matrix('Alignment').locator('[aria-pressed=true]').count(),3,'distributed: the whole cross row is active');
+  await page.locator('#layout-section [data-distribute=space-between]').click();
+  assert.equal((await node('fx')).justifyContent,'flex-start','pressing the active distribution returns to packed');
+  await page.getByRole('button',{name:'Reverse order'}).click();
+  assert.equal((await node('fx')).reverse,true);assert.equal(await styleOf('fx','flexDirection'),'row-reverse');
+  assert.equal(await page.locator('#layout-section [name=gapY]').isDisabled(),true,'cross gap is inactive without wrap');
+  await page.getByRole('button',{name:'Wrap'}).click();
+  assert.equal((await node('fx')).flexWrap,true);
+  await typeIn('gapY','12');await typeIn('gap','20');
+  assert.deepEqual([(await node('fx')).gap,(await node('fx')).gapY],[20,12]);
+  assert.equal(await styleOf('fx','columnGap'),'20px');assert.equal(await styleOf('fx','rowGap'),'12px');
+  await page.locator('#layout-section .insp-direction [data-direction=column]').click();
+  assert.equal((await node('fx')).direction,'column');assert.equal(await styleOf('fx','flexDirection'),'column-reverse');
+  // Padding: axes, collapse back to a single value, then independent sides.
+  await typeIn('paddingX','10');
+  let fx=await node('fx');assert.deepEqual([fx.paddingTop,fx.paddingRight,fx.paddingBottom,fx.paddingLeft],[8,10,8,10]);
+  await typeIn('paddingY','10');
+  fx=await node('fx');assert.equal(fx.padding,10);assert.equal(fx.paddingTop,undefined,'equal sides collapse to padding');
+  await page.getByRole('button',{name:'Independent padding'}).click();
+  await typeIn('paddingTop','5');
+  assert.equal(await styleOf('fx','padding'),'5px 10px 10px');
+  // Min/max limits from the size menu.
+  await page.getByRole('button',{name:'Size options'}).click();await page.locator('[role=menuitem][data-limit=maxW]').click();
+  assert.equal((await node('fx')).maxW,300);
+  await typeIn('maxW','250');assert.equal(await styleOf('fx','maxWidth'),'250px');
+  await page.locator('#layout-section [name=maxWKind]').selectOption('remove');assert.equal((await node('fx')).maxW,undefined);
+  // Grid: tracks popover, gaps, cell alignment toggle.
+  await page.evaluate(()=>window.design.setSelection(['gd']));
+  assert.equal((await page.locator('#grid-tracks').textContent()).trim(),'2 × Auto');
+  await page.locator('#grid-tracks').click();
+  const pop=page.locator('[data-slot=popover-content]');
+  await pop.locator('[name=columns]').fill('3');await pop.locator('[name=columns]').press('Enter');
+  await pop.locator('[name=rows]').fill('2');await pop.locator('[name=rows]').press('Enter');
+  await page.keyboard.press('Escape');
+  assert.deepEqual([(await node('gd')).columns,(await node('gd')).rows],[3,2]);
+  assert.equal((await styleOf('gd','gridTemplateRows')).split(' ').length,2,'equal rows render');
+  await matrix('Cell alignment').locator('[data-cell="1-1"]').click();
+  assert.deepEqual([(await node('gd')).alignItems,(await node('gd')).justifyItems],['center','center']);
+  assert.equal(await styleOf('gd','justifyItems'),'center');
+  await matrix('Cell alignment').locator('[data-cell="1-1"]').click();
+  assert.deepEqual([(await node('gd')).alignItems,(await node('gd')).justifyItems],['stretch',undefined],'pressing the active cell restores stretch');
+  // Grid child: spans and margin (auto centers it).
+  await page.evaluate(()=>window.design.setSelection(['gc']));
+  await typeIn('colSpan','2');await typeIn('rowSpan','2');
+  assert.equal(await styleOf('gc','gridColumnStart'),'span 2');assert.equal(await styleOf('gc','gridRowStart'),'span 2');
+  await page.locator('#layout-section [name=marginXUnit]').selectOption('auto');
+  assert.deepEqual((await node('gc')).margin,[0,'auto',0,'auto']);
+  await page.locator('#layout-section [name=marginXUnit]').selectOption('px');
+  assert.equal((await node('gc')).margin,undefined,'zero margins are removed');
+  // Block flow: vertical spacing, no flex/grid controls; free frames have no padding.
+  await page.evaluate(()=>window.design.setSelection(['bk']));
+  assert.equal(await matrix('Alignment').count(),0);
+  await typeIn('gapY','8');assert.equal((await node('bk')).gapY,8);
+  await page.locator('.insp-display [data-layout=free]').click();
+  assert.equal(await page.locator('#layout-section [name=paddingX]').count(),0,'free position has no padding');
+  // Switching Display back and forth never stacks copies of Padding / Margin (they once shared a React key).
+  await page.evaluate(()=>window.design.setSelection(['gc']));
+  for(const mode of ['flex','grid','block','flex','free','grid','block','grid'])await page.locator(`#layout-section .insp-display [data-layout=${mode}]`).click();
+  const captions=label=>page.locator('#layout-section').getByText(label,{exact:true}).count();
+  assert.equal(await captions('Padding'),1,'one Padding group after switching display');
+  assert.equal(await captions('Margin'),1,'one Margin group after switching display');
+  console.log('PASS layout section: flex matrix, distribution, reverse, wrap, gaps, padding axes/sides, limits, grid tracks + cell alignment, grid child spans, margin auto, block spacing');
  }finally{await app.close();await fs.rm(dir,{recursive:true,force:true})}
 })().catch(e=>{console.error(e);process.exitCode=1});

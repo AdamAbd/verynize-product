@@ -4,5 +4,5 @@
 import '../web/node-style.js';
 
 const api = globalThis.BetterNodeStyle;
-export const { nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, safeCss, PALETTES } = api;
+export const { nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss, PALETTES } = api;
 export default api;
