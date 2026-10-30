@@ -13,20 +13,40 @@ npm run deploy:check
 npm run deploy
 ```
 
-`deploy:check` builds and validates without uploading. `deploy` requires a configured Cloudflare account and creates the declared bindings. No deployment was performed during implementation. The final dry run validates the asset bundle, `ROOMS` SQLite Durable Object, and `ROOM_CREATION` rate-limit binding.
+`deploy:check` builds and validates without uploading. `deploy` requires a configured Cloudflare account and creates the declared bindings. The final dry run validates the asset bundle, `ROOMS` SQLite Durable Object, and `ROOM_CREATION` rate-limit binding.
 
 ## Accounts database (D1) and auth secret
 
 Better Auth (`cloud/auth.js`) keeps users, sessions and organizations in the `DB` D1 database, whose schema is in `cloud/migrations`. The Worker needs Workers Paid, because `cloudflare.config.ts` sets `limits.cpuMs` to 30 000 for scrypt password hashing. First deployment:
 
+Production uses `https://verynize.gayaloo.app`, with D1 database `verynize`
+(`76210bc4-d4fe-4075-a321-776c2525a828`) pinned in `cloudflare.config.ts`.
+
 ```sh
-npx cf d1 create --name verynize
-npm run db:migrate -- <database-id>
+npm run db:migrate -- 76210bc4-d4fe-4075-a321-776c2525a828
 npm run deploy
-npx cf workers secrets update BETTER_AUTH_SECRET --worker verynize --text "$(openssl rand -base64 32)"
 ```
 
-The first command prints the database ID; `npx cf d1 list` shows it again. To pin the binding to that database, add `id` to `bindings.d1({ name: "verynize" })`. Apply new migrations with `npm run db:migrate -- <database-id>` before deploying code that needs them. For a local database, add `--local` (and optionally `--persist-to <dir>`). Until the secret is set, the `/api/auth/*` Better Auth endpoints fail.
+For a fresh Worker, `cf` requires declared secrets at the initial upload. Create a
+private temporary JSON file containing a random `BETTER_AUTH_SECRET`, then run
+`npm run deploy -- --secrets-file /path/to/private-secrets.json`. Remove that file
+after successful deployment. Subsequent deployments retain the existing secret;
+do not rotate it on every deploy. `npx cf d1 list` lists database IDs.
+
+Apply new migrations before deploying code that needs them. For a local database,
+add `--local` (and optionally `--persist-to <dir>`).
+
+### Transactional email
+
+Production uses Cloudflare Email Sending through the native `EMAIL` binding.
+`EMAIL_FROM` is `mada@gayaloo.app`, and the binding restricts senders to that address.
+The `gayaloo.app` sending domain must be onboarded with valid sending DNS records;
+Workers Paid is required to send to arbitrary recipients. No webhook URL or token
+is needed. The optional webhook transport remains available for other deployments.
+Never enable the development `outbox` provider on a public deployment.
+
+`node tests/cloud-email.mjs` checks native sending and failures in local workerd.
+Local simulation does not prove delivery to a real inbox.
 
 ## Sharing
 
