@@ -20,6 +20,7 @@ export function paddingOf(n) {
   return [n.paddingTop ?? p, n.paddingRight ?? p, n.paddingBottom ?? p, n.paddingLeft ?? p].map(num);
 }
 export function bordersOf(n) {
+  if (n.strokeHidden === true) return [0, 0, 0, 0];
   if (Array.isArray(n.strokeWidths) && n.strokeWidths.length === 4) return n.strokeWidths.map(num);
   const w = num(n.strokeWidth); return [w, w, w, w];
 }

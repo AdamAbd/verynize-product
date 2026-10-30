@@ -78,7 +78,13 @@ export function ExportSection({
     }
   };
   return (
-    <OptionalSection id="export-section" title="Export" open={open} onOpenChange={setOpen}>
+    <OptionalSection
+      id="export-section"
+      title="Export"
+      present={open}
+      onAdd={() => setOpen(true)}
+      onRemove={() => setOpen(false)}
+    >
       <div className="grid grid-cols-3 gap-2">
         <Field
           label="Export file name"

@@ -137,6 +137,8 @@
   //     -> mask-image layers plus mask-mode / mask-repeat / mask-position / mask-size / mask-composite lists
   //   outlineToken / strokeToken bind the outline / border colour to a Colors variable; strokeColors
   //     [{color, token?} x4] (top, right, bottom, left) paints each border side separately.
+  //   strokeHidden / outlineHidden: true hides the border / outline without discarding it (the inspector's
+  //     eye toggle): nothing is drawn and the border takes no space.
   const BLEND_MODES = ['normal', 'darken', 'multiply', 'plus-darker', 'color-burn', 'lighten', 'screen', 'plus-lighter', 'color-dodge', 'overlay', 'soft-light', 'hard-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
   const FILTERS = {
     blur: {fn: 'blur', unit: 'px', min: 0, max: 1000, value: 4},
@@ -185,7 +187,7 @@
    */
   function effectsOf(n, tokens) {
     const shadows = visible(n.shadows), filters = visible(n.filters).filter(f => FILTERS[f.type]), masks = visible(n.masks).filter(usableMask);
-    const width = Math.max(0, num(n.outlineWidth));
+    const width = n.outlineHidden === true ? 0 : Math.max(0, num(n.outlineWidth));
     return {
       blend: BLEND_MODES.includes(n.blendMode) && n.blendMode !== 'normal' ? n.blendMode : '',
       outline: width > 0 ? {width, style: pick(n.outlineStyle, OUTLINE_STYLES, 'solid'), color: shadowColor({color: n.outlineColor || '#000000', token: n.outlineToken}, tokens), offset: num(n.outlineOffset)} : null,
@@ -225,6 +227,8 @@
     const tokenName = v => v === undefined || (typeof v === 'string' && FX_NAME.test(v));
     if (!tokenName(n.outlineToken)) return 'Invalid outline color variable';
     if (!tokenName(n.strokeToken)) return 'Invalid border color variable';
+    if (!isBool(n.strokeHidden)) return 'Invalid border visibility';
+    if (!isBool(n.outlineHidden)) return 'Invalid outline visibility';
     if (n.strokeColors !== undefined && (!Array.isArray(n.strokeColors) || n.strokeColors.length !== 4 || !n.strokeColors.every(c => c && typeof c === 'object' && FX_HEX.test(String(c.color)) && tokenName(c.token)))) return 'Invalid border side colors';
     const list = (v, max) => v === undefined || (Array.isArray(v) && v.length <= max && v.every(item => item && typeof item === 'object' && !Array.isArray(item) && isBool(item.hidden)));
     if (!list(n.shadows, 20)) return 'Invalid shadows';
@@ -578,7 +582,7 @@
     const flip = (n.flipX === true || n.flipY === true) ? `scale(${n.flipX === true ? -1 : 1}, ${n.flipY === true ? -1 : 1})` : '';
     if (num(n.rotation) || flip) set('transform', [num(n.rotation) ? `rotate(${num(n.rotation)}deg)` : '', flip].filter(Boolean).join(' '));
     set('opacity', String(num(n.opacity, 100) / 100));
-    set('border', `${Math.max(0, num(n.strokeWidth))}px solid ${safe(n.strokeColor, '#000000')}`);
+    set('border', `${n.strokeHidden === true ? 0 : Math.max(0, num(n.strokeWidth))}px solid ${safe(n.strokeColor, '#000000')}`);
     if (safe(n.shadow)) set('box-shadow', safe(n.shadow));
     if (n.clipContent) set('overflow', 'hidden');
     set('white-space', 'pre-wrap');
@@ -690,7 +694,7 @@
     if (Array.isArray(n.cornerRadii) && n.cornerRadii.length === 4) set('border-radius', n.cornerRadii.map(px).join(' '));
     // Ellipse: any box type can be drawn as an ellipse inscribed in its bounds; it overrides corner radii.
     if (n.ellipse === true && n.type !== 'text') set('border-radius', '50%');
-    if (Array.isArray(n.strokeWidths) && n.strokeWidths.length === 4) set('border-width', n.strokeWidths.map(v => px(Math.max(0, num(v)))).join(' '));
+    if (n.strokeHidden !== true && Array.isArray(n.strokeWidths) && n.strokeWidths.length === 4) set('border-width', n.strokeWidths.map(v => px(Math.max(0, num(v)))).join(' '));
     if (['dashed', 'dotted', 'double'].includes(n.strokeStyle)) set('border-style', n.strokeStyle);
     if (num(n.ringWidth) > 0) {
       const ring = (n.ringInset ? 'inset ' : '') + `0 0 0 ${num(n.ringWidth)}px ${safe(n.ringColor, '#000000')}`;
@@ -755,6 +759,7 @@
   }
 
   function bordersOf(n) {
+    if (n?.strokeHidden === true) return [0, 0, 0, 0];
     if (Array.isArray(n?.strokeWidths) && n.strokeWidths.length === 4) return n.strokeWidths.map(v => num(v));
     const w = num(n?.strokeWidth); return [w, w, w, w];
   }

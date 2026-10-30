@@ -208,6 +208,24 @@ const LOGO = svg(
     card = await node("card");
     assert.equal(card.fills, undefined, "one plain solid paint collapses back into color");
     assert.equal(card.color, "#ff0000");
+    // Removing the last paint leaves no fill (no stale colour); a new paint starts from the default.
+    await fill.locator('[data-paint-remove="0"]').click();
+    card = await node("card");
+    assert.deepEqual([card.fills, card.color, card.token], [undefined, "transparent", ""]);
+    assert.equal(
+      await page
+        .locator("#canvas [data-id=card]")
+        .evaluate((e) => getComputedStyle(e).backgroundColor),
+      "rgba(0, 0, 0, 0)",
+      "no paint draws nothing",
+    );
+    assert.equal(await fill.locator("[data-paint]").count(), 0);
+    await fill.getByRole("button", { name: "Add paint" }).click();
+    card = await node("card");
+    assert.deepEqual([card.fills, card.color], [undefined, "#d9d9d9"], "re-added paint is the default");
+    await page.evaluate(() => window.design.runCommand("edit.undo"));
+    await page.evaluate(() => window.design.runCommand("edit.undo"));
+    assert.equal((await node("card")).color, "#ff0000", "undo restores the removed paint");
     console.log(
       "PASS paint stack: add, type conversion, stops add/position/remove, stop variable bind/follow/detach, reorder, hide, remove, collapse to single fill",
     );

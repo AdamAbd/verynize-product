@@ -35,6 +35,36 @@ function filterSig(node, tokens) {
   const fx = effectsOf(node, tokens);
   return `${norm(fx.filter.join(" "))}|${norm(fx.backdrop.join(" "))}`;
 }
+// A hidden border / outline (the inspector's eye) writes no classes: restore it only while the classes
+// draw no border / outline either.
+const STROKE_KEYS = [
+  "strokeWidth",
+  "strokeWidths",
+  "strokeColor",
+  "strokeColors",
+  "strokeToken",
+  "strokeStyle",
+  "strokeHidden",
+];
+const OUTLINE_KEYS = [
+  "outlineWidth",
+  "outlineOffset",
+  "outlineColor",
+  "outlineStyle",
+  "outlineToken",
+  "outlineHidden",
+];
+function borderSig(node) {
+  if (node.strokeHidden === true) return "0,0,0,0";
+  const widths =
+    Array.isArray(node.strokeWidths) && node.strokeWidths.length === 4
+      ? node.strokeWidths
+      : Array(4).fill(node.strokeWidth);
+  return widths.map((v) => Math.max(0, Number(v) || 0)).join(",");
+}
+function outlineSig(node, tokens) {
+  return JSON.stringify(effectsOf(node, tokens).outline);
+}
 function maskSig(node, tokens) {
   const fx = effectsOf(node, tokens);
   return norm([...fx.masks, node.mask].filter(Boolean).join(", "));
@@ -171,6 +201,12 @@ export function residualOf(node) {
     r.masks = node.masks;
     if (node.mask) r.mask = node.mask;
   }
+  for (const [flag, keys] of [
+    ["strokeHidden", STROKE_KEYS],
+    ["outlineHidden", OUTLINE_KEYS],
+  ])
+    if (node[flag] === true)
+      for (const key of keys) if (node[key] !== undefined) r[key] = node[key];
   if (node.bindings && typeof node.bindings === "object" && Object.keys(node.bindings).length) {
     r.bindings = node.bindings;
     r.bound = boundValues(node, node.bindings);
@@ -247,6 +283,8 @@ export function applyResidual(node, attrs, { tokens = {}, warnings = [], where =
   if (r.shadows !== undefined) group(["shadows", "shadow"], shadowSig);
   if (r.filters !== undefined) group(["filters"], filterSig);
   if (r.masks !== undefined) group(["masks", "mask"], maskSig);
+  if (r.strokeHidden === true) group(STROKE_KEYS, borderSig);
+  if (r.outlineHidden === true) group(OUTLINE_KEYS, outlineSig);
   if (r.textRuns !== undefined && node.type === "text") {
     if (
       canonicalRuns(node.text, r.textRuns) === canonicalRuns(node.text, node.textRuns) &&

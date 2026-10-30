@@ -39,7 +39,7 @@ import {
 } from "./controls";
 import { notify } from "./legacy";
 import { WEIGHTS, fmt, pageNodes, patchNodes, setField, weightName, type Node } from "./model";
-import { BindableField } from "./bind";
+import { BindableField, VariableChip } from "./bind";
 import {
   ALL_WEIGHTS,
   loadCatalog,
@@ -178,11 +178,18 @@ function FontFamilyPicker({
           className={pickerTrigger}
           data-bound={bound ? "fontFamily" : undefined}
         >
-          <span className="flex min-w-0 items-center gap-1">
-            {bound ? <Diamond className="size-3 shrink-0 text-primary-text" aria-hidden /> : null}
-            <span className="truncate">{bound ?? value}</span>
-          </span>
-          <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+          {bound ? (
+            <VariableChip
+              name={bound}
+              missing={!familyVars.some(([name]) => name === bound)}
+              className="ml-0.75"
+            />
+          ) : (
+            <>
+              <span className="truncate">{value}</span>
+              <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+            </>
+          )}
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -371,11 +378,18 @@ function FontWeightPicker({
           className={pickerTrigger}
           data-bound={bound ? "fontWeight" : undefined}
         >
-          <span className="flex min-w-0 items-center gap-1">
-            {bound ? <Diamond className="size-3 shrink-0 text-primary-text" aria-hidden /> : null}
-            <span className="truncate">{bound ?? weightName(value)}</span>
-          </span>
-          <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+          {bound ? (
+            <VariableChip
+              name={bound}
+              missing={!weightVars.some(([name]) => name === bound)}
+              className="ml-0.75"
+            />
+          ) : (
+            <>
+              <span className="truncate">{weightName(value)}</span>
+              <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+            </>
+          )}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

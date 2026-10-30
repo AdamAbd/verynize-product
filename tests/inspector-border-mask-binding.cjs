@@ -18,16 +18,25 @@ const PNG =
   await fs.writeFile(imagePath, Buffer.from(PNG, "base64"));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  env.VERYNIZE_SKIP_ONBOARDING = '1';
-  const app = await _electron.launch({ env, args: [".", `--user-data-dir=${profile}`], timeout: 20000 });
+  env.VERYNIZE_SKIP_ONBOARDING = "1";
+  const app = await _electron.launch({
+    env,
+    args: [".", `--user-data-dir=${profile}`],
+    timeout: 20000,
+  });
   try {
     let page = await app.firstWindow({ timeout: 20000 });
     await page.waitForSelector("#canvas .layer");
     const doc = () => page.evaluate(() => window.design.getDocument());
     const node = (id) =>
-      page.evaluate((id) => window.design.getDocument().pages[0].nodes.find((n) => n.id === id), id);
+      page.evaluate(
+        (id) => window.design.getDocument().pages[0].nodes.find((n) => n.id === id),
+        id,
+      );
     const css = (id, prop) =>
-      page.locator(`#canvas [data-id="${id}"]`).evaluate((el, prop) => getComputedStyle(el).getPropertyValue(prop), prop);
+      page
+        .locator(`#canvas [data-id="${id}"]`)
+        .evaluate((el, prop) => getComputedStyle(el).getPropertyValue(prop), prop);
     const undo = () => page.evaluate(() => window.design.runCommand("edit.undo"));
     const commit = async (selector, value) => {
       const field = page.locator(selector);
@@ -56,13 +65,27 @@ const PNG =
     await page.evaluate(() => {
       const d = window.design.getDocument();
       d.tokens = { accent: "#5eead4", "brand/line": "#334155", "brand/glow": "#ff00ff" };
-      d.variables = { gutter: { type: "dimension", value: 8 }, "space/md": { type: "dimension", value: 240 } };
+      d.variables = {
+        gutter: { type: "dimension", value: 8 },
+        "space/md": { type: "dimension", value: 240 },
+      };
       d.pages = [
         {
           id: "p",
           name: "Parity",
           nodes: [
-            { id: "card", name: "Card", type: "rectangle", x: 40, y: 40, w: 200, h: 120, color: "#ffcc00", strokeWidth: 4, strokeColor: "#000000" },
+            {
+              id: "card",
+              name: "Card",
+              type: "rectangle",
+              x: 40,
+              y: 40,
+              w: 200,
+              h: 120,
+              color: "#ffcc00",
+              strokeWidth: 4,
+              strokeColor: "#000000",
+            },
           ],
         },
       ];
@@ -75,9 +98,17 @@ const PNG =
     // Colour picker Variables tab groups slash names into folders (root first, then "brand").
     await page.getByRole("button", { name: "Pick border colour", exact: true }).click();
     await page.locator("#color-dialog").getByRole("tab", { name: "Variables" }).click();
-    const groups = await page.locator("#color-dialog [role=group]").evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
+    const groups = await page
+      .locator("#color-dialog [role=group]")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
     assert.deepEqual(groups, ["Colors", "brand"]);
-    assert.equal(await page.locator('#color-dialog [role=group][aria-label="brand"] [data-variable="brand/line"]').innerText().then((t) => t.includes("line")), true);
+    assert.equal(
+      await page
+        .locator('#color-dialog [role=group][aria-label="brand"] [data-variable="brand/line"]')
+        .innerText()
+        .then((t) => t.includes("line")),
+      true,
+    );
     await page.keyboard.press("Escape");
 
     // Border colour bound to a variable follows it; detaching keeps the resolved colour; undo rebinds.
@@ -101,7 +132,14 @@ const PNG =
     assert.deepEqual(n.strokeColors[0], { color: "#ff0000", token: "brand/line" });
     assert.equal(n.strokeToken, undefined);
     // A bound side shows the variable; detach it, then type a colour.
-    assert.equal(await page.locator("[name=strokeColorRight]").isDisabled(), true);
+    // Bound: a variable chip replaces the hex/alpha inputs, so the side cannot be typed into.
+    assert.equal(await page.locator("[name=strokeColorRight]").count(), 0);
+    assert.equal(
+      await page
+        .locator('[data-bound-color=strokeColorRight] [data-variable-chip="brand/line"]')
+        .innerText(),
+      "line",
+    );
     await page.getByRole("button", { name: "Detach right border colour variable" }).click();
     assert.deepEqual((await node("card")).strokeColors[1], { color: "#ff0000" });
     await commit("[name=strokeColorRight]", "00FF00");
@@ -127,8 +165,12 @@ const PNG =
     // Bind menu groups typed variables by folder.
     await page.locator("[name=w]").hover();
     await page.locator("[data-bind=w]").click();
-    await page.locator('[role=menu] [data-variable-folder="space"] [data-variable="space/md"]').waitFor();
-    const order = await page.locator("[role=menu] [data-variable]").evaluateAll((els) => els.map((el) => el.dataset.variable));
+    await page
+      .locator('[role=menu] [data-variable-folder="space"] [data-variable="space/md"]')
+      .waitFor();
+    const order = await page
+      .locator("[role=menu] [data-variable]")
+      .evaluateAll((els) => els.map((el) => el.dataset.variable));
     assert.deepEqual(order, ["gutter", "space/md"]);
     await page.locator('[role=menuitem][data-variable="space/md"]').click();
     assert.equal((await node("card")).w, 240);
@@ -176,7 +218,9 @@ const PNG =
       page.locator('#mask-editor [data-mask-type="image"]').click(),
     ]);
     await chooser.setFiles(imagePath);
-    await page.waitForFunction(() => window.design.getDocument().pages[0].nodes[0].masks?.[0]?.type === "image");
+    await page.waitForFunction(
+      () => window.design.getDocument().pages[0].nodes[0].masks?.[0]?.type === "image",
+    );
     n = await node("card");
     assert.equal(n.masks[0].src, "data:image/png;base64," + PNG);
     assert.equal(n.masks[0].css, undefined);
@@ -224,18 +268,40 @@ const PNG =
     await page.locator("[data-mask-detach='0']").click();
     d = await doc();
     const fade = d.pages[0].nodes.at(-1);
-    assert.deepEqual(fade.fills, [{ type: "linear", angle: 90, stops: [{ position: 0, color: "#00000080" }, { position: 100, color: "#00000000" }] }]);
+    assert.deepEqual(fade.fills, [
+      {
+        type: "linear",
+        angle: 90,
+        stops: [
+          { position: 0, color: "#00000080" },
+          { position: 100, color: "#00000000" },
+        ],
+      },
+    ]);
 
     // Validation rejects malformed values (shared with design-store validateDocument).
     const rejected = await page.evaluate(() => {
       const out = [];
-      for (const patch of [{ strokeToken: 7 }, { outlineToken: "" }, { strokeColors: [{ color: "#fff" }] }, { masks: [{ type: "image", src: "https://x/y.png" }] }, { masks: [{ type: "linear", composite: "xor" }] }]) {
-        try { window.design.updateNodes(["card"], patch); out.push(false); } catch { out.push(true); }
+      for (const patch of [
+        { strokeToken: 7 },
+        { outlineToken: "" },
+        { strokeColors: [{ color: "#fff" }] },
+        { masks: [{ type: "image", src: "https://x/y.png" }] },
+        { masks: [{ type: "linear", composite: "xor" }] },
+      ]) {
+        try {
+          window.design.updateNodes(["card"], patch);
+          out.push(false);
+        } catch {
+          out.push(true);
+        }
       }
       return out;
     });
     assert.deepEqual(rejected, [true, true, true, true, true]);
-    console.log("PASS inspector border/outline variables, per-side colours, folder groups in pickers, image/custom masks, advanced mask options, operations, detach mask as shape, reload, undo, validation");
+    console.log(
+      "PASS inspector border/outline variables, per-side colours, folder groups in pickers, image/custom masks, advanced mask options, operations, detach mask as shape, reload, undo, validation",
+    );
   } finally {
     await app.close();
     await fs.rm(profile, { recursive: true, force: true });

@@ -127,15 +127,16 @@ export function ConstraintWidget({
       role="group"
       aria-label="Constraints"
       className={cn(
-        "group/constraints relative row-span-2 h-full min-h-14 rounded-md bg-muted",
+        "group/constraints relative row-span-2 h-full min-h-14 rounded-md bg-accent shadow-field",
         !list && "opacity-50",
       )}
     >
-      <Edge axis="v" edge="start" label="Pin top" className="inset-x-6 top-0 h-3.5" bar="h-2.5 w-px" />
-      <Edge axis="v" edge="end" label="Pin bottom" className="inset-x-6 bottom-0 h-3.5" bar="h-2.5 w-px" />
-      <Edge axis="h" edge="start" label="Pin left" className="inset-y-3.5 left-0 w-6" bar="h-px w-3" />
-      <Edge axis="h" edge="end" label="Pin right" className="inset-y-3.5 right-0 w-6" bar="h-px w-3" />
-      <Edge axis="h" edge="center" label="Center horizontally" className="top-3.5 bottom-3.5 left-1/2 w-3 -translate-x-1/2" bar="h-3 w-px" />
+      {/* Wonder 22/43: #363636 well, 12px ticks 6px in from each edge. */}
+      <Edge axis="v" edge="start" label="Pin top" className="inset-x-6 top-0 h-6" bar="h-3 w-px" />
+      <Edge axis="v" edge="end" label="Pin bottom" className="inset-x-6 bottom-0 h-6" bar="h-3 w-px" />
+      <Edge axis="h" edge="start" label="Pin left" className="inset-y-6 left-0 w-6" bar="h-px w-3" />
+      <Edge axis="h" edge="end" label="Pin right" className="inset-y-6 right-0 w-6" bar="h-px w-3" />
+      <Edge axis="h" edge="center" label="Center horizontally" className="top-6 bottom-6 left-1/2 w-3 -translate-x-1/2" bar="h-3 w-px" />
       <Edge axis="v" edge="center" label="Center vertically" className="top-1/2 left-6 right-6 h-3 -translate-y-1/2" bar="h-px w-3" />
     </div>
   );

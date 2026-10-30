@@ -242,6 +242,16 @@ function buildSink() {
     ],
   });
   Object.assign(by("Inline A"), { name: "  Inline A ", textDecoration: "line-through" });
+  // A border and an outline hidden with the inspector's eye: nothing drawn, both kept.
+  Object.assign(by("CTA"), {
+    strokeWidth: 3,
+    strokeColor: "#ff0000",
+    strokeStyle: "dashed",
+    strokeHidden: true,
+    outlineWidth: 2,
+    outlineColor: "#00ff00",
+    outlineHidden: true,
+  });
   Object.assign(by("Second"), { variantClasses: "md:p-8 hover:opacity-90 dark:bg-black" });
   reflow(page, null, [], doc);
   return validateDocument(doc);

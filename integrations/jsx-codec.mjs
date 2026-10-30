@@ -306,8 +306,10 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
   if (node.opacity !== undefined && Number(node.opacity) !== 100) c.push(Number.isInteger(node.opacity) ? `opacity-${node.opacity}` : `opacity-[${round(node.opacity)}%]`);
   if (Number(node.rotation)) c.push(`rotate-[${round(node.rotation)}deg]`);
   if (node.flipX === true && node.flipY === true) c.push('-scale-100'); else if (node.flipX === true) c.push('-scale-x-100'); else if (node.flipY === true) c.push('-scale-y-100');
+  // A hidden border (inspector eye) draws nothing, so it writes no classes; data-vn keeps it (codec-residual.mjs).
+  const strokeShown = node.strokeHidden !== true;
   const widths = Array.isArray(node.strokeWidths) && node.strokeWidths.length === 4 ? node.strokeWidths.map(Number) : null;
-  if (widths && !widths.every(v => v === widths[0])) {
+  if (!strokeShown) { /* no border classes */ } else if (widths && !widths.every(v => v === widths[0])) {
     ['t', 'r', 'b', 'l'].forEach((side, i) => { if (widths[i]) c.push(widths[i] === 1 ? `border-${side}` : Number.isInteger(widths[i]) ? `border-${side}-${widths[i]}` : `border-${side}-[${round(widths[i])}px]`); });
     c.push(typedColorClass('border', node.strokeColor || '#000000', node.strokeToken, tokens));
   } else if (Number(node.strokeWidth) > 0) {
@@ -315,9 +317,9 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
     c.push(w === 1 ? 'border' : Number.isInteger(w) ? `border-${w}` : `border-[${round(w)}px]`, typedColorClass('border', node.strokeColor || '#000000', node.strokeToken, tokens));
   }
   // Per-side border colours (top, right, bottom, left), each optionally bound to a colour variable.
-  if (Array.isArray(node.strokeColors) && node.strokeColors.length === 4 && (widths ? widths.some(Boolean) : Number(node.strokeWidth) > 0))
+  if (strokeShown && Array.isArray(node.strokeColors) && node.strokeColors.length === 4 && (widths ? widths.some(Boolean) : Number(node.strokeWidth) > 0))
     ['t', 'r', 'b', 'l'].forEach((side, i) => c.push(typedColorClass(`border-${side}`, node.strokeColors[i]?.color || node.strokeColor || '#000000', node.strokeColors[i]?.token, tokens)));
-  if (node.strokeStyle && node.strokeStyle !== 'solid' && Number(node.strokeWidth) > 0) c.push(`border-${node.strokeStyle}`);
+  if (strokeShown && node.strokeStyle && node.strokeStyle !== 'solid' && Number(node.strokeWidth) > 0) c.push(`border-${node.strokeStyle}`);
   if (Number(node.ringWidth) > 0) { const w = Number(node.ringWidth); c.push(Number.isInteger(w) ? (w === 1 ? 'ring-1' : `ring-${w}`) : `ring-[${round(w)}px]`, colorClass('ring', node.ringColor || '#000000', '', tokens)); if (node.ringInset) c.push('ring-inset'); }
   // Structured effects (web/node-style.js effectsOf): hidden entries are not written; colors are resolved.
   const fx = effectsOf(node, tokens);

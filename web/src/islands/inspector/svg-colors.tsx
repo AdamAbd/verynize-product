@@ -3,6 +3,7 @@ import { useState } from "react";
 import { RotateCcw, Unlink } from "lucide-react";
 import type { DesignDocument } from "@/lib/bridge";
 import { ColorPopover } from "./color-picker";
+import { VariableChip } from "./bind";
 import { Field, IconButton, Section, Swatch } from "./controls";
 import { parseColor, toHex } from "./color";
 import { hexLabel, parseHex, patchNodes, type Node } from "./model";
@@ -111,16 +112,17 @@ export function SvgColorsSection({
         token={token}
         onToken={(name) => update(doc.tokens[name], name)}
       >
+        {/* Same geometry as a fill row (Wonder 13): 16px swatch 5px in, variable chip 4px after it. */}
         <div
           data-color-anchor
-          className="flex h-6 items-center gap-2 rounded-md bg-input px-2 text-xs shadow-field"
+          className="flex h-6 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field"
         >
           <button
             type="button"
             aria-label="SVG color"
             aria-expanded={open}
             onClick={() => setOpen(!open)}
-            className="flex size-4 shrink-0 items-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
+            className="flex size-4.5 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
           >
             <Swatch color={color} />
           </button>
@@ -128,16 +130,22 @@ export function SvgColorsSection({
             <button
               type="button"
               data-svg-color-token={token}
+              aria-label={`SVG color variable ${token}`}
+              title={
+                doc.tokens[token]
+                  ? `${token} = ${doc.tokens[token]}`
+                  : `${token} (missing variable)`
+              }
               onClick={() => setOpen(!open)}
-              className="min-w-0 flex-1 truncate text-left"
+              className="-ml-px flex h-5 min-w-0 flex-1 items-center rounded-sm text-left focus-visible:ring-1 focus-visible:ring-ring"
             >
-              {token}
+              <VariableChip name={token} missing={!doc.tokens[token]} />
             </button>
           ) : (
             <Field
               label="SVG hex color"
               value={hexLabel(color)}
-              className="h-5 flex-1 bg-transparent px-1 shadow-none"
+              className="h-5 flex-1 bg-transparent px-0 shadow-none"
               onCommit={(value) => {
                 const next = parseHex(value, color);
                 if (!next) return "Use a hex color such as A58BDD";
@@ -224,21 +232,21 @@ function SvgPaintRow({
       <ColorPopover open={open} onOpenChange={setOpen} value={color} onCommit={onChange}>
         <div
           data-color-anchor
-          className="flex h-6 min-w-0 flex-1 items-center gap-2 rounded-md bg-input px-2 text-xs shadow-field"
+          className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field"
         >
           <button
             type="button"
             aria-label={`SVG color ${index + 1}`}
             aria-expanded={open}
             onClick={() => setOpen(!open)}
-            className="flex size-4 shrink-0 items-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
+            className="flex size-4.5 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
           >
             <Swatch color={color} />
           </button>
           <Field
             label={`SVG color ${index + 1} hex`}
             value={hexLabel(color)}
-            className="h-5 flex-1 bg-transparent px-1 shadow-none"
+            className="h-5 flex-1 bg-transparent px-0 shadow-none"
             onCommit={(value) => {
               const next = parseHex(value, color);
               if (!next) return "Use a hex color such as A58BDD";
