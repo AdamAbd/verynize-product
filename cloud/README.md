@@ -89,6 +89,19 @@ Email + password accounts and organizations run on [Better Auth](https://better-
 - The legacy magic-link routes (`/api/auth/start`, `/api/auth/verify`) remain for older desktop builds; the current desktop no longer offers them.
 - `BETTER_AUTH_SECRET` signs tokens. `AUTH_URL` (optional) overrides the origin used in emailed links, which otherwise is the request origin.
 
+## Organizations and room access (`cloud/orgs.js`)
+
+Rooms created by an email + password user belong to a Better Auth organization, recorded in the D1 `room` table (`cloud/migrations/0002_rooms.sql`). The document stays in the room's Durable Object. Rooms created with a legacy session, or without signing in, stay outside organizations until an owner moves them.
+
+- **Personal organization.** Each user has one, created on first use (`GET /api/me` returns `personalOrganizationId`; `POST /api/rooms` without `organizationId` uses it). Its slug is `personal-<user id>`, and its metadata carries `personal: true`. Other organizations cannot use that slug prefix or set the marker, and metadata updates keep the marker as it is.
+- **Room role from the organization.** Owners and admins of the organization become room owners. Members get the organization's `metadata.roomRole` (`viewer`, `commenter` or `editor`; the default is `editor`). A request's role is the highest of its capability link, its direct room membership and its organization role. The router computes the organization role from D1 and forwards it as `x-verynize-org-role`; a client-sent header of that name is dropped.
+- **Live changes.** Adding a member, accepting an invitation, removing a member, changing a member role, changing `roomRole` and leaving the organization all update the live sockets of the affected rooms (`DesignRoom.applyOrgRoles`). The update sends `role` messages, or `revoked` followed by a close with code 4401.
+- `POST /api/rooms {document, organizationId?}` creates the room in an organization the caller belongs to (403 otherwise; 401 for legacy sessions). The response includes `organizationId`.
+- `PUT /api/rooms/:id/organization {organizationId}` moves a room. The caller must be a room owner and a member of the target organization. It also attaches legacy rooms to an organization.
+- `GET /api/orgs/:id/rooms` (members) → `{role, rooms:[{id,title,createdAt,updatedAt}]}`. `GET /api/me/rooms` merges direct memberships with organization rooms (`organizationId`, `organizationName`), keeping the higher role. `GET /api/rooms/:id/access` adds `organization {id,name}`.
+- An organization that still has rooms cannot be deleted (409). Titles listed from D1 follow the room's title whenever a room response reports it.
+- Better Auth endpoints also accept the session in `X-Verynize-Session`, so the desktop sends one header everywhere.
+
 ## Email delivery (`cloud/mail.js`)
 
 `EMAIL_PROVIDER` selects the transport. `cloudflare` sends through the `EMAIL` send-email binding from `EMAIL_FROM` (what `cloudflare.config.ts` uses). `outbox` stores messages for `/api/dev/outbox` (tests and local development only). `webhook` POSTs `{to,subject,text}` to `EMAIL_WEBHOOK_URL` with `Bearer EMAIL_WEBHOOK_TOKEN`, so that a relay you operate sends the mail. Any other value disables email sign-in with a 503. The webhook relay needs its own live credential and has not been exercised. Invitation emails are best effort, and a failed delivery never blocks the membership change. Passkeys work without email delivery.
@@ -108,6 +121,7 @@ Rooms created by the previous snapshot-only Worker are migrated in place. Their 
 `tests/cloud-harness.mjs` builds the Worker with `vp build` once per test process and runs that bundle (the same one `cf deploy --prebuilt` uploads), and applies `cloud/migrations` to the persisted local D1 database, recording them in `d1_migrations` as `cf d1 migrations apply` does.
 
 - `node tests/cloud-auth-bridge.mjs`: Better Auth sessions acting through directory accounts. Legacy account linking by verified email, new accounts, profiles, room roles and email invitations, socket sessions, passkey tickets, unverified resend, the reset page flow, sign out and sign out everywhere.
+- `node tests/cloud-orgs.mjs`: personal organizations, rooms in organizations, organization roles granting room roles, the default member role, live role changes and revocation on update, removal and leaving, rejoining, direct and organization roles combined, listings, moving rooms (including legacy ones), a forged role header, reserved slugs and refusal to delete an organization with rooms.
 - `node tests/cloud-account-pages.mjs`: the verification landing and the password-reset page in a real Electron browser window (no preload).
 - `node tests/cloud-auth.mjs`: Better Auth on D1. Sign-up, required email verification (including a tampered token), password sign-in with bearer tokens and no cookies, sessions, organizations with emailed invitations and acceptance, password reset that revokes sessions, sign-out, per-IP rate limit and restart persistence.
 - `node tests/cloud-rooms.mjs`: capability auth, isolation, stale-write 409, WebSocket presence and updates, publication, restart persistence, unpublish, creation rate limit.

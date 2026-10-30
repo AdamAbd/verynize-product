@@ -22,6 +22,7 @@ const CLIENT = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_SOCKETS = 32;
 const FUTURE_SKEW = 5 * 60 * 1000;
 const TOKEN_ROLES = ["viewer", "commenter", "editor", "owner"];
+const ORG_ROLES = ["viewer", "commenter", "editor", "owner"];
 const bestRole = (...roles) =>
   roles.filter(Boolean).sort((a, b) => roleRank(b) - roleRank(a))[0] || null;
 
@@ -91,7 +92,10 @@ export class DesignRoom extends DurableObject {
     return { id, token: secret, role };
   }
 
-  /** Role granted by a capability token and/or the signed-in account forwarded by the router. */
+  /**
+   * Role granted by a capability token, the signed-in account's membership and/or its
+   * organization (x-verynize-org-role, computed by the router from D1; clients cannot send it).
+   */
   async access(request, url) {
     const header = request.headers.get("authorization")?.replace(/^Bearer /, "") || "";
     const secret = /^[0-9a-f]{64}$/.test(header) ? header : url.searchParams.get("token") || "";
@@ -108,10 +112,13 @@ export class DesignRoom extends DurableObject {
     const member = account?.id
       ? this.sql.exec("SELECT role FROM members WHERE account_id=?", account.id).toArray()[0]
       : null;
+    const org = request.headers.get("x-verynize-org-role");
+    const orgRole = ORG_ROLES.includes(org) ? org : null;
     return {
-      role: bestRole(capability?.role, member?.role),
+      role: bestRole(capability?.role, member?.role, orgRole),
       capability: capability?.id || null,
       account,
+      orgRole,
     };
   }
 
@@ -305,7 +312,7 @@ export class DesignRoom extends DurableObject {
       const member = state.accountId
         ? this.sql.exec("SELECT role FROM members WHERE account_id=?", state.accountId).toArray()[0]
         : null;
-      const role = bestRole(capability?.role, member?.role);
+      const role = bestRole(capability?.role, member?.role, state.orgRole);
       if (!role) {
         try {
           socket.send(
@@ -348,7 +355,7 @@ export class DesignRoom extends DurableObject {
         return json({ document: JSON.parse(row.public_document), revision: row.public_revision });
       }
       if (!row) return json({ error: "Unauthorized" }, 401);
-      const { role, capability, account } = await this.access(request, url);
+      const { role, capability, account, orgRole } = await this.access(request, url);
       if (!role) return json({ error: "Unauthorized" }, 401);
       const need = (wanted) => {
         if (!atLeast(role, wanted)) fail(403, `This needs the ${wanted} role; you are a ${role}`);
@@ -374,6 +381,7 @@ export class DesignRoom extends DurableObject {
           name: account?.displayName || "Guest",
           role,
           capability,
+          orgRole,
           accountId: account?.id || null,
           handle: account?.handle || null,
           client,
@@ -520,6 +528,31 @@ export class DesignRoom extends DurableObject {
     } catch (error) {
       return errorResponse(error);
     }
+  }
+
+  /** Account ids of the live sockets, so the router can recompute their organization roles. */
+  connectedAccounts() {
+    const ids = new Set();
+    for (const socket of this.ctx.getWebSockets()) {
+      const id = socket.deserializeAttachment()?.accountId;
+      if (id) ids.add(id);
+    }
+    return [...ids];
+  }
+
+  /**
+   * Organization roles changed ({accountId: role|null}): live sockets of those accounts are
+   * re-evaluated and downgraded, promoted or disconnected like after a membership change.
+   */
+  applyOrgRoles(roles) {
+    for (const socket of this.ctx.getWebSockets()) {
+      const state = socket.deserializeAttachment() || {};
+      if (!state.accountId || !Object.hasOwn(roles, state.accountId)) continue;
+      const next = ORG_ROLES.includes(roles[state.accountId]) ? roles[state.accountId] : null;
+      socket.serializeAttachment({ ...state, orgRole: next });
+    }
+    this.refreshSockets();
+    return { updated: true };
   }
 
   peers() {

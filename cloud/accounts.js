@@ -121,6 +121,17 @@ export class AccountDirectory extends DurableObject {
     return publicAccount(this.account(account.id));
   }
 
+  accountIdForEmail(email) {
+    return typeof email === "string"
+      ? this.accountByEmail(email.trim().toLowerCase())?.id || null
+      : null;
+  }
+  accountsById(ids) {
+    return (Array.isArray(ids) ? ids.slice(0, 64) : [])
+      .map((id) => publicAccount(this.account(String(id))))
+      .filter(Boolean);
+  }
+
   async startSignIn(rawEmail, origin) {
     const email = normalizeEmail(rawEmail);
     const token = randomHex(32),

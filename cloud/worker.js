@@ -9,10 +9,25 @@ import {
   documentText,
   errorResponse,
   rpc,
+  roleRank,
   HttpError,
 } from "./http.js";
 import { SESSION } from "./accounts.js";
 import { AUTH_BASE_PATH, createAuth } from "./auth.js";
+import {
+  addRoom,
+  ensurePersonalOrganization,
+  membership,
+  moveRoom,
+  orgRoomRole,
+  organizationRooms,
+  refreshMember,
+  refreshRoom,
+  roomOrganization,
+  roomRoleFor,
+  syncTitle,
+  userOrganizationRooms,
+} from "./orgs.js";
 import { MAX_FILE, cleanPath } from "./apps.js";
 import { profilePage, missingApp } from "./pages.js";
 import { passkeyPage, passkeyScript } from "./passkey-page.js";
@@ -24,7 +39,7 @@ export { PublishedApp } from "./apps.js";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const ROOM_ROUTE = new RegExp(
-  `^/api/rooms/(${UUID})(/socket|/publish|/ops|/access|/members(?:/${UUID})?|/claim|/tokens(?:/rotate|/${UUID})?|/comments)?$`,
+  `^/api/rooms/(${UUID})(/socket|/publish|/ops|/access|/members(?:/${UUID})?|/claim|/organization|/tokens(?:/rotate|/${UUID})?|/comments)?$`,
 );
 const APP_ROUTE = new RegExp(
   `^/api/apps/(${UUID})(/versions(?:/(\\d+)(/finalize|/files/(.+))?)?|/activate|/publish)?$`,
@@ -63,7 +78,10 @@ async function accountOf(env, request, url) {
   // Better Auth users act through their directory account (rooms, profiles, apps, passkeys).
   const found = await authSession(env, request, session);
   if (!found?.user?.emailVerified) return null;
-  return await rpc(directory(env).linkVerifiedAccount(found.user.email, found.user.name));
+  const account = await rpc(directory(env).linkVerifiedAccount(found.user.email, found.user.name));
+  // The Better Auth user (organizations); not serialized into responses.
+  Object.defineProperty(account, "authUser", { value: found.user, enumerable: false });
+  return account;
 }
 async function requireAccount(env, request, url) {
   const account = await accountOf(env, request, url);
@@ -76,10 +94,12 @@ async function limited(binding, key) {
 }
 
 /** Forward to a room with only trusted identity headers: client-sent identity headers are dropped. */
-function roomRequest(target, request, account, body) {
+function roomRequest(target, request, account, body, orgRole) {
   const headers = new Headers(request.headers);
   headers.delete("x-verynize-account");
   headers.delete("x-verynize-session");
+  headers.delete("x-verynize-org-role");
+  if (orgRole) headers.set("x-verynize-org-role", orgRole);
   if (account)
     headers.set(
       "x-verynize-account",
@@ -123,9 +143,27 @@ async function handleBetterAuth(request, env, url) {
   )
     fail(429, "Too many requests. Try again in a minute.");
   // Bearer tokens only (see cloud/auth.js): no cookies in, no cookies out.
-  const forwarded = new Request(request);
-  forwarded.headers.delete("cookie");
+  const headersIn = new Headers(request.headers);
+  headersIn.delete("cookie");
+  // The desktop sends one session header everywhere; Better Auth reads Authorization.
+  const session = request.headers.get("x-verynize-session") || "";
+  if (AUTH_TOKEN.test(session)) headersIn.set("authorization", `Bearer ${session}`);
+  const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.text();
+  const forwarded = new Request(request.url, { method: request.method, headers: headersIn, body });
+  // Leaving an organization runs no Better Auth hook; refresh room access here.
+  let leaving = null;
+  if (endpoint === "/organization/leave" && request.method === "POST") {
+    const token = sessionOf(request, url);
+    const found = token ? await authSession(env, request, token) : null;
+    let organizationId = null;
+    try {
+      organizationId = JSON.parse(body || "{}").organizationId;
+    } catch {}
+    if (found && typeof organizationId === "string")
+      leaving = { organizationId, userId: found.user.id };
+  }
   const response = await createAuth(env, request).handler(forwarded);
+  if (leaving && response.ok) await refreshMember(env, leaving.organizationId, leaving.userId);
   const headers = new Headers(response.headers);
   headers.delete("set-cookie");
   for (const [name, value] of Object.entries(corsHeaders)) headers.set(name, value);
@@ -174,10 +212,14 @@ async function handleAuth(request, env, url) {
     const authSessions = SESSION.test(session)
       ? 0
       : (await createAuth(env, request).api.listSessions({ headers: authHeaders(session) })).length;
+    const personalOrganizationId = account.authUser
+      ? await ensurePersonalOrganization(env, createAuth(env, request), account.authUser)
+      : null;
     return json({
       account,
       sessions: (await directory(env).sessionCount(account.id)) + authSessions,
       profilePath: `/u/${account.handle}`,
+      personalOrganizationId,
     });
   }
   if (path === "/api/me" && request.method === "PATCH") {
@@ -194,7 +236,32 @@ async function handleAuth(request, env, url) {
   }
   if (path === "/api/me/rooms" && request.method === "GET") {
     const account = await requireAccount(env, request, url);
-    return json({ rooms: await directory(env).rooms(account.id) });
+    // Direct memberships plus rooms reached through organizations; the higher role wins.
+    const rooms = new Map();
+    for (const room of await directory(env).rooms(account.id)) rooms.set(room.id, room);
+    if (account.authUser)
+      for (const room of await userOrganizationRooms(env, account.authUser.id)) {
+        const direct = rooms.get(room.id);
+        const role =
+          direct && roleRank(direct.role) > roleRank(room.role) ? direct.role : room.role;
+        rooms.set(room.id, { ...direct, ...room, role });
+      }
+    return json({
+      rooms: [...rooms.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+    });
+  }
+  const orgRooms = path.match(/^\/api\/orgs\/([A-Za-z0-9_-]{1,64})\/rooms$/);
+  if (orgRooms && request.method === "GET") {
+    const account = await requireAccount(env, request, url);
+    const role = account.authUser ? await membership(env, orgRooms[1], account.authUser.id) : null;
+    if (!role) fail(404, "Organization not found");
+    const org = await env.DB.prepare('SELECT "metadata" FROM "organization" WHERE "id" = ?')
+      .bind(orgRooms[1])
+      .first();
+    return json({
+      role: roomRoleFor(role, org?.metadata),
+      rooms: await organizationRooms(env, orgRooms[1]),
+    });
   }
   // Passkeys. The relying party is this server's host (PASSKEY_RP_ID overrides it behind a proxy).
   const rp = { origin: url.origin, id: env.PASSKEY_RP_ID || url.hostname };
@@ -256,14 +323,31 @@ async function handleRooms(request, env, url) {
     const data = await readJson(request);
     documentText(data.document);
     const account = await accountOf(env, request, url);
+    // Email accounts create rooms in an organization: the one named, or their personal one.
+    let organizationId = null;
+    if (account?.authUser) {
+      if (data.organizationId !== undefined) {
+        organizationId = String(data.organizationId);
+        if (!(await membership(env, organizationId, account.authUser.id)))
+          fail(403, "You are not a member of this organization");
+      } else
+        organizationId = await ensurePersonalOrganization(
+          env,
+          createAuth(env, request),
+          account.authUser,
+        );
+    } else if (data.organizationId !== undefined)
+      fail(401, "Sign in with your email and password to create rooms in an organization");
     const id = crypto.randomUUID();
     const response = await env.ROOMS.getByName(id).fetch(
-      roomRequest("https://room/create", request, account, data),
+      roomRequest("https://room/create", request, account, { document: data.document }),
     );
     const result = await response.json();
     if (response.ok && account)
       await directory(env).linkRoom(account.id, id, "owner", result.title);
-    return json({ id, ...result }, response.status);
+    if (response.ok && organizationId)
+      await addRoom(env, { id, organizationId, title: result.title, userId: account.authUser.id });
+    return json({ id, ...result, organizationId }, response.status);
   }
   const publicMatch = url.pathname.match(new RegExp(`^/api/public/(${UUID})\\.([0-9a-f]{64})$`));
   if (publicMatch && request.method === "GET")
@@ -275,6 +359,7 @@ async function handleRooms(request, env, url) {
   const roomId = match[1],
     action = match[2] || "/room";
   const account = await accountOf(env, request, url);
+  const orgRole = account?.authUser ? await orgRoomRole(env, roomId, account.authUser.id) : null;
   const forward = new URL("https://room" + action);
   if (action === "/socket")
     for (const key of ["token", "client"])
@@ -286,7 +371,7 @@ async function handleRooms(request, env, url) {
     const data = await readJson(request, 16 * 1024);
     const invitee = await rpc(directory(env).ensureAccount(data.email));
     const response = await stub.fetch(
-      roomRequest(forward, request, account, { account: invitee, role: data.role }),
+      roomRequest(forward, request, account, { account: invitee, role: data.role }, orgRole),
     );
     const result = await response.json();
     if (response.ok) {
@@ -300,9 +385,40 @@ async function handleRooms(request, env, url) {
     }
     return json(result, response.status);
   }
-  const response = await stub.fetch(roomRequest(forward, request, account));
+  if (action === "/organization" && request.method === "PUT") {
+    // Move a room into an organization (room owners who are members of the target).
+    if (!account?.authUser) fail(401, "Sign in with your email and password first");
+    const data = await readJson(request, 16 * 1024);
+    const organizationId = typeof data.organizationId === "string" ? data.organizationId : "";
+    if (!organizationId || !(await membership(env, organizationId, account.authUser.id)))
+      fail(403, "You are not a member of that organization");
+    const asGet = new Request(request.url, { method: "GET", headers: request.headers });
+    const checked = await stub.fetch(
+      roomRequest(new URL("https://room/access"), asGet, account, undefined, orgRole),
+    );
+    const access = await checked.json();
+    if (!checked.ok) return json(access, checked.status);
+    if (access.role !== "owner") fail(403, "Only room owners can move a room");
+    if (await roomOrganization(env, roomId)) await moveRoom(env, roomId, organizationId);
+    else
+      await addRoom(env, {
+        id: roomId,
+        organizationId,
+        title: access.title,
+        userId: account.authUser.id,
+      });
+    await refreshRoom(env, roomId, organizationId);
+    const org = await roomOrganization(env, roomId);
+    return json({ organization: { id: org.id, name: org.name } });
+  }
+  const response = await stub.fetch(roomRequest(forward, request, account, undefined, orgRole));
   if (action === "/socket" || !response.ok) return response;
   const result = await response.json();
+  if (result?.title) await syncTitle(env, roomId, result.title);
+  if (action === "/access") {
+    const org = await roomOrganization(env, roomId);
+    result.organization = org ? { id: org.id, name: org.name } : null;
+  }
   if (action === "/publish" && request.method === "POST") {
     const publicId = `${roomId}.${result.nonce}`;
     if (account)
