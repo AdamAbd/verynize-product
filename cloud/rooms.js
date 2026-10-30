@@ -15,6 +15,7 @@ import {
   roleRank,
   ROLES,
   MAX_JSON,
+  rpcFail,
 } from "./http.js";
 
 const Ops = globalThis.VerynizeOps;
@@ -275,6 +276,50 @@ export class DesignRoom extends DurableObject {
       ops: result.applied,
       rejected: result.rejected.length,
       reasons: result.rejected.slice(0, 20),
+    };
+  }
+
+  /** Role of a signed-in account here: its membership and/or organization role (no links). */
+  memberRole(accountId, orgRole) {
+    const member = accountId
+      ? this.sql.exec("SELECT role FROM members WHERE account_id=?", accountId).toArray()[0]
+      : null;
+    return bestRole(member?.role, ORG_ROLES.includes(orgRole) ? orgRole : null);
+  }
+
+  /** Hosted MCP read (cloud/mcp.js): the snapshot and the caller's role. */
+  agentRead({ accountId, orgRole } = {}) {
+    const role = this.row() ? this.memberRole(accountId, orgRole) : null;
+    if (!role) rpcFail(404, "Room not found, or you have no access to it");
+    return { ...this.snapshot(), role, title: this.title() };
+  }
+
+  /**
+   * Hosted MCP write (cloud/mcp.js): a server-originated batch, computed by the Worker as a diff
+   * from `baseRevision`, applied with the caller's role and broadcast to live sockets as `ops`.
+   * A newer revision returns {conflict:true} so the caller recomputes its edit.
+   */
+  agentApply({ accountId, orgRole, baseRevision, ops } = {}) {
+    const row = this.row();
+    const role = row ? this.memberRole(accountId, orgRole) : null;
+    if (!role) rpcFail(404, "Room not found, or you have no access to it");
+    if (!atLeast(role, "editor"))
+      rpcFail(403, `Your role in this room (${role}) cannot edit; ask an owner for editor access`);
+    if (row.revision !== baseRevision) return { conflict: true, revision: row.revision };
+    const client = `mcp-${String(accountId)
+      .replace(/[^A-Za-z0-9_-]/g, "")
+      .slice(0, 56)}`;
+    const last =
+      this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
+        ?.last_batch ?? 0;
+    const message = this.applyBatch({ client, batch: last + 1, ops }, role);
+    if (message.error) rpcFail(403, message.error);
+    if (message.ops.length) this.broadcast(message);
+    return {
+      applied: message.ops.length,
+      rejected: message.rejected,
+      reasons: message.reasons || [],
+      ...this.snapshot(),
     };
   }
 

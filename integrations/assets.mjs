@@ -5,7 +5,6 @@
 import { createRequire } from 'node:module';
 import { getIconData, iconToSVG, iconToHTML, replaceIDs } from '@iconify/utils';
 
-const require = createRequire(import.meta.url);
 export const ICON_SETS = {
   lucide: { package: '@iconify-json/lucide', title: 'Lucide', style: 'stroke' },
   ph: { package: '@iconify-json/ph', title: 'Phosphor', style: 'fill' },
@@ -15,8 +14,12 @@ export const DEFAULT_ICON_SET = 'lucide';
 const loaded = new Map();
 function iconSet(prefix) {
   if (!ICON_SETS[prefix]) return null;
-  if (!loaded.has(prefix)) loaded.set(prefix, require(`${ICON_SETS[prefix].package}/icons.json`));
+  if (!loaded.has(prefix)) loaded.set(prefix, createRequire(import.meta.url)(`${ICON_SETS[prefix].package}/icons.json`));
   return loaded.get(prefix);
+}
+/** Hosts without a file system (the collaboration Worker) hand over the parsed icon sets: {lucide, ph, tabler}. */
+export function provideIconSets(sets) {
+  for (const [prefix, set] of Object.entries(sets || {})) if (ICON_SETS[prefix] && set?.icons) loaded.set(prefix, set);
 }
 
 export function listIconSets() {
