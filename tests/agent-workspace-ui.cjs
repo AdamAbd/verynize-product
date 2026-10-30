@@ -84,6 +84,7 @@ else process.exit(0);
     VERYNIZE_WORKSPACES_DIR: path.join(root, "workspaces"),
   };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({
     env,
     args: [".", `--user-data-dir=${profile}`],

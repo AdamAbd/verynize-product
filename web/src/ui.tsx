@@ -7,3 +7,4 @@ import "./islands/home";
 import "./islands/chat";
 import "./islands/settings";
 import "./islands/code";
+import "./islands/onboarding";

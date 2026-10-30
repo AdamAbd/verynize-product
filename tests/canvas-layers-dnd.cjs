@@ -7,6 +7,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
 (async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'canvas-layers-dnd-')), env = {...process.env};
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({env, args: ['.', `--user-data-dir=${dir}`], timeout: 20000});
   try {
     const page = await app.firstWindow({timeout: 20000});

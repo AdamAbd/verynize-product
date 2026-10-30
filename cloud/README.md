@@ -101,6 +101,7 @@ Rooms created by an email + password user belong to a Better Auth organization, 
 - `GET /api/orgs/:id/rooms` (members) → `{role, rooms:[{id,title,createdAt,updatedAt}]}`. `GET /api/me/rooms` merges direct memberships with organization rooms (`organizationId`, `organizationName`), keeping the higher role. `GET /api/rooms/:id/access` adds `organization {id,name}`.
 - An organization that still has rooms cannot be deleted (409). Titles listed from D1 follow the room's title whenever a room response reports it.
 - Better Auth endpoints also accept the session in `X-Verynize-Session`, so the desktop sends one header everywhere.
+- **Desktop UI (phase 3).** Files › workspace switcher lists the account's organizations (personal first), creates organizations and opens Settings › Members. Settings › Members handles invitations, roles, the default member room access (`metadata.roomRole`), invitations addressed to you, leaving and deleting. Share › People & access shows the room's workspace and lets owners move it. Rooms created from the Share panel go to the active workspace. The first-run onboarding signs in or creates the account (default server `https://verynize.gayaloo.app`, changeable) before the agent setup. Tests: `tests/desktop-onboarding.mjs`, `tests/desktop-workspaces.mjs`.
 
 ## Email delivery (`cloud/mail.js`)
 

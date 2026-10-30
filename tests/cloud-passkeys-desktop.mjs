@@ -17,6 +17,7 @@ try {
   const server = direct.replace("127.0.0.1", "localhost"); // WebAuthn relying parties must be domains, not IPs
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = "1";
   app = await electron.launch({ env, args: [".", `--user-data-dir=${path.join(dir, "profile")}`] });
   const page = await app.firstWindow();
   await page.waitForFunction(() => !!window.design && !!window.cloudWorkspace);

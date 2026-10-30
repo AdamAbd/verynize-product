@@ -14,6 +14,7 @@ const path = require('node:path');
   await fs.chmod(path.join(bin, 'codex'), 0o755);
   const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, FAKE_CODEX_LOG: path.join(root, 'codex.log') };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });

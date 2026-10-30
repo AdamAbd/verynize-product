@@ -18,6 +18,7 @@ measure with Python/PIL — divide pixel coordinates by 2). `design-qa.md` lists
 | chat | `chat.tsx` | `#agent-chat-dock` and the Code workspace center column (`#code-chat-host`): transcript, composer, model picker (30), access (31), attach menu (32), repository switcher (33), quick chats (34–35), running state (36–37, 51) | 29–37, 51, 80–83 |
 | settings | `settings.tsx` | `#settings-screen` (all pages) and the remaining dialogs: share/cloud (13), export flow (45–50 save/success), templates, saved views, generate illustration, Figma import, text prompt (`#text-prompt`), preview modal (`#modal`) | 13, 45–50, 61–79 |
 | code | `code.tsx` | `#code-workspace` (body class `code-mode`): repositories/chats sidebar, breadcrumb in the title bar slot `#bd-code-titlebar`, toolbar (Start preview, panel toggle), file tree + editor, terminal panel (`code/terminal-panel.tsx`, terminal workstream), hosting the chat island's `.project-agent` section in the center column | code mode, 80, 81, 33–35, extra/38 |
+| onboarding | `onboarding.tsx` | `#onboarding`: desktop first-run setup (not a tutorial): Verynize account (sign in / create / forgot password / skip), then "Bring your own agent" (Claude/Codex connection status and sign-in, Cursor coming soon). Shown once per profile (`localStorage` `verynize.onboarding`), reopened by `bd:open-onboarding`, skipped when `window.desktop.onboardingState()` reports `skip` (`VERYNIZE_SKIP_ONBOARDING=1`, set by every Electron test) | onboarding reference (agents step) |
 
 Shared files are owned by the integrator — **do not edit**: `web/src/lib/*`, `web/src/components/ui/*` (existing files),
 `web/src/styles/globals.css` (except your own `<area>-tokens` block at the bottom), `web/index.html`, `vite*.config.ts`,
@@ -56,6 +57,14 @@ The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; isla
   [data-path=<file>]`, `#code-file-filter`, `#code-editor`, `#code-editor-save`, `#code-start-preview`, `#code-panel-toggle`,
   and `window.agentWorkspace.getState()` (`chatRoot`, `activeRoot`, `branch`). `#project-name` and `#project-status` stay
   as hidden text hooks. `window.codeWorkspace` exposes repository/chat actions to other islands.
+- **Cloud account and workspaces** (`web/src/lib/cloud-account.ts`): `window.cloudAccount` (from `web/cloud-panel.js`) is the one
+  email + password session. Islands use `useCloudAccount()`, `useOrganizations()` (one shared list; `await organizationsChanged()`
+  before switching to a workspace that was just created or joined), `useActiveOrganization()`, `authRequest()` (Better Auth under
+  `/api/auth`) and `openSignIn()`. Events: `cloud-account-changed`, `cloud-organization-changed`, `bd:open-onboarding`. Test ids:
+  `#workspace-profile`, `#workspace-create`, `#workspace-members`, `#workspace-sign-in`, `#members-page[data-organization]`,
+  `[data-org-member=<email>]`, `[data-org-member-role=<email>]`, `#members-invite*`, `#members-room-role`, `#members-leave`,
+  `[data-accept-invitation]`, `#onboarding[data-step]`, `#onboarding-*`, `[data-agent=<id>] [data-status]`. The legacy Share
+  dialog already uses `data-member` / `data-remove-member`, so organization rows must not.
 - **Zoom menu**: tests click `#zoom-menu-button` then `#zoom-in`, `#zoom-out`, `#zoom-fit`, `#zoom-reset`, `#snap`,
   `#saved-views-open` (chrome island). `#zoom-reset` text must keep the zoom percentage (tests parse it).
 - **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask]`, `[name=layout]`,
