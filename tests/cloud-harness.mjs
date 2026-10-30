@@ -8,6 +8,7 @@ const BUNDLE = new URL(".cloudflare/output/v0/workers/default/bundle/", root);
 const MIGRATIONS = new URL("cloud/migrations/", root);
 const D1 = { type: "d1", id: "verynize-local", name: "verynize" };
 export const AUTH_SECRET = "local-test-secret-not-for-production-0000";
+export const ASSET_SECRET = "local-asset-signing-secret-not-for-production";
 
 // The Worker imports npm packages (Better Auth), so tests run the same bundle that
 // `cf deploy --prebuilt` uploads. It is built once per test process.
@@ -122,6 +123,8 @@ export async function cloudOptions(persistence, extra = {}) {
             APPS: { type: "durable-object", worker: "verynize", exportName: "PublishedApp" },
             DB: D1,
             BETTER_AUTH_SECRET: { type: "text", value: AUTH_SECRET },
+            ASSETS_BUCKET: { type: "r2", name: "verynize-assets" },
+            ASSET_SIGNING_SECRET: { type: "text", value: ASSET_SECRET },
             EMAIL_PROVIDER: { type: "text", value: "outbox" },
           },
           exports: {

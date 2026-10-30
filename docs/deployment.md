@@ -42,6 +42,16 @@ deploy, the Worker copies the existing `AccountDirectory` data into these tables
 For a local database,
 add `--local` (and optionally `--persist-to <dir>`).
 
+### Room assets (R2 bucket and signing secret)
+
+Shared-room images live in the R2 bucket `verynize-assets` (binding `ASSETS_BUCKET`), with metadata in D1 (`cloud/migrations/0004_room_assets.sql`). Upload and read URLs are signed with the `ASSET_SIGNING_SECRET` Worker secret (see cloud/README.md, "Room assets"). Before deploying this release:
+
+1. Apply the migration: `vpr db:migrate` (it applies `0004_room_assets.sql`).
+2. Create the bucket, unless `npm run deploy` provisions it from the declared binding: `npx cf r2 buckets create --name verynize-assets` (add `--location-hint` or `--cf-r2-jurisdiction` if needed, and `--dry-run` to check the request first).
+3. Provide the secret, generated with `openssl rand -base64 32`. For the next deploy, add `ASSET_SIGNING_SECRET` to the private secrets file and run `npm run deploy -- --secrets-file /path/to/private-secrets.json`, or set it on the existing Worker with `npx cf workers secrets update ASSET_SIGNING_SECRET --worker verynize --text '<value>'` (keep the value out of shell history). Delete the file afterwards.
+
+Do not rotate `ASSET_SIGNING_SECRET`: every image URL stored in room documents depends on it. Without the bucket or the secret, the asset endpoints answer 503 and the desktop keeps images embedded as before. These steps were checked only with `npm run deploy:check`; no bucket or secret was created against a real account.
+
 ### Transactional email
 
 Production uses Cloudflare Email Sending through the native `EMAIL` binding.
