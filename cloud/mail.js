@@ -11,7 +11,7 @@ import { rpcFail } from "./http.js";
 export async function sendMail(env, directory, message) {
   const provider = env.EMAIL_PROVIDER || "disabled";
   if (provider === "outbox") {
-    directory.storeOutbox(message);
+    await directory.storeOutbox(message);
     return { provider };
   }
   if (provider === "webhook") {

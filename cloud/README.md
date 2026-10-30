@@ -1,6 +1,6 @@
 # Cloud collaboration service
 
-The Worker (`cloud/worker.js`) routes the HTTP API to three kinds of SQLite Durable Objects:
+The Worker (`cloud/worker.js`) serves Better Auth identities from D1 (`cloud/auth.js`) and routes the rest of the HTTP API to three kinds of SQLite Durable Objects:
 
 - `DesignRoom` (`cloud/rooms.js`), one per shared room: document, capability links with roles, account members, operation merging, comments, WebSocket presence and frozen public snapshots.
 - `AccountDirectory` (`cloud/accounts.js`), a single instance: accounts, magic-link sign-in, hashed sessions, public profiles, the room membership index and the app registry.
@@ -74,6 +74,16 @@ Apps are served with `Content-Security-Policy: sandbox allow-scripts allow-forms
 
 The desktop publisher (`desktop/app-publish.cjs`) runs the project's own `build` script and gives Vite/Vite+ builds a relative base. It finds `dist`, `build`, `out` or `public` (or `package.json` `verynize.outputDir`), hashes the files and uploads them four at a time.
 
+## Better Auth on D1 (`cloud/auth.js`)
+
+Email + password accounts and organizations run on [Better Auth](https://better-auth.com) with the `DB` D1 binding. The schema lives in `cloud/migrations/*.sql`; `node scripts/auth-schema.mjs` prints the SQL for the current options, which is the starting point for a new migration after changing plugins or fields. This is the foundation for replacing the `AccountDirectory` accounts below: for now both run side by side, and the desktop still signs in through the legacy routes.
+
+- Every Better Auth endpoint is served under `/api/auth/*`, after the legacy account routes (their paths do not overlap). The main ones are `POST sign-up/email {email,password,name}`, `POST sign-in/email {email,password}`, `GET get-session`, `POST sign-out`, `POST request-password-reset {email,redirectTo}`, `POST reset-password {token,newPassword}`, `GET verify-email?token=…` and `POST send-verification-email`, plus the organization plugin under `organization/*` (`create`, `list`, `get-full-organization`, `invite-member`, `accept-invitation`, `update-member-role`, `remove-member`, …).
+- Passwords are 10–128 characters and hashed with Better Auth's default scrypt. Email verification is required before sign-in. A password reset revokes every session of the account. Reset, verification and organization invitation emails go through `cloud/mail.js` (invitation links are `<origin>/#invitation=<id>`).
+- Sessions last 30 days and travel only as bearer tokens: sign-in returns the token in the body and in the `set-auth-token` response header, and clients send `Authorization: Bearer <token>`. The Worker drops request `Cookie` and response `Set-Cookie` headers, so there are no ambient credentials, and Better Auth's cookie CSRF check is disabled (it refuses the `Origin: null` sent by the desktop's `file://` renderer). Redirect and callback URLs are still validated against trusted origins. Responses carry the desktop CORS headers and expose `set-auth-token`.
+- `sign-up/email`, `sign-in/email`, `request-password-reset`, `reset-password`, `send-verification-email` and `change-password` are limited by `AUTH_LIMIT` per IP and endpoint. Better Auth's own limiter is off because it keeps state in isolate memory.
+- `BETTER_AUTH_SECRET` signs tokens. `AUTH_URL` (optional) overrides the origin used in emailed links, which otherwise is the request origin.
+
 ## Email delivery (`cloud/mail.js`)
 
 `EMAIL_PROVIDER` selects the transport. `outbox` stores messages for `/api/dev/outbox` (tests and local development only). `webhook` POSTs `{to,subject,text}` to `EMAIL_WEBHOOK_URL` with `Bearer EMAIL_WEBHOOK_TOKEN`, so that a relay you operate sends the mail. Any other value disables email sign-in with a 503. `cloudflare.config.ts` sets `webhook` and declares both values as secrets. Real delivery **needs a live credential** and has not been exercised. Invitation emails are best effort, and a failed delivery never blocks the membership change. Passkeys work without email delivery.
@@ -86,10 +96,13 @@ Rooms created by the previous snapshot-only Worker are migrated in place. Their 
 
 ## Configuration and deployment
 
-`cloudflare.config.ts` declares the three SQLite Durable Object classes, two rate limits (`ROOM_CREATION`, `AUTH_LIMIT`), the email variables and Worker-first routing for `/api/*`, `/u/*` and `/apps/*`. Vite serves the web static assets. Deploy only through `npm run deploy` (`cf deploy`). This implementation has only been built and tested locally (`npm run deploy:check` is a dry run), not deployed. Before a public deployment, it still needs account quotas beyond the per-account app limit, room deletion and lifecycle, abuse reporting for public profiles and apps, and a dedicated apps origin.
+`cloudflare.config.ts` enables `nodejs_compat` (Better Auth imports `node:async_hooks`), raises the CPU limit to 30 s per invocation (Workers Paid, for scrypt), and declares the `DB` D1 database, the `BETTER_AUTH_SECRET` secret, the three SQLite Durable Object classes, two rate limits (`ROOM_CREATION`, `AUTH_LIMIT`), the email variables and Worker-first routing for `/api/*`, `/u/*` and `/apps/*`. Vite serves the web static assets. Deploy only through `npm run deploy` (`cf deploy`). This implementation has only been built and tested locally (`npm run deploy:check` is a dry run), not deployed. Before a public deployment, it still needs account quotas beyond the per-account app limit, room deletion and lifecycle, abuse reporting for public profiles and apps, and a dedicated apps origin.
 
 ## Tests (local workerd via Miniflare; nothing mocked)
 
+`tests/cloud-harness.mjs` builds the Worker with `vp build` once per test process and runs that bundle (the same one `cf deploy --prebuilt` uploads), and applies `cloud/migrations` to the persisted local D1 database, recording them in `d1_migrations` as `cf d1 migrations apply` does.
+
+- `node tests/cloud-auth.mjs`: Better Auth on D1. Sign-up, required email verification (including a tampered token), password sign-in with bearer tokens and no cookies, sessions, organizations with emailed invitations and acceptance, password reset that revokes sessions, sign-out, per-IP rate limit and restart persistence.
 - `node tests/cloud-rooms.mjs`: capability auth, isolation, stale-write 409, WebSocket presence and updates, publication, restart persistence, unpublish, creation rate limit.
 - `node tests/cloud-merge.mjs`: the merge engine (round trips, LWW/HLC, text ranges, cycles, orphans, delete/undo, hostile operations, randomized convergence) and the room over WebSockets (concurrent edits, duplicate batches, restart-persistent stamps, future-stamp clamp, legacy snapshot coexistence).
 - `node tests/cloud-accounts.mjs`: legacy room migration, magic links, sessions, profiles, member roles, role links, profile publications, rotation with socket revocation, recovery, claiming, member removal, sign-out, persistence, rate limit.

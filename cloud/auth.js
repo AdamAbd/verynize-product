@@ -1,0 +1,88 @@
+// Better Auth identity layer: email + password accounts and organizations, stored in D1 (env.DB).
+//
+// The instance is created per request because Worker bindings only exist inside fetch. The
+// options are split out so scripts/auth-schema.mjs can generate cloud/migrations from the same
+// configuration against node:sqlite. Sessions travel only as `Authorization: Bearer` tokens
+// (bearer plugin): the Worker drops request cookies and response Set-Cookie headers, so there
+// are no ambient credentials and Better Auth's cookie CSRF check is disabled. It would otherwise
+// refuse the desktop renderer, whose file:// page sends `Origin: null`. Redirect and callback
+// URLs are still checked against trusted origins. Rate limiting is done by the Worker with
+// the AUTH_LIMIT binding: Better Auth's built-in limiter keeps state in isolate memory, which is
+// not shared between Workers isolates.
+import { betterAuth } from "better-auth";
+import { bearer, organization } from "better-auth/plugins";
+import { sendMail } from "./mail.js";
+
+export const AUTH_BASE_PATH = "/api/auth";
+
+const directory = (env) => env.ACCOUNTS.getByName("directory");
+
+/** Options shared by the Worker and the schema generator. `env` may be partial in scripts. */
+export function authOptions(env = {}, { baseURL, database } = {}) {
+  const mail = (message) => sendMail(env, directory(env), message);
+  return {
+    appName: "Verynize",
+    baseURL,
+    basePath: AUTH_BASE_PATH,
+    secret: env.BETTER_AUTH_SECRET,
+    database,
+    emailAndPassword: {
+      enabled: true,
+      requireEmailVerification: true,
+      minPasswordLength: 10,
+      maxPasswordLength: 128,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, url }) => {
+        await mail({
+          to: user.email,
+          subject: "Reset your Verynize password",
+          text: `Reset your password: ${url}\n\nThe link expires in one hour. If you did not ask for this, ignore this email.`,
+          link: url,
+        });
+      },
+    },
+    emailVerification: {
+      sendOnSignUp: true,
+      // The link opens in a browser, and cookies are not used, so a session there would be lost.
+      autoSignInAfterVerification: false,
+      sendVerificationEmail: async ({ user, url }) => {
+        await mail({
+          to: user.email,
+          subject: "Verify your Verynize email",
+          text: `Confirm your email address: ${url}`,
+          link: url,
+        });
+      },
+    },
+    session: {
+      expiresIn: 60 * 60 * 24 * 30,
+      updateAge: 60 * 60 * 24,
+    },
+    rateLimit: { enabled: false },
+    advanced: {
+      disableCSRFCheck: true,
+      ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
+    },
+    telemetry: { enabled: false },
+    plugins: [
+      bearer(),
+      organization({
+        sendInvitationEmail: async ({ email, organization: org, inviter, id }) => {
+          const link = `${baseURL}/#invitation=${id}`;
+          await mail({
+            to: email,
+            subject: `${inviter.user.name || inviter.user.email} invited you to ${org.name} on Verynize`,
+            text: `Join ${org.name}: ${link}`,
+            link,
+          });
+        },
+      }),
+    ],
+  };
+}
+
+/** The Better Auth instance for one request. */
+export function createAuth(env, request) {
+  const baseURL = env.AUTH_URL || new URL(request.url).origin;
+  return betterAuth(authOptions(env, { baseURL, database: env.DB }));
+}
