@@ -33,7 +33,9 @@ private temporary JSON file containing a random `BETTER_AUTH_SECRET`, then run
 after successful deployment. Subsequent deployments retain the existing secret;
 do not rotate it on every deploy. `npx cf d1 list` lists database IDs.
 
-Apply new migrations before deploying code that needs them. For a local database,
+Apply new migrations before deploying code that needs them; `0002_rooms.sql`
+(rooms owned by organizations) must be applied before the organization release.
+For a local database,
 add `--local` (and optionally `--persist-to <dir>`).
 
 ### Transactional email
