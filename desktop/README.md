@@ -107,6 +107,7 @@ Tests: `node --test tests/dev-server.cjs` (real child processes and a Node http 
 
 ## Named accounts, Verynize tools, chat autonomy, global search and workspace moves
 
+- `onboardingState()` → `{skip}`: the first-run onboarding (account, then agents) is skipped when `VERYNIZE_SKIP_ONBOARDING=1`, which every Electron test sets. Completion itself is remembered by the renderer (`localStorage` key `verynize.onboarding`).
 - `agentProfiles.{list,add,rename,remove,setDefault,setChat,chat}` (`desktop/agent-profiles.cjs`): named Claude Code / Codex accounts. Each has a private 0700 folder `userData/agent-profiles/<agent>/<id>` passed as `CLAUDE_CONFIG_DIR` / `CODEX_HOME`; `system` is the computer's own login. `agentAccountStatus`, `startAgentLogin`, `agentLogout` and `agentUsage.read` accept `{profile}`. Credentials are never read beyond display claims.
 - `agentToolConfig.{list,saveServer,setEnabled,removeServer,setPermission}` (`desktop/agent-tool-config.cjs`): MCP servers and per-tool allow/ask/deny defaults that Verynize passes to every run (global or one project; Claude, Codex or both). Environment values are write-only (the renderer sees names only); Codex gets them through `env_vars`, never argv.
 - `agentAutonomy.{get,set}` (`desktop/agent-autonomy.cjs`): per-chat allowed/denied tools, auto-approve rules, max turns, budget and plan-before-edits, enforced in `agent-runtime.cjs` (events `autonomy` and `policy`).

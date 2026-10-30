@@ -191,6 +191,17 @@ export function CodexMark({ className }: { className?: string }) {
   );
 }
 
+/** Cursor agent placeholder mark: a shaded cube (onboarding, coming soon). */
+export function CursorMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground", className)}>
+      <path fill="currentColor" opacity="0.35" d="M8 1.5 14 5v6l-6 3.5L2 11V5l6-3.5Z" />
+      <path fill="currentColor" d="M8 8 14 5v6l-6 3.5V8Z" />
+      <path d="M2 5l6 3 6-3M8 8v6.5" stroke="var(--background)" strokeWidth="0.8" fill="none" />
+    </svg>
+  );
+}
+
 /** Monochrome Figma mark (lucide no longer ships brand icons). */
 export function FigmaIcon(props: IconProps) {
   return (

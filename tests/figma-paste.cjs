@@ -11,6 +11,7 @@ const path = require("node:path");
   const profile = await fs.mkdtemp(os.tmpdir() + "/bd-figma-"),
     env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({
     timeout: 20000,
     env,

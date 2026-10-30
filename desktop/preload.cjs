@@ -1,7 +1,7 @@
 const {contextBridge,ipcRenderer}=require('electron');
 const call=(method,...args)=>ipcRenderer.invoke('desktop:'+method,...args);
 contextBridge.exposeInMainWorld('desktop',{
- agentAccountStatus:options=>call('agentAccountStatus',options),startAgentLogin:options=>call('startAgentLogin',options),cancelAgentLogin:options=>call('cancelAgentLogin',options),agentLogout:options=>call('agentLogout',options),openExternal:url=>call('openExternal',url),
+ agentAccountStatus:options=>call('agentAccountStatus',options),startAgentLogin:options=>call('startAgentLogin',options),cancelAgentLogin:options=>call('cancelAgentLogin',options),agentLogout:options=>call('agentLogout',options),openExternal:url=>call('openExternal',url),onboardingState:()=>call('onboardingState'),
  onAuthEvent:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:auth-event',listener);return()=>ipcRenderer.removeListener('desktop:auth-event',listener)},
  notifyTask:options=>call('notifyTask',options),
  // Share › Publish app (desktop/app-publish.cjs): build the open project and upload it to the cloud server.

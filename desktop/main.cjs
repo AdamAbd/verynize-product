@@ -60,6 +60,8 @@ app.whenReady().then(() => {
     require('./agent-tool-config.cjs').registerAgentToolConfig(handle,{store:agentStores.tools});
     require('./agent-autonomy.cjs').registerAgentAutonomy(handle,{store:agentStores.autonomy});
     require('./agent-memory.cjs').registerAgentMemory(handle,{userData:app.getPath('userData'),shell});
+    // First-run onboarding (web/src/islands/onboarding): automated runs skip it with VERYNIZE_SKIP_ONBOARDING=1.
+    handle('onboardingState',()=>({skip:process.env.VERYNIZE_SKIP_ONBOARDING==='1'}));
     handle('openExternal',value=>{const url=new URL(value);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('Only HTTP and HTTPS links are supported');return shell.openExternal(url.href);});
     let lastNotification=0;
     handle('notifyTask',options=>{if(!options||typeof options.title!=='string'||typeof options.body!=='string')throw Error('Invalid notification');if(Date.now()-lastNotification<3000||!Notification.isSupported())return false;lastNotification=Date.now();new Notification({title:options.title.slice(0,120),body:options.body.slice(0,300)}).show();return true;});

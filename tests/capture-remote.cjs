@@ -78,6 +78,7 @@ s.__reactFiber$fixture={_debugSource:{fileName:'/repo/src/components/Fiber.jsx',
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "capture-remote-"));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({
     env,
     args: [".", `--user-data-dir=${dir}`],

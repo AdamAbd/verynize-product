@@ -20,12 +20,27 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettings, type SectionId } from "./api";
-import { AccountPage, AgentsPage, ConnectionsPage, MemoryPage, ModelsPage, PreferencesPage, UsagePage } from "./pages";
+import {
+  AccountPage,
+  AgentsPage,
+  ConnectionsPage,
+  MemoryPage,
+  ModelsPage,
+  PreferencesPage,
+  UsagePage,
+} from "./pages";
 import { AccountsPage } from "./accounts";
 import { ToolsPage } from "./tools-config";
 import { ProjectsPage } from "./projects";
+import { MembersPage } from "./members";
+import { isPersonal, useActiveOrganization, useOrganizations } from "@/lib/cloud-account";
 
-const SECTIONS: { id: SectionId; title: string; icon: LucideIcon; page: ComponentType<Parameters<typeof AccountPage>[0]> }[] = [
+const SECTIONS: {
+  id: SectionId;
+  title: string;
+  icon: LucideIcon;
+  page: ComponentType<Parameters<typeof AccountPage>[0]>;
+}[] = [
   { id: "account", title: "Account", icon: CircleUserIcon, page: AccountPage },
   { id: "preferences", title: "Preferences", icon: SettingsIcon, page: PreferencesPage },
   { id: "agents", title: "Agents", icon: SendIcon, page: AgentsPage },
@@ -36,7 +51,10 @@ const SECTIONS: { id: SectionId; title: string; icon: LucideIcon; page: Componen
   { id: "models", title: "Default Models", icon: BoxIcon, page: ModelsPage },
   { id: "connections", title: "Connections", icon: LayoutGridIcon, page: ConnectionsPage },
   { id: "memory", title: "Memory", icon: BookOpenIcon, page: MemoryPage },
+  { id: "members", title: "Members", icon: UsersIcon, page: MembersPage },
 ];
+// Workspace sections sit under the workspace button rather than "Your account".
+const WORKSPACE: SectionId[] = ["members"];
 // "permissions" (the old Allowed actions page) now lives in Agents › Allowed without asking.
 const REDIRECT: Partial<Record<SectionId, SectionId>> = { permissions: "agents" };
 // Sections that need a desktop capability (feature-detected on the preload).
@@ -60,10 +78,21 @@ function Screen() {
 
   if (!api) return null;
   const sections = SECTIONS.filter((s) => AVAILABLE[s.id]?.() ?? true);
-  const visible = sections.filter((s) => s.title.toLowerCase().includes(query.trim().toLowerCase()));
-  const current = sections.find((s) => s.id === (REDIRECT[state.section] ?? state.section)) ?? SECTIONS[1];
+  const visible = sections.filter((s) =>
+    s.title.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const current =
+    sections.find((s) => s.id === (REDIRECT[state.section] ?? state.section)) ?? SECTIONS[1];
   const Page = current.page;
-  const name = preferences.displayName || "Personal workspace";
+  const { account, organizations } = useOrganizations();
+  const activeId = useActiveOrganization();
+  const activeOrg = organizations.find((org) => org.id === activeId) ?? organizations[0] ?? null;
+  const name = activeOrg
+    ? isPersonal(activeOrg)
+      ? account?.account.displayName || activeOrg.name
+      : activeOrg.name
+    : preferences.displayName || "Personal workspace";
+  const kind = activeOrg ? (isPersonal(activeOrg) ? "Personal" : "Team") : "Local";
 
   return (
     <div className="flex size-full bg-settings font-sans text-sm text-foreground-2">
@@ -71,7 +100,12 @@ function Screen() {
         aria-label="Settings"
         className="flex w-settings-nav shrink-0 flex-col overflow-y-auto border-r border-divider bg-background px-3 pt-13.5 pb-5"
       >
-        <button id="settings-back" type="button" className={cn(navRow, "m-0 py-0")} onClick={() => api.close()}>
+        <button
+          id="settings-back"
+          type="button"
+          className={cn(navRow, "m-0 py-0")}
+          onClick={() => api.close()}
+        >
           <ArrowLeftIcon className="size-4" />
           <span>Back to app</span>
         </button>
@@ -90,30 +124,38 @@ function Screen() {
         </label>
         <span className="mt-6 px-3 text-sm text-muted-foreground">Your account</span>
         <nav id="settings-nav" aria-label="Settings sections" className="mt-2 flex flex-col gap-px">
-          {visible.map(({ id, title, icon: Icon }) => {
-            const selected = id === current.id;
-            return (
-              <button
-                key={id}
-                type="button"
-                data-wp="1"
-                data-section={id}
-                aria-current={selected ? "page" : undefined}
-                className={cn(navRow, selected && "bg-row text-foreground hover:bg-row hover:text-foreground [&_svg]:text-foreground")}
-                onClick={() => api.select(id)}
-              >
-                <Icon className="size-4" />
-                <span>{title}</span>
-              </button>
-            );
-          })}
-          {visible.length === 0 && <p className="px-2 py-1.5 text-sm text-subtle-foreground">No matching settings</p>}
+          {visible
+            .filter((s) => !WORKSPACE.includes(s.id))
+            .map(({ id, title, icon: Icon }) => {
+              const selected = id === current.id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  data-wp="1"
+                  data-section={id}
+                  aria-current={selected ? "page" : undefined}
+                  className={cn(
+                    navRow,
+                    selected &&
+                      "bg-row text-foreground hover:bg-row hover:text-foreground [&_svg]:text-foreground",
+                  )}
+                  onClick={() => api.select(id)}
+                >
+                  <Icon className="size-4" />
+                  <span>{title}</span>
+                </button>
+              );
+            })}
+          {visible.length === 0 && (
+            <p className="px-2 py-1.5 text-sm text-subtle-foreground">No matching settings</p>
+          )}
         </nav>
         <button
           type="button"
           className={cn(navRow, "mt-4.5")}
-          onClick={() => api.select("account")}
-          aria-label={`Workspace: ${name} (local)`}
+          onClick={() => api.select(activeOrg ? "members" : "account")}
+          aria-label={`Workspace: ${name} (${kind.toLowerCase()})`}
         >
           <span
             aria-hidden
@@ -124,10 +166,37 @@ function Screen() {
           <span id="settings-workspace-name" className="min-w-0 truncate">
             {name}
           </span>
-          <span className="shrink-0 rounded-sm bg-input px-1.5 text-2xs leading-4.5 text-muted-foreground">Local</span>
+          <span className="shrink-0 rounded-sm bg-input px-1.5 text-2xs leading-4.5 text-muted-foreground">
+            {kind}
+          </span>
           <ChevronsUpDownIcon className="ml-auto size-3" aria-hidden />
         </button>
-        <button id="settings-sharing" type="button" className={cn(navRow, "mt-px")} onClick={() => api.actions.share()}>
+        {visible
+          .filter((s) => WORKSPACE.includes(s.id))
+          .map(({ id, title, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              data-section={id}
+              aria-current={id === current.id ? "page" : undefined}
+              className={cn(
+                navRow,
+                "mt-px",
+                id === current.id &&
+                  "bg-row text-foreground hover:bg-row hover:text-foreground [&_svg]:text-foreground",
+              )}
+              onClick={() => api.select(id)}
+            >
+              <Icon className="size-4" />
+              <span>{title}</span>
+            </button>
+          ))}
+        <button
+          id="settings-sharing"
+          type="button"
+          className={cn(navRow, "mt-px")}
+          onClick={() => api.actions.share()}
+        >
           <Share2Icon className="size-4" />
           <span>Share a design</span>
         </button>
@@ -141,7 +210,12 @@ function Screen() {
         className="min-w-0 flex-1 overflow-y-auto px-6 pt-22.5 pb-20 outline-none"
       >
         <div className="mx-auto w-full max-w-settings-main">
-          <Page api={api} preferences={preferences} setPreference={setPreference} accounts={state.accounts} />
+          <Page
+            api={api}
+            preferences={preferences}
+            setPreference={setPreference}
+            accounts={state.accounts}
+          />
         </div>
         <p id="settings-status" role="status" className="sr-only">
           {state.status}

@@ -45,7 +45,7 @@ async function write(file, text) {
   await fs.mkdir(path.join(outside, 'extra-dir'), { recursive: true });
 
   const env = { ...process.env, ...identity, PATH: bin + path.delimiter + process.env.PATH, FAKE_CODEX_LOG: log, VERYNIZE_WORKSPACES_DIR: workspaces, VERYNIZE_BRANCH_PREFIX: 'verynize', VERYNIZE_AGENT_HOME: home };
-  delete env.ELECTRON_RUN_AS_NODE; delete env.CODEX_HOME;
+  delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1'; delete env.CODEX_HOME;
   const turns = async () => (await fs.readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(c => c.rpc === 'turn/start' && !/word title for a design chat/.test(JSON.stringify(c.params || {})));
   const shots = process.env.CHAT_MENU_SHOT;
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${profile}`], timeout: 20000 });
