@@ -114,6 +114,7 @@ Migration `0003_directory.sql` adds `profile`, `room_membership`, `publication`,
   - re-running adds nothing.
 
   The old tables stay in `AccountDirectory`, unused.
+
 - **Adopting old rooms.** The first email + password sign-in of an account that existed before moves the rooms it owns that are not in any organization into the user's personal organization.
 
 ## Organizations and room access (`cloud/orgs.js`)
@@ -130,6 +131,39 @@ Rooms created by an email + password user belong to a Better Auth organization, 
 - Better Auth endpoints also accept the session in `X-Verynize-Session`, so the desktop sends one header everywhere.
 - **Desktop UI (phase 3).** Files › workspace switcher lists the account's organizations (personal first), creates organizations and opens Settings › Members. Settings › Members handles invitations, roles, the default member room access (`metadata.roomRole`), invitations addressed to you, leaving and deleting. Share › People & access shows the room's workspace and lets owners move it. Rooms created from the Share panel go to the active workspace. The first-run onboarding signs in or creates the account (default server `https://verynize.gayaloo.app`, changeable) before the agent setup. Tests: `tests/desktop-onboarding.mjs`, `tests/desktop-workspaces.mjs`.
 
+## Hosted MCP (`cloud/mcp.js`)
+
+`POST /api/mcp` is a headless MCP server: agents read and edit the account's rooms without any editor open, and open editors receive the edits through the normal room sync (`ops` messages over the socket).
+
+- **Transport.** The stateless JSON subset of MCP Streamable HTTP: `initialize`, `notifications/initialized` (and other notifications, answered `202` with no body), `ping`, `tools/list`, `tools/call`. Each POST gets one `application/json` response; JSON-RPC batches are answered as arrays. There is no SSE stream and no `Mcp-Session-Id`: `GET`/`DELETE` return `405` with `Allow: POST`. Protocol versions `2025-11-25`, `2025-06-18`, `2025-03-26` and `2024-11-05` are accepted; an unknown `MCP-Protocol-Version` header is a `400`. Requests with a foreign `Origin` header are refused (`403`). Bodies are limited to 8 MB.
+- **Auth.** `Authorization: Bearer <session token>` or `X-Verynize-Session: <session token>`, resolved exactly like the rest of the API: a Better Auth bearer token (the `set-auth-token` header of `POST /api/auth/sign-in/email`, also what the desktop stores) or a legacy `vs_` session. Anything else, including room capability links, gets `401` with `WWW-Authenticate: Bearer realm="verynize", error="invalid_token"`. There is no OAuth flow yet, so clients must be configured with the header. `MCP_LIMIT` (240 requests per minute) limits per IP and per account; room creation also counts against `ROOM_CREATION`.
+- **Tools.** The tool table of `integrations/design-tools.mjs` with the same names, descriptions and schemas, run against a cloud backend (31 tools): `get_design_context`, `get_artboards`, `get_element_tree`, `get_element_code`, `find_elements`, `create_artboard`, `update_elements`, `duplicate_elements`, `delete_elements`, `rename_elements`, `finish_artboard`, `get_design_guidelines`, `get_skills`, `get_icons`, `search_images`, `apply_style_tokens`, `get/create/update/delete_design_tokens`, `bind_variables`, `list_documents`, `open_document`, `create_document`, `create_page`, `rename_page`, `read_document`, `apply_operations`, `export_css`, `export_jsx`, `import_jsx`. Absent from `tools/list` (a call returns an `isError` result that says why): `take_screenshot` (no renderer), `ask_agent`, `import_html`, `export_document`, the design-preference tools and the desktop shell tools. Results carry `_meta: {"verynize/headless": true}`, and backend results report `headless: true` / `live: false`.
+- **Documents are rooms.** `list_documents` returns the rooms `GET /api/me/rooms` lists (direct memberships plus organization rooms, higher role wins) with `role`, `organizationId` and the editor URL `<origin>/#room=<id>`. The `document` (or `name`) argument is a room id; it may be omitted when the account reaches exactly one room. `create_document {title, organizationId?}` creates a room with an empty version 2 document like `POST /api/rooms` (personal organization by default, D1 `room` row and membership index; `name` is accepted and ignored). `open_document` only returns the editor URL. `finish_artboard` always reports `unverified` (no screenshot) and focuses nothing.
+- **Writes.** A tool's pure transform runs on the room snapshot (`DesignRoom.agentRead`), the result is validated with `validateDocument`, diffed with `VerynizeOps.diff` and sent to `DesignRoom.agentApply`. That RPC recomputes the caller's role from the room membership and the organization role the Worker computed (no capability links), refuses viewers and commenters, refuses a stale base revision so the Worker recomputes the edit (up to five attempts), and applies the batch through `applyBatch` as client `mcp-<account id>`, stamped by the server clock, then broadcasts it like any client batch. Revisions shown to tools are SHA-256 digests of the document, so `apply_operations` keeps its revision check. Remote `<img src="https://…">` photos are downloaded and embedded before the response (up to 512 KB each; a room document holds at most 2 MB).
+- **Engine in the Worker.** `cloud/mcp-env.js` bundles what the engine reads from `node_modules` on disk: the Tailwind v4 theme stylesheet (handed to `integrations/tailwind-engine.mjs` as `globalThis.__verynizeTailwindTheme`) and the three Iconify sets (loaded on first use and passed to `provideIconSets`). The router imports `cloud/mcp.js` dynamically, so other routes do not load the engine. The bundle grows from about 0.45 MB to about 2.2 MB gzip (11 MB uncompressed, most of it the icon sets).
+
+Setup for agents (replace the server and the token; `claude mcp add` syntax checked against the installed Claude Code CLI):
+
+```sh
+# A session token: the set-auth-token response header of a password sign-in.
+curl -si https://verynize.gayaloo.app/api/auth/sign-in/email -H 'content-type: application/json' \
+  -d '{"email":"you@example.com","password":"…"}' | grep -i set-auth-token
+
+# Claude Code
+claude mcp add --transport http verynize https://verynize.gayaloo.app/api/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Codex (to verify against your Codex version; Codex was not installed where this was written), in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.verynize]
+url = "https://verynize.gayaloo.app/api/mcp"
+bearer_token_env_var = "VERYNIZE_TOKEN"
+```
+
+Session tokens expire with the Better Auth session and are revoked by sign-out; treat them like passwords. Tests: `node tests/cloud-mcp.mjs`.
+
 ## Email delivery (`cloud/mail.js`)
 
 `EMAIL_PROVIDER` selects the transport. `cloudflare` sends through the `EMAIL` send-email binding from `EMAIL_FROM` (what `cloudflare.config.ts` uses). `outbox` stores messages for `/api/dev/outbox` (tests and local development only). `webhook` POSTs `{to,subject,text}` to `EMAIL_WEBHOOK_URL` with `Bearer EMAIL_WEBHOOK_TOKEN`, so that a relay you operate sends the mail. Any other value disables email sign-in with a 503. The webhook relay needs its own live credential and has not been exercised. Invitation emails are best effort, and a failed delivery never blocks the membership change. Passkeys work without email delivery.
@@ -142,7 +176,7 @@ Rooms created by the previous snapshot-only Worker are migrated in place. Their 
 
 ## Configuration and deployment
 
-`cloudflare.config.ts` enables `nodejs_compat` (Better Auth imports `node:async_hooks`), raises the CPU limit to 30 s per invocation (Workers Paid, for scrypt), and declares the `DB` D1 database, the `BETTER_AUTH_SECRET` secret, the three SQLite Durable Object classes, two rate limits (`ROOM_CREATION`, `AUTH_LIMIT`), the email variables and Worker-first routing for `/api/*`, `/u/*` and `/apps/*`. Vite serves the web static assets. Deploy only through `npm run deploy` (`cf deploy`). This implementation has only been built and tested locally (`npm run deploy:check` is a dry run), not deployed. Before a public deployment, it still needs account quotas beyond the per-account app limit, room deletion and lifecycle, abuse reporting for public profiles and apps, and a dedicated apps origin.
+`cloudflare.config.ts` enables `nodejs_compat` (Better Auth imports `node:async_hooks`), raises the CPU limit to 30 s per invocation (Workers Paid, for scrypt), and declares the `DB` D1 database, the `BETTER_AUTH_SECRET` secret, the three SQLite Durable Object classes, three rate limits (`ROOM_CREATION`, `AUTH_LIMIT`, `MCP_LIMIT`), the email variables and Worker-first routing for `/api/*`, `/u/*` and `/apps/*`. Vite serves the web static assets. Deploy only through `npm run deploy` (`cf deploy`). This implementation has only been built and tested locally (`npm run deploy:check` is a dry run), not deployed. Before a public deployment, it still needs account quotas beyond the per-account app limit, room deletion and lifecycle, abuse reporting for public profiles and apps, and a dedicated apps origin.
 
 ## Tests (local workerd via Miniflare; nothing mocked)
 
@@ -153,6 +187,7 @@ Rooms created by the previous snapshot-only Worker are migrated in place. Their 
 - `node tests/cloud-orgs.mjs`: personal organizations, rooms in organizations, organization roles granting room roles, the default member role, live role changes and revocation on update, removal and leaving, rejoining, direct and organization roles combined, listings, moving rooms (including legacy ones), a forged role header, reserved slugs and refusal to delete an organization with rooms.
 - `node tests/cloud-account-pages.mjs`: the verification landing and the password-reset page in a real Electron browser window (no preload).
 - `node tests/cloud-auth.mjs`: Better Auth on D1. Sign-up, required email verification (including a tampered token), password sign-in with bearer tokens and no cookies, sessions, organizations with emailed invitations and acceptance, password reset that revokes sessions, sign-out, per-IP rate limit and restart persistence.
+- `node tests/cloud-mcp.mjs`: the hosted MCP endpoint. Unauthenticated and capability-token requests (401), the handshake and notifications, the `tools/list` subset and schemas, listing and reading rooms, an edit a connected socket receives as `ops` and that persists, directive edits, icons, exports, a viewer and an unrelated account refused, `create_document` in the personal organization (listed by `/api/me/rooms`), `apply_operations` revision checks, legacy sessions and batches.
 - `node tests/cloud-rooms.mjs`: capability auth, isolation, stale-write 409, WebSocket presence and updates, publication, restart persistence, unpublish, creation rate limit.
 - `node tests/cloud-merge.mjs`: the merge engine (round trips, LWW/HLC, text ranges, cycles, orphans, delete/undo, hostile operations, randomized convergence) and the room over WebSockets (concurrent edits, duplicate batches, restart-persistent stamps, future-stamp clamp, legacy snapshot coexistence).
 - `node tests/cloud-accounts.mjs`: legacy room migration, magic links, sessions, profiles, member roles, role links, profile publications, rotation with socket revocation, recovery, claiming, member removal, sign-out, persistence, rate limit.

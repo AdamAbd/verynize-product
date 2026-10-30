@@ -359,7 +359,8 @@ const WARNING_NOTE = 'These classes or elements were not applied. Rewrite the af
 // ---------------------------------------------------------------------------------------------
 // Tool table
 
-function toolTable(backend, context = {}) {
+/** The tool table for a backend: {name: {description, inputSchema (zod shape), annotations, raw?, run}}. */
+export function toolTable(backend, context = {}) {
   const t = {};
   t.get_design_context = {
     description: 'Start here. Summarizes the document: pages, active page, current selection (live editor only), open/saved documents, design tokens, artboards on the page, and the design fundamentals that apply to every design.',

@@ -16,6 +16,8 @@ export default defineConfig({
     env: {
       ROOM_CREATION: bindings.rateLimit({ namespace: "1001", simple: { limit: 10, period: 60 } }),
       AUTH_LIMIT: bindings.rateLimit({ namespace: "1002", simple: { limit: 10, period: 60 } }),
+      // Hosted MCP (POST /api/mcp): per IP and per account.
+      MCP_LIMIT: bindings.rateLimit({ namespace: "1003", simple: { limit: 240, period: 60 } }),
       ROOMS: bindings.durableObject({ worker: "verynize", exportName: "DesignRoom" }),
       ACCOUNTS: bindings.durableObject({ worker: "verynize", exportName: "AccountDirectory" }),
       APPS: bindings.durableObject({ worker: "verynize", exportName: "PublishedApp" }),

@@ -591,6 +591,11 @@ export default {
     try {
       // The directory moved to D1: copy the AccountDirectory data once, before it is read.
       if (/^\/(api|u|apps)\//.test(url.pathname)) await profiles.migrateDirectory(env);
+      if (url.pathname === "/api/mcp") {
+        // Hosted MCP (cloud/mcp.js). Loaded on first use: it bundles the design engine.
+        const { handleMcp } = await import("./mcp.js");
+        return await handleMcp(request, env, url, { accountOf, limited });
+      }
       if (url.pathname.startsWith("/api/")) {
         const response =
           (await handleAuth(request, env, url)) ||
