@@ -16,7 +16,7 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
   {id:'lora',family:'Lora',category:'serif',weights:[400,500,600,700],styles:['normal','italic'],kind:'web'},
   {id:'zilla-slab',family:'Zilla Slab',category:'serif',weights:[300,400,500,600,700],styles:['normal'],kind:'web'},
  ]));
- const env={...process.env,VERYNIZE_FONT_CACHE:fontCache};delete env.ELECTRON_RUN_AS_NODE;
+ const env={...process.env,VERYNIZE_FONT_CACHE:fontCache};delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1';
  const app=await _electron.launch({env,args:['.',`--user-data-dir=${path.join(dir,'profile')}`],timeout:20000});
  try{
   const page=await app.firstWindow({timeout:20000});

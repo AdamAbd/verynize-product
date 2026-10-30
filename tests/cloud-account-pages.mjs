@@ -46,6 +46,7 @@ app.whenReady().then(() => new BrowserWindow({ show: false, webPreferences: { sa
   );
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = "1";
   app = await electron.launch({
     env,
     args: [main, `--user-data-dir=${path.join(dir, "profile")}`],

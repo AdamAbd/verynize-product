@@ -31,6 +31,7 @@
 </details>
 <details class="cloud-section" id="cloud-access-section"><summary>People & access</summary>
  <p>Your role: <strong id="cloud-role">Not connected</strong></p>
+ <p id="cloud-workspace" hidden>Workspace: <strong id="cloud-workspace-name"></strong> · members of this workspace reach the room</p>
  <ul id="cloud-members" class="cloud-list"></ul>
  <div id="cloud-owner-tools" hidden>
   <label>Invite by email<input id="cloud-member-email" type="email" placeholder="teammate@studio.com"></label>
@@ -39,6 +40,7 @@
   <div class="cloud-row"><select id="cloud-link-role" aria-label="Role for the new link"><option value="viewer">Viewer</option><option value="commenter">Commenter</option><option value="editor">Editor</option><option value="owner">Owner</option></select><button id="cloud-link-create">Create link</button></div>
   <input id="cloud-link-output" readonly aria-label="New link" hidden>
   <div class="cloud-actions"><button id="cloud-rotate">Rotate all links</button></div>
+  <div class="cloud-row" id="cloud-move-row" hidden><select id="cloud-move-organization" aria-label="Workspace to move this room to"></select><button id="cloud-move">Move to workspace</button></div>
  </div>
  <div class="cloud-actions"><button id="cloud-claim" hidden>Add this room to my account</button><button id="cloud-access-refresh">Refresh</button></div>
 </details>
@@ -198,6 +200,7 @@
     }
   };
   let account = loadAccount();
+  if (account && !$("cloud-server").value) $("cloud-server").value = account.server;
   const sessionFor = (server) => (account && account.server === server ? account.session : null);
   async function request(path, options = {}, info = connection) {
     const server = info?.server || base();
@@ -715,7 +718,18 @@
     const epoch = generation,
       result = await request(
         "/api/rooms",
-        { method: "POST", body: JSON.stringify({ document: window.design.getDocument() }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            document: window.design.getDocument(),
+            // Email accounts create rooms in the workspace chosen in the file browser.
+            ...(account?.server === server &&
+            !account.session.startsWith("vs_") &&
+            activeOrganization()
+              ? { organizationId: activeOrganization() }
+              : {}),
+          }),
+        },
         { server },
       );
     if (epoch !== generation) return;
@@ -897,6 +911,10 @@
     }
     if (!members.children.length)
       members.append(listItem("No account members yet. People with a link can still join."));
+    // Organization that owns the room (cloud/orgs.js) and, for owners, where it can move.
+    $("cloud-workspace").hidden = !data.organization;
+    $("cloud-workspace-name").textContent = data.organization?.name || "";
+    renderMoveTargets(data.organization?.id || null).catch(() => {});
     for (const link of data.links || [])
       links.append(
         listItem(`${ROLE_LABEL[link.role]} link${link.label ? " · " + link.label : ""}`, [
@@ -904,6 +922,35 @@
         ]),
       );
   }
+  async function renderMoveTargets(currentId) {
+    const row = $("cloud-move-row"),
+      select = $("cloud-move-organization");
+    const emailSession =
+      role === "owner" &&
+      account &&
+      !account.session.startsWith("vs_") &&
+      account.server === connection?.server;
+    row.hidden = true;
+    if (!emailSession) return;
+    const organizations = await request("/api/auth/organization/list", {}, { server: account.server });
+    select.replaceChildren(
+      ...organizations
+        .filter((org) => org.id !== currentId)
+        .map((org) => new Option(org.name, org.id)),
+    );
+    row.hidden = !select.options.length;
+  }
+  $("cloud-move").onclick = action(async () => {
+    if (!connection) throw Error("Create or join a room first");
+    const target = $("cloud-move-organization").value;
+    if (!target) return;
+    const result = await request(`/api/rooms/${connection.id}/organization`, {
+      method: "PUT",
+      body: JSON.stringify({ organizationId: target }),
+    });
+    status(`Moved to ${result.organization.name}`);
+    await refreshAccess();
+  });
   async function refreshAccess() {
     if (!connection) throw Error("Create or join a room first");
     const epoch = generation,
@@ -1080,9 +1127,8 @@
     if (!email) throw Error("Enter your email address");
     return { email, password: $("cloud-password").value };
   };
-  $("cloud-signin").onclick = action(async () => {
-    const server = base();
-    const { email, password } = credentials();
+  async function signInWith(server, email, password) {
+    if (!email) throw Error("Enter your email address");
     if (!password) throw Error("Enter your password");
     const response = await fetch(server + "/api/auth/sign-in/email", {
       method: "POST",
@@ -1090,8 +1136,11 @@
       body: JSON.stringify({ email, password, callbackURL: "/account/verified" }),
     });
     const data = await response.json().catch(() => null);
-    if (response.status === 403 && data?.code === "EMAIL_NOT_VERIFIED")
-      throw Error(`Verify your email first. A new link was sent to ${email}.`);
+    if (response.status === 403 && data?.code === "EMAIL_NOT_VERIFIED") {
+      const e = Error(`Verify your email first. A new link was sent to ${email}.`);
+      e.code = "EMAIL_NOT_VERIFIED";
+      throw e;
+    }
     if (response.status === 401) throw Error("Email or password is incorrect");
     if (!response.ok)
       throw Error(data?.message || data?.error || `Server returned ${response.status}`);
@@ -1102,33 +1151,56 @@
       { headers: { "X-Verynize-Session": session } },
       { server, session: false },
     );
-    saveAccount({ server, session, account: me.account });
-    $("cloud-password").value = "";
-    status(`Signed in as ${me.account.email}`);
+    saveAccount({
+      server,
+      session,
+      account: me.account,
+      personalOrganizationId: me.personalOrganizationId || null,
+    });
+    $("cloud-server").value = server;
     refreshRooms().catch(() => {});
-  });
-  $("cloud-signup").onclick = action(async () => {
-    const { email, password } = credentials();
+    return { ...me.account };
+  }
+  async function signUpWith(server, email, password, name) {
+    if (!email) throw Error("Enter your email address");
     if (password.length < 10) throw Error("Choose a password of at least 10 characters");
-    const name = $("cloud-signup-name").value.trim() || email.split("@")[0];
     await request(
       "/api/auth/sign-up/email",
       {
         method: "POST",
-        body: JSON.stringify({ email, password, name, callbackURL: "/account/verified" }),
+        body: JSON.stringify({
+          email,
+          password,
+          name: name || email.split("@")[0],
+          callbackURL: "/account/verified",
+        }),
       },
-      { server: base(), session: false },
+      { server, session: false },
     );
+  }
+  async function forgotPasswordWith(server, email) {
+    if (!email) throw Error("Enter your email address");
+    await request(
+      "/api/auth/request-password-reset",
+      { method: "POST", body: JSON.stringify({ email, redirectTo: "/account/reset-password" }) },
+      { server, session: false },
+    );
+  }
+  $("cloud-signin").onclick = action(async () => {
+    const { email, password } = credentials();
+    const signedIn = await signInWith(base(), email, password);
+    $("cloud-password").value = "";
+    status(`Signed in as ${signedIn.email}`);
+  });
+  $("cloud-signup").onclick = action(async () => {
+    const { email, password } = credentials();
+    await signUpWith(base(), email, password, $("cloud-signup-name").value.trim());
     $("cloud-password").value = "";
     status(`Check ${email} for a verification link, then sign in here with your password.`);
   });
   $("cloud-forgot").onclick = action(async () => {
     const { email } = credentials();
-    await request(
-      "/api/auth/request-password-reset",
-      { method: "POST", body: JSON.stringify({ email, redirectTo: "/account/reset-password" }) },
-      { server: base(), session: false },
-    );
+    await forgotPasswordWith(base(), email);
     status(`If ${email} has an account, a password reset link is on its way.`);
   });
   $("cloud-profile-save").onclick = action(async () => {
@@ -1166,6 +1238,49 @@
     }
     status(everywhere ? "Signed out on every device" : "Signed out");
   }
+  // Shared with the islands (onboarding, workspace switcher, Settings › Members): one account,
+  // one session store and one change event ("cloud-account-changed").
+  const ORG_KEY = "verynize.cloud.organization";
+  const DEFAULT_SERVER = "https://verynize.gayaloo.app";
+  const activeOrganization = () => {
+    if (!account) return null;
+    try {
+      const stored = JSON.parse(localStorage.getItem(ORG_KEY) || "null");
+      if (stored?.server === account.server && stored.email === account.account.email)
+        return stored.id;
+    } catch {}
+    return account.personalOrganizationId || null;
+  };
+  window.cloudAccount = {
+    defaultServer: () =>
+      account?.server ||
+      $("cloud-server").value ||
+      (location.protocol.startsWith("http") ? location.origin : DEFAULT_SERVER),
+    get: () =>
+      account
+        ? {
+            server: account.server,
+            account: { ...account.account },
+            emailAccount: !account.session.startsWith("vs_"),
+            personalOrganizationId: account.personalOrganizationId || null,
+          }
+        : null,
+    signIn: ({ server, email, password }) => signInWith(server, email, password),
+    signUp: ({ server, email, password, name }) => signUpWith(server, email, password, name),
+    forgotPassword: ({ server, email }) => forgotPasswordWith(server, email),
+    signOut: (everywhere = false) => signOut(everywhere),
+    /** Authenticated JSON request to the account's server. */
+    request: (path, options = {}) => accountRequest(path, options),
+    activeOrganization,
+    setActiveOrganization(id) {
+      if (!account) return;
+      localStorage.setItem(
+        ORG_KEY,
+        JSON.stringify({ server: account.server, email: account.account.email, id }),
+      );
+      window.dispatchEvent(new CustomEvent("cloud-organization-changed", { detail: { id } }));
+    },
+  };
   $("cloud-signout").onclick = action(() => signOut(false));
   $("cloud-signout-all").onclick = action(() => signOut(true));
   // ---- passkeys ---------------------------------------------------------------------------------
