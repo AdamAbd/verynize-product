@@ -1,0 +1,216 @@
+{
+  "version": 2,
+  "name": "Wonder workflow — Verynize recreation",
+  "activePage": "page",
+  "tokens": {
+    "accent": "#5EEAD4",
+    "surface": "#172033"
+  },
+  "variables": {
+    "spacing": {
+      "type": "dimension",
+      "value": 32
+    },
+    "strength": {
+      "type": "number",
+      "value": 60
+    },
+    "family": {
+      "type": "fontFamily",
+      "value": "Inter"
+    },
+    "weight": {
+      "type": "fontWeight",
+      "value": "600"
+    }
+  },
+  "icons": [
+    {
+      "id": "spark-asset",
+      "name": "Spark",
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS44IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Im0xMiAyIDIuOCA3LjJMMjIgMTJsLTcuMiAyLjhMMTIgMjJsLTIuOC03LjJMMiAxMmw3LjItMi44WiIvPjxwYXRoIGQ9Ik0xOSAydjRNMTcgNGg0Ii8+PC9zdmc+Cg=="
+    }
+  ],
+  "pages": [
+    {
+      "id": "page",
+      "name": "Workflow",
+      "background": "#2B2B2B",
+      "width": 960,
+      "height": 730,
+      "nodes": [
+        {
+          "id": "artboard",
+          "name": "From idea to interface",
+          "type": "frame",
+          "parentId": null,
+          "x": 80,
+          "y": 80,
+          "w": 800,
+          "h": 570,
+          "color": "#172033",
+          "token": "surface",
+          "radius": 32,
+          "padding": 32,
+          "gap": 32,
+          "layout": "flex",
+          "direction": "column",
+          "justifyContent": "space-between",
+          "alignItems": "flex-start",
+          "clipContent": true,
+          "bindings": {
+            "radius": "spacing",
+            "padding": "spacing",
+            "gap": "spacing"
+          }
+        },
+        {
+          "id": "title",
+          "name": "From idea to interface.",
+          "type": "text",
+          "parentId": "artboard",
+          "x": 32,
+          "y": 32,
+          "w": 650,
+          "h": 58,
+          "text": "From idea to interface.",
+          "fontSize": 48,
+          "fontFamily": "Inter",
+          "fontWeight": "600",
+          "lineHeight": 1.2,
+          "color": "#F8FAFC",
+          "bindings": {
+            "fontFamily": "family",
+            "fontWeight": "weight"
+          },
+          "letterSpacing": -1.5
+        },
+        {
+          "id": "subtitle",
+          "name": "One canvas. Five variable types. A connected design system.",
+          "type": "text",
+          "parentId": "artboard",
+          "x": 32,
+          "y": 195,
+          "w": 700,
+          "h": 28,
+          "text": "One canvas. Five variable types. A connected design system.",
+          "fontSize": 18,
+          "fontFamily": "Inter",
+          "fontWeight": "600",
+          "lineHeight": 1.2,
+          "color": "#94A3B8",
+          "bindings": {
+            "fontFamily": "family",
+            "fontWeight": "weight"
+          }
+        },
+        {
+          "id": "grid",
+          "name": "Variables · Icons · Properties",
+          "type": "frame",
+          "parentId": "artboard",
+          "x": 32,
+          "y": 328,
+          "w": 690,
+          "h": 210,
+          "color": "#1E293B",
+          "radius": 16,
+          "layout": "grid",
+          "columns": 3,
+          "gap": 32,
+          "padding": 20,
+          "alignItems": "center",
+          "strokeWidth": 1,
+          "strokeColor": "#334155",
+          "shadow": "0 0 0 4px #172033, 0 0 0 5px #5EEAD4, 0 12px 4px -4px #00000040",
+          "bindings": {
+            "gap": "spacing"
+          }
+        },
+        {
+          "id": "label-0",
+          "name": "01 / Variables",
+          "type": "text",
+          "parentId": "grid",
+          "x": 0,
+          "y": 0,
+          "w": 200,
+          "h": 28,
+          "text": "01 / Variables",
+          "fontSize": 18,
+          "fontFamily": "Inter",
+          "fontWeight": "600",
+          "lineHeight": 1.2,
+          "color": "#FFFFFF",
+          "bindings": {
+            "fontFamily": "family",
+            "fontWeight": "weight"
+          },
+          "wMode": "fill"
+        },
+        {
+          "id": "label-1",
+          "name": "02 / Icons",
+          "type": "text",
+          "parentId": "grid",
+          "x": 0,
+          "y": 0,
+          "w": 200,
+          "h": 28,
+          "text": "02 / Icons",
+          "fontSize": 18,
+          "fontFamily": "Inter",
+          "fontWeight": "600",
+          "lineHeight": 1.2,
+          "color": "#FFFFFF",
+          "bindings": {
+            "fontFamily": "family",
+            "fontWeight": "weight"
+          },
+          "wMode": "fill"
+        },
+        {
+          "id": "label-2",
+          "name": "03 / Properties",
+          "type": "text",
+          "parentId": "grid",
+          "x": 0,
+          "y": 0,
+          "w": 200,
+          "h": 28,
+          "text": "03 / Properties",
+          "fontSize": 18,
+          "fontFamily": "Inter",
+          "fontWeight": "600",
+          "lineHeight": 1.2,
+          "color": "#FFFFFF",
+          "bindings": {
+            "fontFamily": "family",
+            "fontWeight": "weight"
+          },
+          "wMode": "fill"
+        },
+        {
+          "id": "spark",
+          "name": "Spark",
+          "type": "image",
+          "parentId": "artboard",
+          "position": "absolute",
+          "x": 680,
+          "y": 40,
+          "w": 64,
+          "h": 64,
+          "color": "transparent",
+          "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS44IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Im0xMiAyIDIuOCA3LjJMMjIgMTJsLTcuMiAyLjhMMTIgMjJsLTIuOC03LjJMMiAxMmw3LjItMi44WiIvPjxwYXRoIGQ9Ik0xOSAydjRNMTcgNGg0Ii8+PC9zdmc+Cg==",
+          "svgColor": "#5EEAD4",
+          "svgColorToken": "accent",
+          "opacity": 60,
+          "bindings": {
+            "opacity": "strength"
+          }
+        }
+      ]
+    }
+  ]
+}

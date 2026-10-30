@@ -357,6 +357,8 @@ export function serializeNode(node, index, { depth = Infinity, tokens = {}, inde
   } else if (node.type === 'image') {
     // Embedded data wins; a remote URL not fetched yet is written back as-is.
     const src = node.src || node.srcRemote || '';
+    if (node.svgColor) attrs.push(`data-svg-color="${escapeAttr(node.svgColor)}"`);
+    if (node.svgColorToken) attrs.push(`data-svg-color-token="${escapeAttr(node.svgColorToken)}"`);
     attrs.push(`src="${escapeAttr(src.length > MAX_INLINE_SRC ? `[embedded image ${Math.round(src.length / 1024)} KB]` : src)}"`, `alt="${escapeAttr(node.name || '')}"`);
   }
   if (node.type === 'shader') attrs.push(`preset="${escapeAttr(node.shaderPreset || 'aurora')}"`, `speed={${node.shaderSpeed ?? 1}}`, `intensity={${node.shaderIntensity ?? 1}}`);

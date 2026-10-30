@@ -108,3 +108,51 @@ The root agent authorized bounded fixes after reviewing this audit:
 Added `tests/inspector-variable-library.cjs` for duplicate/cross-type/reserved-name creation, successful reveal/selection/undo, clipboard preservation on export collision, and malformed base64/non-SVG/XML insertion. The root agent must wire this new file into the test script because `package.json` contains pre-existing user changes. No Electron run was started by this agent while the Wonder session was active.
 
 Validation after edits: `node --test integrations/variables.test.mjs` **8/8 passed** (including new color/color, color/dimension, and dimension/number CSS-collision regressions); `npm run lint:ui` passed; `npm run typecheck:ui` passed; `node --check web/app.js` and `node --check tests/inspector-variable-library.cjs` passed. Existing dirty files were preserved, and no commit was made. The other agent independently edits `bindVariable` in `vars.ts`; this agent edits only its `variablesCss` function.
+
+
+## Fresh Wonder evidence and bounded SVG Colors implementation
+
+The root agent's new [13 — Icon color variable](../../design/wonder/2026-10-30/13-icon-color-variable.png) shows a pasted SVG with its actual **Colors** property bound to `accent`, independently of its background, and its Opacity bound to `strength`. This upgrades I2's reference from the historical spec to fresh runtime evidence. Screenshot 12 establishes the number convention: `60` represents 60% opacity.
+
+Implemented an original, deliberately bounded equivalent for **simple monochrome imported SVG images**:
+
+- New `svg-colors.tsx` exposes a Colors row, color picker and color-variable picker, detach, and restore-original actions. Multicolor SVGs, CSS styles/classes, references, gradients, effects and catalog-generated icons are excluded from this control. Unsupported images keep their original rendering.
+- The original embedded `src` remains unchanged. Optional image fields `svgColor` (six/eight digit hex) and `svgColorToken` describe the paint. Both document validators check these fields. Existing `iconColor` is reserved for catalog icon regeneration, so this implementation does not overload it.
+- The shared `node-style.js` renders the actual SVG alpha silhouette with the chosen paint. The layer background is independent. Canvas and headless HTML export use the same mapping; token changes resolve at render time. Token rename/delete helpers preserve references/resolved paint.
+- JSX uses explicit `data-svg-color` and `data-svg-color-token` attributes so source, paint and binding survive a read/write round trip. The public node type remains `image`; a new SVG node type was not introduced.
+- `integrations/svg-colors.test.mjs` verifies shared shape/background styles, variable changes, rename/delete, JSON reload, HTML export, unchanged source, JSX round trip and schema rejection. The combined variables, SVG colors, node-style and design-edit runs pass **38/38**.
+- The existing new UI test now also checks actual screenshot pixels (green shape center, gray outside), UI variable propagation, detach, reload, export and restoring the original image. The final Electron pass is recorded below. Clipboard checks no longer overwrite the system clipboard; launch/cleanup handles failed Electron startup.
+
+This supports one paint for a simple monochrome SVG. It does not implement per-color replacement on multicolor artwork or claim full Wonder Icons parity.
+
+
+## Electron evidence — first completed pass
+
+`VERYNIZE_EVIDENCE_DIR=design/verynize/2026-10-30 node tests/inspector-variable-library.cjs` passed after rebuilding the combined UI. It verifies creation rejection/reveal/undo, export-collision errors, malformed assets, SVG variable updates, real rendered shape pixels, independent background, multi-selection detach with different colors and missing-variable fallback, reload/export/restore, and no uncaught renderer errors. Screenshot pixels are decoded through an sRGB canvas with a two-level quantization tolerance because macOS `nativeImage.toBitmap()` converts into display color space; the unpainted sample avoids resize handles.
+
+- [SVG variable binding in Verynize](../../design/verynize/2026-10-30/svg-color-variable.png)
+- [Editable workflow recreation in Verynize](../../design/verynize/2026-10-30/workflow-canvas.png)
+
+The workflow screenshot was captured from the root agent's `workflow.verynize.json` in an isolated temporary profile. Eight layers rendered, the SVG tint was present, and visual inspection found the title, icon and grid inside the artboard. The first native 2× PNG export exposed a separate scaling issue: a 1600×1140 bitmap contained 800×570 artwork at its upper-left. That initial export is retained as before-fix evidence; the corrected final export is verified below.
+
+SVG mask sizing now follows `contain`, `cover`, `fill` and `none`; `scale-down` currently falls back to contain. Per-color SVG replacement, complex SVG effects, and exact scale-down sizing remain outside this bounded implementation. Multi-selection detach now preserves each selected image's own resolved paint.
+
+
+## Final verification and artifacts
+
+The desktop was released by the root agent and every Electron command below ran **sequentially**, using temporary profiles that were closed and removed afterward. Both new suites are registered in `package.json` → `test:canvas`; the lockfile resync produced no lockfile diff.
+
+| Command | Final result |
+|---|---|
+| `npm run build:ui` | Passed with existing unresolved asset warnings for `x.png` and `…` |
+| `node tests/inspector-variable-library.cjs` | Passed on the latest combined build; safe variable creation, export collision, malformed icon handling, actual SVG pixels, variable propagation, independent background, multi-selection detach, source/reload/export/restore |
+| `node tests/inspector-variable-binding.cjs` | Passed; fill detach with alpha/mixed selection/missing token/undo/redo/reload, scalar override replacement, individual corners/borders and independent gaps |
+| `node tests/canvas-page.cjs` | Passed; page, panel accordion and icon-library regression |
+| `node tests/inspector-parity.cjs` | Passed; color picker, typed variables, fonts, 0.5×/4× PNG and PDF save, layout controls |
+| `node tests/render-export.cjs` | Passed; real pixel coverage at 0.5×/1×/2×/4× and unchanged CSS layout measurements |
+| `npm run lint:ui` / `npm run typecheck:ui` | Passed |
+| `git diff --check` | Passed |
+
+The properties agent fixed the native scaling bug by setting the Electron zoom factor **after** navigation. The regenerated [workflow export](../../design/verynize/2026-10-30/workflow-export.png) is **1600×1140** and fills the intended artboard extent. PNG header dimensions and opaque pixels in the right/lower, bottom-center and right-center regions were checked; [export-verification.json](../../design/verynize/2026-10-30/export-verification.json) records the result. Visual inspection confirms the title, icon and grid fit, with no extra transparent half-canvas. The [before-fix export](../../design/verynize/2026-10-30/workflow-export-before-scale-fix.png) is retained only as bug evidence.
+
+Additional actual-product proof: [individual corners](../../design/verynize/2026-10-30/01-individual-corners.png), [individual border widths](../../design/verynize/2026-10-30/02-individual-border-widths.png), [SVG variable binding](../../design/verynize/2026-10-30/svg-color-variable.png), and [canvas recreation](../../design/verynize/2026-10-30/workflow-canvas.png). These are Verynize screenshots, separate from the Wonder reference directory. No application commits were created by this agent.

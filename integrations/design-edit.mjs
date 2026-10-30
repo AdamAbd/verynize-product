@@ -296,6 +296,21 @@ export function refreshIcons(page, document = {}) {
  * {roots, nodes, warnings}. Geometry is computed later by `reflow` once the nodes are on the page.
  * `reuse` maps short/long ids of nodes being replaced to node ids that may be kept.
  */
+function applySvgColor(node, attrs) {
+  if (Object.hasOwn(attrs, 'data-svg-color')) {
+    const value = attrs['data-svg-color'];
+    if (value === '') { delete node.svgColor; delete node.svgColorToken; }
+    else if (typeof value === 'string' && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value)) node.svgColor = value;
+    else throw new Error('Invalid SVG color');
+  }
+  if (Object.hasOwn(attrs, 'data-svg-color-token')) {
+    const name = attrs['data-svg-color-token'];
+    if (name === '') delete node.svgColorToken;
+    else { checkTokenName(name); node.svgColorToken = name; }
+  }
+  if (!/^data:image\/svg\+xml;base64,/.test(node.src || '')) { delete node.svgColor; delete node.svgColorToken; }
+}
+
 export function buildNodes(elements, { document, page, parent = null, warnings = [], keepRootId = null, reuse = null }) {
   const tokens = document.tokens || {};
   const nodes = []; const roots = [];
@@ -335,6 +350,7 @@ export function buildNodes(elements, { document, page, parent = null, warnings =
         else { node.srcRemote = src; node.assetStatus = 'pending'; }
       } else if (reused?.src && !src) node.src = reused.src;
       else if (src) warnings.push(`Image ${label || ''} src must be an embedded data:image URL or an http(s) URL; created an empty image placeholder`);
+      applySvgColor(node, el.attrs);
     }
     if (type === 'text') { const { text, runs } = collectText(el, { tokens }); node.text = text; node.textRuns = runs; }
     // Text-only keys (truncate, line-clamp) belong to the label of a box-text element.
@@ -485,6 +501,7 @@ function editNode(document, page, node, el, warnings) {
     if (isEmbeddedSrc(src)) { node.src = src; delete node.srcRemote; delete node.assetStatus; }
     else if (isRemoteSrc(src) && src !== node.srcRemote) { node.srcRemote = src; node.assetStatus = 'pending'; delete node.src; }
   }
+  if (node.type === 'image' && !node.icon) applySvgColor(node, el.attrs);
   if (node.type === 'shader') {
     if (['aurora', 'waves', 'noise', 'ribbon', 'mesh', 'swirl'].includes(el.attrs.preset)) node.shaderPreset = el.attrs.preset;
     if (Number.isFinite(el.attrs.speed)) node.shaderSpeed = Math.min(5, Math.max(0, el.attrs.speed));
@@ -663,9 +680,9 @@ export function checkTokenName(name) {
   if (typeof name !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,99}$/.test(name) || RESERVED.has(name)) throw new Error(`Invalid token name ${JSON.stringify(name)}; use letters, digits, "-", "_", "." and "/" (e.g. color/text/primary)`);
   return name;
 }
-export function renameTokenRefs(document, from, to) { for (const page of document.pages) for (const node of page.nodes) if (node.token === from) node.token = to; }
-export function unbindToken(document, name) { const value = document.tokens[name]; for (const page of document.pages) for (const node of page.nodes) if (node.token === name) { node.color = value; node.token = ''; } }
-export function syncTokenColors(document) { for (const page of document.pages) for (const node of page.nodes) if (node.token && document.tokens[node.token]) node.color = document.tokens[node.token]; syncVariables(document); }
+export function renameTokenRefs(document, from, to) { for (const page of document.pages) for (const node of page.nodes) { if (node.token === from) node.token = to; if (node.svgColorToken === from) node.svgColorToken = to; } }
+export function unbindToken(document, name) { const value = document.tokens[name]; for (const page of document.pages) for (const node of page.nodes) { if (node.token === name) { node.color = value; node.token = ''; } if (node.svgColorToken === name) { node.svgColor = value; delete node.svgColorToken; } } }
+export function syncTokenColors(document) { for (const page of document.pages) for (const node of page.nodes) { if (node.token && document.tokens[node.token]) node.color = document.tokens[node.token]; if (node.svgColorToken && document.tokens[node.svgColorToken]) node.svgColor = document.tokens[node.svgColorToken]; } syncVariables(document); }
 
 // ---------------------------------------------------------------------------------------------
 // Typed variables (dimension / number / fontFamily / fontWeight; see design-store.mjs). Bound layer

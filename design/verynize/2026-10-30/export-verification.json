@@ -1,0 +1,10 @@
+{
+  "nativeRender": "window.design.exportArtwork PNG scale2",
+  "width": 1600,
+  "height": 1140,
+  "rightLower": 255,
+  "bottomCenter": 255,
+  "rightCenter": 255,
+  "layers": 8,
+  "svgTintPresent": 1
+}

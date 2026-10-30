@@ -2,7 +2,11 @@
 
 Dokumen ini menghubungkan eksplorasi UI Wonder, bukti gambar, audit implementasi Verynize, dan pemeriksaan regresi. Sasaran sesi adalah membuat desain dari canvas kosong sambil mencoba keluarga konfigurasi Properties, Icons, dan Variables, termasuk perubahan nilai variable setelah dipakai pada beberapa properti.
 
-**Status dokumen: sesi masih berlangsung.** Bukti baru yang telah diperiksa mengonfirmasi canvas awal kosong, pembuatan frame putih 800 × 570, menu tipe variable, serta lima entri variable yang dibuat. Checklist di bawah adalah cakupan pengujian, bukan pernyataan bahwa semua fitur telah berhasil dipakai. Hasil akhir dan validasi Verynize harus mengikuti catatan pelaksana serta gambar yang benar-benar tersedia.
+**Hasil sesi:** desain baru dibuat di Wonder melalui UI dan direkam dalam 43 screenshot (00–42) dan satu export PNG. Kelima tipe variable dipakai; fill, radius, spacing, tipografi, opacity dan warna SVG dikombinasikan dengan variable. Cakupan yang diuji meliputi flex/grid, gradient, border, outline, shadow, filter, mask, blend, radius individual dan shader. **Seluruh konfigurasi belum selesai diuji.** Daftar di bawah membedakan hasil yang diterapkan, kontrol yang hanya terlihat dan pekerjaan tersisa. Export PNG 2× berhasil dibuat dan diperiksa pada1600×1140, mencakup ikon Spark serta seluruh artboard.
+
+![Desain akhir sesi di Wonder, dengan folder variable dan ikon](../design/wonder/2026-10-30/42-final-with-variable-folder.png)
+
+[Screenshot akhir Wonder](../design/wonder/2026-10-30/42-final-with-variable-folder.png) · [Export PNG asli 1600×1140](../design/wonder/2026-10-30/wonder-workflow.png). File aktif tetap **Thrush / Page1**; artboard **Frame**,800×570. Ikon **Spark** kini menjadi child absolute pada X680/Y40, sehingga ikut dalam export frame. Rename/delete/Undo variable sudah dicoba; reopen/persistensi dokumen Wonder setelah menutup aplikasi belum diuji.
 
 ## Pembagian pekerjaan
 
@@ -44,10 +48,45 @@ File aktif pada baseline adalah **Thrush**, halaman **Page 1**, zoom **100%**. C
 | 01 | Membuat frame dari canvas kosong | Frame putih terpilih, ukuran 800 × 570 px, X −620, Y −305, rotation 0° | [01-frame-created.png](../design/wonder/2026-10-30/01-frame-created.png) |
 | 02 | Membuka create-variable menu | Frame kini memakai fill `111827` dan radius 24; menu Colors, Dimensions, Numbers, Font family, Font weight terlihat. Pembuatan masing-masing tipe belum dibuktikan oleh gambar ini | [02-variable-types.png](../design/wonder/2026-10-30/02-variable-types.png) |
 | 03 | Membuat satu variable dari tiap tipe | Panel menunjukkan Variables 5: surface `#111827`, spacing `24px`, strength `0`, family `Inter`, dan weight sedang dalam field edit nama; nilai weight tidak tampak | [03-five-variable-types-created.png](../design/wonder/2026-10-30/03-five-variable-types-created.png) |
-
 | 04 | Menyelesaikan nilai lima variable | `surface=#111827`, `spacing=24px`, `strength=1`, `family=Inter`, `weight=600` | [04-variable-values.png](../design/wonder/2026-10-30/04-variable-values.png) |
 | 05 | Memasang binding fill/radius dan mengaktifkan Flex | Background Fill menampilkan chip `surface`; Corner radius menampilkan chip `spacing`; kontrol Flex aktif | [05-bound-fill-radius-flex.png](../design/wonder/2026-10-30/05-bound-fill-radius-flex.png) |
 | 06 | Beralih ke Flex Column, mengikat gap dan padding | Vertical gap, horizontal padding, vertical padding sama-sama menampilkan chip `spacing`; radius tetap terikat dan fill tetap `surface` | [06-variable-mix-layout.png](../design/wonder/2026-10-30/06-variable-mix-layout.png) |
+| 07 | Menambahkan judul dan mengikat tipografi | “From idea to interface.” berada pada X24/Y24, W487.7 Hug × H58 Hug; chip family/weight aktif, size48px, letter spacing−1.5px, Text Fill F8FAFC | [07-bound-typography.png](../design/wonder/2026-10-30/07-bound-typography.png) |
+| 08 | Menambahkan body copy dan membuka Add icon | Body “One canvas. Five variable types. A connected design system.” terlihat. Menu menawarkan Upload SVG, Paste SVG markup, Add from selection (disabled karena tidak ada selection) | [08-icon-menu.png](../design/wonder/2026-10-30/08-icon-menu.png) |
+| 09 | Memasukkan ikon dan mengikat opacity | Icons1; instance `pasted` berukuran64×64; Colors `5EEAD4`; Opacity menampilkan chip `strength`. Ikon tampak sangat redup | [09-icon-instance.png](../design/wonder/2026-10-30/09-icon-instance.png) |
+| 10 | Mengubah Numbers strength | Nilai menjadi0.6, chip opacity tetap strength; skala persen/angka belum disimpulkan dari screenshot | [10-number-propagation.png](../design/wonder/2026-10-30/10-number-propagation.png) |
+| 11 | Mengedit color dan dimension global | surface menjadi#172033 dan spacing32px. Background berubah, radius dan inset teks ikut berubah tanpa melepas binding | [11-color-spacing-propagation.png](../design/wonder/2026-10-30/11-color-spacing-propagation.png) |
+| 12 | Mengoreksi unit opacity | strength 60 membuat ikon terlihat jelas dengan opacity terikat; nilai0.6 sebelumnya terlalu kecil untuk skala persen | [12-number-percent-corrected.png](../design/wonder/2026-10-30/12-number-percent-corrected.png) |
+| 13 | Mengikat warna SVG pada color variable | Variables6; Colors pada instance pasted menampilkan chip accent, opacity tetap strength | [13-icon-color-variable.png](../design/wonder/2026-10-30/13-icon-color-variable.png) |
+| 14 | Membuat frame Grid 690×210 dan membuka konfigurasi | Grid aktif; picker track terlihat. Field2 sedang diedit sementara preview masih3×1; jumlah akhir belum ditentukan dari gambar ini | [14-grid-settings.png](../design/wonder/2026-10-30/14-grid-settings.png) |
+| 15 | Mengisi tampilan grid dan border | Tiga track terlihat; padding20/20, margin0/0, radius16, fill1E293B, border width1 All; gap menampilkan chip spacing | [15-grid-border-fill.png](../design/wonder/2026-10-30/15-grid-border-fill.png) |
+| 16 | Menambahkan outline dan box shadow | Border334155; outline5EEAD4 width1 offset4; shadow X0 Y12 blur4 spread−4, hitam25%. Box aktif, Drop dan Inner shadow terlihat namun tidak diterapkan | [16-shadow-variable.png](../design/wonder/2026-10-30/16-shadow-variable.png) |
+| 17 | Membuka filter menu | Blur2 aktif; menu Layer menawarkan Blur, Brightness, Contrast, Grayscale, Hue rotation, Invert, Saturate, Sepia. Backdrop group terlihat sebagian | [17-filter-options.png](../design/wonder/2026-10-30/17-filter-options.png) |
+| 18 | Menerapkan Brightness dan Linear mask | Brightness1.1; mask Linear alpha100 rotation180°, handles pada canvas | [18-mask-config.png](../design/wonder/2026-10-30/18-mask-config.png) |
+| 19 | Mencoba Radial mask dan Advanced | Radial aktif; Mode Auto, Repeat, Position X0%/Y0%, Size auto terlihat | [19-radial-mask-advanced.png](../design/wonder/2026-10-30/19-radial-mask-advanced.png) |
+| 20 | Mencoba Conic mask | Conic rotation45°, alpha100, handles melingkar. Invert tersedia; checkbox tampak tidak aktif saat capture | [20-conic-mask.png](../design/wonder/2026-10-30/20-conic-mask.png) |
+| 21 | Menonaktifkan mask dan membuka Export | Conic row redup/hidden, komposisi utuh kembali; Export dibuka, nama Frame dan bagian konfigurasi2x PNG terlihat di bawah | [21-export-config.png](../design/wonder/2026-10-30/21-export-config.png) |
+| 22 | Membuka daftar format Export | Menu pada frame ini menawarkan PNG, JPG, WebP, PDF, Code; PNG dipilih. SVG tidak terlihat pada menu yang ditangkap | [22-export-formats.png](../design/wonder/2026-10-30/22-export-formats.png) |
+| 23 | Melepas fill variable | Background Fill menjadi literal 172033 tanpa perubahan warna; radius tetap chip spacing. Tiga label grid ditambahkan; artboard sementara800×510 | [23-fill-detached-preserves-color.png](../design/wonder/2026-10-30/23-fill-detached-preserves-color.png) |
+| 24 | Mengubah fill menjadi Linear gradient | Linear aktif dengan handles vertikal; menu menawarkan Linear/Radial/Conic; stop memakai172033 dan456099 | [24-gradient-types.png](../design/wonder/2026-10-30/24-gradient-types.png) |
+| 25 | Mencoba Radial gradient | Radial aktif, stop456099/172033, masing-masing100%; pusat gradasi terlihat pada canvas | [25-radial-gradient.png](../design/wonder/2026-10-30/25-radial-gradient.png) |
+| 26 | Mencoba Conic gradient | Conic aktif dengan handles melingkar dan efek warna berputar | [26-conic-gradient.png](../design/wonder/2026-10-30/26-conic-gradient.png) |
+| 27 | Membuka blend menu | Normal dipilih; opsi hingga Hard light terlihat; artboard sudah kembali800×570 | [27-blend-modes.png](../design/wonder/2026-10-30/27-blend-modes.png) |
+| 28 | Menerapkan Multiply | Seluruh komposisi menjadi gelap dan tombol blend aktif | [28-multiply-applied.png](../design/wonder/2026-10-30/28-multiply-applied.png) |
+| 29 | Mengedit radius individual dan membuka W mode | Radius Mixed dengan8/32/48/32; W menu Fixed, Hug, Calculate, Add min width, Add max width. Tampilan kembali terang | [29-individual-corners.png](../design/wonder/2026-10-30/29-individual-corners.png) |
+| 30 | Membuka shader library dan memilih preset | Background Fill menjadi Shifted Swirls3; picker Background/SVG/Image dan search terlihat; parameter Gradient Center456099, Gradient Edge172033, Ripple ColorFFFFFF, Background000000 | [30-shader-library.png](../design/wonder/2026-10-30/30-shader-library.png) |
+| 31 | Membuka Shader settings | Gradient Aspect, Gradient Size, Ripple Density, Animation Speed, Distortion Amount, Grain Strength terlihat; nilai slider numerik tidak ditampilkan | [31-shader-options.png](../design/wonder/2026-10-30/31-shader-options.png) |
+| 32 | Mengembalikan komposisi solid dan membuka Icons grid | Artboard 800×570, label01/Variables–02/Icons–03/Properties dan ikon terlihat utuh; shader dinonaktifkan, fill surface/radius spacing dipasang kembali menurut pelaksana; Icons1 menampilkan thumbnail | [32-restored-bindings-icons-grid.png](../design/wonder/2026-10-30/32-restored-bindings-icons-grid.png) |
+| 33 | Mencari ikon dengan query Spark | Asset di-rename dari pasted menjadiSpark melalui Rename/F2 lalu Enter, dikonfirmasi AX PlaceSpark/nameSpark oleh pelaksana; Search Spark aktif dan thumbnail tetap tampil | [33-icon-search.png](../design/wonder/2026-10-30/33-icon-search.png) |
+| 34 | Capture akhir komposisi | Desain solid dengan enam variable, ikon Spark, judul/body dan panel tiga label; tidak ada selection. Ini screenshot UI, bukan file export | [34-final-design.png](../design/wonder/2026-10-30/34-final-design.png) |
+| 35 | Rename color variable denganF2 | surface menjadi surface/base; Background Fill tetap bound dan chip menampilkanbase | [35-variable-rename-reference.png](../design/wonder/2026-10-30/35-variable-rename-reference.png) |
+| 36 | Search variable dan folder | Query surface menampilkan folder surface → base dengan nilai#172033; binding tetapbase | [36-variable-folder-search.png](../design/wonder/2026-10-30/36-variable-folder-search.png) |
+| 37 | Menghapus variable yang dipakai | Hasil searchsurface menjadi kosong; Fill berubah ke literal 172033, warna artboard tetap | [37-delete-bound-variable.png](../design/wonder/2026-10-30/37-delete-bound-variable.png) |
+| 38 | Undo penghapusan variable | CmdZ mengembalikan folder surface/base dan chip bindingbase, warna tetap | [38-undo-restores-binding.png](../design/wonder/2026-10-30/38-undo-restores-binding.png) |
+| 39 | Rotation dan Flip Horizontal ikon | Spark terlihat miring dan mirrored; inspector setelah flip menunjukkan−15°. Pelaksana kemudian memulihkan0°/unflipped | [39-icon-transform.png](../design/wonder/2026-10-30/39-icon-transform.png) |
+| 40 | Memindahkan ikon ke dalam artboard | Cut→pilih frame→paste membuatchild; setelah melepas Locked to layout, ikon absoluteX680/Y40, rotation 0; Colors accent/Opacity strength bertahan | [40-icon-absolute-child.png](../design/wonder/2026-10-30/40-icon-absolute-child.png) |
+| 41 | Export PNG asli | Filename wonder-workflow, scale2×, formatPNG; toast Exported 1 element. File 1600×1140 tersimpan dan mencakup Spark | [41-export-success.png](../design/wonder/2026-10-30/41-export-success.png) |
+| 42 | Capture akhir setelah rename/Undo/export | Komposisi lengkap dengan folder surface/base, enam variable dan satu ikon | [42-final-with-variable-folder.png](../design/wonder/2026-10-30/42-final-with-variable-folder.png) |
 
 ![Baseline Wonder: Thrush / Page 1 masih kosong, Variables dan Icons dilipat](../design/wonder/2026-10-30/00-empty-canvas.png)
 
@@ -67,21 +106,50 @@ Pada frame baru, inspector menampilkan:
 
 ## Binding yang sudah diterapkan
 
-Pelaksana mengamati bahwa klik pada input angka menampilkan saran variable yang kompatibel. Memilih `spacing 24px` mengganti tampilan angka dengan chip nama variable. Untuk warna, jalurnya **Choose color → Variables → surface**. Pada capture 06, frame yang sama memakai `surface` untuk background dan `spacing` untuk radius, horizontal padding, vertical padding serta vertical gap. Ini membuktikan pemasangan beberapa binding berbeda pada satu frame; propagasi nilai setelah variable diedit dan persistensi setelah reopen masih memerlukan bukti tambahan.
+Pelaksana mengamati bahwa klik pada input angka menampilkan saran variable yang kompatibel. Memilih `spacing 24px` mengganti tampilan angka dengan chip nama variable. Untuk warna, jalurnya **Choose color → Variables → surface**. Pada capture 06, frame yang sama memakai `surface` untuk background dan `spacing` untuk radius, horizontal padding, vertical padding serta vertical gap. Capture 11 kemudian menunjukkan propagasi saat `surface` diubah menjadi `#172033` dan `spacing` menjadi `32px`: background, radius, padding, dan jarak content berubah. Persistensi setelah reopen masih memerlukan bukti tambahan.
 
-| Variable | Tipe dan nilai pada capture 04 | Properti yang sudah terikat pada capture 06 |
+| Variable | Tipe dan nilai akhir yang dicatat | Properti yang sudah terikat |
 |---|---|---|
-| surface | Colors, `#111827` | Background Fill frame |
-| spacing | Dimensions, `24px` | Corner radius, horizontal padding, vertical padding, vertical gap |
-| strength | Numbers, `1` | Belum ada binding yang dibuktikan |
-| family | Font family, `Inter` | Belum ada binding yang dibuktikan |
-| weight | Font weight, `600` | Belum ada binding yang dibuktikan |
+| surface/base | Colors, `#172033`; nama awal surface | Background Fill frame, referensi tetap setelah rename35 dan Undo38 |
+| spacing | Dimensions, `32px` | Corner radius, horizontal padding, vertical padding, vertical gap |
+| strength | Numbers, `60` | Opacity ikon; memakai skala persen, bukan fraksi0–1 |
+| family | Font family, `Inter` | Font family judul, capture 07 |
+| weight | Font weight, `600` | Font weight judul, capture 07 |
+| accent | Colors, `#5EEAD4` | Colors SVG ikon, capture 13 |
 
 ![Variable diterapkan bersamaan pada radius, gap, padding dan fill](../design/wonder/2026-10-30/06-variable-mix-layout.png)
 
-## Latihan desain yang diusulkan
+### Catatan unit opacity
 
-Bagian ini merupakan rancangan latihan untuk cakupan fitur, belum hasil yang sudah dibuat. Gunakan satu komposisi dashboard/kartu proyek yang mudah dibaca, lalu letakkan contoh efek terpisah di sampingnya. Konfigurasi yang saling menggantikan, seperti mode layout atau jenis fill, dicoba berurutan atau di node berbeda agar efeknya dapat dibandingkan.
+Pada capture 09–10, ikon sangat redup saat Numbers `strength` bernilai1 lalu 0.6. Capture 12 mengoreksi nilai menjadi60 dan ikon terlihat dengan jelas. Input opacity menggunakan skala persen: untuk60% gunakan60, bukan0.6. Pelajaran ini perlu dibawa ke audit Verynize sebagai pemeriksaan unit, bukan menganggap semua Numbers dinormalisasi0–1.
+
+### Filter, mask dan unit parameter
+
+Percobaan Brightness menggunakan 110 sempat dibatasi UI menjadi 3, lalu pelaksana mengoreksi ke 1.1. Capture 18–21 menampilkan1.1. Artinya opacity dan brightness memiliki skala input berbeda; nilai harus mengikuti property, walaupun sama-sama berupa angka.
+
+Mask Linear, Radial, dan Conic diterapkan berurutan pada panel grid yang sama (18–20). Pelaksana juga mencoba Invert, tetapi capture 20 menunjukkan checkbox kembali tidak aktif. Pada21, mask disembunyikan melalui visibility sehingga bentuk panel kembali utuh. Keberadaan pilihan Advanced tidak membuktikan seluruh kombinasi Mode, Repeat, Position dan Size telah diuji.
+
+Percobaan binding blur shadow tidak menghasilkan chip variable pada capture 16: nilai yang terlihat tetap4. Catatan ini dipertahankan meskipun filename mengandung kata `variable`; nama file tidak digunakan untuk menyatakan keberhasilan binding.
+
+### Detach, gradient dan radius individual
+
+Capture 23 mengonfirmasi bahwa pelepasan color variable mempertahankan warna resolved `172033`; inspector menampilkan literal warna, sementara radius masih memakai `spacing`. Hasil ini mendukung perilaku yang dituju perbaikan Verynize pada detach color binding.
+
+Fill gradient dicoba sebagai Linear, Radial dan Conic (24–26), terpisah dari gradient **mask** (18–20). Dua stop berwarna `172033` dan `456099`; Add Stop dan opacity stop terlihat, tetapi penambahan stop tidak ditunjukkan. Blend menu27 memperlihatkan Normal, Darken, Multiply, Plus darker, Color burn, Lighten, Screen, Plus lighter, Color dodge, Overlay, Soft light dan Hard light; capture hanya membuktikan Multiply diterapkan dan efek gelapnya28. Dropdown berlanjut di luar bagian yang tertangkap, sehingga daftar tersebut bukan seluruh mode yang tersedia.
+
+Capture 29 memperlihatkan radius individual8/32/48/32 serta label Mixed. Ini membuktikan edit per-corner, tetapi belum semantik pemasangan ulang binding scalar di atas nilai per-corner tersebut. Pada capture 23–26 tinggi artboard sementara510 memotong bagian bawah grid; capture 27–29 kembali570. Keadaan sementara ini tidak boleh digunakan sebagai bukti layout akhir yang lolos pemeriksaan.
+
+### Rename, delete, Undo dan export akhir
+
+Color variable `surface` di-rename menjadi `surface/base` melalui F2. Capture 35–36 menunjukkan folder `surface` dengan anak `base`; binding fill mengikuti nama baru tanpa perubahan warna. Delete pada 37 menghapus entri library dan mengubah fill menjadi literal `172033`. CmdZ pada 38 mengembalikan variable serta binding. Ini membuktikan Undo untuk delete variable, belum seluruh jenis Undo/Redo.
+
+Ikon sebelumnya sibling artboard, lalu dipindahkan melalui Cut → pilih frame → Paste. Pelaksana mencatat posisi awal di flex flow Y576, kemudian memakai toggle Locked to layout untuk membuatchild absolute. Capture 40 menunjukkanX680/Y40, rotation 0 dan warna/opacity masih bound. Capture 41 memperlihatkan export2×PNG berhasil; file `wonder-workflow.png` diukur1600×1140 dan diperiksa visual: judul, body, ketiga label dan Spark seluruhnya berada dalam gambar. Tidak ada chrome/selection UI pada export.
+
+![Export PNG asli dari Wonder](../design/wonder/2026-10-30/wonder-workflow.png)
+
+## Latihan lanjutan untuk menutup cakupan
+
+Bagian ini merupakan rancangan perluasan latihan, bukan klaim bahwa semua elemennya ada pada desain akhir. Komposisi sesi ini sudah memiliki artboard, judul/body, panel grid dengan tiga label, dan ikon. Untuk menutup cakupan yang tersisa, tambahkan contoh efek terpisah di sampingnya. Konfigurasi yang saling menggantikan, seperti mode layout atau jenis fill, dicoba berurutan atau di node berbeda agar efeknya dapat dibandingkan.
 
 | Elemen | Tujuan desain | Konfigurasi yang dicoba |
 |---|---|---|
@@ -101,37 +169,37 @@ Kolom status merupakan hasil **sesi 30 Oktober**, bukan dukungan fitur di Veryni
 | ID | Keluarga dan kontrol yang perlu dicoba | Cara membuktikan efek | Dasar inventaris | Status sesi |
 |---|---|---|---|---|
 | P01 | Page background: warna, opacity, visibility | Ubah satu nilai, bandingkan canvas, pulihkan | Baseline baru | Terlihat |
-| P02 | Position X/Y dan rotation | Nilai inspector cocok dengan perpindahan/rotasi node | H43, S §3 | Terlihat pada 01; belum diuji |
+| P02 | Position X/Y dan rotation | Nilai inspector cocok dengan perpindahan/rotasi node | H43, S §3 | FrameX−620/Y−305; ikon absolutechildX680/Y40 rotation 0 pada 40; rotation diuji 39 |
 | P03 | Align L/C/R dan T/M/B, distribusi | Beberapa node menunjukkan posisi/spacing berubah sesuai aksi | H43, S §2 | Terlihat pada 01; belum diuji |
-| P04 | Rotate 90°, flip horizontal/vertical | Gunakan bentuk/ikon asimetris supaya hasil jelas | H43, S §3 | Terlihat pada 01; belum diuji |
+| P04 | Rotate 90°, flip horizontal/vertical | Gunakan bentuk/ikon asimetris supaya hasil jelas | H43, S §3 | Ikon rotation15 lalu FlipHorizontal39 menampilkan−15; pulih0/unflipped40. Rotate90/FlipV belum |
 | P05 | Anchors Left/Right/Center dan Top/Bottom/Center; constraint widget | Resize parent dan periksa hubungan anak | H43, S §3 | Terlihat pada 01; belum diuji |
-| P06 | Z / Auto dan absolute positioning | Node tumpang tindih; ubah urutan dan posisi dalam parent flow | H43, S §3 | Terlihat pada 01; belum diuji |
-| P07 | Display free/absolute, flex, block, grid | Capture tiap mode serta perpindahan child | H43, S §3 | Flex aktif pada 05, Column pada 06; free/block/grid belum diuji |
-| P08 | W/H fixed px, relative %, Hug, Fill, Auto | Catat mode yang tersedia per parent/node; resize parent/content | H25, H43, S §1 | Terlihat pada 01; belum diuji |
-| P09 | Min/max width/height; aspect ratio; Calculate bila ditawarkan | Resize melewati batas; ratio tetap; tulis jika Calculate tidak tersedia | S §1/§3 | Belum |
+| P06 | Z / Auto dan absolute positioning | Node tumpang tindih; ubah urutan dan posisi dalam parent flow | H43, S §3 | Ikon dipindah menjadichild absolute40; ZAuto terlihat, z-order belum diuji |
+| P07 | Display free/absolute, flex, block, grid | Capture tiap mode serta perpindahan child | H43, S §3 | Flex05, Column06, Grid14–15 diterapkan; free/block belum dibandingkan |
+| P08 | W/H fixed px, relative %, Hug, Fill, Auto | Catat mode yang tersedia per parent/node; resize parent/content | H25, H43, S §1 | Frame fixed800×570, transientH510 lalu570; judul Hug07; W mode Fixed/Hug/Calculate terlihat 29 |
+| P09 | Min/max width/height; aspect ratio; Calculate bila ditawarkan | Resize melewati batas; ratio tetap; tulis jika Calculate tidak tersedia | S §1/§3 | Calculate dan Add min/max width terlihat 29; belum diterapkan |
 | P10 | Flex direction, wrap bila tersedia, align, justify, gap | Bandingkan susunan paling sedikit tiga child | S §1/§3 | Column diterapkan dan vertical gap terikat spacing pada 06; layout child belum diuji |
-| P11 | Grid columns/rows, auto-flow, gap X/Y, child spans | Grid berisi beberapa item menunjukkan track dan span berubah | S §1/§3 | Belum |
+| P11 | Grid columns/rows, auto-flow, gap X/Y, child spans | Grid berisi beberapa item menunjukkan track dan span berubah | S §1/§3 | Grid frame14–15 dengan tiga track dan gap bound; spans/auto-flow belum |
 | P12 | Padding/margin uniform, per-axis, per-side | Nilai di tiap sisi terlihat pada jarak child/parent | S §1/§3 | Padding X/Y terikat spacing pada 06; margin/per-side belum |
-| P13 | Visibility dan opacity | Toggle lalu pulihkan; turunkan opacity dengan backdrop pembanding | H43 | Terlihat pada 01; belum diuji |
-| P14 | Blend mode | Dua layer berwarna saling tumpang tindih; capture pilihan dan efek | S §1/§3 | Terlihat pada 01; belum diuji |
-| P15 | Radius uniform dan per-corner | Bandingkan sudut yang berbeda; kemudian coba binding dimension | H43 | Radius uniform terikat spacing pada 05–06; per-corner belum |
+| P13 | Visibility dan opacity | Toggle lalu pulihkan; turunkan opacity dengan backdrop pembanding | H43 | Opacity ikon bound strength09–10; visibility belum diuji |
+| P14 | Blend mode | Dua layer berwarna saling tumpang tindih; capture pilihan dan efek | S §1/§3 | Menu27, Multiply diterapkan 28, tampilan normal kembali29; opsi lain belum |
+| P15 | Radius uniform dan per-corner | Bandingkan sudut yang berbeda; kemudian coba binding dimension | H43 | Bound spacing05–06; per-corner8/32/48/32 pada 29 |
 | P16 | Clip content / overflow | Child sengaja melewati batas parent, toggle dan bandingkan | H43, S §1 | Terlihat pada 01; belum diuji |
-| P17 | Font family, weight, size | Teks terpilih menunjukkan nilai dan perbedaan tipografi | H25–27 | Belum |
-| P18 | Line height Auto/px, letter spacing | Gunakan teks beberapa baris dan cukup panjang | H25 | Belum |
-| P19 | Text horizontal/vertical alignment; advanced typography | Frame teks lebih besar dari content; capture menu lanjutan | H25, S §3 | Belum |
-| P20 | Text Fill dan Background Fill: warna, opacity, visibility, tambah/hapus paint | Teks dan background berbeda; periksa paint individual | H23, H25, H43 | Background solid terikat surface pada 05–06; Text Fill/paint stack belum |
-| P21 | Color picker: Custom/Variables, hue, alpha, channel, format, eyedropper | Konversi format mempertahankan warna; binding tampil setelah pilih variable | H23, S §3 | Belum |
-| P22 | Gradient linear/radial/conic; stop, posisi, opacity | Capture editor stop dan hasil visual masing-masing jenis yang tersedia | S §1/§3 | Belum |
+| P17 | Font family, weight, size | Teks terpilih menunjukkan nilai dan perbedaan tipografi | H25–27 | Judul: family/weight binding aktif, size48px pada 07 |
+| P18 | Line height Auto/px, letter spacing | Gunakan teks beberapa baris dan cukup panjang | H25 | Judul: line heightAuto, letter spacing−1.5px pada 07; multi-line belum |
+| P19 | Text horizontal/vertical alignment; advanced typography | Frame teks lebih besar dari content; capture menu lanjutan | H25, S §3 | Left/top terlihat pada 07; opsi lain/advanced belum |
+| P20 | Text Fill dan Background Fill: warna, opacity, visibility, tambah/hapus paint | Teks dan background berbeda; periksa paint individual | H23, H25, H43 | Background bound surface05–06; Text Fill F8FAFC07; paint stack belum |
+| P21 | Color picker: Custom/Variables, hue, alpha, channel, format, eyedropper | Konversi format mempertahankan warna; binding tampil setelah pilih variable | H23, S §3 | Color binding melalui Variables05; format/eyedropper belum |
+| P22 | Gradient linear/radial/conic; stop, posisi, opacity | Capture editor stop dan hasil visual masing-masing jenis yang tersedia | S §1/§3 | Linear24, Radial25, Conic26 dengan dua stop172033/456099; Add Stop terlihat, belum diuji |
 | P23 | Image fill: cover/contain/fill/scale-down | Gunakan rasio gambar dan frame berbeda, periksa crop/stretch | S §1 | Belum |
-| P24 | Shader fill/node: preset dan parameter | Pilih preset, ubah satu parameter; simpan sebelum–sesudah | H55–56, S §3 | Belum |
-| P25 | Border: warna, opacity, width uniform/per-side, style bila tersedia | Border kontras; tiap sisi dibedakan | H43, S §1 | Terlihat pada 01; belum diuji |
-| P26 | Outline | Ubah width/offset/color yang ditawarkan dan capture hasil | H43 | Terlihat pada 01; belum diuji |
-| P27 | Shadow outer/inset/drop/text; tambah/hapus dan parameter | Capture jenis yang tersedia dan efek pada bentuk/teks | H43, S §1 | Terlihat pada 01; belum diuji |
-| P28 | Filters: blur, brightness, contrast, grayscale, hue rotate, invert, saturate, sepia, drop shadow | Gunakan contoh berwarna; catat satu hasil tiap filter yang tersedia | H43, S §1 | Terlihat pada 01; belum diuji |
-| P29 | Mask dan pelepasan mask | Bentuk pemotong dan target jelas; capture sebelum/sesudah | H52, S §2 | Terlihat pada 01; belum diuji |
-| P30 | Icon / SVG Colors (kontekstual) | Ubah warna path/stroke; bedakan dengan background bounding box | S §3 | Belum |
+| P24 | Shader fill/node: preset dan parameter | Pilih preset, ubah satu parameter; simpan sebelum–sesudah | H55–56, S §3 | ShiftedSwirls3 diterapkan 30 lalu dinonaktifkan32; settings31 hanya diamati, slider tidak diubah |
+| P25 | Border: warna, opacity, width uniform/per-side, style bila tersedia | Border kontras; tiap sisi dibedakan | H43, S §1 | Border1px All; warna334155 pada 16; per-side/style belum |
+| P26 | Outline | Ubah width/offset/color yang ditawarkan dan capture hasil | H43 | Outline1px, offset4, warna5EEAD4 pada 16 |
+| P27 | Shadow outer/inset/drop/text; tambah/hapus dan parameter | Capture jenis yang tersedia dan efek pada bentuk/teks | H43, S §1 | Box shadow X0/Y12/blur4/spread−4/hitam25% pada 16; Drop/Inner hanya terlihat |
+| P28 | Filters: blur, brightness, contrast, grayscale, hue rotate, invert, saturate, sepia, drop shadow | Gunakan contoh berwarna; catat satu hasil tiap filter yang tersedia | H43, S §1 | Blur2 pada 17 lalu Brightness1.1 pada 18–21; menu Layer/Backdrop diinventaris, opsi lain belum diterapkan |
+| P29 | Mask dan pelepasan mask | Bentuk pemotong dan target jelas; capture sebelum/sesudah | H52, S §2 | Linear180°, Radial Advanced, Conic45°18–20; visibility off21. Invert dicoba menurut pelaksana, off saat20 |
+| P30 | Icon / SVG Colors (kontekstual) | Ubah warna path/stroke; bedakan dengan background bounding box | S §3 | Colors SVG bound accent pada 13; path turquoise nyata pada 12–13 |
 | P31 | Scale tool (kontekstual) | Ukuran, stroke/radius/font ikut berubah sesuai kontrol yang ditawarkan | S §2/§3 | Belum |
-| P32 | Export format, scale, prefix dan output | Capture pengaturan, file output dan dimensi; buka output | H45–50 | Terlihat pada 01; belum diuji |
+| P32 | Export format, scale, prefix dan output | Capture pengaturan, file output dan dimensi; buka output | H45–50 | PNG 2× berhasil41, output 1600×1140 diperiksa; format lain hanya menu22 |
 
 Untuk dropdown dengan banyak opsi, catat daftar yang muncul, opsi yang benar-benar diterapkan, dan alasan opsi tersisa belum dicoba. “Semua konfigurasi” tidak boleh disimpulkan hanya dari daftar keluarga di atas.
 
@@ -142,24 +210,24 @@ Screenshot historis H42 menunjukkan lima kategori: **Colors, Dimensions, Numbers
 | ID | Percobaan | Hasil yang harus dicatat | Status sesi |
 |---|---|---|---|
 | V01 | Buka create menu dan tiap kategori | Nama kategori, field nilai, unit/default | Terlihat: menu 02; detail tiap tipe belum |
-| V02 | Buat color variable dan folder/nama dengan slash | Nilai tersimpan, pengelompokan, nama saat dipilih | Color surface `#111827` dibuat pada 03; folder belum |
+| V02 | Buat color variable dan folder/nama dengan slash | Nilai tersimpan, pengelompokan, nama saat dipilih | Color surface#111827 dibuat03, berubah172033, renamefolder surface/base35–36 |
 | V03 | Buat dimension variable | Nilai dan unit; daftar properti kompatibel | spacing 24px dibuat 04, terikat radius/gap/padding 06 |
-| V04 | Buat number variable | Range dan unit; batas saat dipakai opacity/angka lain | strength 1 terlihat pada 04; binding belum |
-| V05 | Buat family dan weight variable | Nama family dan nilai weight yang diterima | family Inter dan weight 600 terlihat pada 04; binding belum |
-| V06 | Search/filter/grid atau list yang ditawarkan | Hasil pencarian nama/nilai serta reset pencarian | Belum |
-| V07 | Rename, duplicate, delete yang ditawarkan | Referensi lama tetap konsisten atau perilaku pelepasan yang terlihat | Belum |
+| V04 | Buat number variable | Range dan unit; batas saat dipakai opacity/angka lain | strength akhir60 pada 12; dipakai opacity ikon |
+| V05 | Buat family dan weight variable | Nama family dan nilai weight yang diterima | familyInter dan weight600 dibuat04, keduanya bound ke judul07 |
+| V06 | Search/filter/grid atau list yang ditawarkan | Hasil pencarian nama/nilai serta reset pencarian | Searchsurface menampilkan folderbase36; hasilkosong saatdelete37; reset akhir42 |
+| V07 | Rename, duplicate, delete yang ditawarkan | Referensi lama tetap konsisten atau perilaku pelepasan yang terlihat | Rename surface→surface/base35, delete37, Undo38; duplicate belum |
 | V08 | Bind satu color ke fill pada dua node berbeda | Kedua node menampilkan warna yang sama serta indikator binding | Belum |
 | V09 | Bind color yang sama pada Text Fill dan background | Setelah edit token, warna teks dan frame sama-sama berubah | Belum |
-| V10 | Bind dimension ke radius, gap, padding, ukuran/font size yang kompatibel | Satu variable mengontrol lebih dari satu properti sesuai picker | spacing terikat radius, padding X/Y dan vertical gap pada 06; ukuran/font size belum |
-| V11 | Bind number ke opacity atau properti angka kompatibel | Nilai hasil dan normalisasi persen/angka jelas | Belum |
-| V12 | Bind family + weight + size pada teks yang sama | Ketiga binding tetap aktif bersamaan | Belum |
-| V13 | Literal override lalu bind kembali | Nilai dan indikator sesuai sumber nilai yang aktif | Belum |
-| V14 | Bind scalar saat per-side/per-corner/per-axis aktif | Catat apakah override dibersihkan, dipertahankan, atau UI menolak | Belum |
-| V15 | Edit variable global setelah dipakai beberapa node | Capture sebelum–sesudah; identifikasi semua node yang berubah | Belum |
-| V16 | Detach variable | Tampilan sebelum dan sesudah; apakah nilai resolved dipertahankan | Belum |
-| V17 | Hapus variable yang masih dipakai | Perilaku pengguna nyata: fallback, detach, dialog, atau penolakan | Belum |
-| V18 | Undo/redo edit, bind, detach | Nilai, binding, dan tampilan kembali konsisten | Belum |
-| V19 | Simpan/reopen serta export variable jika tersedia | Binding/nama/nilai tetap; output bukan hanya screenshot | Belum |
+| V10 | Bind dimension ke radius, gap, padding, ukuran/font size yang kompatibel | Satu variable mengontrol lebih dari satu properti sesuai picker | spacing terikat radius/paddingX/Y/gap06; edit24→32 terpropagasi 11 |
+| V11 | Bind number ke opacity atau properti angka kompatibel | Nilai hasil dan normalisasi persen/angka jelas | strength→opacity teruji09–12; gunakan60 untuk60%, bukan0.6 |
+| V12 | Bind family + weight + size pada teks yang sama | Ketiga binding tetap aktif bersamaan | family+weight bound bersamaan pada 07; size masih literal48px |
+| V13 | Literal override lalu bind kembali | Nilai dan indikator sesuai sumber nilai yang aktif | Fill bound→detach23→bind kembali surface32, dikonfirmasi pelaksana |
+| V14 | Bind scalar saat per-side/per-corner/per-axis aktif | Catat apakah override dibersihkan, dipertahankan, atau UI menolak | Radius bound→individual29→bound spacing lagi32; pelaksana mencatat radius32 mengembalikan chip |
+| V15 | Edit variable global setelah dipakai beberapa node | Capture sebelum–sesudah; identifikasi semua node yang berubah | surface#111827→#172033 dan spacing24→32 terpropagasi 11 |
+| V16 | Detach variable | Tampilan sebelum dan sesudah; apakah nilai resolved dipertahankan | Color detach23 mempertahankan172033; numeric detach belum |
+| V17 | Hapus variable yang masih dipakai | Perilaku pengguna nyata: fallback, detach, dialog, atau penolakan | Deleteusedcolor37 mempertahankan172033 sebagai literal |
+| V18 | Undo/redo edit, bind, detach | Nilai, binding, dan tampilan kembali konsisten | CmdZ Undo delete mengembalikan variable folder+binding38; Redo/edit/bindundo belum |
+| V19 | Simpan/reopen serta export variable jika tersedia | Binding/nama/nilai tetap; output bukan hanya screenshot | PNG desain export41 teruji; reopen/variableCSSexport Wonder belum |
 
 Percobaan yang paling menentukan untuk Verynize adalah **V14** dan **V16**: audit kode awal menemukan potensi konflik antara binding scalar dengan override individual, serta pelepasan color binding yang dapat mengembalikan warna lama. Audit dan pengujian Verynize tetap terpisah dari perilaku Wonder sampai sesi UI mengonfirmasinya.
 
@@ -169,16 +237,16 @@ Baseline baru memperlihatkan header Icons dengan tombol view, search dan add. Me
 
 | ID | Percobaan | Bukti yang diperlukan | Status sesi |
 |---|---|---|---|
-| I01 | Expand Icons dan buka Add | Menu penuh, kategori/set/import yang benar-benar tersedia | Terlihat: header saja |
-| I02 | Pilih/tambah ikon yang tersedia | Nama set dan ikon, preview, item library | Belum |
-| I03 | Grid/list, search dan clear | Hasil pencarian serta perubahan tampilan panel | Belum |
-| I04 | Masukkan ikon pada canvas / parent | Node hasil, ukuran, tipe/konteks Properties | Belum |
-| I05 | Resize/rotate/flip ikon | Hasil dengan bentuk asimetris dan nilai inspector | Belum |
-| I06 | Ubah warna ikon melalui Properties | Path/stroke berubah, bukan hanya background kotak | Belum |
-| I07 | Bind warna ikon ke color variable jika ditawarkan | Picker, indikator binding, perubahan global, hasil ikon | Belum |
+| I01 | Expand Icons dan buka Add | Menu penuh, kategori/set/import yang benar-benar tersedia | Menu08: Upload SVG, Paste SVG markup, Add from selection (disabled) |
+| I02 | Pilih/tambah ikon yang tersedia | Nama set dan ikon, preview, item library | Satu asset pasted terlihat 09; alur input mengikuti catatan pelaksana |
+| I03 | Grid/list, search dan clear | Hasil pencarian serta perubahan tampilan panel | Grid32, rename/searchSpark33; list/reset belum |
+| I04 | Masukkan ikon pada canvas / parent | Node hasil, ukuran, tipe/konteks Properties | Instance Spark64×64 kini child absolute X680/Y40 pada 40, ikutexport41 |
+| I05 | Resize/rotate/flip ikon | Hasil dengan bentuk asimetris dan nilai inspector | Rotate15+FlipHorizontal39, lalu 0/unflipped40; resize/FlipV belum |
+| I06 | Ubah warna ikon melalui Properties | Path/stroke berubah, bukan hanya background kotak | Warna path turquoise terlihat 12; Colors SVG bound accent13 |
+| I07 | Bind warna ikon ke color variable jika ditawarkan | Picker, indikator binding, perubahan global, hasil ikon | Colors chip accent dan opacity strength bersamaan pada 13; edit accent belum |
 | I08 | Ikon yang sama pada dua komponen | Periksa apakah instance ikut update atau berupa salinan mandiri | Belum |
-| I09 | Rename/delete asset yang dipakai | Dampak ke instance dan Undo | Belum |
-| I10 | Export ikon dan komposisi | Ikon tetap terlihat pada file output | Belum |
+| I09 | Rename/delete asset yang dipakai | Dampak ke instance dan Undo | Rename pasted→Spark melalui F2/Enter dikonfirmasi33; delete/Undo belum |
+| I10 | Export ikon dan komposisi | Ikon tetap terlihat pada file output | PNG 2×41 dan wonder-workflow.png menyertakan Spark setelah menjadi child absolute pada 40 |
 
 ## Bukti historis untuk inventaris
 
@@ -198,24 +266,66 @@ Baseline baru memperlihatkan header Icons dengan tombol view, search dan add. Me
 
 Setiap perbaikan harus menghubungkan empat hal: tindakan pengguna, perilaku yang diharapkan, lokasi implementasi, dan bukti regresi. Audit kode dapat membuktikan bug internal tanpa harus mengklaim perilaku Wonder identik.
 
-| Temuan audit awal | Dampak pengguna | Pemilik dan dokumen | Status validasi akhir |
-|---|---|---|---|
-| Detach color binding dapat memakai literal warna lama | Tampilan berubah saat pengguna melepas binding | `audit_properties`, [audit Properties](audits/2026-10-30-properties-agent.md) | Mengikuti laporan agent/integrasi akhir |
-| Scalar binding bertentangan dengan override radius/spacing individual | Indikator bound tidak mencerminkan hasil visual | `audit_properties` | Mengikuti laporan agent/integrasi akhir |
-| Color creation bisa bertabrakan dengan nama variable | Nilai terpakai tertimpa atau dokumen tidak valid | `audit_variables_icons`, [audit Variables/Icons](audits/2026-10-30-variables-icons-agent.md) | Mengikuti laporan agent/integrasi akhir |
-| Nama berbeda menjadi identifier CSS sama | Ekspor membatalkan nilai variable sebelumnya | `audit_variables_icons` | Mengikuti laporan agent/integrasi akhir |
-| Ikon SVG tidak valid lolos lalu gagal saat decoding | Klik insert dapat melempar error sebelum handler | `audit_variables_icons` | Mengikuti laporan agent/integrasi akhir |
+| Perubahan Verynize | Hasil bagi pengguna | Bukti / validasi |
+|---|---|---|
+| Detach color variable mempertahankan nilai resolved dan alpha | Warna tidak kembali ke literal lama; multi-selection memakai warna masing-masing | [Audit Properties](audits/2026-10-30-properties-agent.md); `inspector-variable-binding` lulus |
+| Binding uniform membersihkan override yang bertentangan | Chip radius, border, padding dan gap sesuai hasil render; cross-axis dipertahankan sesuai kontrak | `inspector-variable-binding` lulus |
+| Editor radius per-corner dan border per-side | Empat nilai dapat diedit, undoable, lalu kembali ke uniform/binding | [Corners](../design/verynize/2026-10-30/01-individual-corners.png), [Border](../design/verynize/2026-10-30/02-individual-border-widths.png); regression lulus |
+| Validasi color creation terhadap namespace color dan typed | Nama duplikat/reserved tidak menimpa variable yang dipakai | [Audit Variables/Icons](audits/2026-10-30-variables-icons-agent.md); `inspector-variable-library` lulus |
+| CSS export menolak identifier yang bertabrakan | Nilai tidak diam-diam tertimpa pada output CSS | Integrasi variable dan UI library lulus; round-trip JSX nama ambigu tetap batas terpisah |
+| Decode dan parse SVG di dalam error handler | Ikon malformed ditolak dengan notifikasi tanpa node rusak | UI library lulus; screenshot tes memperlihatkan toast expected invalid SVG |
+| Colors untuk SVG monochrome sederhana | Warna bentuk asli dapat terikat variable, terpisah dari background; detach/reload/export bekerja | [SVG proof](../design/verynize/2026-10-30/svg-color-variable.png); uji pixel dan lifecycle lulus |
+| Urutan zoom native export diperbaiki setelah loadURL | Raster 2× benar-benar memenuhi1600×1140, bukan artwork 1× di pojok | [PNG hasil perbaikan](../design/verynize/2026-10-30/workflow-export.png), [verification](../design/verynize/2026-10-30/export-verification.json); `render-export` lulus 0.5×/1×/2×/4× |
 
-Gaps yang perlu tetap dinyatakan: outline/filter inspector, warna SVG berbasis variable, struktur folder variable dan binding properti yang belum didukung. Status pastinya mengikuti audit sumber terbaru dan hasil implementasi, bukan daftar lama dalam spec.
+Gaps yang perlu tetap dinyatakan: outline/filter inspector, penggantian per-warna pada SVG multicolor, struktur folder variable dan binding properti yang belum didukung. Implementasi baru Colors untuk SVG monochrome sederhana dijelaskan dalam audit Variables/Icons; itu bukan dukungan penuh semua SVG. Status pastinya mengikuti audit sumber terbaru dan hasil implementasi, bukan daftar lama dalam spec.
 
-## Kriteria penutupan sesi
+## Rekonstruksi Verynize yang dapat diedit
 
-- [ ] Desain baru terlihat, bernama, dan dapat dibuka kembali di Wonder.
-- [ ] Semua keluarga Properties yang tersedia di konteks yang diuji memiliki hasil/catatan batas yang eksplisit.
-- [x] Kelima tipe variable dibuat; nilai akhirnya terlihat pada capture 04.
-- [ ] Setidaknya satu edit global memperbarui beberapa node/properti; detach dan undo dibuktikan.
-- [ ] Ikon dimasukkan ke komposisi; interaksi warna/variable dicatat sesuai kemampuan nyata.
-- [ ] Screenshot sebelum–sesudah dan indeks bukti sesuai isi gambar.
-- [ ] Ekspor hasil desain tersedia atau kegagalannya didokumentasikan.
-- [ ] Audit tiap agent selesai, perubahan Verynize tercatat, dan tes relevan dilaporkan dengan hasil nyata.
-- [ ] Bukti Wonder dan Verynize dibedakan; tidak ada klaim full parity tanpa pengujian.
+[Dokumen native Verynize](../design/verynize/2026-10-30/workflow.verynize.json) merupakan rekonstruksi mandiri dari komposisi yang diamati, bukan file export Wonder. Dokumen berisi delapan layer, enam variable dari lima tipe, dan ikon Spark sebagai child absolute artboard. [Catatan artefak](../design/verynize/2026-10-30/README.md) menjelaskan perbedaan: outline terpisah didekati dengan CSS shadow; Brightness dan mask tersembunyi dari Wonder tidak dimasukkan. Ini rekonstruksi fungsional, bukan klaim pixel-identical.
+
+![Rekonstruksi yang dibuka di Verynize](../design/verynize/2026-10-30/workflow-canvas.png)
+
+[Export PNG Verynize 1600×1140](../design/verynize/2026-10-30/workflow-export.png) sudah dibuat ulang setelah perbaikan skala. Agent penguji dan agent dokumentasi memeriksa gambar lengkap. [Export verification](../design/verynize/2026-10-30/export-verification.json) mencatat delapan layer, SVG tint, dimensi dan pixel opaque di area kanan/bawah yang sebelumnya kosong. [Export sebelum perbaikan](../design/verynize/2026-10-30/workflow-export-before-scale-fix.png) dipertahankan hanya sebagai bukti bug, bukan hasil akhir.
+
+### Hasil pengujian Verynize
+
+Hasil berikut dilaporkan agent pemegang desktop setelah build UI terbaru dan seluruh aplikasi Electron pengujian ditutup:
+
+| Pemeriksaan | Hasil dan batas |
+|---|---|
+| `npm run build:ui` | Lulus pada build akhir untuk regression |
+| `node tests/inspector-variable-binding.cjs` | Lulus; fill detach, undo, binding, corner individual dan border individual |
+| `node tests/inspector-variable-library.cjs` | Lulus ulang pada build terbaru; validasi nama/export collision, malformed SVG, pixel warna bentuk, perubahan variable, multi-selection, reload/export/restore |
+| `node tests/canvas-page.cjs` | Lulus |
+| `node tests/inspector-parity.cjs` | Lulus; termasuk PNG 0.5×/4× dan PDF |
+| `node tests/render-export.cjs` | Lulus 0.5×/1×/2×/4× dengan ukuran dan pixel cakupan artwork |
+| Integrasi terpilih oleh agent utama | 116/116 lulus |
+| Fidelity oleh agent utama | 26 fixture, 105 pemeriksaan lulus |
+| `npm run check`, `npm run lint:ui`, `npm run typecheck:ui` | Lulus pada pemeriksaan akhir agent utama |
+
+Regresi UI dan export yang relevan sudah selesai; ini tidak menyatakan seluruh `npm test` dijalankan. Rincian implementasi dan batas cakupan tetap berada dalam dokumen audit masing-masing agent.
+
+## Validasi dan pekerjaan tersisa
+
+Agent dokumentasi memeriksa secara visual 43 screenshot baru Wonder, PNG asli Wonder, empat screenshot Verynize dan PNG Verynize setelah perbaikan skala. Seluruh tautan lokal diperiksa. Bukti historis, Wonder sesi baru, dan produk Verynize dilabel terpisah. Hasil regression Electron di atas berasal dari agent penguji setelah giliran kontrol desktop berpindah dari Wonder.
+
+| Hasil | Status |
+|---|---|
+| Membuat desain dari canvas kosong | Terbukti 00–42 |
+| Membuat dan memakai lima tipe variable | Terbukti 04–13; dua Colors menghasilkan total enam variable |
+| Mengubah variable global dan melihat perubahan properti | Terbukti 10–12; unit opacity dikoreksi ke 60 |
+| Detach color mempertahankan warna | Terbukti 23, lalu binding dipasang lagi32 menurut pelaksana |
+| Memakai SVG Colors dan opacity variable bersamaan | Terbukti 13; asset Spark dicari pada 33 |
+| Memakai semua konfigurasi yang tersedia | Belum; 61 baris checklist mencatat bagian yang hanya terlihat atau belum dicoba |
+| Undo delete variable | Terbukti 38; Redo dan reopen dokumen belum diuji |
+| File export PNG | Berhasil 41;1600×1140/2× diperiksa. PDF/JPG/WebP/Code belum diekspor |
+| Hierarki ikon untuk export frame | Ikon menjadi child absolute pada 40 dan tampil dalam PNG41 |
+| Kesetaraan penuh Verynize–Wonder | Tidak diklaim; implementasi dan batas fitur dicatat di audit masing-masing |
+
+Pekerjaan lanjutan yang masih diperlukan untuk memenuhi permintaan “semua konfigurasi”:
+
+1. Uji keluarga Position/alignment/anchors/transform, berbagai sizing modes/min-max/Calculate, block layout, grid spans/auto-flow, margin/per-side padding, per-side border, visibility/overflow, typography lanjutan dan seluruh opsi color format.
+2. Uji image fill, variasi shadow selain Box, filter selain Blur/Brightness, seluruh parameter mask, mode blend tersisa dan perubahan parameter shader. Dropdown yang dibuka belum berarti setiap opsi diterapkan.
+3. Lanjutkan binding lintas beberapa node, numeric detach, Redo dan reopen; rename/delete/folder/search serta Undo delete sudah diuji 35–38. Selesaikan icon list/delete/instance reuse, resize/FlipV dan edit global accent.
+4. Uji format export lain bila dibutuhkan. PNG 2× sudah berhasil setelah ikon menjadi child artboard pada 40–41; PDF/JPG/WebP/Code belum dijalankan.
+5. Tinjau gap Verynize yang masih terbuka, terutama paint stack, outline/filter inspector, folder variable, binding per-corner/per-side dan SVG multicolor. Regresi UI/export baru sudah lulus; perubahan berikutnya memerlukan validasi sesuai cakupannya.
