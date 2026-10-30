@@ -135,3 +135,13 @@ Rooms created by the previous snapshot-only Worker are migrated in place. Their 
 - `tests/cloud-async.cjs` (`npm run test:ux`): stale panel completions never touch a newly selected document.
 
 The installed `cf/config` (`@cloudflare/config`) and Miniflare type definitions determine the beta configuration shape (text/secret bindings, multi-module manifests). Earlier passes consulted Context7 for Durable Object WebSocket hibernation and SQLite patterns.
+
+## Drizzle ORM on D1
+
+`db.js` constructs a request-scoped Drizzle D1 client. `schema.js` maps the eight existing D1 tables (Better Auth plus the organization room index). Better Auth uses its Drizzle adapter with SQLite and interactive transactions disabled for D1. Organization queries use the query builder and parameterized `sql` templates for joins. Durable Object storage remains independent.
+
+Existing SQL migrations in `cloud/migrations` remain authoritative and are applied by `npm run db:migrate`; this adapter change requires no new migration. Auth date fields deliberately use ISO text mappings, preserving the original adapter's stored values in SQLite `date` columns; room timestamps stay epoch milliseconds. Do not regenerate those fields as integer timestamps without a separate data migration.
+
+When changing auth plugins or fields, use `scripts/auth-schema.mjs` as a reference for Better Auth's required SQL, review an incremental SQL migration (never replay the initial CREATE TABLE statements), and update `cloud/schema.js` to match. The generator intentionally uses the native SQLite adapter only for schema discovery. It is not the runtime database adapter. No Drizzle Kit push or remote credentials are needed for this integration.
+
+Validation: `npm run test:cloud` covers old-format session reads/expiry/revocation, new account flows, room permissions, and restart persistence; `npm run deploy:check` validates Worker packaging without uploading.

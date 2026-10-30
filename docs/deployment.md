@@ -23,7 +23,7 @@ Production uses `https://verynize.gayaloo.app`, with D1 database `verynize`
 (`76210bc4-d4fe-4075-a321-776c2525a828`) pinned in `cloudflare.config.ts`.
 
 ```sh
-npm run db:migrate -- 76210bc4-d4fe-4075-a321-776c2525a828
+vpr db:migrate
 npm run deploy
 ```
 
@@ -65,3 +65,9 @@ Context7 resolved Cloudflare's official Workers SDK and cf documentation; config
 - [Cloud service implementation and API](../cloud/README.md)
 - [Cloudflare project configuration](https://developers.cloudflare.com/cf/projects/cloudflare-config/)
 - [Durable Object WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
+
+### Migration shortcut
+
+Run `vpr db:migrate` (or `npm run db:migrate`) from the product repository. The wrapper reads `worker.env.DB.id` from `cloudflare.config.ts`; no database ID argument is needed. Forks must configure their own D1 binding before deploying or migrating.
+
+The default target is the cloud database. Use `vpr db:migrate --dry-run` to validate arguments without executing migrations, or `vpr db:migrate --local --persist-to .cloudflare/state` for the local state used by the Vite development server. A dry run does not verify credentials or SQL against the database. `--profile NAME` selects the cf authentication profile; configuration modes and arbitrary database overrides are intentionally not accepted.
