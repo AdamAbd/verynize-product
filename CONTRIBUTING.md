@@ -11,3 +11,11 @@ Run product checks from `verynize-product`: `npm run build:ui`, `npm run check`,
 Use your own cloud resources for integration testing. Production deployment belongs to maintainers. Follow SECURITY.md for vulnerability reports.
 
 Contributions of original work are submitted under the MIT License. Only contribute material you have the right to license, and identify any third-party material and its applicable license.
+
+## Branch flow
+
+Create feature branches from `origin/staging` and open pull requests targeting `staging`. Promote releases with a pull request from this repository's `staging` to `main`. Direct pushes, force pushes, and deletion of both branches are blocked, including for administrators. Main requires the `staging-promotion` metadata check; a fork branch named staging does not qualify.
+
+Use merge commits for staging-to-main promotions to preserve ancestry. Keep staging after promotion. Required reviewer count is zero so a solo maintainer can merge their own PR; PRs and resolved conversations are still required. Add a required independent approval when another maintainer is available. These branch rules do not replace application tests.
+
+For workspace releases, merge and push the product/marketing changes first, then update the parent submodule pointers through the same PR flow.

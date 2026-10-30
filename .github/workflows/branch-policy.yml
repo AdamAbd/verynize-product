@@ -1,0 +1,23 @@
+name: Branch policy
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+# Metadata only. Never check out or execute PR code in this workflow.
+permissions: {}
+jobs:
+  staging-promotion:
+    name: staging-promotion
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require staging from this repository
+        env:
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          if [ "$HEAD_BRANCH" != staging ] || [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo '::error::Open a PR to staging first. Only this repository staging branch may merge into main.'
+            exit 1
+          fi
