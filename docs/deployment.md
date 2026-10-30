@@ -35,6 +35,10 @@ do not rotate it on every deploy. `npx cf d1 list` lists database IDs.
 
 Apply new migrations before deploying code that needs them; `0002_rooms.sql`
 (rooms owned by organizations) must be applied before the organization release.
+`0003_directory.sql` (profiles, room index, publications and apps in D1) must be
+applied before deploying the directory release. On the first request after that
+deploy, the Worker copies the existing `AccountDirectory` data into these tables once
+(see cloud/README.md, "Account directory in D1"); no manual step is needed.
 For a local database,
 add `--local` (and optionally `--persist-to <dir>`).
 

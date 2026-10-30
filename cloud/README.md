@@ -3,7 +3,7 @@
 The Worker (`cloud/worker.js`) serves Better Auth identities from D1 (`cloud/auth.js`) and routes the rest of the HTTP API to three kinds of SQLite Durable Objects:
 
 - `DesignRoom` (`cloud/rooms.js`), one per shared room: document, capability links with roles, account members, operation merging, comments, WebSocket presence and frozen public snapshots.
-- `AccountDirectory` (`cloud/accounts.js`), a single instance: accounts, magic-link sign-in, hashed sessions, public profiles, the room membership index and the app registry.
+- `AccountDirectory` (`cloud/accounts.js`), a single instance: credentials only. It holds magic-link sign-in, hashed legacy sessions, passkeys, handoffs, the development outbox and a mirror of each account (id, email, handle, name) for passkey ceremonies. Profiles, the room membership index, publications and the app registry live in D1 (`cloud/profiles.js`, see "Account directory in D1").
 - `PublishedApp` (`cloud/apps.js`), one per published app: immutable, versioned static builds.
 
 Documents are generic JSON (object or array) up to 2 MB per request. Version-2 design documents (`pages[].nodes[]`) merge per page, per node and per property. Other documents merge per top-level key.
@@ -77,7 +77,7 @@ The desktop publisher (`desktop/app-publish.cjs`) runs the project's own `build`
 
 ## Better Auth on D1 (`cloud/auth.js`)
 
-Email + password accounts and organizations run on [Better Auth](https://better-auth.com) with the `DB` D1 binding. The schema lives in `cloud/migrations/*.sql`; `node scripts/auth-schema.mjs` prints the SQL for the current options, which is the starting point for a new migration after changing plugins or fields. The desktop signs in with email + password (Share › Account: Sign in, Create account, Forgot password). Accounts, rooms, profiles and apps still live in `AccountDirectory` until they move to D1, and passkeys keep their own `vs_…` sessions.
+Email + password accounts and organizations run on [Better Auth](https://better-auth.com) with the `DB` D1 binding. The schema lives in `cloud/migrations/*.sql`; `node scripts/auth-schema.mjs` prints the SQL for the current options, which is the starting point for a new migration after changing plugins or fields. The desktop signs in with email + password (Share › Account: Sign in, Create account, Forgot password). Profiles, the room index, publications and apps are in D1 (below); passkeys keep their own `vs_…` sessions.
 
 - Every Better Auth endpoint is served under `/api/auth/*`, after the legacy account routes (their paths do not overlap). The main ones are `POST sign-up/email {email,password,name}`, `POST sign-in/email {email,password}`, `GET get-session`, `POST sign-out`, `POST request-password-reset {email,redirectTo}`, `POST reset-password {token,newPassword}`, `GET verify-email?token=…` and `POST send-verification-email`, plus the organization plugin under `organization/*` (`create`, `list`, `get-full-organization`, `invite-member`, `accept-invitation`, `update-member-role`, `remove-member`, …).
 - Passwords are 10–128 characters and hashed with Better Auth's default scrypt. Email verification is required before sign-in. A password reset revokes every session of the account. Reset, verification and organization invitation emails go through `cloud/mail.js` (invitation links are `<origin>/#invitation=<id>`).
@@ -88,6 +88,20 @@ Email + password accounts and organizations run on [Better Auth](https://better-
 - Emailed links land on Worker pages (`cloud/account-pages.js`). Clients pass `callbackURL: "/account/verified"` to sign-up and sign-in, and `redirectTo: "/account/reset-password"` to `request-password-reset`. `/account/verified` runs no script. `/account/reset-password` loads only `/account/reset-password.js` (CSP `script-src 'self'`), which drops the token from the address bar and posts `reset-password`. An unverified sign-in (403 `EMAIL_NOT_VERIFIED`) emails a fresh verification link.
 - The legacy magic-link routes (`/api/auth/start`, `/api/auth/verify`) remain for older desktop builds; the current desktop no longer offers them.
 - `BETTER_AUTH_SECRET` signs tokens. `AUTH_URL` (optional) overrides the origin used in emailed links, which otherwise is the request origin.
+
+## Account directory in D1 (`cloud/profiles.js`)
+
+Migration `0003_directory.sql` adds `profile`, `room_membership`, `publication`, `app` and `migration_state`. Account ids are the former `AccountDirectory` ids, so room members, live sockets and app versions keep their references.
+
+- A **profile** is the public account: email, handle, display name, avatar and `verified`. `userId` links it to its Better Auth user. Better Auth sessions resolve through that link, or on first use through the verified email, which also links profiles made earlier by a magic link, a passkey or an invitation. Legacy `vs_…` sessions resolve to an account id in `AccountDirectory`, then to its D1 profile.
+- Magic links (`/api/auth/start`, `/api/auth/verify`) still work for older desktop builds. The link is consumed in `AccountDirectory`, the profile is created or found in D1, and the session is issued for its id. Creating a passkey ticket and editing a profile refresh the account's mirror in `AccountDirectory`.
+- **One-time copy.** The first request to `/api/*`, `/u/*` or `/apps/*` after the upgrade copies `accounts`, `memberships`, `publications` and `apps` from `AccountDirectory` into D1 (`migrateDirectory`). Progress is recorded in `migration_state` (`running`, `done` or `failed`; a run stuck for 5 minutes is taken over), and each isolate checks it once. The copy is idempotent:
+  - an email that already has a D1 profile keeps it, and the old account's rows are mapped onto it;
+  - a handle that is already taken is replaced by a free one;
+  - re-running adds nothing.
+
+  The old tables stay in `AccountDirectory`, unused.
+- **Adopting old rooms.** The first email + password sign-in of an account that existed before moves the rooms it owns that are not in any organization into the user's personal organization.
 
 ## Organizations and room access (`cloud/orgs.js`)
 
@@ -122,6 +136,7 @@ Rooms created by the previous snapshot-only Worker are migrated in place. Their 
 `tests/cloud-harness.mjs` builds the Worker with `vp build` once per test process and runs that bundle (the same one `cf deploy --prebuilt` uploads), and applies `cloud/migrations` to the persisted local D1 database, recording them in `d1_migrations` as `cf d1 migrations apply` does.
 
 - `node tests/cloud-auth-bridge.mjs`: Better Auth sessions acting through directory accounts. Legacy account linking by verified email, new accounts, profiles, room roles and email invitations, socket sessions, passkey tickets, unverified resend, the reset page flow, sign out and sign out everywhere.
+- `node tests/cloud-directory-migration.mjs`: the upgrade from the previous `AccountDirectory` (seeded by `tests/fixtures/account-directory-v1.js`) to D1. It checks preserved account ids and legacy sessions, profiles, the room index, publications and apps, email collision mapping, handle replacement, private unverified profiles, a single run across restarts and retries, and the adoption of owned rooms on the first password sign-in.
 - `node tests/cloud-orgs.mjs`: personal organizations, rooms in organizations, organization roles granting room roles, the default member role, live role changes and revocation on update, removal and leaving, rejoining, direct and organization roles combined, listings, moving rooms (including legacy ones), a forged role header, reserved slugs and refusal to delete an organization with rooms.
 - `node tests/cloud-account-pages.mjs`: the verification landing and the password-reset page in a real Electron browser window (no preload).
 - `node tests/cloud-auth.mjs`: Better Auth on D1. Sign-up, required email verification (including a tampered token), password sign-in with bearer tokens and no cookies, sessions, organizations with emailed invitations and acceptance, password reset that revokes sessions, sign-out, per-IP rate limit and restart persistence.
