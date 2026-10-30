@@ -11,7 +11,7 @@ export default defineConfig({
     limits: { cpuMs: 30_000 },
     assets: {
       notFoundHandling: "single-page-application",
-      runWorkerFirst: ["/api/*", "/u/*", "/apps/*", "/passkey", "/passkey.js"],
+      runWorkerFirst: ["/api/*", "/u/*", "/apps/*", "/passkey", "/passkey.js", "/account/*"],
     },
     env: {
       ROOM_CREATION: bindings.rateLimit({ namespace: "1001", simple: { limit: 10, period: 60 } }),

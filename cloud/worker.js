@@ -16,6 +16,7 @@ import { AUTH_BASE_PATH, createAuth } from "./auth.js";
 import { MAX_FILE, cleanPath } from "./apps.js";
 import { profilePage, missingApp } from "./pages.js";
 import { passkeyPage, passkeyScript } from "./passkey-page.js";
+import { verifiedPage, resetPasswordPage, resetPasswordScript } from "./account-pages.js";
 
 export { DesignRoom } from "./rooms.js";
 export { AccountDirectory } from "./accounts.js";
@@ -34,19 +35,35 @@ const SERVE_ROUTE =
 const directory = (env) => env.ACCOUNTS.getByName("directory");
 const ip = (request) => request.headers.get("CF-Connecting-IP") || "local";
 
+// Sessions: legacy directory sessions (`vs_…`) and Better Auth bearer tokens (`<id>.<signature>`,
+// cloud/auth.js). Either travels in X-Verynize-Session, Authorization (where room capability
+// tokens are 64 hex characters, so the formats cannot collide) or, for sockets, ?session=.
+const AUTH_TOKEN = /^[A-Za-z0-9]{16,64}\.[A-Za-z0-9+/=_%-]{16,128}$/;
+const isSession = (value) => SESSION.test(value) || AUTH_TOKEN.test(value);
 function sessionOf(request, url) {
   const header = request.headers.get("x-verynize-session") || "";
   const bearer = request.headers.get("authorization")?.replace(/^Bearer /, "") || "";
-  const value = SESSION.test(header)
+  const value = isSession(header)
     ? header
-    : SESSION.test(bearer)
+    : isSession(bearer)
       ? bearer
       : (url.pathname.endsWith("/socket") ? url.searchParams.get("session") : "") || "";
-  return SESSION.test(value) ? value : null;
+  return isSession(value) ? value : null;
+}
+const authHeaders = (token) => new Headers({ authorization: `Bearer ${token}` });
+/** The Better Auth session for a bearer token, or null. */
+async function authSession(env, request, token) {
+  if (!env.DB || !AUTH_TOKEN.test(token)) return null;
+  return await createAuth(env, request).api.getSession({ headers: authHeaders(token) });
 }
 async function accountOf(env, request, url) {
   const session = sessionOf(request, url);
-  return session ? await directory(env).resolveSession(session) : null;
+  if (!session) return null;
+  if (SESSION.test(session)) return await directory(env).resolveSession(session);
+  // Better Auth users act through their directory account (rooms, profiles, apps, passkeys).
+  const found = await authSession(env, request, session);
+  if (!found?.user?.emailVerified) return null;
+  return await rpc(directory(env).linkVerifiedAccount(found.user.email, found.user.name));
 }
 async function requireAccount(env, request, url) {
   const account = await accountOf(env, request, url);
@@ -130,17 +147,36 @@ async function handleAuth(request, env, url) {
       fail(429, "Too many sign-in attempts. Try again in a minute.");
     return json(await rpc(directory(env).verifySignIn(data.token, data.label)));
   }
-  if (path === "/api/auth/signout" && request.method === "POST")
-    return json(await rpc(directory(env).signOut(sessionOf(request, url))));
+  if (path === "/api/auth/signout" && request.method === "POST") {
+    const session = sessionOf(request, url);
+    if (session && !SESSION.test(session) && env.DB) {
+      await createAuth(env, request).api.signOut({ headers: authHeaders(session) });
+      return json({ signedOut: true });
+    }
+    return json(await rpc(directory(env).signOut(session)));
+  }
   if (path === "/api/auth/signout-all" && request.method === "POST") {
     const account = await requireAccount(env, request, url);
-    return json(await rpc(directory(env).signOutEverywhere(account.id)));
+    // Ends both kinds of session: Better Auth ones of this email and directory (passkey) ones.
+    const session = sessionOf(request, url);
+    let revoked = 0;
+    if (!SESSION.test(session)) {
+      const auth = createAuth(env, request);
+      revoked = (await auth.api.listSessions({ headers: authHeaders(session) })).length;
+      await auth.api.revokeSessions({ headers: authHeaders(session) });
+    }
+    const legacy = await rpc(directory(env).signOutEverywhere(account.id));
+    return json({ signedOut: true, sessions: legacy.sessions + revoked });
   }
   if (path === "/api/me" && request.method === "GET") {
     const account = await requireAccount(env, request, url);
+    const session = sessionOf(request, url);
+    const authSessions = SESSION.test(session)
+      ? 0
+      : (await createAuth(env, request).api.listSessions({ headers: authHeaders(session) })).length;
     return json({
       account,
-      sessions: await directory(env).sessionCount(account.id),
+      sessions: (await directory(env).sessionCount(account.id)) + authSessions,
       profilePath: `/u/${account.handle}`,
     });
   }
@@ -411,6 +447,11 @@ export default {
       }
       if (url.pathname === "/passkey" && request.method === "GET") return passkeyPage();
       if (url.pathname === "/passkey.js" && request.method === "GET") return passkeyScript();
+      if (request.method === "GET") {
+        if (url.pathname === "/account/verified") return verifiedPage(url);
+        if (url.pathname === "/account/reset-password") return resetPasswordPage(url);
+        if (url.pathname === "/account/reset-password.js") return resetPasswordScript();
+      }
       const profile = url.pathname.match(/^\/u\/([a-z0-9-]{1,30})\/?$/);
       if (profile && request.method === "GET")
         return profilePage(await directory(env).profile(profile[1]));
