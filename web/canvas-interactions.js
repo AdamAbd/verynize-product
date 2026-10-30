@@ -1391,7 +1391,7 @@
     let synced = new WeakMap();
     const sameBox = (a, n) => ['x', 'y', 'w', 'h'].every(k => Math.abs((Number(a[k]) || 0) - (Number(n[k]) || 0)) < 0.01);
     const anchoredLayer = n => !!n.parentId && !!NS()?.anchored(n, find(n.parentId));
-    function bordersOf(p) { return Array.isArray(p.strokeWidths) && p.strokeWidths.length === 4 ? p.strokeWidths.map(v => Math.max(0, Number(v) || 0)) : Array(4).fill(Math.max(0, Number(p.strokeWidth) || 0)); }
+    function bordersOf(p) { if (p.strokeHidden === true) return [0, 0, 0, 0]; return Array.isArray(p.strokeWidths) && p.strokeWidths.length === 4 ? p.strokeWidths.map(v => Math.max(0, Number(v) || 0)) : Array(4).fill(Math.max(0, Number(p.strokeWidth) || 0)); }
     // The parent's padding box (CSS containing block of an absolute child) and the x/y offset of that box in the
     // child's coordinate convention: free parents measure x/y inside the border, flow parents from the border box.
     function containing(n) {

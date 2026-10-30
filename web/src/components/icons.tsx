@@ -132,17 +132,26 @@ export function PlusIcon(props: IconProps) {
 }
 
 /**
- * Box-model glyphs of the Layout section (Wonder's Padding / Margin fields). Padding draws the inset edge(s) inside a
- * rounded square; margin draws them outside a smaller square. `sides` lists the edges: t, r, b, l.
+ * Box-model glyphs of the Layout section (Wonder's Padding / Margin fields, 2026-10-30/06, 15). Padding draws the
+ * inset edge(s) inside a rounded square; margin draws them outside a smaller box (a tall box for left/right, a wide
+ * one for top/bottom). `sides` lists the edges: t, r, b, l. All four sides (the "independent" toggles) use short bars.
  */
 function BoxSides({ sides, outside, ...props }: IconProps & { sides: string; outside?: boolean }) {
-  const inner = outside ? { x: 7.25, y: 7.25, s: 9.5 } : { x: 4.25, y: 4.25, s: 15.5 };
-  const at = outside ? [4, 20] : [7.5, 16.5];
-  const lo = outside ? 8.5 : 7.5,
-    hi = outside ? 15.5 : 16.5;
+  const all = sides.length === 4;
+  const lr = sides === "lr",
+    tb = sides === "tb";
+  const box = !outside
+    ? { x: 2.75, y: 2.75, w: 18.5, h: 18.5, r: 4 }
+    : lr
+      ? { x: 7, y: 3.5, w: 10, h: 17, r: 3.5 }
+      : tb
+        ? { x: 3.5, y: 7, w: 17, h: 10, r: 3.5 }
+        : { x: 6.5, y: 6.5, w: 11, h: 11, r: 3 };
+  const at = outside ? [2.5, 21.5] : [6.5, 17.5];
+  const [lo, hi] = all ? (outside ? [8.5, 15.5] : [9.5, 14.5]) : outside ? [4, 20] : [6.5, 17.5];
   return (
     <Glyph {...props}>
-      <rect x={inner.x} y={inner.y} width={inner.s} height={inner.s} rx={outside ? 2 : 3.5} />
+      <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={box.r} />
       {sides.includes("l") ? <path d={`M${at[0]} ${lo}v${hi - lo}`} /> : null}
       {sides.includes("r") ? <path d={`M${at[1]} ${lo}v${hi - lo}`} /> : null}
       {sides.includes("t") ? <path d={`M${lo} ${at[0]}h${hi - lo}`} /> : null}
@@ -164,6 +173,184 @@ export const MarginTopIcon = (props: IconProps) => <BoxSides sides="t" outside {
 export const MarginRightIcon = (props: IconProps) => <BoxSides sides="r" outside {...props} />;
 export const MarginBottomIcon = (props: IconProps) => <BoxSides sides="b" outside {...props} />;
 export const MarginSidesIcon = (props: IconProps) => <BoxSides sides="tlrb" outside {...props} />;
+
+/* ---------- Layout section glyphs (design/wonder 22, 43, 2026-10-30/05, 06, 14) ---------- */
+
+/** Display: free position (three loose circles). */
+export function FreeLayoutIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <circle cx="14.5" cy="7.5" r="3.25" />
+      <circle cx="8.25" cy="16" r="3.25" />
+      <circle cx="15.75" cy="16" r="3.25" />
+    </Glyph>
+  );
+}
+
+/** Display: flexbox (a tall item, a round item and a plus for the next one). */
+export function FlexLayoutIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="4" y="3.75" width="6" height="16.5" rx="3" />
+      <circle cx="16.5" cy="7" r="3.25" />
+      <path d="M16.5 13v7.25M12.875 16.625h7.25" />
+    </Glyph>
+  );
+}
+
+/** Display: block flow (one rounded box). */
+export function BlockLayoutIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="4" y="4" width="16" height="16" rx="4" />
+    </Glyph>
+  );
+}
+
+/** Display: grid (2 × 2 rounded cells). */
+export function GridLayoutIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="3.75" y="3.75" width="7" height="7" rx="3" />
+      <rect x="13.25" y="3.75" width="7" height="7" rx="3" />
+      <rect x="3.75" y="13.25" width="7" height="7" rx="3" />
+      <rect x="13.25" y="13.25" width="7" height="7" rx="3" />
+    </Glyph>
+  );
+}
+
+/** Two side-by-side pills: flex direction "row", grid column span. */
+export function ColumnsIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="3" y="2" width="7.5" height="20" rx="3.75" />
+      <rect x="13.5" y="2" width="7.5" height="20" rx="3.75" />
+    </Glyph>
+  );
+}
+
+/** Two stacked pills: flex direction "column", grid row span. */
+export function RowsIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="2" y="3" width="20" height="7.5" rx="3.75" />
+      <rect x="2" y="13.5" width="20" height="7.5" rx="3.75" />
+    </Glyph>
+  );
+}
+
+/** Column gap `)|(`. */
+export function GapXIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <path d="M2.5 2.5q5 9.5 0 19M21.5 2.5q-5 9.5 0 19M12 7.5v9" />
+    </Glyph>
+  );
+}
+
+/** Row gap (the column gap turned a quarter). */
+export function GapYIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <path d="M2.5 2.5q9.5 5 19 0M2.5 21.5q9.5-5 19 0M7.5 12h9" />
+    </Glyph>
+  );
+}
+
+type Distribution = "around" | "between" | "evenly";
+const DISTRIBUTE_AT: Record<Distribution, [number, number]> = {
+  around: [8, 16],
+  between: [5.5, 18.5],
+  evenly: [9.5, 14.5],
+};
+/** A container with two items spread along its main axis (Wonder's distribution row). */
+function Distribute({ along, spread, ...props }: IconProps & { along: "x" | "y"; spread: Distribution }) {
+  const [a, b] = DISTRIBUTE_AT[spread];
+  return (
+    <Glyph {...props}>
+      {along === "y" ? (
+        <>
+          <rect x="6" y="2" width="12" height="20" rx="3" />
+          <path d={`M9.5 ${a}h5M9.5 ${b}h5`} />
+        </>
+      ) : (
+        <>
+          <rect x="2" y="6" width="20" height="12" rx="3" />
+          <path d={`M${a} 9.5v5M${b} 9.5v5`} />
+        </>
+      )}
+    </Glyph>
+  );
+}
+export const DistributeAroundXIcon = (p: IconProps) => <Distribute along="x" spread="around" {...p} />;
+export const DistributeBetweenXIcon = (p: IconProps) => <Distribute along="x" spread="between" {...p} />;
+export const DistributeEvenlyXIcon = (p: IconProps) => <Distribute along="x" spread="evenly" {...p} />;
+export const DistributeAroundYIcon = (p: IconProps) => <Distribute along="y" spread="around" {...p} />;
+export const DistributeBetweenYIcon = (p: IconProps) => <Distribute along="y" spread="between" {...p} />;
+export const DistributeEvenlyYIcon = (p: IconProps) => <Distribute along="y" spread="evenly" {...p} />;
+
+/** Flex wrap: a line that runs right, turns down and comes back left. */
+export function WrapIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <path d="M3.5 4.5h11.25a5.25 5.25 0 0 1 0 10.5H4" />
+      <path d="m7.5 11.5-3.5 3.5 3.5 3.5" />
+    </Glyph>
+  );
+}
+
+/** Layout section header: add / remove auto layout (`-○-`). */
+export function AutoLayoutIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="7.75" y="7.75" width="8.5" height="8.5" rx="4" />
+      <path d="M1.5 12h6.25M16.25 12h6.25" />
+    </Glyph>
+  );
+}
+
+/** W/H size options: a box with two opposite corner marks. */
+export function SizeOptionsIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="3.75" y="3.75" width="16.5" height="16.5" rx="4" />
+      <path d="M7.5 11.5v-3a1 1 0 0 1 1-1h3M16.5 12.5v3a1 1 0 0 1-1 1h-3" />
+    </Glyph>
+  );
+}
+
+/** Rotation field prefix: an angle with a dotted arc. */
+export function AngleIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <path d="M5 4.5V19h14.5" />
+      <path d="M5 11a8 8 0 0 1 8 8" strokeDasharray="0.5 2.5" />
+    </Glyph>
+  );
+}
+
+/** Opacity field prefix: a box whose lower corner fades out in dots. */
+export function OpacityIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="2.75" y="2.75" width="18.5" height="18.5" rx="4" />
+      <path d="M17.5 17.5h.01M14.5 17.5h.01M11.5 17.5h.01M8.5 17.5h.01M17.5 14.5h.01M14.5 14.5h.01M11.5 14.5h.01M17.5 11.5h.01M14.5 11.5h.01M17.5 8.5h.01" />
+    </Glyph>
+  );
+}
+
+/** One rounded corner (top-left; `turn` rotates it to tr / br / bl) for the individual radius fields. */
+function Corner({ turn, ...props }: IconProps & { turn: number }) {
+  return (
+    <Glyph {...props}>
+      <path d="M6 19v-7a6 6 0 0 1 6-6h7" transform={`rotate(${turn} 12 12)`} />
+    </Glyph>
+  );
+}
+export const CornerTopLeftIcon = (p: IconProps) => <Corner turn={0} {...p} />;
+export const CornerTopRightIcon = (p: IconProps) => <Corner turn={90} {...p} />;
+export const CornerBottomRightIcon = (p: IconProps) => <Corner turn={180} {...p} />;
+export const CornerBottomLeftIcon = (p: IconProps) => <Corner turn={270} {...p} />;
 
 /** Claude agent mark (chat model chip, settings Agents). */
 export function ClaudeMark({ className }: { className?: string }) {

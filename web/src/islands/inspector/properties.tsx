@@ -13,8 +13,8 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Minus,
   RotateCcw,
-  RotateCw,
   RotateCwSquare,
   Scan,
   SquareDashed,
@@ -23,11 +23,20 @@ import {
 } from "lucide-react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
 import { activePage, type DesignDocument } from "@/lib/bridge";
+import {
+  AngleIcon,
+  CornerBottomLeftIcon,
+  CornerBottomRightIcon,
+  CornerTopLeftIcon,
+  CornerTopRightIcon,
+  OpacityIcon,
+} from "@/components/icons";
 import { cn } from "@/lib/utils";
 import {
   Affix,
   Caption,
   Field,
+  fieldShell,
   IconAffix,
   IconButton,
   NativeSelect,
@@ -197,7 +206,7 @@ function PositionSection({ node, selection }: Props) {
           numeric
           value={fmt(node.rotation)}
           onCommit={set("rotation")}
-          prefix={<IconAffix icon={RotateCw} />}
+          prefix={<IconAffix icon={AngleIcon} />}
           suffix="°"
         />
       </div>
@@ -233,7 +242,7 @@ function InspectorCheckbox({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="m-0 flex h-6 w-fit items-center gap-2 text-xs text-foreground-2/90">
+    <label className="m-0 flex h-7 w-fit items-center gap-2 text-xs text-foreground-2/90">
       <CheckboxPrimitive.Root
         name={name}
         checked={checked}
@@ -280,7 +289,7 @@ function AppearanceSection({ doc, node, selection }: Props) {
             selection={selection}
             field="opacity"
             label="Opacity"
-            prefix={<IconAffix icon={SquareDashed} />}
+            prefix={<IconAffix icon={OpacityIcon} />}
           >
             {(suffix) => (
               <Field
@@ -289,7 +298,7 @@ function AppearanceSection({ doc, node, selection }: Props) {
                 numeric
                 value={fmt(node.opacity)}
                 onCommit={set("opacity")}
-                prefix={<IconAffix icon={SquareDashed} />}
+                prefix={<IconAffix icon={OpacityIcon} />}
                 suffix={<>%{suffix}</>}
               />
             )}
@@ -342,7 +351,12 @@ function AppearanceSection({ doc, node, selection }: Props) {
             "Bottom right radius",
             "Bottom left radius",
           ]}
-          prefixes={["TL", "TR", "BR", "BL"]}
+          prefixes={[
+            <CornerTopLeftIcon key="tl" className="size-3.5" />,
+            <CornerTopRightIcon key="tr" className="size-3.5" />,
+            <CornerBottomRightIcon key="br" className="size-3.5" />,
+            <CornerBottomLeftIcon key="bl" className="size-3.5" />,
+          ]}
         />
       ) : null}
       {node.type === "frame" ? (
@@ -416,7 +430,8 @@ function IndividualFields({
   property: IndividualProperty;
   scalar: UniformProperty;
   labels: string[];
-  prefixes: string[];
+  /** Letters or 14px glyphs shown in each field's prefix slot. */
+  prefixes: ReactNode[];
 }) {
   const values = individualValues(node, property, scalar);
   return (
@@ -638,58 +653,59 @@ function PageSection({ doc }: { doc: DesignDocument }) {
   const color = background || defaultPageColor();
   const commit = (next: string) => updatePage({ background: next });
   return (
-    <Section
-      id="page-section"
-      title="Page"
-      tools={
-        background ? (
-          <IconButton
-            icon={RotateCcw}
-            label="Reset page colour"
-            onClick={() => updatePage({ background: undefined })}
-          />
-        ) : null
-      }
-    >
-      <ColorPopover
-        open={open}
-        onOpenChange={setOpen}
-        value={color}
-        onPreview={(next) => {
-          const el = workspace();
-          if (el) el.style.backgroundColor = next;
-        }}
-        onCommit={commit}
-      >
-        <div
-          data-color-anchor
-          className="flex h-6 min-w-0 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field focus-within:ring-1 focus-within:ring-ring"
+    // Wonder 2026-10-30/00: one paint row (swatch, hex, opacity) with a trailing 24px tool column.
+    <Section id="page-section" title="Page">
+      <div className="flex items-center gap-2">
+        <ColorPopover
+          open={open}
+          onOpenChange={setOpen}
+          value={color}
+          onPreview={(next) => {
+            const el = workspace();
+            if (el) el.style.backgroundColor = next;
+          }}
+          onCommit={commit}
         >
-          <button
-            type="button"
-            name="pageBackground"
-            aria-label="Page colour"
-            aria-expanded={open}
-            title="Pick page colour"
-            className="flex size-4.5 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
-            onClick={() => setOpen(!open)}
-          >
-            <Swatch color={color} className="size-4.5 rounded-sm" />
-          </button>
-          <Field
-            label="Page hex colour"
-            value={hexLabel(color)}
-            className="h-5 flex-1 bg-transparent px-1 shadow-none focus-within:ring-0"
-            inputClassName="uppercase"
-            onCommit={(value) => {
-              const hex =
-                parseHex(value, color) ?? (parseColor(value) ? toHex(parseColor(value)!) : null);
-              if (!hex) return "Use a hex colour such as 2B2B2B";
-              commit(hex);
-            }}
-          />
+          <div data-color-anchor className={cn(fieldShell, "flex-1 pl-1.5")}>
+            <button
+              type="button"
+              name="pageBackground"
+              aria-label="Page colour"
+              aria-expanded={open}
+              title="Pick page colour"
+              className="flex size-4 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
+              onClick={() => setOpen(!open)}
+            >
+              <Swatch color={color} className="size-4 rounded-sm" />
+            </button>
+            <Field
+              label="Page hex colour"
+              value={hexLabel(color)}
+              className="h-5 flex-1 bg-transparent px-0 shadow-none focus-within:ring-0"
+              inputClassName="uppercase"
+              onCommit={(value) => {
+                const hex =
+                  parseHex(value, color) ?? (parseColor(value) ? toHex(parseColor(value)!) : null);
+                if (!hex) return "Use a hex colour such as 2B2B2B";
+                commit(hex);
+              }}
+            />
+            {/* Page backgrounds are opaque hex colours; the opacity is shown, not edited. */}
+            <span className="shrink-0 select-none tabular-nums" title="Page colour opacity">
+              100 <span className="text-muted-foreground">%</span>
+            </span>
+          </div>
+        </ColorPopover>
+        <div className="flex w-6 shrink-0 justify-center">
+          {background ? (
+            <IconButton
+              icon={RotateCcw}
+              label="Reset page colour"
+              onClick={() => updatePage({ background: undefined })}
+            />
+          ) : null}
         </div>
-      </ColorPopover>
+      </div>
     </Section>
   );
 }
@@ -708,19 +724,64 @@ function useOptional(nodeId: string | undefined, hasValue: boolean) {
   return [open, setOpen] as const;
 }
 
+/** Everything that describes a border; removing the border clears all of it (one undo step). */
+const BORDER_RESET = {
+  strokeWidth: 0,
+  strokeColor: "#000000",
+  strokeWidths: undefined,
+  strokeColors: undefined,
+  strokeToken: undefined,
+  strokeStyle: undefined,
+  strokeHidden: undefined,
+};
+/** Wonder's new border: 1px, all sides, solid #000000 at 100%. */
+const BORDER_DEFAULT = { ...BORDER_RESET, strokeWidth: 1 };
+
+/** The selection's bindings without the border width variable. */
+function withoutBorderBinding(node: Node) {
+  const rest = { ...node.bindings };
+  delete rest.strokeWidth;
+  return { bindings: Object.keys(rest).length ? rest : undefined };
+}
+
+function hasBorder(node: Node) {
+  return (
+    individualValues(node, "strokeWidths", "strokeWidth").some((value) => value > 0) ||
+    !!node.bindings?.strokeWidth
+  );
+}
+
 function BorderSection({ doc, node, selection }: Props) {
   const widths = individualValues(node, "strokeWidths", "strokeWidth");
-  const [open, setOpen] = useOptional(
-    node.id,
-    widths.some((value) => value > 0),
-  );
+  const present = hasBorder(node);
+  const hidden = (node as Node & { strokeHidden?: boolean }).strokeHidden === true;
   const [sidesOpen, setSidesOpen] = useOptional(node.id, Array.isArray(node.strokeWidths));
   const sidesExpanded = sidesOpen && !node.bindings?.strokeWidth;
   const set = (key: string) => (value: string) => setField(selection, node, key, value);
   return (
-    <OptionalSection id="border-section" title="Border" open={open} onOpenChange={setOpen}>
-      <div className="grid grid-cols-2 gap-2">
-        <Caption label="Width">
+    <OptionalSection
+      id="border-section"
+      title="Border"
+      present={present}
+      onAdd={() => {
+        setSidesOpen(false);
+        patchNodes(selection, (n) => ({ ...BORDER_DEFAULT, ...withoutBorderBinding(n) }));
+      }}
+      tools={
+        <IconButton
+          icon={SquareDashed}
+          label="Independent border widths"
+          active={sidesExpanded}
+          aria-expanded={sidesExpanded}
+          onClick={() => {
+            if (!sidesExpanded) expandIndividual(selection, "strokeWidths", "strokeWidth");
+            setSidesOpen(!sidesExpanded);
+          }}
+        />
+      }
+    >
+      <div className="flex items-center gap-2" data-border-row data-hidden={hidden || undefined}>
+        <div className="min-w-0 flex-1">
           <BindableField
             doc={doc}
             node={node}
@@ -743,22 +804,25 @@ function BorderSection({ doc, node, selection }: Props) {
               />
             )}
           </BindableField>
-        </Caption>
-        <Caption label="Style">
-          <div className="flex items-center justify-end gap-2">
-            <BorderStyleSelect node={node} selection={selection} />
-            <IconButton
-              icon={SquareDashed}
-              label="Independent border widths"
-              active={sidesExpanded}
-              aria-expanded={sidesExpanded}
-              onClick={() => {
-                if (!sidesExpanded) expandIndividual(selection, "strokeWidths", "strokeWidth");
-                setSidesOpen(!sidesExpanded);
-              }}
-            />
-          </div>
-        </Caption>
+        </div>
+        <div className="flex min-w-0 flex-1">
+          <BorderStyleSelect node={node} selection={selection} />
+        </div>
+        <IconButton
+          icon={hidden ? EyeOff : Eye}
+          label={hidden ? "Show border" : "Hide border"}
+          data-border-tool="visibility"
+          onClick={() => patchNodes(selection, () => ({ strokeHidden: hidden ? undefined : true }))}
+        />
+        <IconButton
+          icon={Minus}
+          label="Remove border"
+          data-border-tool="remove"
+          onClick={() => {
+            setSidesOpen(false);
+            patchNodes(selection, (n) => ({ ...BORDER_RESET, ...withoutBorderBinding(n) }));
+          }}
+        />
       </div>
       <BorderColors doc={doc} node={node} selection={selection} />
       {sidesExpanded ? (
@@ -780,12 +844,19 @@ function BorderSection({ doc, node, selection }: Props) {
   );
 }
 
+/** Layer tools (name, parent, scale, duplicate, delete): a UI-only panel, opened per layer with `+`. */
 function LayerSection({ doc, node, selection }: Props) {
-  const [open, setOpen] = useOptional(node.id, false);
+  const [open, setOpen] = useState<string | null>(null);
   const excluded = descendants(doc, node.id);
   const frames = pageNodes(doc).filter((n) => n.type === "frame" && !excluded.has(n.id));
   return (
-    <OptionalSection id="layer-section" title="Layer" open={open} onOpenChange={setOpen}>
+    <OptionalSection
+      id="layer-section"
+      title="Layer"
+      present={open === node.id}
+      onAdd={() => setOpen(node.id)}
+      onRemove={() => setOpen(null)}
+    >
       <Caption label="Name">
         <Field
           name="name"
@@ -876,9 +947,21 @@ export function PropertiesBody({
       {node ? <LayoutSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <AppearanceSection doc={doc} node={node} selection={selection} /> : null}
       {node?.type === "text" ? (
-        <TypographySection key={node.id} doc={doc} node={node} selection={selection} />
+        <TypographySection
+          key={"typography-" + node.id}
+          doc={doc}
+          node={node}
+          selection={selection}
+        />
       ) : null}
-      {node ? <SvgColorsSection key={node.id} doc={doc} node={node} selection={selection} /> : null}
+      {node ? (
+        <SvgColorsSection
+          key={"svg-colors-" + node.id}
+          doc={doc}
+          node={node}
+          selection={selection}
+        />
+      ) : null}
       <FillSection doc={doc} node={node} selection={selection} />
       {node ? <BorderSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <OutlineSection doc={doc} node={node} selection={selection} /> : null}

@@ -77,7 +77,65 @@ const path = require("node:path");
     await undo();
 
     // Border style (Solid / Dashed / Dotted) next to uniform + per-side widths.
+    // Border add / hide / remove are real document edits (Wonder 15): `+` writes a 1px #000000 border at
+    // once, the eye hides it without losing it, `−` clears every border field in one undo step, and a
+    // re-added border starts from the defaults again.
+    const borderGone = async () => {
+      const b = await node("card");
+      assert.deepEqual(
+        [b.strokeWidth, b.strokeColor, b.strokeWidths, b.strokeColors, b.strokeToken, b.strokeStyle, b.strokeHidden],
+        [0, "#000000", undefined, undefined, undefined, undefined, undefined],
+      );
+      assert.equal(await css("card", "border-top-width"), "0px");
+      assert.equal(await page.locator("#border-section .insp-add").isVisible(), true);
+      assert.equal(await page.locator("[name=strokeWidth]").isVisible(), false);
+    };
+    const borderDefault = async () => {
+      const b = await node("card");
+      assert.deepEqual(
+        [b.strokeWidth, b.strokeColor, b.strokeWidths, b.strokeColors, b.strokeStyle, b.strokeHidden],
+        [1, "#000000", undefined, undefined, undefined, undefined],
+      );
+      assert.equal(await css("card", "border-top-width"), "1px");
+      assert.equal(await css("card", "border-top-style"), "solid");
+      assert.equal(await css("card", "border-top-color"), "rgb(0, 0, 0)");
+      assert.equal(await page.locator("#border-section .insp-add").count(), 0);
+    };
+    assert.equal(await css("card", "border-top-width"), "0px");
     await page.locator("#border-section .insp-add").click();
+    await borderDefault();
+    await commit("[name=strokeWidth]", "2");
+    await page.locator("[name=strokeStyle]").selectOption("dashed");
+    assert.equal(await css("card", "border-top-style"), "dashed");
+    await commit("[name=strokeColor]", "FF0000");
+    await page.getByRole("button", { name: "Independent border widths", exact: true }).click();
+    await commit("[name=strokeWidths-0]", "5");
+    assert.deepEqual((await node("card")).strokeWidths, [5, 2, 2, 2]);
+    assert.equal(await css("card", "border-top-width"), "5px");
+    // Eye: hidden borders draw nothing and keep every value.
+    await page.locator('#border-section [data-border-tool="visibility"]').click();
+    assert.equal((await node("card")).strokeHidden, true);
+    assert.equal(await css("card", "border-top-width"), "0px");
+    assert.equal(await css("card", "border-left-width"), "0px");
+    await page.locator('#border-section [data-border-tool="visibility"]').click();
+    assert.equal((await node("card")).strokeHidden, undefined);
+    assert.equal(await css("card", "border-top-width"), "5px");
+    // Remove clears the border from the document and the canvas; one undo brings all of it back.
+    await page.locator('#border-section [data-border-tool="remove"]').click();
+    await borderGone();
+    await undo();
+    let b = await node("card");
+    assert.deepEqual([b.strokeWidths, b.strokeStyle, b.strokeColor], [[5, 2, 2, 2], "dashed", "#ff0000"]);
+    assert.equal(await css("card", "border-top-width"), "5px");
+    await page.locator('#border-section [data-border-tool="remove"]').click();
+    await borderGone();
+    // Reselecting does not resurrect the old border; re-adding starts from the defaults.
+    await page.evaluate(() => window.design.setSelection(["back"]));
+    await page.evaluate(() => window.design.setSelection(["card"]));
+    await borderGone();
+    await page.locator("#border-section .insp-add").click();
+    await borderDefault();
+    assert.equal(await page.locator('[name="strokeWidths-0"]').count(), 0);
     await commit("[name=strokeWidth]", "2");
     await page.locator("[name=strokeStyle]").selectOption("dashed");
     assert.equal(await css("card", "border-top-style"), "dashed");
@@ -97,6 +155,24 @@ const path = require("node:path");
     assert.equal(await css("card", "box-shadow"), "none");
     await undo();
     assert.equal((await node("card")).outlineColor, "#000000");
+    // Outline eye / remove / re-add write the document the same way.
+    await page.locator('#outline-section [data-effect-tool="visibility"]').click();
+    assert.equal((await node("card")).outlineHidden, true);
+    assert.notEqual(await css("card", "outline-width"), "3px");
+    await page.locator('#outline-section [data-effect-tool="visibility"]').click();
+    assert.equal(await css("card", "outline-width"), "3px");
+    await page.locator('#outline-section [data-effect-tool="remove"]').click();
+    n = await node("card");
+    assert.deepEqual(
+      [n.outlineWidth, n.outlineOffset, n.outlineColor, n.outlineHidden],
+      [undefined, undefined, undefined, undefined],
+    );
+    assert.notEqual(await css("card", "outline-width"), "3px");
+    await page.locator("#outline-section .insp-add").click();
+    n = await node("card");
+    assert.deepEqual([n.outlineWidth, n.outlineOffset, n.outlineColor], [1, 0, "#000000"]);
+    await commit("[name=outlineWidth]", "3");
+    await commit("[name=outlineOffset]", "4");
 
     // Shadows: add box, edit geometry, make inner, add drop, bind colour to a variable, hide, remove.
     await page.locator("#shadow-section .insp-add").click();

@@ -2,31 +2,22 @@
 // (Flex: direction, 3×3 alignment, distribution, reverse, wrap, gaps · Grid: tracks, gaps, cell alignment · Block:
 // vertical spacing), the layer's own placement inside its parent (Grid child spans, Margin) and Padding.
 import { useState, type ReactNode } from "react";
+import { ArrowRightLeft, FoldHorizontal, FoldVertical } from "lucide-react";
 import {
-  AlignHorizontalDistributeCenter,
-  AlignHorizontalSpaceAround,
-  AlignHorizontalSpaceBetween,
-  AlignVerticalDistributeCenter,
-  AlignVerticalSpaceAround,
-  AlignVerticalSpaceBetween,
-  ArrowLeftRight,
-  Columns2,
-  Columns3,
-  CornerDownLeft,
-  FoldHorizontal,
-  FoldVertical,
-  GitCommitHorizontal,
-  LayoutGrid,
-  Proportions,
-  Rows2,
-  Rows3,
-  SeparatorHorizontal,
-  SeparatorVertical,
-  Shapes,
-  Square,
-} from "lucide-react";
-import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui";
-import {
+  AutoLayoutIcon,
+  BlockLayoutIcon,
+  ColumnsIcon,
+  DistributeAroundXIcon,
+  DistributeAroundYIcon,
+  DistributeBetweenXIcon,
+  DistributeBetweenYIcon,
+  DistributeEvenlyXIcon,
+  DistributeEvenlyYIcon,
+  FlexLayoutIcon,
+  FreeLayoutIcon,
+  GapXIcon,
+  GapYIcon,
+  GridLayoutIcon,
   MarginBottomIcon,
   MarginLeftIcon,
   MarginRightIcon,
@@ -41,8 +32,9 @@ import {
   PaddingTopIcon,
   PaddingXIcon,
   PaddingYIcon,
-  StackColumnIcon,
-  StackRowIcon,
+  RowsIcon,
+  SizeOptionsIcon,
+  WrapIcon,
 } from "@/components/icons";
 import type { DesignDocument } from "@/lib/bridge";
 import {
@@ -107,9 +99,17 @@ function parseLength(raw: string, min = -Infinity): number | null {
 
 /* ---------- Shared rows ---------- */
 /** Two field columns plus Wonder's 24px trailing tool column. */
-function Row({ children, tool }: { children: ReactNode; tool?: ReactNode }) {
+function Row({
+  children,
+  tool,
+  className,
+}: {
+  children: ReactNode;
+  tool?: ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="flex items-start gap-2">
+    <div className={cn("flex items-start gap-2", className)}>
       <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">{children}</div>
       <div className="flex w-6 shrink-0 flex-col items-center gap-2">{tool}</div>
     </div>
@@ -153,16 +153,15 @@ function NumberField({
   );
 }
 
+/** Groups after the size row (Flex, Grid, Grid child, Padding, Margin) sit 16px apart, as in Wonder 05/06. */
+const GROUP = "mt-2";
+
 /* ---------- Display + size ---------- */
-const DISPLAY = (direction: string) => [
-  { value: "free", label: "Free position", icon: Shapes },
-  {
-    value: "flex",
-    label: "Flexbox",
-    icon: direction === "column" ? StackColumnIcon : StackRowIcon,
-  },
-  { value: "block", label: "Block flow", icon: Square },
-  { value: "grid", label: "Grid", icon: LayoutGrid },
+const DISPLAY = [
+  { value: "free", label: "Free position", icon: FreeLayoutIcon },
+  { value: "flex", label: "Flexbox", icon: FlexLayoutIcon },
+  { value: "block", label: "Block flow", icon: BlockLayoutIcon },
+  { value: "grid", label: "Grid", icon: GridLayoutIcon },
 ];
 const UNIT_LABEL: Record<SizingMode, string> = { fixed: "px", hug: "Hug", fill: "Fill" };
 const LIMITS = [
@@ -203,13 +202,12 @@ function SizeField({
           prefix={<Affix>{axis.toUpperCase()}</Affix>}
           className="pr-1"
           suffix={
-            <span className="flex items-center gap-1">
+            <>
               <NativeSelect
                 bare
                 name={axis + "Mode"}
                 label={label + " sizing"}
                 value={mode}
-                className="text-muted-foreground"
                 options={(["fixed", "hug", "fill"] as SizingMode[]).map((m) => ({
                   value: m,
                   label: UNIT_LABEL[m],
@@ -218,7 +216,7 @@ function SizeField({
                 onChange={(value) => setField(selection, node, axis + "Mode", value)}
               />
               {bind}
-            </span>
+            </>
           }
         />
       )}
@@ -231,7 +229,7 @@ function SizeMenu({ node, parent, selection }: Props & { parent: Node | undefine
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <IconButton icon={Proportions} label="Size options" />
+        <IconButton icon={SizeOptionsIcon} label="Size options" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="bottom" align="end" className="w-44">
         <DropdownMenuItem
@@ -295,7 +293,7 @@ function LimitRows({ doc, node, selection }: Props) {
                       patchNodes(selection, (n) => ({ [l.key]: v, ...unbind(n, l.key) }));
                   }}
                   suffix={
-                    <span className="flex items-center gap-1">
+                    <>
                       <NativeSelect
                         bare
                         name={l.key + "Kind"}
@@ -330,7 +328,7 @@ function LimitRows({ doc, node, selection }: Props) {
                         }
                       />
                       {bind}
-                    </span>
+                    </>
                   }
                 />
               )}
@@ -439,38 +437,34 @@ function Distribution({
   column: boolean;
   onChange: (value: string) => void;
 }) {
-  const items = column
-    ? [
-        { value: "space-around", label: "Space around", icon: AlignVerticalSpaceAround },
-        { value: "space-between", label: "Space between", icon: AlignVerticalSpaceBetween },
-        { value: "space-evenly", label: "Space evenly", icon: AlignVerticalDistributeCenter },
-      ]
-    : [
-        { value: "space-around", label: "Space around", icon: AlignHorizontalSpaceAround },
-        { value: "space-between", label: "Space between", icon: AlignHorizontalSpaceBetween },
-        { value: "space-evenly", label: "Space evenly", icon: AlignHorizontalDistributeCenter },
-      ];
+  const items = [
+    {
+      value: "space-around",
+      label: "Space around",
+      icon: column ? DistributeAroundYIcon : DistributeAroundXIcon,
+    },
+    {
+      value: "space-between",
+      label: "Space between",
+      icon: column ? DistributeBetweenYIcon : DistributeBetweenXIcon,
+    },
+    {
+      value: "space-evenly",
+      label: "Space evenly",
+      icon: column ? DistributeEvenlyYIcon : DistributeEvenlyXIcon,
+    },
+  ];
   return (
-    <ToggleGroupPrimitive.Root
-      type="single"
-      aria-label="Distribution"
+    <Segmented
+      label="Distribution"
+      hook="insp-distribution"
+      dataKey="distribute"
+      deselectable
       value={DISTRIBUTED.includes(value) ? value : ""}
-      onValueChange={onChange}
-      className="flex h-6 w-full items-stretch overflow-hidden rounded-md bg-muted"
-    >
-      {items.map(({ value: v, label, icon: Icon }) => (
-        <ToggleGroupPrimitive.Item
-          key={v}
-          value={v}
-          aria-label={label}
-          title={label}
-          data-distribute={v}
-          className="flex flex-1 items-center justify-center rounded-md text-subtle-foreground hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=on]:bg-accent data-[state=on]:text-foreground"
-        >
-          <Icon className="size-4" aria-hidden />
-        </ToggleGroupPrimitive.Item>
-      ))}
-    </ToggleGroupPrimitive.Root>
+      onChange={onChange}
+      items={items}
+      itemClassName="text-muted-foreground"
+    />
   );
 }
 
@@ -490,7 +484,7 @@ function GapField({
 }: Props & { axis: "x" | "y"; main: boolean; disabled?: boolean; className?: string }) {
   const key = axis === "x" ? "gapX" : "gapY";
   const value = num(node[key], num(node.gap));
-  const icon = axis === "x" ? SeparatorVertical : SeparatorHorizontal;
+  const icon = axis === "x" ? GapXIcon : GapYIcon;
   const label = axis === "x" ? "Column gap" : "Row gap";
   const commit = (raw: string) => {
     const v = parseLength(raw, 0);
@@ -539,8 +533,8 @@ function GapField({
 
 /* ---------- Flex ---------- */
 const DIRECTION = [
-  { value: "row", label: "Horizontal", icon: Columns2 },
-  { value: "column", label: "Vertical", icon: Rows2 },
+  { value: "row", label: "Horizontal", icon: ColumnsIcon },
+  { value: "column", label: "Vertical", icon: RowsIcon },
 ];
 
 function FlexGroup(props: Props) {
@@ -557,7 +551,7 @@ function FlexGroup(props: Props) {
   const cross = indexOf(node.alignItems);
   const set = (patch: Patch) => patchNodes(selection, () => patch);
   return (
-    <Caption label="Flex">
+    <Caption label="Flex" className={GROUP}>
       <div className="flex items-start gap-2">
         <div className="grid min-w-0 flex-1 grid-cols-2 grid-rows-3 gap-2">
           <Segmented
@@ -608,14 +602,14 @@ function FlexGroup(props: Props) {
         </div>
         <div className="flex w-6 shrink-0 flex-col items-center gap-2">
           <IconButton
-            icon={ArrowLeftRight}
+            icon={ArrowRightLeft}
             label="Reverse order"
             active={reverse}
             aria-pressed={reverse}
             onClick={() => set({ reverse: reverse ? undefined : true })}
           />
           <IconButton
-            icon={CornerDownLeft}
+            icon={WrapIcon}
             label="Wrap"
             active={wrap}
             aria-pressed={wrap}
@@ -663,7 +657,7 @@ function TrackEditor({ node, selection }: Props) {
             <NumberField
               name="columns"
               label="Grid columns"
-              icon={Columns3}
+              icon={ColumnsIcon}
               value={String(columns)}
               onCommit={commit("columns")}
             />
@@ -672,7 +666,7 @@ function TrackEditor({ node, selection }: Props) {
             <NumberField
               name="rows"
               label="Grid rows"
-              icon={Rows3}
+              icon={RowsIcon}
               value={rows ? String(rows) : ""}
               placeholder="Auto"
               onCommit={commit("rows")}
@@ -692,16 +686,19 @@ function GridGroup(props: Props) {
     col = indexOf(node.justifyItems);
   return (
     <>
-      <Row>
+      <Row className={GROUP}>
         <Caption label="Grid">
           <TrackEditor {...props} />
         </Caption>
         <Caption label="Gap">
-          <GapField {...props} axis="x" main />
-          <GapField {...props} axis="y" main={false} />
+          {/* Two stacked 24px fields, 8px apart, line up with the 56px track preview. */}
+          <div className="flex flex-col gap-2">
+            <GapField {...props} axis="x" main />
+            <GapField {...props} axis="y" main={false} />
+          </div>
         </Caption>
       </Row>
-      <Row>
+      <Row className={GROUP}>
         <Caption label="Align">
           <Matrix
             label="Cell alignment"
@@ -724,12 +721,12 @@ function GridGroup(props: Props) {
 /* ---------- Block ---------- */
 function BlockGroup({ node, selection }: Props) {
   return (
-    <Caption label="Block">
+    <Caption label="Block" className={GROUP}>
       <Row>
         <NumberField
           name="gapY"
           label="Vertical spacing"
-          icon={SeparatorHorizontal}
+          icon={GapYIcon}
           value={fmt(num(node.gapY))}
           onCommit={(raw) => {
             const v = parseLength(raw, 0);
@@ -752,19 +749,19 @@ function GridChild({ node, selection }: Props) {
     if (v !== null) patchNodes(selection, () => ({ [key]: Math.min(24, Math.round(v)) }));
   };
   return (
-    <Caption label="Grid child">
+    <Caption label="Grid child" className={GROUP}>
       <Row>
         <NumberField
           name="colSpan"
           label="Column span"
-          icon={Columns2}
+          icon={ColumnsIcon}
           value={node.colSpan === "full" ? "Full" : String(node.colSpan ?? 1)}
           onCommit={span("colSpan")}
         />
         <NumberField
           name="rowSpan"
           label="Row span"
-          icon={Rows2}
+          icon={RowsIcon}
           value={String(node.rowSpan ?? 1)}
           onCommit={span("rowSpan")}
         />
@@ -838,7 +835,11 @@ function PaddingGroup({ doc, node, selection }: Props) {
           icon={icon}
           value={value}
           placeholder="Mixed"
-          unit={<span className="flex items-center gap-1">px{suffix}</span>}
+          unit={
+            <>
+              px{suffix}
+            </>
+          }
           onCommit={edit(sides)}
         />
       )}
@@ -847,7 +848,7 @@ function PaddingGroup({ doc, node, selection }: Props) {
   const horizontal = axisField("paddingX", "Horizontal padding", PaddingXIcon, mixed(l, r), [1, 3]);
   const bound = !!node.bindings?.padding;
   return (
-    <Caption label="Padding">
+    <Caption label="Padding" className={GROUP}>
       <Row
         tool={
           <IconButton
@@ -937,7 +938,7 @@ function MarginGroup({ node, selection }: Props) {
     );
   };
   return (
-    <Caption label="Margin">
+    <Caption label="Margin" className={GROUP}>
       <Row
         tool={
           <IconButton
@@ -981,10 +982,12 @@ export function LayoutSection(props: Props) {
       title="Layout"
       tools={
         frame ? (
+          // Wonder keeps this a quiet glyph without a fill in both states (05, 06, 14).
           <IconButton
-            icon={GitCommitHorizontal}
+            icon={AutoLayoutIcon}
             label={flow ? "Remove auto layout" : "Add auto layout"}
-            active={flow}
+            aria-pressed={flow}
+            className="text-subtle-foreground"
             onClick={() => setField(selection, node, "layout", flow ? "free" : "flex")}
           />
         ) : null
@@ -998,7 +1001,7 @@ export function LayoutSection(props: Props) {
             dataKey="layout"
             value={layout}
             onChange={(value) => setField(selection, node, "layout", value)}
-            items={DISPLAY(node.direction)}
+            items={DISPLAY}
           />
         </Caption>
       ) : null}

@@ -32,6 +32,7 @@ import {
 import { ColorPicker, ColorPopover } from "./color-picker";
 import { alphaPercent, parseColor, toHex, withAlpha } from "./color";
 import { Field, IconButton, NativeSelect, Swatch } from "./controls";
+import { VariableChip } from "./bind";
 import { notify } from "./legacy";
 import { HEX, hexLabel, pageNodes, parseHex, patchNodes, setField, type Node } from "./model";
 
@@ -87,6 +88,8 @@ const resolved = (c: { color?: string; token?: string }, tokens: Tokens) =>
 /** Node patch for a stack: one plain visible solid paint collapses back into `color`/`token`. */
 function stackPatch(node: Node, paints: Paint[], tokens: Tokens): Record<string, unknown> {
   const [only] = paints;
+  // Removing the last paint leaves no fill at all: no stale `color` for readers that ignore `fills`.
+  if (!paints.length) return { fills: undefined, color: "transparent", token: "" };
   if (
     paints.length === 1 &&
     only.type === "solid" &&
@@ -262,7 +265,7 @@ export function FillTools({
     <div className="flex items-center gap-1">
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
-          <IconButton icon={ShaderIcon} label="Apply variable" active={bound} />
+          <IconButton icon={ShaderIcon} label="Apply variable" />
         </DropdownMenuTrigger>
         <DropdownMenuContent side="left" align="start" sideOffset={12} className="w-48">
           <div className="flex h-7 items-center gap-2 px-2 text-xs text-foreground-3">
@@ -463,21 +466,29 @@ function SolidRow({ doc, node, selection, paints, index, legacy }: RowProps) {
             className="flex size-4.5 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
             onClick={() => setOpen(!open)}
           >
-            <Swatch color={color} className="size-4.5 rounded-sm" />
+            <Swatch color={color} />
           </button>
           {p.token ? (
-            <span
-              className="min-w-0 flex-1 truncate pl-1 text-foreground"
-              title={`Variable: ${p.token}`}
+            <button
+              type="button"
+              data-paint-token={p.token}
+              aria-label={`${first ? "Fill" : `Paint ${index + 1}`} variable ${p.token}`}
+              title={
+                tokens[p.token]
+                  ? `${p.token} = ${tokens[p.token]}`
+                  : `${p.token} (missing variable)`
+              }
+              className="-ml-px flex h-5 min-w-0 flex-1 items-center rounded-sm text-left focus-visible:ring-1 focus-visible:ring-ring"
+              onClick={() => setOpen(!open)}
             >
-              {p.token}
-            </span>
+              <VariableChip name={p.token} missing={!tokens[p.token]} />
+            </button>
           ) : (
             <Field
               label={first ? "Fill hex colour" : `Paint ${index + 1} hex colour`}
               value={hexLabel(p.color ?? "")}
               placeholder={HEX.test(p.color ?? "") ? "" : p.color}
-              className="h-5 flex-1 bg-transparent px-1 shadow-none focus-within:ring-0"
+              className="h-5 flex-1 bg-transparent px-0 shadow-none focus-within:ring-0"
               inputClassName="uppercase"
               onCommit={(value) => {
                 const hex =
@@ -488,25 +499,27 @@ function SolidRow({ doc, node, selection, paints, index, legacy }: RowProps) {
               }}
             />
           )}
-          <Field
-            label={first ? "Fill opacity" : `Paint ${index + 1} opacity`}
-            numeric
-            disabled={legacy && !!p.token}
-            value={String(opacity)}
-            className="h-5 w-12 shrink-0 bg-transparent px-0 shadow-none focus-within:ring-0"
-            inputClassName="text-right"
-            suffix="%"
-            onCommit={(value) => {
-              const n = Number(value);
-              if (!Number.isFinite(n)) return "Enter a percentage";
-              const pct = Math.max(0, Math.min(100, n));
-              if (p.token)
-                return void setPaint((q) => ({ ...q, opacity: pct === 100 ? undefined : pct }));
-              const next = withAlpha(p.color ?? color, pct);
-              if (!next) return "Enter a percentage";
-              commit(next);
-            }}
-          />
+          {/* Wonder hides the percentage of a bound colour (05, 06, 35); a translucent bound paint keeps it. */}
+          {p.token && (legacy || opacity === 100) ? null : (
+            <Field
+              label={first ? "Fill opacity" : `Paint ${index + 1} opacity`}
+              numeric
+              value={String(opacity)}
+              className="h-5 w-12 shrink-0 bg-transparent px-0 shadow-none focus-within:ring-0"
+              inputClassName="text-right"
+              suffix="%"
+              onCommit={(value) => {
+                const n = Number(value);
+                if (!Number.isFinite(n)) return "Enter a percentage";
+                const pct = Math.max(0, Math.min(100, n));
+                if (p.token)
+                  return void setPaint((q) => ({ ...q, opacity: pct === 100 ? undefined : pct }));
+                const next = withAlpha(p.color ?? color, pct);
+                if (!next) return "Enter a percentage";
+                commit(next);
+              }}
+            />
+          )}
         </div>
       </ColorPopover>
       {legacy ? null : <RowTools selection={selection} paints={paints} index={index} />}
@@ -536,7 +549,7 @@ function PaintRow({ doc, node, selection, paints, index }: RowProps) {
               className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left focus-visible:ring-1 focus-visible:ring-ring"
               onClick={() => setOpen(!open)}
             >
-              <Swatch color={paintPreview(p, tokens)} className="size-4.5 rounded-sm" />
+              <Swatch color={paintPreview(p, tokens)} />
               <span className="min-w-0 flex-1 truncate text-foreground">{label}</span>
             </button>
             <Field

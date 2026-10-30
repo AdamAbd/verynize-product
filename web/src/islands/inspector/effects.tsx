@@ -24,6 +24,7 @@ import {
   useHookClass,
 } from "./controls";
 import { ColorPopover } from "./color-picker";
+import { VariableChip } from "./bind";
 import { alphaPercent, withAlpha } from "./color";
 import { fmt, hexLabel, parseHex, patchNodes, type Node } from "./model";
 
@@ -75,7 +76,9 @@ export type EffectNode = Node & {
   outlineColor?: string;
   outlineStyle?: string;
   outlineToken?: string;
+  outlineHidden?: boolean;
   strokeStyle?: string;
+  strokeHidden?: boolean;
   shadows?: Shadow[];
   filters?: Filter[];
   masks?: Mask[];
@@ -169,48 +172,75 @@ export function EffectColorField({
       onToken={onToken}
     >
       <div data-color-anchor className="flex min-w-0 flex-1 items-center gap-2">
-        <Field
-          name={name}
-          label={label}
-          value={bound ? "" : hexLabel(value)}
-          placeholder={bound ? token : ""}
-          inputClassName="uppercase"
-          className="flex-1"
-          scrub={false}
-          disabled={!!bound}
-          prefix={
+        {bound && token ? (
+          // Bound: swatch + variable chip, no hex or alpha (Wonder 05/13); the chip opens the Variables tab.
+          <div
+            data-bound-color={name}
+            className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field"
+          >
             <button
               type="button"
               aria-label={"Pick " + label.toLowerCase()}
               aria-expanded={open}
-              className="flex rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
-              onPointerDown={(event) => event.stopPropagation()}
+              className="flex size-4.5 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
               onClick={() => setOpen(!open)}
             >
-              <Swatch color={color} className="size-3.5" />
+              <Swatch color={color} />
             </button>
-          }
-          onCommit={(raw) => {
-            const hex = parseHex(raw, value);
-            if (!hex) return "Use a hex colour such as A58BDD";
-            onCommit(hex);
-          }}
-        />
-        <Field
-          name={name + "Alpha"}
-          label={label + " opacity"}
-          numeric
-          disabled={!!bound}
-          value={String(alphaPercent(color))}
-          className="w-16 shrink-0"
-          inputClassName="text-right"
-          suffix="%"
-          onCommit={(raw) => {
-            const next = withAlpha(value, Number(raw));
-            if (!next || !Number.isFinite(Number(raw))) return "Enter a percentage";
-            onCommit(next);
-          }}
-        />
+            <button
+              type="button"
+              aria-label={`${label} variable ${token}`}
+              title={`${token} = ${bound}`}
+              className="-ml-px flex h-5 min-w-0 flex-1 items-center rounded-sm text-left focus-visible:ring-1 focus-visible:ring-ring"
+              onClick={() => setOpen(!open)}
+            >
+              <VariableChip name={token} />
+            </button>
+          </div>
+        ) : (
+          <>
+            <Field
+              name={name}
+              label={label}
+              value={hexLabel(value)}
+              inputClassName="uppercase"
+              className="flex-1 pl-1"
+              scrub={false}
+              prefix={
+                // 16px swatch 5px in, hex 26px in, as in a fill row (Wonder 16).
+                <button
+                  type="button"
+                  aria-label={"Pick " + label.toLowerCase()}
+                  aria-expanded={open}
+                  className="flex size-4.5 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => setOpen(!open)}
+                >
+                  <Swatch color={color} />
+                </button>
+              }
+              onCommit={(raw) => {
+                const hex = parseHex(raw, value);
+                if (!hex) return "Use a hex colour such as A58BDD";
+                onCommit(hex);
+              }}
+            />
+            <Field
+              name={name + "Alpha"}
+              label={label + " opacity"}
+              numeric
+              value={String(alphaPercent(color))}
+              className="w-16 shrink-0"
+              inputClassName="text-right"
+              suffix="%"
+              onCommit={(raw) => {
+                const next = withAlpha(value, Number(raw));
+                if (!next || !Number.isFinite(Number(raw))) return "Enter a percentage";
+                onCommit(next);
+              }}
+            />
+          </>
+        )}
         {bound ? (
           <IconButton
             icon={Unlink}
@@ -325,7 +355,7 @@ export function BorderStyleSelect({ node, selection }: Omit<EffectProps, "doc">)
 export function OutlineSection({ doc, node, selection }: EffectProps) {
   const n = node as EffectNode;
   const width = typeof n.outlineWidth === "number" ? n.outlineWidth : 0;
-  const [open, setOpen] = useOutlineOpen(node.id, width > 0);
+  const hidden = n.outlineHidden === true;
   const color = n.outlineColor || "#000000";
   const patch = (values: Partial<EffectNode>) =>
     patchNodes(selection, (current) => {
@@ -336,24 +366,30 @@ export function OutlineSection({ doc, node, selection }: EffectProps) {
         ...values,
       };
     });
-  const remove = () =>
-    patchNodes(selection, () => ({
-      outlineWidth: undefined,
-      outlineOffset: undefined,
-      outlineColor: undefined,
-      outlineStyle: undefined,
-      outlineToken: undefined,
-    }));
+  const reset = {
+    outlineWidth: undefined,
+    outlineOffset: undefined,
+    outlineColor: undefined,
+    outlineStyle: undefined,
+    outlineToken: undefined,
+    outlineHidden: undefined,
+  };
+  const remove = () => patchNodes(selection, () => reset);
   return (
     <OptionalSection
       id="outline-section"
       title="Outline"
-      open={open}
-      onOpenChange={(next) => {
-        // Adding an outline starts at Wonder's default (1px, offset 0) so the change is visible at once.
-        if (next && width <= 0) patch({ outlineWidth: 1 });
-        setOpen(next);
-      }}
+      present={width > 0}
+      // Adding an outline starts at Wonder's default (1px #000000, offset 0) so the change is visible at
+      // once; nothing from an earlier outline comes back.
+      onAdd={() =>
+        patchNodes(selection, () => ({
+          ...reset,
+          outlineWidth: 1,
+          outlineOffset: 0,
+          outlineColor: "#000000",
+        }))
+      }
     >
       <div className="flex items-end gap-2">
         <Caption label="Width" className="flex-1">
@@ -384,7 +420,20 @@ export function OutlineSection({ doc, node, selection }: EffectProps) {
             }}
           />
         </Caption>
-        <IconButton icon={Minus} label="Remove outline" onClick={remove} />
+        <IconButton
+          icon={hidden ? EyeOff : Eye}
+          label={hidden ? "Show outline" : "Hide outline"}
+          data-effect-tool="visibility"
+          onClick={() =>
+            patchNodes(selection, () => ({ outlineHidden: hidden ? undefined : true }))
+          }
+        />
+        <IconButton
+          icon={Minus}
+          label="Remove outline"
+          data-effect-tool="remove"
+          onClick={remove}
+        />
       </div>
       <div className="flex items-center gap-2">
         <EffectColorField
@@ -419,12 +468,6 @@ export function OutlineSection({ doc, node, selection }: EffectProps) {
       />
     </OptionalSection>
   );
-}
-
-function useOutlineOpen(id: string, has: boolean) {
-  const [state, setState] = useState({ id, open: has });
-  const open = state.id === id ? state.open || has : has;
-  return [open, (next: boolean) => setState({ id, open: next })] as const;
 }
 
 /** Section header tools: one `+` that appends a list item (Wonder's Shadow / Filters / Mask headers). */

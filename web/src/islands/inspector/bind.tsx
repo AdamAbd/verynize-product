@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { fieldPrefixInset, fieldShell } from "./controls";
 import type { Node } from "./model";
 import {
   BINDABLE,
@@ -132,7 +133,40 @@ export function BindButton(props: BindProps) {
   );
 }
 
-/** A field bound to a variable renders as a chip (prefix + variable name) that opens the bind menu. */
+/**
+ * The bound-variable pill Wonder draws inside a field (design/wonder/2026-10-30/05, 06, 07, 13, 35): 16px tall,
+ * 4px radius, panel-coloured fill with a 0.5px edge, 12px label. Shows the leaf of a folder name
+ * (`surface/base` → `base`); the full name stays in the tooltip. A name whose variable is gone renders red.
+ */
+export function VariableChip({
+  name,
+  missing,
+  className,
+}: {
+  name: string;
+  missing?: boolean;
+  className?: string;
+}) {
+  return (
+    <span
+      data-variable-chip={name}
+      data-missing={missing || undefined}
+      className={cn(
+        "flex h-4 min-w-0 max-w-full shrink items-center rounded-sm bg-variable-chip px-1 text-xs text-variable-chip-foreground shadow-variable-chip",
+        missing && "text-destructive",
+        className,
+      )}
+    >
+      <span className="min-w-0 truncate">{leafOf(name)}</span>
+    </span>
+  );
+}
+
+/**
+ * A field bound to a variable keeps its prefix icon and shows the variable as a chip instead of the value; no unit
+ * suffix (Wonder 05/06/07); the chip starts 3px after where the value text would (27.5px in with a prefix,
+ * 11.5px without). The whole field opens the bind menu (other variables, create, detach).
+ */
 export function BoundChip({
   prefix,
   className,
@@ -149,17 +183,14 @@ export function BoundChip({
           title={variable ? `${name} = ${valueLabel(variable)}` : `${name} (missing variable)`}
           data-bound={props.field}
           className={cn(
-            "flex h-6 min-w-0 items-center gap-1 rounded-md bg-input px-2 text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring",
+            fieldShell,
+            prefix && fieldPrefixInset,
+            "w-full text-left focus-visible:ring-1 focus-visible:ring-ring",
             className,
           )}
         >
           {prefix ? <span className="flex shrink-0 items-center">{prefix}</span> : null}
-          <Diamond className="size-3 shrink-0 text-primary-text" aria-hidden />
-          <span
-            className={cn("min-w-0 flex-1 truncate text-left", !variable && "text-destructive")}
-          >
-            {name}
-          </span>
+          <VariableChip name={name} missing={!variable} className="ml-0.75" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="left" align="start" sideOffset={12} className="w-52">
