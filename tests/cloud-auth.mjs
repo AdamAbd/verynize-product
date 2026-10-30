@@ -32,6 +32,54 @@ const outbox = async (email) =>
   (await data(await send("/api/dev/outbox?to=" + encodeURIComponent(email)), 200)).messages;
 
 try {
+  // Seed the pre-Drizzle storage format directly into the existing migration schema.
+  // A driver switch must preserve old sessions, expiry comparisons and boolean values.
+  const db = await mf.getD1Database("DB");
+  const oldDate = new Date(Date.now() - 2 * 86400000).toISOString();
+  await db
+    .prepare(
+      'INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    .bind("legacy-orm-user", "Legacy ORM", "legacy-orm@example.com", 1, oldDate, oldDate)
+    .run();
+  for (const [id, expiry] of [
+    ["valid", Date.now() + 86400000],
+    ["expired", Date.now() - 86400000],
+  ]) {
+    await db
+      .prepare(
+        'INSERT INTO "session" (id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .bind(
+        "legacy-" + id,
+        "legacy-token-" + id,
+        "legacy-orm-user",
+        new Date(expiry).toISOString(),
+        oldDate,
+        oldDate,
+      )
+      .run();
+  }
+  const legacy = await data(
+    await send("/api/auth/get-session", { bearer: "legacy-token-valid" }),
+    200,
+  );
+  assert.equal(legacy.user.email, "legacy-orm@example.com");
+  assert.equal(legacy.user.emailVerified, true);
+  assert.equal(legacy.user.createdAt, oldDate);
+  assert.equal(
+    await data(await send("/api/auth/get-session", { bearer: "legacy-token-expired" }), 200),
+    null,
+  );
+  await data(
+    await send("/api/auth/sign-out", { method: "POST", bearer: "legacy-token-valid", body: {} }),
+    200,
+  );
+  assert.equal(
+    await data(await send("/api/auth/get-session", { bearer: "legacy-token-valid" }), 200),
+    null,
+  );
+
   const email = "ana@example.com";
   const password = "correct horse battery";
 

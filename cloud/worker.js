@@ -1,3 +1,5 @@
+import { sql } from "drizzle-orm";
+import { database } from "./db.js";
 // Verynize collaboration Worker: routes the HTTP API to the room, account and app Durable Objects.
 // API reference: cloud/README.md.
 import {
@@ -255,9 +257,9 @@ async function handleAuth(request, env, url) {
     const account = await requireAccount(env, request, url);
     const role = account.authUser ? await membership(env, orgRooms[1], account.authUser.id) : null;
     if (!role) fail(404, "Organization not found");
-    const org = await env.DB.prepare('SELECT "metadata" FROM "organization" WHERE "id" = ?')
-      .bind(orgRooms[1])
-      .first();
+    const org = await database(env).get(
+      sql`SELECT "metadata" FROM "organization" WHERE "id" = ${orgRooms[1]}`,
+    );
     return json({
       role: roomRoleFor(role, org?.metadata),
       rooms: await organizationRooms(env, orgRooms[1]),
