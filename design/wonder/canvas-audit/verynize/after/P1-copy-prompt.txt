@@ -1,15 +1,15 @@
 Implement this Verynize design.
 
 Design to implement (each link ends in the Verynize page id and the element id: verynize://node/<document>/<pageId>/<elementId>):
-  verynize://node/Sunbird/page-1/lod
+  verynize://node/Sunbird/p1/lod
   Read each element through the Verynize MCP server: get_element_code with that pageId and element id (omit document to read the design open in Verynize), and get_design_context for its tokens and fonts.
   (If you don't have the Verynize MCP installed yet, see "Run and configure" in docs/figcraft-reference.md of the Verynize repository: with the app open, connect to the url and token in ~/Library/Application Support/Verynize/mcp.json.)
 
-Inline snapshot (fallback, captured at 2026-10-31T05:15:38.016Z):
+Inline snapshot (fallback, captured at 2026-10-31T05:39:18.534Z):
 ```tsx
 /**
  * Made with Verynize
- * verynize://node/Sunbird/page-1/lod
+ * verynize://node/Sunbird/p1/lod
  * Oct 31, 2026
  */
 /* @verynize {"name":"Sunbird","page":{"name":"Page 1"}} */
@@ -20,8 +20,8 @@ export default function Frame() {
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin />
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap" rel="stylesheet" />
       <style>{"* { box-sizing: border-box; }"}</style>
-      <div data-node-label="Frame" data-canvas-x="0" data-canvas-y="0" className="layout-free w-[420px] h-[391.18px] bg-white" data-vn='{"gap":16,"padding":16}'>
-        <div data-node-label="Frame" className="absolute left-[49px] top-[40px] layout-free w-[100px] h-[80px]" data-vn='{"gap":16,"padding":16}'></div>
+      <div data-node-label="Frame" data-canvas-x="56" data-canvas-y="-153" className="layout-free w-[420px] h-[391.18px] bg-white overflow-hidden" data-vn='{"gap":16,"padding":16}'>
+        <div data-node-label="Frame" className="absolute left-[49px] top-[40px] layout-free w-[100px] h-[80px] bg-white overflow-hidden" data-vn='{"gap":16,"padding":16}'></div>
         <p data-node-label="Canvas au" className="absolute left-[59px] top-[160px] text-black text-xs leading-[1.15] font-['Inter']">Canvas au</p>
       </div>
     </>

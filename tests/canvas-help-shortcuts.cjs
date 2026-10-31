@@ -143,7 +143,11 @@ const nodes = [
     const firstRow = p.locator('[data-command-palette] [cmdk-item]').first();
     assert.equal((await firstRow.boundingBox()).height, 32, 'rows are 32px');
     assert.deepEqual(await firstRow.evaluate(el => { const r = el.getBoundingClientRect(); return [r.x, r.width, getComputedStyle(el).backgroundColor, getComputedStyle(el).borderTopLeftRadius]; }), [392, 656, 'rgb(41, 41, 41)', '8px'], 'active row x392 w656, rgb(41,41,41), radius 8');
-    await paletteInput.fill('select');
+    // Typed one key at a time (as a user does): the list must not keep an earlier query's scroll offset.
+    await paletteInput.fill('');
+    await paletteInput.pressSequentially('select', {delay: 40});
+    await p.waitForTimeout(100);
+    assert.ok(await p.evaluate(() => { const list = document.querySelector('[data-command-palette] [cmdk-list]'), row = list.querySelector('[cmdk-item][data-selected=true]'), a = list.getBoundingClientRect(), b = row.getBoundingClientRect(); return b.top >= a.top && b.bottom <= a.bottom; }), 'the active row stays visible while typing');
     let listed = await paletteSections();
     assert.deepEqual(listed.slice(0, 2).map(s => s[0]), ['Edit', 'Selection'], 'Wonder P2-select: Edit, then Selection');
     assert.deepEqual(listed[0][1].slice(0, 2), ['select.all', 'clipboard.pasteOverSelection']);
