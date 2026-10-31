@@ -12,6 +12,7 @@ export const {
   normalizeDocument,
   resolveAliases,
   prepareDocument,
+  documentProblems,
   validateAliases,
   isRoomAssetUrl,
   checkVariableValue,

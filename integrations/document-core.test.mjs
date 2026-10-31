@@ -9,6 +9,7 @@ import {
   normalizeDocument,
   prepareDocument,
   resolveAliases,
+  documentProblems,
 } from "./document-core.mjs";
 import { validateDocument } from "./design-store.mjs";
 
@@ -50,6 +51,7 @@ test("web/app.js has no validator of its own: validate() is prepareDocument with
     "/shaders.js",
     "/node-style.js",
     "/document-core.js",
+    "/document-safety.js",
     "/app.js",
   ].map((src) => html.indexOf(`src="${src}"`));
   assert.ok(
@@ -198,4 +200,140 @@ test("normalizeDocument tolerates malformed input and leaves rejection to valida
     assert.doesNotThrow(() => normalizeDocument(bad, DEFAULTS));
     assert.throws(() => prepareDocument(bad, DEFAULTS));
   }
+});
+
+// Load-time repairs (normalizeDocument/prepareDocument with a `repairs` array): documents saved before the shared
+// schema load with each change reported as {path, before, after}; editing (no array) keeps rejecting.
+const repaired = (d) => {
+  const repairs = [];
+  const prepared = prepareDocument(structuredClone(d), DEFAULTS, repairs);
+  assert.doesNotThrow(() => validateDocument(structuredClone(prepared)), "the store accepts it");
+  return { prepared, repairs };
+};
+
+test("load repairs clamp coordinates and sizes to ±1e6 and report each change", () => {
+  const { prepared, repairs } = repaired(doc([rect({ x: 2e6, y: -3.5e6, w: 4e6, h: 80 })]));
+  const box = prepared.pages[0].nodes[0];
+  assert.deepEqual([box.x, box.y, box.w, box.h], [1e6, -1e6, 1e6, 80]);
+  assert.deepEqual(repairs, [
+    { path: "pages[0].nodes[0].x", before: 2e6, after: 1e6 },
+    { path: "pages[0].nodes[0].y", before: -3.5e6, after: -1e6 },
+    { path: "pages[0].nodes[0].w", before: 4e6, after: 1e6 },
+  ]);
+  assert.throws(
+    () => prepareDocument(doc([rect({ x: Infinity })]), DEFAULTS, []),
+    /Invalid node x/,
+  );
+});
+
+test("load repairs cut document, page and layer names to 200 characters", () => {
+  const long = "n".repeat(250),
+    emoji = "a".repeat(199) + "😀" + "b";
+  const { prepared, repairs } = repaired({
+    ...doc([rect({ name: long }), rect({ id: "r2", name: emoji })]),
+    name: long,
+    pages: [{ ...page([rect({ name: long }), rect({ id: "r2", name: emoji })]), name: long }],
+  });
+  assert.equal(prepared.name, "n".repeat(200));
+  assert.equal(prepared.pages[0].name, "n".repeat(200));
+  assert.equal(prepared.pages[0].nodes[0].name, "n".repeat(200));
+  assert.equal(prepared.pages[0].nodes[1].name, "a".repeat(199), "a surrogate pair is never split");
+  assert.deepEqual(
+    repairs.map((r) => r.path),
+    ["document.name", "pages[0].name", "pages[0].nodes[0].name", "pages[0].nodes[1].name"],
+  );
+  assert.match(
+    repairs[0].before,
+    /… \(250 characters\)$/,
+    "long values are shortened in the report",
+  );
+  assert.match(repairs[0].after, /… \(200 characters\)$/);
+});
+
+test("load repairs reset over-long or mistyped style strings to the editor default", () => {
+  const { prepared, repairs } = repaired(
+    doc([rect({ gradient: "g".repeat(4001), shadow: "s".repeat(5000), alignItems: 7 })]),
+  );
+  const box = prepared.pages[0].nodes[0];
+  assert.equal(box.gradient, "");
+  assert.equal(box.shadow, "");
+  assert.equal(box.alignItems, "stretch");
+  assert.deepEqual(
+    repairs.map((r) => [r.path, r.after]),
+    [
+      ["pages[0].nodes[0].gradient", ""],
+      ["pages[0].nodes[0].shadow", ""],
+      ["pages[0].nodes[0].alignItems", "stretch"],
+    ],
+  );
+  assert.equal(repairs[2].before, 7);
+});
+
+test("load repairs report the coercions the canvas always made (font weight, palette, names, active page)", () => {
+  const { prepared, repairs } = repaired(
+    doc(
+      [
+        rect({ name: " ", fontWeight: "heavy", animated: "neon" }),
+        rect({ id: "r2", fontWeight: 700 }),
+      ],
+      { activePage: "gone" },
+    ),
+  );
+  assert.equal(prepared.activePage, "p1");
+  assert.equal(
+    prepared.pages[0].nodes[1].fontWeight,
+    "700",
+    "a numeric weight is stored, not reported",
+  );
+  assert.deepEqual(repairs, [
+    { path: "pages[0].nodes[0].name", before: " ", after: "Rectangle" },
+    { path: "pages[0].nodes[0].fontWeight", before: "heavy", after: "400" },
+    { path: "pages[0].nodes[0].animated", before: "neon", after: "" },
+    { path: "activePage", before: "gone", after: "p1" },
+  ]);
+  assert.deepEqual(repaired(doc([rect()])).repairs, [], "a valid document reports nothing");
+});
+
+test("load repairs never rewrite ids or token names and never drop layers", () => {
+  const refuse = (d, re) =>
+    assert.throws(() => prepareDocument(structuredClone(d), DEFAULTS, []), re);
+  refuse(doc([rect({ id: "" })]), /Node id/);
+  refuse(doc([rect({ id: "i".repeat(201) })]), /Node id/);
+  refuse({ ...doc([rect()]), pages: [{ ...page([rect()]), id: "p".repeat(201) }] }, /Page id/);
+  refuse(doc([rect()], { tokens: { ["t".repeat(201)]: "#ffffff" } }), /Token name/);
+  refuse(
+    {
+      ...doc([]),
+      pages: [
+        page(Array.from({ length: 5000 }, (_, i) => rect({ id: "a" + i }))),
+        {
+          id: "p2",
+          name: "B",
+          nodes: Array.from({ length: 5000 }, (_, i) => rect({ id: "b" + i })),
+        },
+        { id: "p3", name: "C", nodes: [rect({ id: "c" })] },
+      ],
+    },
+    /10000 nodes/,
+  );
+});
+
+test("documentProblems lists every problem with its path, not only the first", () => {
+  const problems = documentProblems({
+    ...doc([
+      rect({ id: "" }),
+      rect({ id: "r2", type: "blob" }),
+      rect({ id: "r3", parentId: "nowhere" }),
+      rect({ id: "r4" }),
+    ]),
+    name: "",
+  });
+  assert.deepEqual(
+    problems.map((p) => p.path),
+    ["document", "pages[0].nodes[0]", "pages[0].nodes[1]", "pages[0].nodes[2].parentId"],
+  );
+  assert.match(problems[0].message, /Document name/);
+  assert.match(problems[1].message, /Node id/);
+  assert.deepEqual(documentProblems(doc([rect()])), []);
+  assert.equal(documentProblems(null).length, 1);
 });
