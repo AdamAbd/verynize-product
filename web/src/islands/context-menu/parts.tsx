@@ -51,7 +51,7 @@ export function MenuItem({
       )}
       {...props}
     >
-      <span className="flex-1 whitespace-nowrap">{label}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
       {shortcut ? <MenuShortcut>{shortcut}</MenuShortcut> : null}
     </Menu.Item>
   );

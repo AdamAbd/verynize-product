@@ -63,3 +63,18 @@
   grid-template-columns: var(--grid-preview-columns);
   grid-template-rows: var(--grid-preview-rows);
 }
+
+/*
+ * Screen template dropdown of a preview frame (preview audit PF4-presets): 224 px wide, names 10 px from the left
+ * edge, sizes right-aligned 28 px from the right edge and the check mark in the last 14 px. The shared dropdown owns
+ * its spacing classes, so the preview list adjusts it here (inside the utilities layer, whose rules are !important).
+ */
+@layer utilities {
+  #screen-template-menu {
+    padding: 4px !important;
+  }
+  #screen-template-menu [data-preset] {
+    padding-inline: 6px !important;
+    column-gap: 4px !important;
+  }
+}

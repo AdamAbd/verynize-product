@@ -1,5 +1,5 @@
 // Layer type icons for the layer tree. Glyphs come from lucide or the shared set in @/components/icons.
-import { Circle, Frame, Image as ImageIcon, LayoutGrid, Square, Star, Type, type LucideIcon } from "lucide-react";
+import { AppWindow, Circle, Frame, Image as ImageIcon, LayoutGrid, Square, Star, Type, type LucideIcon } from "lucide-react";
 import { ShaderIcon, StackColumnIcon, StackRowIcon, type IconProps } from "@/components/icons";
 import type { ComponentType } from "react";
 
@@ -16,9 +16,11 @@ export function LayerTypeIcon({
   node,
   className,
 }: {
-  node: { type: string; layout?: unknown; direction?: unknown; ellipse?: unknown };
+  node: { type: string; layout?: unknown; direction?: unknown; ellipse?: unknown; preview?: unknown };
   className?: string;
 }) {
+  // Preview audit PF7: a live preview frame is a browser window, not a frame.
+  if (node.type === "frame" && node.preview) return <AppWindow className={className} />;
   if (node.type === "frame") {
     if (node.layout === "flex") {
       const Stack = node.direction === "column" ? StackColumnIcon : StackRowIcon;
