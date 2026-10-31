@@ -57,7 +57,7 @@ Why the hash, checked against the code:
   send the full URL, query included, as `Referer` on every same-origin script,
   style, asset and `/api/*` request. The query is also in the request line itself,
   which reaches Worker logs (`observability` is enabled). Browsers never send the
-  fragment. The plain-browser check below served 177 requests for a
+  fragment. The plain-browser check below served 176 requests for a
   `/editor#room=…&token=…` session; none carried the token in its path, query or
   `Referer`.
 - Links already sent stay valid. Links are built in `web/cloud-panel.js`
@@ -126,6 +126,36 @@ History:
   the view underneath changed meanwhile, the settings entry is replaced with the
   current view.
 - Repeated `open`/`select` calls for the current section do not touch history.
+
+Legacy shell changes (home/editor/settings) write the history directly
+(`commit()`), and the router follows its notification. `router.navigate` compares
+against `router.latestLocation`, which lags a push made in the same tick.
+`showHome(); showEditor()` would otherwise leave the URL on `/` with the editor
+showing, and the route effect would then switch the shell back to home. That
+broke `tests/views-templates.cjs` until the change, and `tests/shell-router.cjs`
+now covers it.
+
+Known edges: settings closes through `history.back()`, so the URL catches up one
+tick after the overlay hides. A reload in that tick reopens settings. Escape over
+Files home with settings open still closes settings and also leaves home (two
+pre-existing key handlers); the URL ends on `/editor`, matching the shell.
+`leftRooms` lives only for the page session.
+
+### Room-hash and settings validation (spike/room-hash-settings)
+
+- `npm run build:ui`, `lint:ui`, `typecheck:ui` and `check` exit 0.
+  `oxfmt --check` passes on the changed files. `web/settings.js` is minified
+  legacy and already fails the baseline check.
+- `node tests/shell-router.cjs` and `node tests/settings-route.cjs`: 3/3 PASS each.
+- `test:ux` run file by file (wonder-shell, settings, views-templates, views-store,
+  document-lifecycle, cloud-async, shell-router, settings-route): all PASS.
+  `npm run test:cloud`: PASS.
+- Plain Chrome against a static `web/` server with SPA fallback: `/settings` →
+  `/settings/preferences` (section clicks replace, Back to app → `/editor`, ⌘,
+  pushes, Back/Forward/reload work). `/editor#room=…&token=…` opens the invite
+  dialog. `shellRouter.navigate({to: "/"})`, settings over home, two Backs and
+  reload all keep the exact fragment. There were no page errors. Of 176 server
+  requests, none contained the token.
 
 ## Validation
 

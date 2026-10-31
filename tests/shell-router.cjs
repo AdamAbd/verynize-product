@@ -45,6 +45,14 @@ const os = require("node:os");
       window.fileLibrary.showEditor();
     });
     assert.equal(await page.evaluate(() => window.shellRouter.history.length), length);
+    // Two view changes in one tick: the URL follows the last one (router state lags history).
+    await page.evaluate(() => {
+      window.fileLibrary.showHome();
+      window.fileLibrary.showEditor();
+    });
+    await expectView("/editor");
+    await page.waitForTimeout(300);
+    await expectView("/editor");
     assert.equal(new URL(page.url()).pathname, "/editor");
     assert.ok(await ipcWorks(), "IPC after route changes");
     assert.deepEqual(await page.evaluate(() => window.design.getDocument()), documentBefore);

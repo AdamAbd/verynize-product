@@ -57,11 +57,6 @@ const settingsSection = (): SectionId => {
 const shellPath = () =>
   settingsOpen() ? `/settings/${settingsSection()}` : (currentView() as string);
 const isSettingsPath = (path: string) => path === "/settings" || path.startsWith("/settings/");
-/** Typed navigation target for a shell path. */
-const target = (path: string) =>
-  path.startsWith("/settings/")
-    ? ({ to: "/settings/$section", params: { section: path.slice(10) } } as const)
-    : ({ to: path === "/" ? "/" : "/editor" } as const);
 
 /* ---------- Cloud fragment preservation (by construction) ---------- */
 
@@ -200,11 +195,7 @@ function applySettings(section: string | undefined) {
   // Canonical URL (/settings and unknown sections become /settings/<section>) and recorded state,
   // both in place.
   if (record || history.location.pathname !== `/settings/${wanted}`)
-    void navigate({
-      ...target(`/settings/${wanted}`),
-      replace: true,
-      state: (prev) => ({ ...prev, ...record }),
-    });
+    commit(`/settings/${wanted}`, "replace", { ...settingsStateOf(state), ...record });
 }
 
 function useSettingsRoute(section?: string) {
@@ -259,6 +250,18 @@ export function navigate(options: NavigateOptions) {
 
 /* ---------- Shell → URL ---------- */
 
+const settingsStateOf = ({ settingsUnder, settingsPushed }: SettingsState): SettingsState => ({
+  ...(settingsUnder ? { settingsUnder } : {}),
+  ...(settingsPushed ? { settingsPushed } : {}),
+});
+// Shell-driven URL changes write the history directly (search kept; the wrapper keeps the cloud
+// fragment) and the router follows its notification. router.navigate compares against
+// router.latestLocation, which lags a push made in the same tick (showHome(); showEditor()), and
+// would drop the second change as "same location".
+function commit(path: string, mode: "push" | "replace", state: SettingsState = {}) {
+  history[mode](path + history.location.search, { ...state, __hashScrollIntoViewOptions: false });
+}
+
 // Compare with history (updated immediately), not the asynchronously committed
 // route state. Repeated legacy renders/open calls must not add history entries.
 function syncFromShell() {
@@ -270,15 +273,11 @@ function syncFromShell() {
   if (isSettingsPath(to)) {
     // Opening settings pushes one entry that remembers the view underneath; switching
     // sections replaces it, so Back always closes settings in one step.
-    if (isSettingsPath(at)) void navigate({ ...target(to), replace: true, state: true });
+    if (isSettingsPath(at)) commit(to, "replace", settingsStateOf(state));
     else
-      void navigate({
-        ...target(to),
-        state: (prev) => ({
-          ...prev,
-          settingsUnder: at === "/" || at === "/editor" ? at : currentView(),
-          settingsPushed: true,
-        }),
+      commit(to, "push", {
+        settingsUnder: at === "/" || at === "/editor" ? at : currentView(),
+        settingsPushed: true,
       });
     return;
   }
@@ -287,10 +286,10 @@ function syncFromShell() {
     if (state.settingsPushed && state.settingsUnder === to) {
       adoptShellOnLanding = true;
       history.back();
-    } else void navigate({ ...target(to), replace: true });
+    } else commit(to, "replace");
     return;
   }
-  void navigate(target(to));
+  commit(to, "push");
 }
 window.addEventListener("bd:view-change", syncFromShell);
 
