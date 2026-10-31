@@ -24,7 +24,7 @@ require('./app-preferences.cjs').attachDeepLinks(app); // verynize:// design lin
 app.whenReady().then(async () => {
   appProtocol.registerHandler(protocol, net);
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  await require('./storage-migration.cjs').migrateStorage({app,BrowserWindow}); // one-time file:// → app://verynize localStorage/IndexedDB copy
+  const storageMigration=require('./storage-migration.cjs');const migration=await storageMigration.migrateStorage({app,BrowserWindow}); // one-time file:// → app://verynize localStorage/IndexedDB copy; applies staged old-build edits
   // Design preferences: one file shared by the agent persona (agent-runtime.cjs) and the MCP tools.
   if(!process.env.VERYNIZE_PREFERENCES)process.env.VERYNIZE_PREFERENCES=path.join(app.getPath('userData'),'design-preferences.json');
   // ask_agent MCP tool: nested read-only helper run on the most recent window's agent runtime.
@@ -123,8 +123,9 @@ app.whenReady().then(async () => {
     win.webContents.on('will-navigate', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
     win.webContents.on('will-redirect', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
     win.loadURL(appProtocol.ENTRY_URL);
+    return win;
   };
-  createWindow();
+  storageMigration.probeAfterLaunch({app,BrowserWindow,editor:createWindow(),startup:migration}); // background check for old-build (file://) edits, staged for the next launch
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 });
 app.on('will-quit',()=>mcpBridge.stopBridge()); // agent-bridge hook
