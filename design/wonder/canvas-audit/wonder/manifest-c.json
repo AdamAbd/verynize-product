@@ -1,0 +1,282 @@
+[
+  {
+    "filename": "R1-column-drag-far.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 316008,
+    "sha256": "6ceb8456788a6263911aa064206716bfa6fa1741cef0dcd67aaf0d254641bfd6"
+  },
+  {
+    "filename": "R1-column-drag-out.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 315599,
+    "sha256": "debb6d7289372e2658ed6c76eb5c462b25fcb9118333925030bb22c000475286"
+  },
+  {
+    "filename": "R1-column-drag-slot.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 317684,
+    "sha256": "bc85cf51ab14df98b6dfe639288a9eb11c34cddb1b45f116a631c65a9709bbe3"
+  },
+  {
+    "filename": "R1-column-ready.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 326819,
+    "sha256": "bad78ad803cb656cb7f59c02ca4fb9c08b8288e3e0e58344a5c7e090c017996d"
+  },
+  {
+    "filename": "R1-layout-initial.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 314375,
+    "sha256": "1c819334a1cc1c13dd971c67be1a7984c6c7566101b2bd040449b7873095c7ab"
+  },
+  {
+    "filename": "R1-row-drag-far.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 318341,
+    "sha256": "e09106d2a0de5def1cc024814b80965e656541c7c45d872fee210317c340d2bb"
+  },
+  {
+    "filename": "R1-row-drag-out.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 316369,
+    "sha256": "7055d3d88809f2744db79a40e8b8830ff09b5a9d310a44a0b3038d60dc8f8ed3"
+  },
+  {
+    "filename": "R1-row-drag-slot.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 316026,
+    "sha256": "801439403e664fb5c066b1c06870d51def11a851944d3048534c61b3d5a09d76"
+  },
+  {
+    "filename": "R1-row-parent.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 249858,
+    "sha256": "fe05b5dc8c6cb6bc65806ae68055429bd9ed454ee015ec2371d8d07a85fbbba5"
+  },
+  {
+    "filename": "R1-row-ready.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 249858,
+    "sha256": "fe05b5dc8c6cb6bc65806ae68055429bd9ed454ee015ec2371d8d07a85fbbba5"
+  },
+  {
+    "filename": "R1-row-return-during.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 317933,
+    "sha256": "246cd0ef835188412c310d56067509052626bccf5b13e65161b4e72eacdc6aa6"
+  },
+  {
+    "filename": "R1-row-small-drag.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 317349,
+    "sha256": "a6d90e96757e18f34b73bb6baafc8069a4b9286555de84ff259ee37b8d8a00b7"
+  },
+  {
+    "filename": "R2-multi-scale-after.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 244994,
+    "sha256": "6dadf5a131c8a7a635a22de4ff4ee262b1064a399e334a448fff5e4671963ccc"
+  },
+  {
+    "filename": "R2-multi-scale-before.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 241506,
+    "sha256": "e39a26e69b83cac93dd087b745b4e5776a962a0738f5b44bcab5633b663a33d5"
+  },
+  {
+    "filename": "R2-single-presets.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 266635,
+    "sha256": "e3b29612d1af612eb7aaf5e193682e3b81d341abf10910cfd9cadffb8a62518e"
+  },
+  {
+    "filename": "R3-delete-hover.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 281786,
+    "sha256": "d31ff261f0a7b4a9bbf5264452f41f649261e72751009a95fb9fe36da234e3ef"
+  },
+  {
+    "filename": "R3-single-page-menu.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 272714,
+    "sha256": "c77156df970e27ff4d076fddf1f6575af0a56f2d1b1632e5e921dcae436b6ce0"
+  },
+  {
+    "filename": "R4-hover-crop.png",
+    "width": 400,
+    "height": 380,
+    "bytes": 17070,
+    "sha256": "9fb229b6add840ec74420ba325c8c1b22cc5dba2b6642b91c372283e23cd731f"
+  },
+  {
+    "filename": "R4-rotated-hover-100.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 266543,
+    "sha256": "14d683d81a47c976d0fd82c3f9818af50779257832eb446e17375f1ca1dad04a"
+  },
+  {
+    "filename": "R5-badge-crop.png",
+    "width": 140,
+    "height": 65,
+    "bytes": 5798,
+    "sha256": "95a241d9c6bd8a59c0ebd61b3984bfa3e1f78f9ecbcd0c541438a9bc1707ac49"
+  },
+  {
+    "filename": "R5-handle-crop.png",
+    "width": 34,
+    "height": 34,
+    "bytes": 3465,
+    "sha256": "355ea91a2e9ff5a7ca8d29e22f3fe86ea1e72d6bc3af768c3e974e01d022ad5a"
+  },
+  {
+    "filename": "R5-outline-crop.png",
+    "width": 60,
+    "height": 25,
+    "bytes": 3321,
+    "sha256": "bcd7f02fcad61d13e72ace8aece89182e979f3508d0a56683d99bc7a590f394b"
+  },
+  {
+    "filename": "R5-selected-100.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 298461,
+    "sha256": "53d495effa8d9c1ca6792c6365bb29d2b9dafb3b61ee67c3ed3f671930dc7424"
+  },
+  {
+    "filename": "R6-help-menu.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 337270,
+    "sha256": "a88b982bbca409e0e8dc1b8e3ce0e1957707b2d2c5c79a666a83bc1ee7539bd8"
+  },
+  {
+    "filename": "R7-caret-100-a.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 338459,
+    "sha256": "b5af35328975aad589bf2451dbade7457a1855a64edd79acbc5a0c1cf7855d9e"
+  },
+  {
+    "filename": "R7-caret-100-b.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 338585,
+    "sha256": "bf77bddc86a257e7f39fcb2577bc69125324ecf505a3fb118a956ad878d42749"
+  },
+  {
+    "filename": "R7-caret-100-crop.png",
+    "width": 50,
+    "height": 60,
+    "bytes": 3488,
+    "sha256": "201ceb30cea93502f1fb4a65b5759450cbc873f51ede33ea3c844e4572b87fca"
+  },
+  {
+    "filename": "R7-caret-100-physical.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 339090,
+    "sha256": "aee59b7ef17122dfb354d3d791712b1c2850d900c24358f9c7388725c305bb61"
+  },
+  {
+    "filename": "R7-caret-400-crop.png",
+    "width": 110,
+    "height": 140,
+    "bytes": 3742,
+    "sha256": "c9fc243a7c28f554c22120367b07a17d4b80d4d1860b2a388f83a75467967977"
+  },
+  {
+    "filename": "R7-caret-400-phase-b.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 314185,
+    "sha256": "b1084e897b706ef9ac7718136c1e01d8fa6c15c3a380289d932efdb961ceb984"
+  },
+  {
+    "filename": "R7-caret-400-phase-c.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 313705,
+    "sha256": "8857173066ac8a10ff52614067e0f5616d1f554432bc38169e3c95ca5f84c61a"
+  },
+  {
+    "filename": "R7-caret-400-physical.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 313705,
+    "sha256": "8857173066ac8a10ff52614067e0f5616d1f554432bc38169e3c95ca5f84c61a"
+  },
+  {
+    "filename": "R7-caret-400.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 316107,
+    "sha256": "91d87f564092098c628a382abba3af9cfbcf4e6a4015135dc5d8e413a6d05fc0"
+  },
+  {
+    "filename": "R7-empty-caret-100.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 339160,
+    "sha256": "49dd652d5f04ac2b58e563ad49be0358a9ea636dad3f8d6334130e0698762fd9"
+  },
+  {
+    "filename": "R7-same-text-100-a.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 337880,
+    "sha256": "79da77e8ac117cdc6f1c61d61b00e430e4e8abe5bbd20bf41d10f11d4b7234fe"
+  },
+  {
+    "filename": "R7-same-text-100-b.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 337880,
+    "sha256": "79da77e8ac117cdc6f1c61d61b00e430e4e8abe5bbd20bf41d10f11d4b7234fe"
+  },
+  {
+    "filename": "R7-same-text-100-c.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 337825,
+    "sha256": "e2fab92a46ef83360031608d77b79cd4847a41fb85e7a9a869b9caebbd473739"
+  },
+  {
+    "filename": "R7-text-caret-100-edit.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 338849,
+    "sha256": "eab6173666b3c84be408642eeb7577aae2046d6a770e74832b9486bdb23561aa"
+  },
+  {
+    "filename": "R7-text-caret-100-left.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 339128,
+    "sha256": "59252bc0e0365c22fd5446b82cf824028a310335d6bdd7026210c6d886932563"
+  },
+  {
+    "filename": "R7-text-caret-100.png",
+    "width": 2880,
+    "height": 1740,
+    "bytes": 339090,
+    "sha256": "aee59b7ef17122dfb354d3d791712b1c2850d900c24358f9c7388725c305bb61"
+  }
+]
