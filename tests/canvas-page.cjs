@@ -19,6 +19,15 @@ const {_electron}=require(process.cwd()+'/node_modules/@playwright/test');const 
     await p.waitForFunction(()=>{const d=window.design.getDocument();return d.pages.find(x=>x.id===d.activePage).background==='#112233'});
     assert.equal(await p.locator('#workspace').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(17, 34, 51)');
     assert.equal(await p.evaluate(()=>{try{window.design.updatePage({background:'red'});return false}catch{return true}}),true);
+    // Page eye (properties-audit C8): hides the page background in the editor and keeps the colour.
+    const defaultBg=await p.evaluate(()=>{const w=document.querySelector('#workspace'),i=w.style.backgroundColor;w.style.backgroundColor='';const c=getComputedStyle(w).backgroundColor;w.style.backgroundColor=i;return c});
+    await p.locator('[aria-label="Hide page background"]').click();
+    assert.equal(await p.evaluate(()=>{const d=window.design.getDocument();const pg=d.pages.find(x=>x.id===d.activePage);return [pg.background,pg.backgroundHidden].join()}),'#112233,true');
+    assert.equal(await p.locator('#workspace').evaluate(e=>getComputedStyle(e).backgroundColor),defaultBg,'hidden page background shows the canvas default');
+    assert.equal(await p.evaluate(()=>{try{window.design.updatePage({backgroundHidden:false});return false}catch{return true}}),true,'backgroundHidden is true or absent');
+    await p.locator('[aria-label="Show page background"]').click();
+    assert.equal(await p.evaluate(()=>{const d=window.design.getDocument();return 'backgroundHidden' in d.pages.find(x=>x.id===d.activePage)}),false);
+    assert.equal(await p.locator('#workspace').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(17, 34, 51)');
     await p.locator('[aria-label="Reset page colour"]').click();
     assert.equal(await p.evaluate(()=>{const d=window.design.getDocument();return 'background' in d.pages.find(x=>x.id===d.activePage)}),false);
     // Selecting a layer keeps Variables collapsed and hides the page section.

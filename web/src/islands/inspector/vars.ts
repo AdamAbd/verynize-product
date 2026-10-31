@@ -488,8 +488,11 @@ function materialize(n: Node, key: string): Record<string, unknown> {
       ]),
     );
   }
-  if (key === "w" && n.wMode && n.wMode !== "fixed") return { wMode: "fixed" };
-  if (key === "h" && n.hMode && n.hMode !== "fixed") return { hMode: "fixed" };
+  // A bound W/H is a Fixed size: Relative (%) and Calculate expressions end.
+  if (key === "w" && ((n.wMode && n.wMode !== "fixed") || n.wPct !== undefined))
+    return { wMode: "fixed", wPct: undefined, wCalc: undefined };
+  if (key === "h" && ((n.hMode && n.hMode !== "fixed") || n.hPct !== undefined))
+    return { hMode: "fixed", hPct: undefined, hCalc: undefined };
   return {};
 }
 

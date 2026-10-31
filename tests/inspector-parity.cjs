@@ -163,6 +163,9 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
   await page.waitForTimeout(500);
   assert.equal(await page.locator('#artwork-status').textContent(),'');
   console.log('PASS export 0.5×/4× PNG, PDF and native save dialog with success toast');
+  // Like Wonder (ref 50) the export toasts sit over the bottom-right of the inspector; let them leave (Sonner pauses
+  // while hovered) before the menus below open there.
+  await page.mouse.move(400,300);await page.waitForSelector('[data-sonner-toast]',{state:'detached',timeout:20000});
 
   // --- Layout section per display (Wonder Layout panel): flex matrix/distribution/reverse/wrap/gaps, padding
   // axes and sides, grid tracks + cell alignment, grid child spans, margin auto, block spacing, min/max limits ------
@@ -176,6 +179,8 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
   const styleOf=(id,prop)=>page.locator(`#canvas [data-id=${id}]`).evaluate((el,p)=>getComputedStyle(el)[p],prop);
   const typeIn=async(name,value)=>{const f=page.locator(`#layout-section [name=${name}]`);await f.fill(value);await f.press('Enter');};
   const matrix=label=>page.locator(`#layout-section [role=group][aria-label="${label}"]`);
+  // A Radix menu that is still closing ignores the next press on its trigger: wait until it is gone.
+  const openMenu=async trigger=>{await page.locator('[role=menu]').waitFor({state:'detached'});await page.locator(trigger).click();await page.locator('[role=menu]').waitFor();};
   // Row direction: the matrix column is the main axis (justify), the row is the cross axis (align).
   await matrix('Alignment').locator('[data-cell="1-2"]').click();
   assert.deepEqual([(await node('fx')).justifyContent,(await node('fx')).alignItems],['flex-end','center'],'matrix sets justify + align');
@@ -187,14 +192,33 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
   assert.equal((await node('fx')).justifyContent,'flex-start','pressing the active distribution returns to packed');
   await page.getByRole('button',{name:'Reverse order'}).click();
   assert.equal((await node('fx')).reverse,true);assert.equal(await styleOf('fx','flexDirection'),'row-reverse');
-  assert.equal(await page.locator('#layout-section [name=gapY]').isDisabled(),true,'cross gap is inactive without wrap');
+  // Wonder B1: the cross gap is typeable without wrap (it only shows once the stack wraps), and committing the
+  // main gap never moves it.
+  assert.equal(await page.locator('#layout-section [name=gapY]').isDisabled(),false,'cross gap is editable without wrap');
+  await typeIn('gap','37');
+  assert.deepEqual([(await node('fx')).gap,(await node('fx')).gapY,(await node('fx')).flexWrap],[37,4,undefined],'the main gap pins the cross gap to its old value');
+  assert.equal(await page.locator('#layout-section [name=gapY]').inputValue(),'4');
+  await typeIn('gapY','12');
+  assert.deepEqual([(await node('fx')).gapY,(await node('fx')).flexWrap],[12,undefined],'typing the cross gap does not turn wrap on');
   await page.getByRole('button',{name:'Wrap'}).click();
   assert.equal((await node('fx')).flexWrap,true);
-  await typeIn('gapY','12');await typeIn('gap','20');
+  assert.equal(await page.getByRole('button',{name:'Wrap'}).getAttribute('data-active'),'true');
+  // Computed colour-mix() values come back as rgb() or color(srgb …): compare the 0–255 channels.
+  const rgbOf=css=>{const m=css.match(/color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/);return m?m.slice(1,4).map(v=>Math.round(Number(v)*255)):css.match(/[\d.]+/g).slice(0,3).map(Number);};
+  const wrapStyle=await page.getByRole('button',{name:'Wrap'}).evaluate(e=>[getComputedStyle(e).backgroundColor,getComputedStyle(e).color]);
+  assert.deepEqual(rgbOf(wrapStyle[0]),[54,36,64],'active flex toggles take the purple tint #362440');
+  assert.ok(rgbOf(wrapStyle[1]).every((v,i)=>Math.abs(v-[206,134,248][i])<=6),`active glyph is #ce86f8 (${wrapStyle[1]})`);
+  await typeIn('gap','20');
   assert.deepEqual([(await node('fx')).gap,(await node('fx')).gapY],[20,12]);
+  // Baseline (rows only) sits first in the trailing column.
+  await page.getByRole('button',{name:'Align to baseline'}).click();
+  assert.equal((await node('fx')).alignItems,'baseline');assert.equal(await styleOf('fx','alignItems'),'baseline');
+  await page.getByRole('button',{name:'Align to baseline'}).click();
+  assert.equal((await node('fx')).alignItems,'flex-start');
   assert.equal(await styleOf('fx','columnGap'),'20px');assert.equal(await styleOf('fx','rowGap'),'12px');
   await page.locator('#layout-section .insp-direction [data-direction=column]').click();
   assert.equal((await node('fx')).direction,'column');assert.equal(await styleOf('fx','flexDirection'),'column-reverse');
+  assert.equal(await page.getByRole('button',{name:'Align to baseline'}).count(),0,'no baseline toggle for columns');
   // Padding: axes, collapse back to a single value, then independent sides.
   await typeIn('paddingX','10');
   let fx=await node('fx');assert.deepEqual([fx.paddingTop,fx.paddingRight,fx.paddingBottom,fx.paddingLeft],[8,10,8,10]);
@@ -203,11 +227,12 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
   await page.getByRole('button',{name:'Independent padding'}).click();
   await typeIn('paddingTop','5');
   assert.equal(await styleOf('fx','padding'),'5px 10px 10px');
-  // Min/max limits from the size menu.
-  await page.getByRole('button',{name:'Size options'}).click();await page.locator('[role=menuitem][data-limit=maxW]').click();
-  assert.equal((await node('fx')).maxW,300);
-  await typeIn('maxW','250');assert.equal(await styleOf('fx','maxWidth'),'250px');
-  await page.locator('#layout-section [name=maxWKind]').selectOption('remove');assert.equal((await node('fx')).maxW,undefined);
+  // Min/max limits from the W menu: an empty row (Wonder B2-max-width-added), written once a value is typed.
+  await openMenu('#layout-section [data-size-menu=w]');await page.locator('[role=menuitem][data-limit=maxW]').click();
+  assert.equal(await page.locator('#layout-section [name=maxW]').inputValue(),'');assert.equal((await node('fx')).maxW,undefined);
+  await typeIn('maxW','250');assert.equal((await node('fx')).maxW,250);assert.equal(await styleOf('fx','maxWidth'),'250px');
+  await openMenu('#layout-section [data-limit-menu=maxW]');await page.locator('[role=menuitem][data-limit-remove=maxW]').click();
+  assert.equal((await node('fx')).maxW,undefined);
   // Grid: tracks popover, gaps, cell alignment toggle.
   await page.evaluate(()=>window.design.setSelection(['gd']));
   assert.equal((await page.locator('#grid-tracks').textContent()).trim(),'2 × Auto');
@@ -227,14 +252,22 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
   await page.evaluate(()=>window.design.setSelection(['gc']));
   await typeIn('colSpan','2');await typeIn('rowSpan','2');
   assert.equal(await styleOf('gc','gridColumnStart'),'span 2');assert.equal(await styleOf('gc','gridRowStart'),'span 2');
-  await page.locator('#layout-section [name=marginXUnit]').selectOption('auto');
+  const marginUnit=async(unit)=>{await openMenu('#layout-section [data-unit-menu=marginX]');await page.locator(`[role=menuitem][data-unit=${unit}]`).click();};
+  await marginUnit('auto');
   assert.deepEqual((await node('gc')).margin,[0,'auto',0,'auto']);
-  await page.locator('#layout-section [name=marginXUnit]').selectOption('px');
+  await marginUnit('px');
   assert.equal((await node('gc')).margin,undefined,'zero margins are removed');
   // Block flow: vertical spacing, no flex/grid controls; free frames have no padding.
   await page.evaluate(()=>window.design.setSelection(['bk']));
   assert.equal(await matrix('Alignment').count(),0);
   await typeIn('gapY','8');assert.equal((await node('bk')).gapY,8);
+  // Block alignment (Wonder C2-display-block): left / centre / right of children narrower than the frame.
+  await page.evaluate(()=>{const d=window.design.getDocument();d.pages[0].nodes.push({id:'bc',name:'Child',type:'rectangle',parentId:'bk',x:0,y:0,w:50,h:20,color:'#ff0000'});window.design.setDocument(d);window.design.setSelection(['bk']);});
+  await page.locator('#layout-section .insp-block-align [data-align=center]').click();
+  assert.equal((await node('bk')).justifyItems,'center');
+  assert.equal(await page.locator('#canvas [data-id=bc]').evaluate(e=>e.offsetLeft),75,'the child is centred in the 200px block');
+  await page.locator('#layout-section .insp-block-align [data-align=flex-start]').click();
+  assert.equal((await node('bk')).justifyItems,undefined);
   await page.locator('.insp-display [data-layout=free]').click();
   assert.equal(await page.locator('#layout-section [name=paddingX]').count(),0,'free position has no padding');
   // Switching Display back and forth never stacks copies of Padding / Margin (they once shared a React key).

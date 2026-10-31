@@ -83,16 +83,19 @@ export function elementCode(document, page, node, depth = Infinity) {
 //
 // Node model written by the codec (all optional; legacy documents keep working):
 //   layout 'block'|'flex'|'grid'|'inline'|'free'   frames default to 'block' (CSS block flow)
-//   wMode/hMode 'fixed'|'hug'|'fill', wPct/hPct     sizing; hug/fill w/h are layout outputs
+//   wMode/hMode 'fixed'|'hug'|'fill'|'auto'|'calc', wPct/hPct     sizing; hug/fill/auto/calc w/h are layout outputs
+//   wCalc/hCalc (Calculate expression)              px/% calc() terms for wMode/hMode 'calc' (w-[calc(100%_-_24px)]); 'auto' = w-auto
 //   paddingTop/Right/Bottom/Left                    when not uniform (uniform -> `padding`)
 //   gapX/gapY                                       when they differ (equal -> `gap`)
 //   cornerRadii [tl,tr,br,bl], strokeWidths [t,r,b,l], strokeStyle, ringWidth/ringColor/ringInset
 //   ellipse (rounded-[50%]), flipX/flipY (-scale-x-100 / -scale-y-100)
 //   flexWrap, reverse (row-/column-reverse), grow, shrink, basis, alignSelf, colSpan, rowSpan, margin [t,r,b,l] (number|'auto')
-//   rows (equal grid rows), justifyItems (grid cell alignment)
+//   rows (equal grid rows), justifyItems (grid cell alignment; Block alignment on block frames)
 //   minW/maxW/minH/maxH (px number or 'N%'), aspectRatio
 //   position 'absolute' + inset [t,r,b,l] (px|'N%'|null) + translate [x,y] (px|'N%')
 //   textTransform, textDecoration, fontStyle, truncate, noWrap, lineClamp, textWrap, objectFit, hidden
+//   textAlignVertical (content-center/end), whiteSpace (whitespace-*), wordBreak (break-normal/break-all), textIndent (indent-*),
+//     fontSmoothing (antialiased/subpixel-antialiased), lineHeight 'auto' (leading-[normal])
 //   textStyle (frames: inheritable text declarations), styleOwn (text: keys declared on itself)
 //   measured: false                                  geometry came from the headless estimate
 //   icon 'set:name' (image nodes from <Icon name> / <ArrowRight/>): src is a generated SVG data URL;
@@ -165,6 +168,8 @@ export function applySpec(node, spec, tokens) {
     if ('fontSize' in p) node.fontSize = p.fontSize;
     if ('ink' in p) { node.color = p.ink; node.token = p.inkToken || ''; }
     for (const key of ['fontWeight', 'fontFamily', 'textAlign', 'lineHeight', 'letterSpacing', 'textTransform', 'textDecoration', 'fontStyle', 'textWrap', 'truncate', 'noWrap', 'lineClamp']) if (key in p) node[key] = p[key];
+    // Type settings: an empty value means the canvas default, which is stored as an absent field.
+    for (const key of ['textAlignVertical', 'whiteSpace', 'wordBreak', 'textIndent', 'fontSmoothing']) if (key in p) { if (p[key] === '' || p[key] === 'top' || p[key] === 0) delete node[key]; else node[key] = p[key]; }
     if ('lineHeightPx' in p) node.lineHeight = Math.round(p.lineHeightPx / (node.fontSize || 16) * 1000) / 1000;
     if ('letterSpacingEm' in p) node.letterSpacing = Math.round(p.letterSpacingEm * (node.fontSize || 16) * 100) / 100;
     for (const key of Object.keys(p)) if (OWN_KEY[key]) own.add(OWN_KEY[key]);
@@ -235,6 +240,11 @@ function applyGeometry(node, spec, parent, { isNew, warnings, label }) {
   const canHug = node.type === 'text' || node.type === 'frame';
   const row = isFlexRow(parent) && node.position !== 'absolute';
   const axis = (len, key, modeKey, pctKey, defMode) => {
+    const calcKey = key + 'Calc';
+    if (len) delete node[calcKey];
+    // An explicit w-auto / h-auto on text or a frame is the Auto sizing mode (CSS auto); elsewhere it is the default.
+    if (len?.auto && canHug && parent) { node[modeKey] = 'auto'; delete node[pctKey]; return; }
+    if (len?.calc) { node[modeKey] = 'calc'; node[calcKey] = len.calc; delete node[pctKey]; if (len.frac === undefined) node[key] = Math.max(1, len.px); return; }
     if (!len || len.auto) {
       if (!isNew && !len) return;
       let mode = defMode;

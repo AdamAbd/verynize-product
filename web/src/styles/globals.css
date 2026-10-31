@@ -249,6 +249,24 @@ html[data-ui-theme="light"] {
   --color-variable-chip: var(--background);
   --color-variable-chip-foreground: var(--foreground-2);
   --shadow-variable-chip: 0 0 0 0.5px color-mix(in srgb, var(--foreground) 12%, var(--background));
+  /* Multi-select "Click to replace …" buttons and Selection filters rows (properties-audit A9): a #181818 well
+   * with a 1px #242424 edge. */
+  --color-well: color-mix(in srgb, var(--background) 86%, black);
+  --color-well-edge: color-mix(in srgb, var(--foreground) 4.5%, var(--background));
+  /* Disabled field (properties-audit B4/C1): #242424 fill, #828282 value; its caret and the disabled constraint
+   * diagram's ticks are #535353 (the diagram well itself is #363636 = accent; enabled it is #2b2b2b = input). */
+  --color-field-disabled: color-mix(in srgb, var(--input) 53%, var(--background));
+  --color-field-disabled-foreground: color-mix(in srgb, var(--muted-foreground) 60%, var(--subtle-foreground));
+  --color-disabled-glyph: color-mix(in srgb, var(--foreground) 16.3%, var(--accent));
+  /* Purple "on" header toggle (Position absolute toggle, C1): #372441 fill, #ce86f8 glyph. */
+  --color-toggle-on: color-mix(in srgb, var(--primary) 20%, var(--background));
+  --color-toggle-on-foreground: color-mix(in srgb, var(--primary-text) 85%, white);
+  /* Active flex toggles (reverse, wrap, baseline) in properties-audit C3: a purple tint #362440 behind a #ce86f8
+   * glyph (primary mixed into the panel / primary text lifted toward white; both follow the light theme). */
+  --color-toggle-active: color-mix(in srgb, var(--primary) 19.5%, var(--background));
+  --color-toggle-active-foreground: color-mix(in srgb, var(--primary-text) 82%, white);
+  /* Page swatch edge (properties-audit C8): a 1px #555555 ring so a dark page colour stays visible on #2b2b2b. */
+  --color-swatch-ring: color-mix(in srgb, var(--foreground) 22%, var(--input));
   /* </inspector-tokens> */
   /* <home-tokens> */
   /* </home-tokens> */

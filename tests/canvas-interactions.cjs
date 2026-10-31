@@ -262,16 +262,75 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await seed([{id: 'stack', name: 'Stack', type: 'frame', x: 0, y: 0, w: 400, h: 200, color: '#ffffff', layout: 'flex', direction: 'row', padding: 10, gap: 10},
       rect('fixed', 0, 0, 100, 50, {parentId: 'stack'}), rect('grow', 0, 0, 100, 50, {parentId: 'stack'}),
       {id: 'label', name: 'Label', type: 'text', x: 0, y: 300, w: 400, h: 60, text: 'Hug', fontSize: 20, color: '#222222'}]);
+    // The unit ("px ▾") opens the axis menu; modes that do not apply are omitted, not disabled (Wonder B2).
+    // A Radix menu that is still closing ignores the next press on its trigger: wait until it is gone.
+    const openMenu = async trigger => { await page.locator('[role=menu]').waitFor({state: 'detached'}); await page.locator(trigger).click(); await page.locator('[role=menu]').waitFor(); };
+    const sizeMenu = async (axis = 'w') => {
+      await openMenu(`#layout-section [data-size-menu=${axis}]`);
+      const items = await page.locator('[role=menuitem]').evaluateAll(list => list.map(i => i.textContent.trim()));
+      const checked = await page.locator('[role=menuitem]:has(svg.lucide-check)').evaluateAll(list => list.map(i => i.textContent.trim()));
+      return {items, checked};
+    };
+    const pickSize = async (axis, mode) => { await openMenu(`#layout-section [data-size-menu=${axis}]`); await page.locator(`[role=menuitem][data-size-mode=${mode}]`).click(); };
+    const typeW = async value => { await page.locator('#layout-section [name=w]').fill(value); await page.locator('#layout-section [name=w]').press('Enter'); };
+    const widthOf = id => page.locator(`#canvas [data-id=${id}]`).evaluate(e => e.getBoundingClientRect().width / window.design.getCamera().zoom);
     await page.evaluate(() => window.design.setSelection(['grow']));
-    const options = await page.locator('[name=wMode] option').evaluateAll(list => list.map(o => [o.value, o.disabled]));
-    assert.deepEqual(options, [['fixed', false], ['hug', true], ['fill', false]], 'Fill offered inside flex parent; Hug not for rectangles');
-    await page.locator('[name=wMode]').selectOption('fill');
+    assert.deepEqual(await sizeMenu(), {items: ['Fixed', 'Relative', 'Fill', 'Calculate', 'Add min width', 'Add max width'], checked: ['Fixed']}, 'a rectangle in a flex row: Relative and Fill, no Hug or Auto');
+    await page.locator('[role=menuitem][data-size-mode=fill]').click();
     assert.equal((await node('grow')).w, 400 - 20 - 10 - 100, 'Fill takes the remaining main-axis space');
     assert.match(await page.locator('#selection-measure').textContent(), /270 Fill × 50/);
+    assert.equal((await page.locator('#layout-section [data-size-menu=w]').textContent()).trim(), 'Fill', 'the unit names the mode');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.design.setSelection(['stack']));
+    assert.deepEqual((await sizeMenu()).items, ['Fixed', 'Calculate', 'Add min width', 'Add max width'], 'a top-level frame: Fixed and Calculate only');
+    await page.keyboard.press('Escape');
     await page.evaluate(() => window.design.setSelection(['label']));
-    assert.deepEqual(await page.locator('[name=wMode] option').evaluateAll(list => list.map(o => o.disabled)), [false, false, true], 'top-level text can hug, not fill');
-    await page.locator('[name=wMode]').selectOption('hug');
+    assert.deepEqual((await sizeMenu()).items, ['Fixed', 'Hug', 'Auto', 'Calculate', 'Add min width', 'Add max width'], 'top-level text: Hug and Auto, no Relative or Fill');
+    await page.locator('[role=menuitem][data-size-mode=hug]').click();
     assert.ok((await node('label')).w < 100, 'hugging text shrinks to its content');
+    assert.equal((await sizeMenu()).checked[0], 'Hug', 'the current mode carries the check');
+    await page.keyboard.press('Escape');
+    // Auto: CSS auto width (fits content on the canvas).
+    await pickSize('w', 'auto');
+    assert.equal((await node('label')).wMode, 'auto');
+    assert.ok((await widthOf('label')) < 100, 'auto text keeps its content width');
+    assert.equal((await page.locator('#layout-section [data-size-menu=w]').textContent()).trim(), 'Auto');
+    // Relative: a percentage of the parent's content box (stack: 400 - 2 × 10 padding = 380).
+    await page.evaluate(() => window.design.setSelection(['fixed']));
+    await pickSize('w', 'relative');
+    assert.equal((await node('fixed')).wPct, 26.32, '100px of 380px');
+    assert.equal((await page.locator('#layout-section [data-size-menu=w]').textContent()).trim(), '%');
+    await typeW('50');
+    assert.deepEqual([(await node('fixed')).wMode, (await node('fixed')).wPct], ['fixed', 50]);
+    near(await widthOf('fixed'), 190, 0.5, 'relative width renders as a percentage');
+    assert.match(await page.locator('#selection-measure').textContent(), /^190 50% × 50/);
+    // Calculate: an expression of px and % terms; the unit becomes part of the value and the badge reads "Calc".
+    await pickSize('w', 'calc');
+    assert.deepEqual([(await node('fixed')).wMode, (await node('fixed')).wCalc, (await node('fixed')).wPct], ['calc', '190px', undefined]);
+    assert.equal(await page.locator('#layout-section [name=w]').inputValue(), '190px');
+    await typeW('100%-280px');
+    assert.equal((await node('fixed')).wCalc, '100% - 280px');
+    near(await widthOf('fixed'), 100, 0.5, 'calc() resolves against the parent');
+    assert.equal((await node('fixed')).w, 100, 'the measured width is read back');
+    assert.match(await page.locator('#selection-measure').textContent(), /^100 Calc × 50/);
+    await typeW('12 apples');
+    assert.equal((await node('fixed')).wCalc, '100% - 280px', 'an invalid expression is refused');
+    await pickSize('w', 'fixed');
+    assert.deepEqual([(await node('fixed')).wMode, (await node('fixed')).wCalc, (await node('fixed')).w], ['fixed', undefined, 100], 'Fixed keeps the current size');
+    // Min / max limits come from the axis menu as empty, focused rows (Wonder B2-min-width-added).
+    await openMenu('#layout-section [data-size-menu=h]');
+    assert.deepEqual(await page.locator('[role=menuitem]').evaluateAll(list => list.map(i => i.textContent.trim()).slice(-2)), ['Add min height', 'Add max height'], 'the H menu adds height limits only');
+    await page.locator('[role=menuitem][data-limit=minH]').click();
+    await page.waitForFunction(() => document.activeElement?.getAttribute('name') === 'minH');
+    assert.equal(await page.locator('#layout-section [name=minH]').inputValue(), '', 'the new limit row starts empty');
+    assert.equal(await page.locator('#layout-section [name=minH]').getAttribute('placeholder'), 'Min H');
+    assert.equal((await node('fixed')).minH, undefined, 'nothing is written until a value is typed');
+    await page.keyboard.type('60'); await page.keyboard.press('Enter');
+    assert.equal((await node('fixed')).minH, 60);
+    near(await page.locator('#canvas [data-id=fixed]').evaluate(e => e.getBoundingClientRect().height / window.design.getCamera().zoom), 60, 0.5, 'min height renders');
+    await openMenu('#layout-section [data-limit-menu=minH]'); await page.locator('[role=menuitem][data-limit-remove=minH]').click();
+    assert.equal((await node('fixed')).minH, undefined, 'Remove drops the limit');
+    await page.evaluate(() => window.design.setSelection(['label']));
     await page.locator('[name=w]').fill('300'); await page.locator('[name=w]').press('Tab');
     assert.equal((await node('label')).wMode, 'fixed', 'typing a width returns to Fixed');
 

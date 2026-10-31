@@ -67,10 +67,10 @@ The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; isla
   dialog already uses `data-member` / `data-remove-member`, so organization rows must not.
 - **Zoom menu**: tests click `#zoom-menu-button` then `#zoom-in`, `#zoom-out`, `#zoom-fit`, `#zoom-reset`, `#snap`,
   `#saved-views-open` (chrome island). `#zoom-reset` text must keep the zoom percentage (tests parse it).
-- **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask]`, `[name=layout]`,
+- **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask-0-css]`, `[name=layout]`,
   `[name=wMode]`, `[name=shaderPreset]`, `[name=shaderSpeed]`, `[name=shaderIntensity]`, `[name=animated]`,
   `[name=color]`, `.insp-display [data-layout=flex]`, `#mask-section .insp-add`, `#shader-settings summary`,
-  `#choose-shader`, `#range-bold`, `#precision-right`, `#color-value`, `#color-dialog` … — grep `tests/` for the full list.
+  `#choose-shader`, `#type-settings-toggle` / `#type-settings`, `#precision-right`, `#color-value`, `#color-dialog` … — grep `tests/` for the full list.
   Field names must be unique in the document (Playwright strict mode), so the legacy `#inspector` form may not keep
   same-named inputs in the DOM at the same time.
 - **Plain CSS**: if you must restyle legacy DOM you cannot render yourself (e.g. the `main` grid, `#canvas-wrap`
