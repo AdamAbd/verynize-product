@@ -28,6 +28,18 @@
   const IS_MAC = /Mac/.test(navigator.platform);
   const typing = target => !!target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable);
 
+  // Ink for a new text layer, also the caret colour (text-caret.js): black over a light background, white over a dark one.
+  function inkAt(clientX, clientY) {
+    for (const el of document.elementsFromPoint(clientX, clientY)) {
+      if (el.closest('#canvas .layer')?.dataset.designType === 'text') continue;
+      const value = getComputedStyle(el).backgroundColor, c = (value.match(/[\d.]+/g) || []).map(Number);
+      if (c.length < 3 || (c.length > 3 ? c[3] : 1) < 0.5) continue;
+      const scale = value.startsWith('color(') ? 1 : 255;
+      return (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / scale < 0.5 ? '#ffffff' : '#000000';
+    }
+    return '#000000';
+  }
+
   function install(ed) {
     const $ = s => document.querySelector(s);
     const {canvas, camera: cam} = ed;
@@ -691,16 +703,6 @@
     // The new layer enters the undo history only once it has text (one step that removes it again); editing that
     // ends with no text removes it. Any text layer emptied in the editor is removed as one undo step.
     let draftText = null;
-    function inkAt(clientX, clientY) {
-      for (const el of document.elementsFromPoint(clientX, clientY)) {
-        if (el.closest('#canvas .layer')?.dataset.designType === 'text') continue;
-        const value = getComputedStyle(el).backgroundColor, c = (value.match(/[\d.]+/g) || []).map(Number);
-        if (c.length < 3 || (c.length > 3 ? c[3] : 1) < 0.5) continue;
-        const scale = value.startsWith('color(') ? 1 : 255;
-        return (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / scale < 0.5 ? '#ffffff' : '#000000';
-      }
-      return '#000000';
-    }
     function createText(r, click, parent, clientX, clientY) {
       const before = ed.snapshot();
       let x = r.x, y = r.y;
@@ -1699,5 +1701,5 @@
     };
   }
   const extensions = [];
-  window.BetterCanvas = {install, ZOOM_STOPS, FRAME_PRESETS, extend: fn => extensions.push(fn)};
+  window.BetterCanvas = {install, inkAt, ZOOM_STOPS, FRAME_PRESETS, extend: fn => extensions.push(fn)};
 })();

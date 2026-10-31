@@ -111,14 +111,14 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.evaluate(() => window.design.setTool('text'));
     await page.mouse.click(p.x, p.y);
     const editor = page.locator('#canvas [data-text-editing]'); await editor.waitFor();
-    assert.deepEqual(await editor.evaluate(e => [getComputedStyle(e).outlineStyle, getComputedStyle(e).caretColor, e.querySelectorAll('.handle').length]), ['none', 'rgb(0, 0, 0)', 0], 'no selection ring or handles; black caret on the white frame');
+    assert.deepEqual(await editor.evaluate(e => [getComputedStyle(e).outlineStyle, getComputedStyle(e).color, e.querySelectorAll('.handle').length]), ['none', 'rgb(0, 0, 0)', 0], 'no selection ring or handles; black ink (and caret, text-caret.js) on the white frame');
     for (const sel of ['#selection-name', '#selection-measure', '#selection-chat-chip']) assert.equal(await shown('#canvas-overlay ' + sel), false, sel + ' hidden while typing a click text');
     await page.keyboard.press('Escape'); await editor.waitFor({state: 'detached'});
     p = await screen(515, 47);
     await page.evaluate(() => window.design.setTool('text'));
     await page.mouse.move(p.x, p.y); await page.mouse.down(); await page.mouse.move(p.x + 150, p.y + 60, {steps: 6}); await page.mouse.up();
     await editor.waitFor();
-    assert.deepEqual(await editor.evaluate(e => [getComputedStyle(e).outlineStyle, getComputedStyle(e).caretColor]), ['none', 'rgb(255, 255, 255)'], 'a drag box on the dark page: no ring, white caret');
+    assert.deepEqual(await editor.evaluate(e => [getComputedStyle(e).outlineStyle, getComputedStyle(e).color]), ['none', 'rgb(255, 255, 255)'], 'a drag box on the dark page: no ring, white ink');
     assert.equal(await shown('#canvas-overlay #selection-name'), false, 'no "Text" label');
     assert.equal(await shown('#canvas-overlay #selection-measure'), false, 'no size badge');
     assert.equal(await shown('#canvas-overlay #selection-chat-chip'), true, 'the ⊕ chip stays for a fixed box (TX1-drag)');
