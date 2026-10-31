@@ -1,6 +1,10 @@
 (() => {
   const entries = new Map();
   let activeId = null;
+  // Frame chrome (web/preview-frame-chrome.js) registers itself here: mount(entry), paint(entry), update(entry), navigated(entry).
+  let chrome = null;
+  // Electron prefixes rejected IPC calls; the user only needs the reason.
+  const cleanError = error => String(error?.message || error || '').replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
   const valid = value => {
     const url = new URL(value);
     if (!['http:', 'https:'].includes(url.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.username || url.password) throw Error('Enter a localhost application URL');
@@ -29,7 +33,8 @@
     entry.controls.toggle.textContent = state === 'running' || state === 'starting' ? '⊙ Stop' : '▶ Start';
     entry.controls.title.textContent = state === 'starting' ? 'Starting your app' : state === 'error' ? 'Unable to start preview' : 'Ready to start your preview';
     entry.controls.message.textContent = message || (state === 'starting' ? 'Waiting for the local application to be ready…' : 'Start this preview to connect to your local app.');
-    entry.controls.placeholder.hidden = state === 'running'; entry.frame.hidden = state !== 'running'; changed();
+    entry.controls.placeholder.hidden = state === 'running'; entry.frame.hidden = state !== 'running';
+    entry.message = message; entry.paintSeq = (entry.paintSeq || 0) + 1; chrome?.paint(entry); changed();
   }
   function navigate(entry, url, remember = true) {
     const target = valid(url);
@@ -43,16 +48,24 @@
     activate(entry);
     const api = window.desktop?.devServer;
     if (!api || !entry.node.preview.root) { paint(entry, 'error', 'Connect this preview to a repository through chat.'); return; }
+    // Each start is an attempt; results and status polls from an older attempt never repaint a newer one.
+    const attempt = entry.attempt = (entry.attempt || 0) + 1;
     try {
       if (entry.state === 'running' || entry.state === 'starting') {
+        // Staged preview edits are lost on stop: the edit layer may ask first (false keeps the preview running).
+        if (window.previewEdits?.confirmBeforeStop && !(await window.previewEdits.confirmBeforeStop(entry.node.id))) return;
         await api.stop({root: entry.node.preview.root}); entry.settingUp=false; entry.frame.removeAttribute('src'); paint(entry, 'paused');
       } else {
+        entry.attemptAt = Date.now(); entry.status = null; entry.pending = true;
         paint(entry, 'starting');
         const result = await api.start({root: entry.node.preview.root});
+        if (entry.attempt !== attempt) return;
+        entry.status = result;
         if (result.state === 'running' && result.url) navigate(entry, result.url);
         else if (result.state !== 'starting') paint(entry, 'error', result.error || result.tail || 'The app did not start.');
       }
-    } catch (error) { paint(entry, 'error', error.message); }
+    } catch (error) { if (entry.attempt === attempt) paint(entry, 'error', cleanError(error)); }
+    finally { if (entry.attempt === attempt) entry.pending = false; }
   }
   // Captured documents are inserted with fresh ids; embedded fonts merge into the document's fontFaces.
   function insertCaptured(captured, place) {
@@ -148,6 +161,7 @@
     controls.inspect.onclick = async () => { try { activate(entry); const result = await window.desktop.previewInspect({selector: form.elements.selector.value}); form.elements.text.disabled=result.text===null; for (const key of ['text','color','backgroundColor','fontSize']) form.elements[key].value = key === 'text' ? result.text || '' : result.styles?.[key] || ''; } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
     form.onsubmit = async event => { event.preventDefault(); try { activate(entry); const styles = {}; for (const key of ['color','backgroundColor','fontSize']) if (form.elements[key].value) styles[key] = form.elements[key].value; await window.desktop.previewEdit({selector: form.elements.selector.value, ...(form.elements.text.disabled?{}:{text: form.elements.text.value}), styles}); form.querySelector('[role=status]').textContent = 'Applied to the running page.'; } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
     controls.undo.onclick = async () => { try { activate(entry); await window.desktop.previewEdit({undo: true}); } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
+    chrome?.mount(entry);
     paint(entry, 'paused');
     return entry;
   }
@@ -161,6 +175,7 @@
     entry.controls.breadcrumb.textContent = node.preview.name || node.name;
     entry.controls.project.textContent = node.preview.name || node.preview.root.split('/').pop() || 'Local app';
     if (!activeId) activate(entry);
+    chrome?.update(entry);
     return entry;
   }
   function focus(entry){const rect=document.getElementById('canvas-wrap').getBoundingClientRect(),zoom=Math.max(.05,Math.min((rect.width-100)/entry.node.w,(rect.height-140)/entry.node.h,1));window.design.setCamera(50-entry.node.x*zoom,60-entry.node.y*zoom,zoom);}
@@ -182,7 +197,8 @@
     // Preview audit PF4/PF7: new frames open at the default screen template (MacBook Pro 14", window.previewPresets)
     // and the layer is named after the chat's worktree.
     const size = window.previewPresets?.find(p => p.default) || {name: 'MacBook Pro 14"', w: 1512, h: 982};
-    const preview = {root: info.root, name: info.name || 'Local app', chatId: info.chatId || '', template: size.name, ...(info.url ? {url: valid(info.url)} : {})};
+    const repo = info.repo || window.agentWorkspace?.getState?.()?.projectName || '';
+    const preview = {root: info.root, name: info.name || 'Local app', chatId: info.chatId || '', template: size.name, ...(repo ? {repo: String(repo).slice(0, 200)} : {}), ...(info.url ? {url: valid(info.url)} : {})};
     const id = window.design.addNode('frame', {name: layerName(info, preview), parentId: null, x: right, y: 100, w: size.w, h: size.h, color: '#191919', radius: 8, padding: 0, preview});
     activate(entries.get(id));focus(entries.get(id));
     return id;
@@ -198,8 +214,10 @@
   document.addEventListener('pointerdown',event=>{const entry=current();if(entry?.inputToApp&&!event.target.closest('#preview-toolbar')){releaseInput(entry);changed();}},true);
   window.addEventListener('message',event=>{const entry=current();if(entry?.inputToApp&&event.source===entry.frame.contentWindow&&event.data?.type==='verynize-preview-release-input'){releaseInput(entry);changed();}});
   window.addEventListener('bd:preview-input-released',()=>{for(const entry of entries.values())entry.inputToApp=false;changed();});
-  window.livePreview = {show, hide, reveal, ensure, renderNode, getSelectionState:selectionState,navigateMode,editMode,captureSelected:()=>{const entry=selected();return entry?capture(entry):Promise.resolve();},captureRegion:()=>{const entry=selected()||current();return entry?pickAndCapture(entry):Promise.resolve();},pickRegion,insertCaptured,sendAllInput,openInBrowser, nodeElement: id => entries.get(id)?.el, getURL: () => current()?.url || '', getNodeId: () => activeId};
-  window.addEventListener('bd:preview-setup-state', event => {for(const entry of entries.values())if(entry.node.preview.root===event.detail.root){entry.settingUp=event.detail.state==='setting-up';paint(entry,event.detail.state==='failed'?'error':'starting',event.detail.message||'');}});
+  window.livePreview = {show, hide, reveal, ensure, renderNode, getSelectionState:selectionState,navigateMode,editMode,captureSelected:()=>{const entry=selected();return entry?capture(entry):Promise.resolve();},captureRegion:()=>{const entry=selected()||current();return entry?pickAndCapture(entry):Promise.resolve();},pickRegion,insertCaptured,sendAllInput,openInBrowser, nodeElement: id => entries.get(id)?.el, getURL: () => current()?.url || '', getNodeId: () => activeId,
+    // Internal surface for the frame chrome module (web/preview-frame-chrome.js); not a stable API.
+    frameInternals: {entries, toggle, navigate, activate, paint, valid, cleanError, current, setChrome(next) { chrome = next; for (const entry of entries.values()) { chrome.mount(entry); chrome.update(entry); chrome.paint(entry); } }}};
+  window.addEventListener('bd:preview-setup-state', event => {for(const entry of entries.values())if(entry.node.preview.root===event.detail.root){entry.settingUp=event.detail.state==='setting-up';if(event.detail.state!=='failed'){entry.attemptAt=Date.now();entry.status=null;}paint(entry,event.detail.state==='failed'?'error':'starting',event.detail.message||'');}});
   window.design.subscribe(doc => {
     const alive = new Set(doc.pages.find(p => p.id === doc.activePage).nodes.filter(n => n.preview).map(n => n.id));
     for (const [id, entry] of entries) if (!alive.has(id)) { releaseInput(entry);entry.frame.removeAttribute('src'); entries.delete(id); if (id === activeId) activeId = null; }
@@ -212,10 +230,16 @@
   setInterval(async () => {
     for (const entry of entries.values()) {
       if (!entry.node.preview.root || !window.desktop?.devServer || !entry.el.isConnected) continue;
-      try { const state = await window.desktop.devServer.status({root: entry.node.preview.root}); if (!entry.el.isConnected) continue;
-        if(state.setup?.state==='running'){entry.settingUp=true;paint(entry,'starting',state.setup.tail||'Running setup command…');continue;}if(entry.settingUp)continue;
+      try { const seq = entry.paintSeq, state = await window.desktop.devServer.status({root: entry.node.preview.root}); if (!entry.el.isConnected) continue;
+        // A repaint while this status was in flight (a click, a start result) wins over it.
+        if (entry.paintSeq !== seq) continue;
+        if(state.setup?.state==='running'){entry.settingUp=true;entry.status=state;paint(entry,'starting',state.setup.tail||'Running setup command…');continue;}if(entry.settingUp)continue;
+        // A process record that predates the latest start attempt describes the previous run, not this one.
+        const stale = entry.attemptAt && (!state.startedAt || Date.parse(state.startedAt) < entry.attemptAt - 250);
+        if (!(stale && entry.state === 'starting')) entry.status = state;
         if (state.state === 'running' && state.url && entry.state === 'starting') navigate(entry, state.url);
-        else if (['stopped','failed','exited'].includes(state.state) && ['starting','running'].includes(entry.state)) { entry.frame.removeAttribute('src'); paint(entry, ['failed','exited'].includes(state.state) ? 'error' : 'paused', state.error || state.tail || (state.state==='exited'?'The preview process exited. Check the run command.':'')); }
+        else if (['stopped','failed','exited'].includes(state.state) && ['starting','running'].includes(entry.state) && !(entry.state === 'starting' && (stale || entry.pending))) { entry.frame.removeAttribute('src'); paint(entry, ['failed','exited'].includes(state.state) ? 'error' : 'paused', state.error || state.tail || (state.state==='exited'?'The preview process exited. Check the run command.':'')); }
+        else chrome?.paint(entry);
       } catch { /* Repository may no longer be connected; explicit Start reports the error. */ }
     }
   }, 1500);
