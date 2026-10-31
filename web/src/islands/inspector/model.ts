@@ -25,7 +25,10 @@ export type Node = LayerNode & {
   justifyContent: string;
   gradient: string;
   mask: string;
+  /** Older animated CSS gradient (aurora / sunset / ocean); still rendered, replaced by Shader mode. */
   animated: string;
+  /** Shader mode (Wonder H6): the fill is painted by the shader preset/colours/sliders below. */
+  shaderFill?: boolean;
   shadow: string;
   strokeWidth: number;
   strokeColor: string;

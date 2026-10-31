@@ -258,8 +258,8 @@ const LOGO = svg(
     assert.equal((await box(fill)).h, 32, "an empty fill is the 32 px header only");
     assert.doesNotMatch(await fill.innerText(), /No paints/, "no placeholder text");
     assert.equal(await fill.locator("[name=animated]").count(), 0, "Animated is not in the body");
-    // Header tools 8 px apart: the wavy square at 224, + at 256.
-    assert.equal((await box(fill.locator("[data-fill-animated]"))).cx, 224);
+    // Header tools 8 px apart: the wavy square (Shader mode, H6) at 224, + at 256.
+    assert.equal((await box(fill.locator("[data-shader-mode]"))).cx, 224);
     assert.equal((await box(fill.getByRole("button", { name: "Add paint" }))).cx, 256);
     // Defaults: white first, then black at 20 %.
     await fill.getByRole("button", { name: "Add paint" }).click();
@@ -300,12 +300,93 @@ const LOGO = svg(
     // Hidden paint: Wonder's closed-eye glyph.
     await fill.locator('[data-paint-visibility="1"]').click();
     assert.equal(await fill.locator('[data-paint-visibility="1"] svg.lucide-eye-closed').count(), 1);
-    // Animated lives behind the wavy-square header tool ([name=animated] kept).
-    await fill.locator("[data-fill-animated]").click();
-    await page.locator("#fill-animated [name=animated]").selectOption("aurora");
-    assert.equal((await node("card")).animated, "aurora");
-    assert.equal(await fill.locator("[data-fill-animated]").getAttribute("data-active"), "true");
-    await page.keyboard.press("Escape");
+    // --- H6: the wavy square is the "Shader mode" toggle (wonder/H6-tooltip-confirmed, H6-open-confirmed) ---
+    const shaderMode = fill.locator("[data-shader-mode]");
+    const paintsBefore = (await node("card")).fills;
+    await page.mouse.move(5, 5);
+    await shaderMode.hover();
+    await page.getByRole("tooltip", { name: "Shader mode" }).waitFor();
+    assert.equal(await shaderMode.getAttribute("aria-label"), "Shader mode");
+    assert.equal(await shaderMode.getAttribute("aria-pressed"), "false");
+    await shaderMode.click();
+    let modeCard = await node("card");
+    assert.equal(modeCard.shaderFill, true, "shader mode on");
+    assert.equal(modeCard.type, "frame", "the layer keeps its type; only its fill changes");
+    assert.equal(modeCard.shaderPreset, "tidal-swirl-1", "starts on the first parametric preset");
+    assert.deepEqual(modeCard.fills, paintsBefore, "paints are kept");
+    assert.equal(await shaderMode.getAttribute("aria-pressed"), "true");
+    assert.equal(await shaderMode.getAttribute("data-active"), "true");
+    // Pressed look: the purple toggle tint behind a light purple glyph (Wonder #372441 / #ce86f8).
+    assert.notEqual(
+      await shaderMode.evaluate((e) => getComputedStyle(e).backgroundColor),
+      await fill.getByRole("button", { name: "Add paint" }).evaluate((e) => getComputedStyle(e).backgroundColor),
+    );
+    // Preset dropdown + settings button + the preset's colours replace the paint rows.
+    assert.equal(await fill.locator("[data-paint]").count(), 0, "paint rows replaced");
+    assert.equal(await fill.locator("#shader-fill-preset").innerText(), "Tidal Swirl 1");
+    assert.equal(await fill.locator("[data-shader-color-row]").count(), 4);
+    const presetBox = await box(fill.locator("#shader-fill-preset"));
+    assert.deepEqual([presetBox.x, presetBox.right, presetBox.h], [12, 232, 24], "dropdown x 12–232");
+    assert.equal((await box(fill.locator("#shader-options-open"))).cx, 256, "settings button under +");
+    assert.equal((await box(fill.getByRole("button", { name: "Add paint" }))).cx, 256, "+ stays");
+    // The canvas paints the fill with a shader surface under the layer's content.
+    const surface = page.locator('#canvas [data-id="card"] > canvas.shader-surface');
+    await surface.waitFor({ state: "attached" });
+    assert.equal(await page.locator('#canvas [data-id="card"]').getAttribute("data-shader-fill"), "true");
+    assert.equal(await page.locator('#canvas [data-id="card"]').getAttribute("data-shader-preset"), "tidal-swirl-1");
+    assert.equal(await surface.evaluate((e) => getComputedStyle(e).zIndex), "-1");
+    // Choosing a preset changes the fill, not the layer type.
+    await fill.locator("#shader-fill-preset").click();
+    await page.locator('#shader-gallery [data-shader-option="ripple-pool-2"]').click();
+    modeCard = await node("card");
+    assert.deepEqual([modeCard.type, modeCard.shaderPreset, modeCard.shaderFill], ["frame", "ripple-pool-2", true]);
+    assert.equal(await fill.locator("#shader-fill-preset").innerText(), "Ripple Pool 2");
+    await fill.locator("#shader-options-open").click();
+    await page.locator("#shader-options").waitFor();
+    await page.locator("#shader-options").getByRole("button", { name: "Close shader settings" }).click();
+    // Persisted: the mode, preset and pressed state survive a reload.
+    await page.reload();
+    await page.waitForSelector("#canvas .layer");
+    await page.evaluate(() => window.design.setSelection(["card"]));
+    modeCard = await node("card");
+    assert.deepEqual([modeCard.shaderFill, modeCard.shaderPreset], [true, "ripple-pool-2"], "saved with the document");
+    assert.equal(await shaderMode.getAttribute("aria-pressed"), "true", "still pressed after reload");
+    await page.locator('#canvas [data-id="card"] > canvas.shader-surface').waitFor({ state: "attached" });
+    // Off: the paint rows come back unchanged, the surface goes, the chosen preset is kept for next time.
+    await shaderMode.click();
+    modeCard = await node("card");
+    assert.equal(modeCard.shaderFill, undefined, "shader mode off");
+    assert.deepEqual(modeCard.fills, paintsBefore);
+    assert.equal(modeCard.shaderPreset, "ripple-pool-2");
+    assert.equal(await shaderMode.getAttribute("aria-pressed"), "false");
+    assert.equal(await fill.locator("[data-paint]").count(), 2, "paint rows back");
+    assert.equal(await page.locator('#canvas [data-id="card"] > canvas.shader-surface').count(), 0);
+    assert.equal(await page.locator('#canvas [data-id="card"]').getAttribute("data-shader-fill"), null);
+    // + in Shader mode adds a paint and goes back to the paint rows (one step).
+    await shaderMode.click();
+    await fill.getByRole("button", { name: "Add paint" }).click();
+    modeCard = await node("card");
+    assert.equal(modeCard.shaderFill, undefined);
+    assert.equal(modeCard.fills.length, 3);
+    // Older documents: an `animated` gradient still renders and stays editable; Shader mode replaces it.
+    await page.evaluate(() => window.design.updateNodes(["card"], { animated: "aurora" }));
+    assert.ok(
+      (await page.locator('#canvas [data-id="card"]').evaluate((e) => e.style.animation)).includes("design-gradient"),
+    );
+    assert.equal(await fill.locator("[name=animated]").inputValue(), "aurora");
+    await shaderMode.click();
+    assert.equal((await node("card")).animated, "", "Shader mode replaces the animated gradient");
+    assert.equal(await fill.locator("[name=animated]").count(), 0);
+    // Text: Text Fill has no shader mode (disabled); the Background Fill behind the glyphs does.
+    await setup([{ id: "label", name: "Label", type: "text", text: "Hi", x: 20, y: 20, w: 100, h: 40, color: "#ffffff" }]);
+    assert.equal(await fill.locator("[data-shader-mode]").isDisabled(), true, "Text Fill: no shader mode");
+    const textBackground = page.locator("#text-background-fill-section");
+    await textBackground.locator("[data-shader-mode]").click();
+    assert.equal((await node("label")).shaderFill, true);
+    assert.equal(await textBackground.locator("[data-shader-color-row]").count(), 4);
+    await page.locator('#canvas [data-id="label"] > canvas.shader-surface').waitFor({ state: "attached" });
+    assert.equal(await page.locator('#canvas [data-id="label"]').innerText(), "Hi", "glyphs stay above the shader");
+    console.log("PASS shader mode: tooltip, pressed toggle, preset + colours replace paints, canvas surface, reload, off, legacy animated");
 
     // P0 bug 1: a solid with a separate paint opacity shows the product, and edits fold it into the colour alpha.
     await setup([
@@ -371,7 +452,7 @@ const LOGO = svg(
     await closeDialog();
     assert.equal(await fill.getByRole("textbox", { name: "Fill opacity" }).inputValue(), "50");
     console.log(
-      "PASS Wonder fill parity: empty header only, Animated behind the header tool, defaults, 12–204 field, 224/256 tools, 33 px pitch, drag grip, opacity 50, no gradient %, bound fill unlink/plane/variable alpha",
+      "PASS Wonder fill parity: empty header only, Shader mode header toggle, defaults, 12–204 field, 224/256 tools, 33 px pitch, drag grip, opacity 50, no gradient %, bound fill unlink/plane/variable alpha",
     );
 
     // --- Rendered pixels: stack with per-paint opacity, hidden paint (native PNG export, 2×) ------------------
