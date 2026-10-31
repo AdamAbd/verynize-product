@@ -52,3 +52,9 @@
     --tw-ring-shadow: 0 0 #0000 !important;
   }
 }
+
+/* Grid track preview (grid-settings.tsx): one outline per track, sized by the tracks' fr weights. */
+#grid-tracks {
+  grid-template-columns: var(--grid-preview-columns);
+  grid-template-rows: var(--grid-preview-rows);
+}

@@ -128,6 +128,14 @@ const DORMANT = [
     (n) => n.type === "frame" && n.layout !== "grid" && n.columns !== undefined && n.columns !== 2,
   ],
   ["rows", (n) => n.type === "frame" && n.layout !== "grid" && n.rows !== undefined],
+  ["columnSizes", (n) => n.type === "frame" && n.layout !== "grid" && n.columnSizes !== undefined],
+  [
+    "rowSizes",
+    (n) =>
+      n.type === "frame" &&
+      (n.layout !== "grid" || !(Number(n.rows) >= 1)) &&
+      n.rowSizes !== undefined,
+  ],
   [
     "direction",
     (n) =>
@@ -216,6 +224,8 @@ export function residualOf(node) {
   }
   if (Array.isArray(node.textRuns) && node.textRuns.length) r.textRuns = node.textRuns;
   if (node.locked === true) r.locked = true;
+  // Grid "Automatic positioning" off has no class (it changes no CSS).
+  if (node.type === "frame" && node.autoPosition === false) r.autoPosition = false;
   if (node.preview && typeof node.preview === "object" && !node.parentId) r.preview = node.preview;
   const name = typeof node.name === "string" ? node.name : "";
   if (name && (name !== name.trim() || name.length > 200)) r.name = name;
@@ -306,6 +316,7 @@ export function applyResidual(node, attrs, { tokens = {}, warnings = [], where =
     if (Object.keys(kept).length < Object.keys(r.bindings).length) stale.push("bindings");
   }
   if (r.locked === true) node.locked = true;
+  if (r.autoPosition === false && node.type === "frame") node.autoPosition = false;
   if (r.preview && typeof r.preview === "object" && !node.parentId)
     node.preview = structuredClone(r.preview);
   if (typeof r.name === "string" && r.name.trim() && r.name.trim().slice(0, 200) === node.name)

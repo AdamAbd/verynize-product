@@ -191,7 +191,7 @@ const layoutFields = {
   translate: z.array(length).length(2).describe('[x, y] in px or "N%"').optional(),
   flexWrap: z.enum(['nowrap', 'wrap', 'wrap-reverse']).optional(), grow: z.number().finite().min(0).max(100).optional(), shrink: z.number().finite().min(0).max(100).optional(),
   basis: z.union([px, pct]).optional(), alignSelf: z.string().max(40).optional(), colSpan: z.union([z.number().int().min(1).max(24), z.literal('full')]).optional(), rowSpan: z.number().int().min(1).max(24).optional(),
-  reverse: z.boolean().optional(), rows: z.number().int().min(1).max(100).optional(), justifyItems: z.string().max(40).optional(),
+  reverse: z.boolean().optional(), rows: z.number().int().min(1).max(100).optional(), columnSizes: z.array(z.number().finite().positive().max(1000)).max(100).describe('Grid column fr weights (Fill · N fr), one per column; missing = 1').optional(), rowSizes: z.array(z.number().finite().positive().max(1000)).max(100).describe('Grid row fr weights for explicit rows; missing = 1').optional(), autoPosition: z.boolean().describe('Grid "Automatic positioning" toggle (default true)').optional(), justifyItems: z.string().max(40).optional(),
   fill: z.string().max(200).optional(), ink: z.string().max(200).optional(), inkToken: z.string().max(100).optional(),
   lineHeightPx: px.optional(), letterSpacingEm: z.number().finite().min(-1).max(2).optional(),
   textTransform: z.enum(['none', 'uppercase', 'lowercase', 'capitalize']).optional(), textDecoration: z.enum(['', 'underline', 'line-through', 'overline']).optional(),

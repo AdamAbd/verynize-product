@@ -10,5 +10,5 @@ export const { paintError, eachPaintColor, paintColor, fillsCss, svgPaintList, s
 // Type settings (vertical alignment, white space, word break, indent, smoothing, line height "auto").
 export const { typographyError, TEXT_ALIGN_VERTICAL, WHITE_SPACES, WORD_BREAKS, FONT_SMOOTHINGS } = api;
 // Sizing modes (Relative / Auto / Calculate expressions) and Block alignment.
-export const { parseCalc, calcValue, calcCss, sizingError, SIZING_MODES, BLOCK_ALIGN } = api;
+export const { parseCalc, calcValue, calcCss, sizingError, SIZING_MODES, BLOCK_ALIGN, trackWeight, gridTracks } = api;
 export default api;
