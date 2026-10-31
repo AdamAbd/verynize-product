@@ -1,3 +1,4 @@
+const { waitForUiReady } = require("./helpers/ui-ready.cjs");
 const { _electron: electron } = require("@playwright/test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
@@ -13,7 +14,10 @@ const os = require("node:os");
   const app = await electron.launch({ env, args: [".", `--user-data-dir=${profile}`] });
   try {
     const page = await app.firstWindow();
-    const ready = () => page.waitForFunction(() => window.shellRouter?.state.status === "idle");
+    const ready = async () => {
+      await waitForUiReady(page);
+      await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
+    };
     await ready();
     const state = () =>
       page.evaluate(() => ({

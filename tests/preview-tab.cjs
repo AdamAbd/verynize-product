@@ -2,6 +2,7 @@
 // tab with a separate page state; the tab survives tab switches, "Show on canvas" returns to the selected frame and
 // keeps the tab, closing it never stops the dev server, and a stopped server shows "<worktree> · Stopped".
 const {_electron} = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -18,6 +19,7 @@ const APP = `require('http').createServer((q,r)=>{r.setHeader('content-type','te
   const app = await _electron.launch({env, args: ['.', `--user-data-dir=${path.join(dir, 'profile')}`]});
   let root = '';
   const page = await app.firstWindow();
+  await waitForUiReady(page);
   try {
     await page.waitForFunction(() => !!window.livePreview && !!window.previewTab && !!window.agentWorkspace);
     await app.evaluate(({dialog}, folder) => { dialog.showOpenDialog = async () => ({canceled: false, filePaths: [folder]}); }, repo);

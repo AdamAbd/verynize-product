@@ -3,6 +3,7 @@
 // is down survive an app restart and reach the room exactly once (persistent outbox).
 import { Miniflare } from "miniflare";
 import { _electron as electron } from "@playwright/test";
+import { waitForUiReady } from "./helpers/ui-ready.cjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -26,6 +27,7 @@ async function launch(profile) {
   });
   apps.add(app);
   const page = await app.firstWindow({ timeout: 20000 });
+  await waitForUiReady(page);
   await page.waitForFunction(
     () =>
       !!window.design && !!window.cloudWorkspace && !!window.fileLibrary && !!window.cloudAccount,

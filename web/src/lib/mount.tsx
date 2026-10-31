@@ -1,6 +1,7 @@
-import { StrictMode, type ReactNode } from "react";
+import { StrictMode, useEffect, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { markIslandCommitted, registerIsland } from "@/lib/bridge";
 import "@/styles/globals.css";
 
 // The shell is a fixed one-viewport layout; undo any document scroll caused by focus or scrollIntoView
@@ -14,12 +15,20 @@ function guardDocumentScroll() {
   });
 }
 
+/** Reports the island's first commit to the UI-ready signal (bridge.ts). Renders nothing. */
+function Committed({ name }: { name: string }) {
+  useEffect(() => markIslandCommitted(name), [name]);
+  return null;
+}
+
 /**
  * Mount an island once the legacy scripts have run.
  * `target` is the element the island renders into (created if it is a string id that does not exist yet).
+ * The island holds back `html[data-ui-ready]` / `bd:ui-ready` until its first render has committed.
  */
 export function mountIsland(name: string, target: HTMLElement | (() => HTMLElement), node: () => ReactNode) {
   guardDocumentScroll();
+  registerIsland(name);
   const start = () => {
     const container = typeof target === "function" ? target() : target;
     container.setAttribute("data-bd", "");
@@ -27,6 +36,7 @@ export function mountIsland(name: string, target: HTMLElement | (() => HTMLEleme
     createRoot(container).render(
       <StrictMode>
         <TooltipProvider delayDuration={400}>{node()}</TooltipProvider>
+        <Committed name={name} />
       </StrictMode>,
     );
   };

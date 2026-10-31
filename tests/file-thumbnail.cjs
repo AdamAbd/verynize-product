@@ -3,6 +3,7 @@
 // reload, and the Files card draws that layer alone, covering the thumbnail box. When the layer is deleted the card
 // falls back to the active page.
 const {_electron} = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
@@ -13,6 +14,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
   const app = await _electron.launch({env, args: ['.', `--user-data-dir=${dir}`], timeout: 20000});
   try {
     const page = await app.firstWindow({timeout: 20000});
+    await waitForUiReady(page);
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     const ready = async () => {
@@ -71,6 +73,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     // Persisted across a reload.
     await page.waitForTimeout(400);
     await page.reload();
+    await waitForUiReady(page);
     await ready();
     assert.equal(await page.evaluate(() => window.design.getDocument().thumbnailNodeId), 'card', 'thumbnail survives reload');
 

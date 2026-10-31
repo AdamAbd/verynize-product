@@ -1,5 +1,6 @@
 // Variable creation/export and malformed icon assets: real Electron UI regressions.
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -14,6 +15,7 @@ const path = require('node:path');
   try {
     app = await _electron.launch({ env, args: ['.', `--user-data-dir=${profile}`], timeout: 20000 });
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await page.waitForSelector('#canvas .layer');
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -123,7 +125,7 @@ const path = require('node:path');
     assert.equal((await doc()).pages[0].nodes[0].svgColor, '#00ff00');
     assert.equal((await doc()).pages[0].nodes[0].svgColorToken, undefined);
     assert.equal((await doc()).pages[0].nodes[0].src, svg);
-    await page.reload(); await page.waitForSelector('#canvas [data-svg-color="true"]');
+    await page.reload(); await waitForUiReady(page); await page.waitForSelector('#canvas [data-svg-color="true"]');
     assert.equal((await doc()).pages[0].nodes[0].src, svg);
     assert.match(await page.evaluate(() => window.design.exportHTML()), /mask-mode: alpha|mask-mode:alpha/);
     await page.evaluate(() => window.design.setSelection(['svg']));

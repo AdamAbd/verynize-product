@@ -1,6 +1,7 @@
 // Live MCP bridge: a real SDK client talks to the desktop app's loopback HTTP server and edits
 // the document open in the editor renderer (visible at once, undoable), plus headless fallback.
 const {_electron:electron}=require('@playwright/test');
+const {waitForUiReady}=require('./helpers/ui-ready.cjs');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
 const os=require('node:os');
@@ -14,7 +15,7 @@ const path=require('node:path');
   let app,client;
   try{
     app=await electron.launch({env,args:['.',`--user-data-dir=${profile}`]});
-    const page=await app.firstWindow();
+    const page=await app.firstWindow();await waitForUiReady(page);
     await page.waitForFunction(()=>!!window.desktop&&!!window.verynize);
     assert.equal(await page.evaluate(()=>typeof window.desktop.agentBridge.reply),'function');
     assert.equal(await page.evaluate(()=>typeof require),'undefined');
