@@ -7,7 +7,7 @@
 //   POST /api/ai/runs                         start (or replay, by idempotencyKey) → SSE
 //   GET  /api/ai/runs/:id/events?after=<seq>  stored events after seq, then live → SSE
 //   POST /api/ai/runs/:id/cancel              {ok: true}
-//   POST /api/ai/runs/:id/approvals           {requestId, allow} → {ok: true} | 404 | 403 | 409
+//   POST /api/ai/runs/:id/approvals           {requestId, allow, argsHash} → {ok} | 404 | 403 | 409
 //
 // Every endpoint needs a signed-in account (the router's accountOf); the account never comes from
 // the request body or the model.
@@ -18,6 +18,7 @@ import {
   claimExpired,
   createRun,
   decideApproval,
+  denyPending,
   eventsAfter,
   getApproval,
   getRun,
@@ -26,7 +27,7 @@ import {
   requestCancel,
   runByKey,
 } from "./ai-store.js";
-import { DESIGN_STYLE, createEventLog, executeRun } from "./ai-executor.js";
+import { APPROVAL_TIMEOUT_MS, DESIGN_STYLE, createEventLog, executeRun } from "./ai-executor.js";
 
 export const AI_PREFIX = "/api/ai/";
 const RUN_ROUTE = /^\/api\/ai\/runs\/([0-9a-f-]{36})\/(events|cancel|approvals)$/;
@@ -46,6 +47,10 @@ const positive = (value, fallback) => {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : fallback;
 };
+
+/** How long a write waits for its approval (`VERYNIZE_AI_APPROVAL_TIMEOUT_MS`, default 10 min). */
+export const approvalTimeout = (env) =>
+  positive(env.VERYNIZE_AI_APPROVAL_TIMEOUT_MS, APPROVAL_TIMEOUT_MS);
 
 /** The runtime configuration from the bindings: `VERYNIZE_AI_MODELS` is "id[=Label],…". */
 export function aiConfig(env) {
@@ -137,6 +142,16 @@ async function closeExpired(env, run) {
   if (!(await claimExpired(env, run.id))) return;
   let seq = await lastSeq(env, run.id);
   const base = { id: run.id, chatId: run.chatId };
+  // Approvals the dead executor was waiting for are denied, as when a run ends.
+  for (const requestId of await denyPending(env, run.id, "cancelled"))
+    await appendEvent(env, run.id, {
+      ...base,
+      seq: ++seq,
+      type: "permission-resolved",
+      requestId,
+      allow: false,
+      reason: "cancelled",
+    });
   await appendEvent(env, run.id, {
     ...base,
     seq: ++seq,
@@ -205,6 +220,9 @@ function followStream(env, runId, after) {
 function validRunRequest(body, config) {
   if (!body || typeof body !== "object" || Array.isArray(body)) fail(400, "Body must be an object");
   const { chatId, roomId, prompt, model, access, history, designStyle, idempotencyKey } = body;
+  for (const flag of ["plan", "helper"])
+    if (body[flag] !== undefined && typeof body[flag] !== "boolean")
+      fail(400, `${flag} must be true or false`);
   if (typeof chatId !== "string" || !/^[\w.:-]{1,128}$/.test(chatId))
     fail(400, "chatId must be 1-128 letters, digits, _ . : or -");
   if (typeof roomId !== "string" || !ROOM_ID.test(roomId)) fail(400, "roomId must be a room id");
@@ -233,6 +251,8 @@ function validRunRequest(body, config) {
     access: access || "ask",
     history: turns.filter((item) => item.text.trim()),
     designStyle: designStyle || undefined,
+    plan: body.plan === true,
+    helper: body.helper === true,
     idempotencyKey,
   };
 }
@@ -306,6 +326,9 @@ export async function handleAi(request, env, url, { accountOf, limited, ctx }) {
       prompt: input.prompt,
       history: input.history,
       designStyle: input.designStyle,
+      plan: input.plan,
+      helper: input.helper,
+      approvalTimeoutMs: approvalTimeout(env),
       limits: config.limits,
       provider: {
         apiKey: env.OPENROUTER_API_KEY,
@@ -336,13 +359,22 @@ export async function handleAi(request, env, url, { accountOf, limited, ctx }) {
     if (run.status === "running") await requestCancel(env, runId);
     return json({ ok: true });
   }
-  // approvals
+  // Approvals: the decision is stored once, here; the executor (on whichever instance runs the
+  // run) polls it, re-checks the hash against the call it is about to run, and the room role.
   const body = await readJson(request, 16 * 1024);
   if (typeof body?.requestId !== "string" || typeof body.allow !== "boolean")
-    fail(400, "Body must be {requestId, allow}");
+    fail(400, "Body must be {requestId, allow, argsHash}");
+  if (body.argsHash !== undefined && typeof body.argsHash !== "string")
+    fail(400, "argsHash must be the argsHash of the permission request");
+  if (body.allow && body.argsHash === undefined)
+    fail(400, "Approving needs the argsHash of the permission request");
   const approval = await getApproval(env, runId, body.requestId);
   if (!approval) fail(404, "Approval request not found");
+  if (approval.accountId !== account.id) fail(403, "This request belongs to another account");
   if (approval.decision) fail(409, "This request was already decided");
+  if (run.status !== "running" || run.leaseUntil < Date.now()) fail(409, "This run has ended");
+  if (body.argsHash !== undefined && body.argsHash !== approval.argsHash)
+    fail(409, "The arguments of this tool call do not match the approval request");
   if (!(await decideApproval(env, runId, body.requestId, body.allow, "user")))
     fail(409, "This request was already decided");
   return json({ ok: true });

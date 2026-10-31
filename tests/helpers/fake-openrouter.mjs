@@ -6,13 +6,38 @@
 // within a scenario by the number of tool results already in the request (0 for the first model
 // call, 1 after one tool round, …). A turn is a list of steps:
 //   {text: "..."}                          assistant text, streamed in a few deltas
-//   {tool: "name", args: {...}, id?}       one tool call (arguments streamed in two pieces)
+//   {tool: "name", args: {...}, id?}       one tool call (arguments streamed in two pieces); any
+//                                          tool name, read or write (create_artboard, …); `args`
+//                                          may be a function of the request body, and `id` fixes
+//                                          the tool call id (the same id twice scripts a repeat)
 //   {delay: ms}                            wait before the next step
 //   {hang: true}                           keep the stream open until the client goes away
-// Every request is recorded (`requests`), so tests can assert what the backend sent.
+// Every request is recorded (`requests`), so tests can assert what the backend sent (for writes:
+// the tool message the model got back, e.g. a denial). `userText(body)` and `toolMessages(body)`
+// read a recorded request.
 import http from "node:http";
 
 const sse = (res, payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+
+/** Text of the latest user message of a chat completions request body. */
+export function userText(body) {
+  const lastUser = [...(body.messages || [])].reverse().find((m) => m.role === "user");
+  return typeof lastUser?.content === "string"
+    ? lastUser.content
+    : (lastUser?.content || []).map((part) => part.text || "").join("");
+}
+
+/** The tool result messages of a request body, as {id, content}. */
+export const toolMessages = (body) =>
+  (body.messages || [])
+    .filter((m) => m.role === "tool")
+    .map((m) => ({
+      id: m.tool_call_id,
+      content:
+        typeof m.content === "string"
+          ? m.content
+          : (m.content || []).map((part) => part.text || "").join(""),
+    }));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -32,12 +57,7 @@ export async function startFakeOpenRouter(scenarios) {
     const body = JSON.parse(raw || "{}");
     requests.push({ headers: req.headers, body });
     const messages = body.messages || [];
-    const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    const userText =
-      typeof lastUser?.content === "string"
-        ? lastUser.content
-        : (lastUser?.content || []).map((part) => part.text || "").join("");
-    const name = /\[scenario:([\w-]+)\]/.exec(userText)?.[1] || "default";
+    const name = /\[scenario:([\w-]+)\]/.exec(userText(body))?.[1] || "default";
     const scenario = scenarios[name] || scenarios.default;
     const turnIndex = messages.filter((m) => m.role === "tool").length;
     const turns = typeof scenario === "function" ? null : scenario;
@@ -78,7 +98,9 @@ export async function startFakeOpenRouter(scenarios) {
           await sleep(5);
         }
       } else if (step.tool) {
-        const args = JSON.stringify(step.args || {});
+        const args = JSON.stringify(
+          (typeof step.args === "function" ? step.args(body) : step.args) || {},
+        );
         const half = Math.ceil(args.length / 2);
         const callId = step.id || `call_${counter}_${toolIndex}`;
         chunk({
