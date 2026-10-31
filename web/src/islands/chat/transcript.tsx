@@ -876,7 +876,7 @@ function pickSuggestions(suggestions: Suggestion[], seed: string | null): Sugges
 
 /** Empty chat (34, 35): logo + prompt, with a few of the workspace's starter briefs as cards that fill the composer. */
 function EmptyState({ suggestions, seed }: { suggestions: Suggestion[]; seed: string | null }) {
-  // A brief written for a catalog style also pins that style in the composer picker, so the run carries `designStyle`.
+  // A brief written for a catalog style also pins that style (window.chatDesignStyle), so the run carries `designStyle`.
   const fill = ({ prompt, style }: Suggestion) => {
     const el = document.getElementById("project-prompt") as HTMLTextAreaElement | null;
     if (!el) return;
