@@ -14,7 +14,13 @@ const os = require("node:os");
 const path = require("node:path");
 
 const OUT = __dirname;
-const only = process.argv.slice(2);
+// `--new-only` never overwrites a PNG that already exists (used for the 2026-10-31 follow-up pass).
+const NEW_ONLY = process.argv.includes("--new-only");
+const only = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+// Follow-up ids (notes-2026-10-31.md): D1/D2 frame tool + defaults, G1–G6 top remaining gaps, H1–H9 assumptions.
+// Their names follow the Wonder pass in wonder/notes-2026-10-31.md so make-pairs.py pairs them.
+const FOLLOW_UP = /^(D[12]|G[1-6]|H[1-9])-/;
+const onlyFollowUp = only.length > 0 && only.every((p) => FOLLOW_UP.test(p.endsWith("-") ? p : p + "-"));
 
 const TOKENS = { surface: "#111827", "surface/base": "#172033", accent: "#5EEAD4", ink: "#000000" };
 const VARIABLES = {
@@ -44,6 +50,7 @@ const card = (patch = {}) => [{ ...CARD, ...patch }];
     await page.waitForTimeout(500);
 
     /* ---------- helpers ---------- */
+    const exists = (file) => fs.access(path.join(OUT, file)).then(() => true, () => false);
     const ensureOpen = async () => {
       const closed = await page.evaluate(() => document.querySelector("#insp-properties > [data-scroll]")?.hidden);
       if (closed) {
@@ -173,6 +180,7 @@ const card = (patch = {}) => [{ ...CARD, ...patch }];
     const snap = async (id, state, section, opts = {}) => {
       const file = `${id}-${state}.png`;
       if (only.length && !only.some((p) => file.startsWith(p))) return;
+      if (NEW_ONLY && (await exists(file))) return console.log("keep", file);
       if (section && opts.scroll !== false) await scroll(section, opts.block);
       if (opts.hover) {
         await page.hover(opts.hover);
@@ -206,8 +214,284 @@ const card = (patch = {}) => [{ ...CARD, ...patch }];
       console.log("shot", file);
     };
 
-    /* ---------- A1 Background Fill ---------- */
+    /* ---------- 2026-10-31 follow-up: D1/D2, G1–G6, H1–H9 (notes-2026-10-31.md) ---------- */
     const FILL = "#fill-section";
+    const BORDER = "#border-section";
+    const LAYOUT = "#layout-section";
+    const POS = "#position-section";
+    const APP = "#appearance-section";
+    const want = (file) => (!only.length || only.some((p) => file.startsWith(p)));
+    /** Non-panel shot: `rect` is "window", "canvas" (#canvas-wrap), "canvas+panel", or a selector (element box). */
+    const shoot = async (id, state, rect, opts = {}) => {
+      const file = `${id}-${state}.png`;
+      if (!want(file)) return;
+      if (NEW_ONLY && (await exists(file))) return console.log("keep", file);
+      if (opts.hover) {
+        await page.hover(opts.hover);
+        await page.waitForTimeout(opts.hoverWait ?? 200);
+      }
+      const clip = await page.evaluate((rect) => {
+        const box = (s) => document.querySelector(s)?.getBoundingClientRect();
+        if (rect === "window") return { x: 0, y: 0, width: innerWidth, height: innerHeight };
+        if (rect === "canvas") {
+          const r = box("#canvas-wrap");
+          return { x: r.left, y: r.top, width: r.width, height: r.height };
+        }
+        if (rect === "canvas+panel") {
+          const r = box("#canvas-wrap");
+          return { x: r.left, y: r.top, width: innerWidth - r.left, height: innerHeight - r.top };
+        }
+        const r = box(rect);
+        return r ? { x: r.left, y: r.top, width: r.width, height: r.height } : null;
+      }, rect);
+      if (!clip) return console.log("missing", rect, file);
+      await page.screenshot({ path: path.join(OUT, file), clip });
+      metrics.push({
+        file,
+        id,
+        state,
+        clip,
+        section: opts.section ? await describe(opts.section) : null,
+        menus: await menus(),
+        nodes: await page.evaluate(() => window.design.getDocument().pages[0]?.nodes ?? []),
+        selection: await page.evaluate(() => [...window.design.getSelection()]),
+        tool: await page.evaluate(() => window.design.getTool?.() ?? null),
+        ...(opts.extra ? { extra: await opts.extra() } : {}),
+      });
+      console.log("shot", file);
+    };
+    const followUp = only.length === 0 || only.some((p) => FOLLOW_UP.test(p.endsWith("-") ? p : p + "-"));
+    const lastNode = () => page.evaluate(() => window.design.getDocument().pages[0].nodes.at(-1) ?? null);
+    const newest = async () => (await lastNode())?.id;
+    // A clean, empty page with nothing selected and the Move tool, as in Wonder's D1 steps.
+    const emptyPage = async () => {
+      await load([], []);
+      await page.evaluate(() => window.design.setTool?.("move"));
+      await page.mouse.click(420, 160); // empty canvas: keyboard focus on the canvas, nothing selected
+      await page.waitForTimeout(150);
+    };
+    if (followUp) {
+      /* D1 Frame tool with nothing selected: F, then click / drag / preset; plus the toolbar button path. */
+      await emptyPage();
+      await page.keyboard.press("f");
+      await page.waitForTimeout(250);
+      await snap("D1", "collapsed", "#page-section", { extra: () => page.evaluate(() => ({ tool: window.design.getTool(), nodes: window.design.getDocument().pages[0].nodes.length })) });
+      await shoot("D1", "frame-tool-window", "window");
+      await shoot("D1", "frame-presets", "#frame-presets", { extra: () => page.evaluate(() => [...document.querySelectorAll("#frame-presets strong, #frame-presets button")].map((e) => e.innerText.replace(/\s+/g, " "))) });
+      await page.mouse.click(420, 200);
+      await page.waitForTimeout(300);
+      await shoot("D1", "click-created", "window");
+      await snap("D2", "click", APP, { nodeId: await newest() });
+      await emptyPage();
+      await page.keyboard.press("f");
+      await page.mouse.move(420, 200);
+      await page.mouse.down();
+      await page.mouse.move(560, 300, { steps: 6 });
+      await page.mouse.move(677, 393, { steps: 6 });
+      await page.mouse.up();
+      await page.waitForTimeout(300);
+      await shoot("D1", "drag-created", "window");
+      await snap("D2", "drag", APP, { nodeId: await newest() });
+      // Zoom to the dragged frame (Shift+2), deselect, and show its corner on the canvas.
+      await page.mouse.move(700, 120);
+      await page.keyboard.press("Shift+Digit2");
+      await page.waitForTimeout(400);
+      await page.evaluate(() => window.design.setSelection([]));
+      await page.waitForTimeout(250);
+      await shoot("D2", "corner-zoom", "canvas", { extra: () => page.evaluate(() => { const el = document.querySelector("#canvas .frame-layer"); const s = el && getComputedStyle(el); return s && { borderRadius: s.borderRadius, overflow: s.overflow, backgroundColor: s.backgroundColor }; }) });
+      await emptyPage();
+      await page.keyboard.press("f");
+      await page.locator('#frame-presets [data-preset="iPhone 17"]').click();
+      await page.waitForTimeout(400);
+      await shoot("D1", "preset-created", "window");
+      await snap("D2", "preset", APP, { nodeId: await newest() });
+      // The toolbar button (and the legacy #add-frame command) does not arm the tool: it inserts a frame at once.
+      await emptyPage();
+      await page.locator("#canvas-toolbar #add-frame").click();
+      await page.waitForTimeout(400);
+      await shoot("D1", "toolbar-click-created", "window");
+      await snap("D2", "toolbar-click", APP, { nodeId: await newest() });
+
+      /* G1 (B5) type-to-bind: type a variable name into W. */
+      await load(card());
+      await scroll(LAYOUT, "start");
+      await page.locator(`${LAYOUT} [name=w]`).click();
+      await page.locator(`${LAYOUT} [name=w]`).fill("spac");
+      await page.waitForTimeout(250);
+      await snap("G1", "width-suggestions", LAYOUT, { scroll: false });
+      await page.locator(`${LAYOUT} [name=w]`).fill("spacing");
+      await page.locator(`${LAYOUT} [name=w]`).press("Enter");
+      await page.waitForTimeout(300);
+      await snap("G1", "width-enter", LAYOUT, { scroll: false, extra: async () => ({ w: (await node()).w, bindings: (await node()).bindings ?? null, field: await page.locator(`${LAYOUT} [name=w]`).inputValue().catch(() => null), toasts: await page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].map((t) => t.innerText)) }) });
+
+      /* G2 (A7) export selects: native <select>s; their OS popups cannot be captured, so the shots show the focused field. */
+      const EXPORT = "#export-section";
+      const selectInfo = (id) => () => page.evaluate((id) => { const s = document.getElementById(id); return s && { tag: s.tagName, value: s.value, options: [...s.options].map((o) => o.text) }; }, id);
+      await load(card());
+      await click(`${EXPORT} button[aria-label="Add export"]`);
+      await away();
+      await snap("G2", "added", EXPORT);
+      await page.locator("#artwork-scale").focus();
+      await snap("G2", "scale-menu", EXPORT, { scroll: false, extra: selectInfo("artwork-scale") });
+      await page.locator("#artwork-format").focus();
+      await snap("G2", "format-menu", EXPORT, { scroll: false, extra: selectInfo("artwork-format") });
+      await page.evaluate(() => document.activeElement?.blur?.());
+
+      /* G3 (A2) border colour bound to an opaque variable (Wonder: color-1 = #000000). */
+      await load(card({ strokeWidth: 1, strokeColor: "#000000", strokeToken: "ink" }));
+      await snap("G3", "bound", BORDER);
+      await click(`${BORDER} button[aria-label="Pick border colour"]`);
+      await page.locator("[role=tab]", { hasText: "Variables" }).click().catch(() => {});
+      await page.waitForTimeout(200);
+      await snap("G3", "variables", BORDER, { scroll: false });
+      await page.locator("[role=tab]", { hasText: "Custom" }).click().catch(() => {});
+      await page.waitForTimeout(200);
+      await snap("G3", "border-picker", BORDER, { scroll: false });
+      await page.keyboard.press("Escape");
+
+      /* G4 (C3) active-cell bars: every alignment cell, row and column direction (matrix crop, 108×56 CSS). */
+      const flexKids = [
+        { id: "c1", name: "A", type: "rectangle", parentId: "card", x: 0, y: 0, w: 60, h: 40, color: "#ff0000" },
+        { id: "c2", name: "B", type: "rectangle", parentId: "card", x: 0, y: 0, w: 60, h: 40, color: "#00aa00" },
+      ];
+      const MATRIX = `${LAYOUT} [role=group][aria-label=Alignment]`;
+      for (const direction of ["row", "column"]) {
+        await load([{ ...CARD, layout: "flex", direction, gap: 10, padding: 0, alignItems: "flex-start", justifyContent: "flex-start" }, ...flexKids]);
+        await scroll(LAYOUT, "start");
+        if (direction === "row") await snap("G4", "flex-state", LAYOUT, { scroll: false });
+        for (let r = 0; r < 3; r++)
+          for (let c = 0; c < 3; c++) {
+            await page.locator(`${MATRIX} [data-cell="${r}-${c}"]`).click();
+            await away();
+            // Wonder retook every cell as `*-verified` (its first column crops missed the matrix); save both names.
+            for (const suffix of ["", "-verified"])
+              await shoot("G4", `${direction}-${r + 1}${c + 1}${suffix}`, MATRIX, { extra: async () => { const n = await node(); return { alignItems: n.alignItems, justifyContent: n.justifyContent }; } });
+          }
+      }
+
+      /* G5 (C4) grid track preview and editor at 2 / 3 / 4 columns, 4×2, and a fixed row. */
+      const gridOf = (columns, rows) => [
+        { ...CARD, layout: "grid", columns, ...(rows ? { rows } : {}), gap: 10, padding: 0 },
+        ...[1, 2, 3, 4].map((i) => ({ id: "g" + i, name: "Cell " + i, type: "rectangle", parentId: "card", x: 0, y: 0, w: 60, h: 40, color: "#dddddd" })),
+      ];
+      for (const [state, columns, rows] of [["track-editor", 2], ["two-columns", 2], ["three-columns", 3], ["four-columns", 4], ["four-two", 4, 2], ["row-added", 2, 1]]) {
+        await load(gridOf(columns, rows));
+        await scroll(LAYOUT, "start");
+        if (state !== "track-editor") await snap("G5", `${state}-preview`, LAYOUT, { scroll: false });
+        await click("#grid-tracks");
+        await snap("G5", state, LAYOUT, { scroll: false });
+        await page.keyboard.press("Escape");
+      }
+
+      /* G6 (A1/A4) paint picker on a solid, the gradient editor, and the bound shadow editor. */
+      await load(card());
+      await click(`${FILL} button[aria-label="Fill colour"]`);
+      await snap("G6", "fill-picker", FILL, { scroll: false });
+      await page.keyboard.press("Escape");
+      await load(card({ fills: [{ type: "linear", angle: 180, stops: [{ position: 0, color: "#172033" }, { position: 100, color: "#456099" }] }] }));
+      await click(`${FILL} [data-paint="0"] button[aria-label^="Edit"]`);
+      await snap("G6", "gradient-editor", FILL, { scroll: false });
+      await page.keyboard.press("Escape");
+      await load(card({ shadows: [{ type: "box", x: 0, y: 4, blur: 12, spread: 0, color: "#000000", token: "ink" }] }));
+      await click("#shadow-section [data-shadow-edit=\"0\"]");
+      await snap("G6", "shadow-bound-editor", "#shadow-section", { scroll: false });
+      await page.keyboard.press("Escape");
+
+      /* H1 (C1) Position expand tool on a frame with a child; the tooltip is a native title (not drawn in shots). */
+      const withChild = [{ ...CARD }, { id: "inner", name: "Inner", type: "frame", parentId: "card", x: 20, y: 20, w: 100, h: 80, color: "#dddddd" }];
+      const titleOf = (sel) => () => page.evaluate((sel) => { const b = document.querySelector(sel); return b && { title: b.title, label: b.getAttribute("aria-label"), disabled: b.disabled }; }, sel);
+      await load(withChild, ["card"]);
+      await scroll(POS, "start");
+      await snap("H1", "tooltip", POS, { scroll: false, hover: "#position-fit-content", extra: titleOf("#position-fit-content") });
+      await click("#position-fit-content");
+      await away();
+      await snap("H1", "after-click", POS, { scroll: false });
+
+      /* H2 (A9) Selection colors target button. */
+      const COLORS = "#selection-colors-section";
+      await load([
+        { ...CARD, color: "#111827", token: "surface" },
+        { id: "t1", name: "Title", type: "text", parentId: "card", x: 16, y: 16, w: 200, h: 24, text: "Hello", color: "#000000", fontSize: 18 },
+        { id: "t2", name: "Body", type: "text", parentId: "card", x: 16, y: 60, w: 200, h: 24, text: "World", color: "#000000", fontSize: 14 },
+      ]);
+      await snap("H2", "selection-colors", COLORS, { block: "end", hover: `${COLORS} [data-selection-color-target]` });
+      const targets = page.locator(`${COLORS} [data-selection-color-target]`);
+      await targets.nth((await targets.count()) - 1).click();
+      await page.waitForTimeout(300);
+      await away();
+      await snap("H2", "target-clicked", "#position-section", { block: "start", nodeId: "t1", extra: () => page.evaluate(() => [...window.design.getSelection()]) });
+
+      /* H3 (A9) Click to replace on a mixed multi-selection. */
+      const mixed = [
+        { ...CARD, fills: [{ type: "solid", color: "#ffffff" }, { type: "solid", color: "#00000033" }], shadows: [{ type: "box", x: 0, y: 4, blur: 4, spread: 0, color: "#00000040" }] },
+        { ...CARD, id: "card2", name: "Card 2", x: 420, fills: [{ type: "solid", color: "#ff0000" }] },
+      ];
+      const fillsOf = () => page.evaluate(() => window.design.getDocument().pages[0].nodes.map((n) => ({ id: n.id, fills: n.fills ?? null, color: n.color, shadows: n.shadows ?? null })));
+      await load(mixed, ["card", "card2"]);
+      await snap("H3", "mixed", "#fill-mixed-section", { block: "center", extra: fillsOf });
+      await page.locator("#fill-mixed-section [data-replace]").click();
+      await page.waitForTimeout(300);
+      await away();
+      await snap("H3", "replaced", FILL, { block: "center", extra: fillsOf });
+
+      /* H4 (A2) Border `+` in All mode, then with four sides. */
+      await load(card({ strokeWidth: 1, strokeColor: "#000000" }));
+      await snap("H4", "all", BORDER);
+      await click(`${BORDER} button[aria-label="Add border side"]`);
+      await away();
+      await snap("H4", "plus-all", BORDER, { extra: () => node().then((n) => ({ strokeWidth: n.strokeWidth, strokeWidths: n.strokeWidths ?? null })) });
+      await load(card({ strokeWidth: 1, strokeColor: "#000000", strokeWidths: [1, 1, 1, 1] }));
+      await snap("H4", "four-plus", BORDER, { extra: titleOf(`${BORDER} button[aria-label="Add border side"]`) });
+
+      /* H5 (B4) constraint menu without and with an existing Scale constraint. */
+      await load(withChild, ["inner"]);
+      await scroll(POS, "start");
+      await click(`${POS} [data-constraint-menu=h]`);
+      await snap("H5", "constraint-menu", POS, { scroll: false, nodeId: "inner" });
+      await page.keyboard.press("Escape");
+      await page.evaluate(() => window.design.setConstraints(["inner"], { h: "scale" }));
+      await page.waitForTimeout(250);
+      await click(`${POS} [data-constraint-menu=h]`);
+      await snap("H5", "scale-existing", POS, { scroll: false, nodeId: "inner", extra: () => page.evaluate(() => window.design.getConstraints("inner")) });
+      await page.keyboard.press("Escape");
+
+      /* H6 (A1) Fill header wavy square: hover, then open. */
+      await load(card());
+      await snap("H6", "tooltip", FILL, { hover: `${FILL} [data-fill-animated]`, extra: titleOf(`${FILL} [data-fill-animated]`) });
+      await click(`${FILL} [data-fill-animated]`);
+      await snap("H6", "open", FILL, { scroll: false });
+      await page.keyboard.press("Escape");
+
+      /* H7 (C2/C4) grid-mode Layout header: wrap toggle and grid icon. */
+      await load(gridOf(2));
+      await snap("H7", "grid-header", LAYOUT, { block: "start" });
+      await snap("H7", "wrap-tooltip", LAYOUT, { block: "start", hover: `${LAYOUT} [data-grid-wrap]`, extra: titleOf(`${LAYOUT} [data-grid-wrap]`) });
+      await click(`${LAYOUT} [data-grid-wrap]`);
+      await away();
+      await snap("H7", "wrap-off", LAYOUT, { block: "start", extra: () => node().then((n) => ({ columns: n.columns, rows: n.rows ?? null })) });
+
+      /* H8 (C8) Page eye, with the canvas so the page background change is visible. */
+      await load(card(), []);
+      await page.evaluate(() => window.design.updatePage({ background: "#2B2B2B" }));
+      await page.waitForTimeout(250);
+      await shoot("H8", "before", "canvas+panel");
+      await click("#page-section [data-page-visibility]");
+      await away();
+      await shoot("H8", "eye-hidden", "canvas+panel", { extra: () => page.evaluate(() => ({ page: window.design.getDocument().pages[0], workspaceBg: getComputedStyle(document.getElementById("workspace")).backgroundColor })) });
+
+      /* H9 (C3) active alignment cell: plain vs hovered. */
+      await load([{ ...CARD, layout: "flex", direction: "row", gap: 10, padding: 0, alignItems: "center", justifyContent: "center" }, ...flexKids]);
+      await scroll(LAYOUT, "start");
+      await shoot("H9", "active-only", MATRIX);
+      await shoot("H9", "active-verified", MATRIX);
+      await shoot("H9", "hover-active", MATRIX, { hover: `${MATRIX} [data-cell="1-1"]` });
+      await shoot("H9", "hover-verified", MATRIX, { hover: `${MATRIX} [data-cell="1-1"]` });
+      await away();
+    }
+
+    legacy: {
+    if (onlyFollowUp) break legacy;
+    /* ---------- A1 Background Fill ---------- */
     await load(card({ color: "transparent" }));
     await snap("A1", "background-empty", FILL);
     await click(`${FILL} button[aria-label="Add paint"]`);
@@ -702,6 +986,8 @@ const card = (patch = {}) => [{ ...CARD, ...patch }];
     await page.evaluate(() => window.design.updatePage({ background: "#1E1E1E" }));
     await page.waitForTimeout(250);
     await snap("C8", "page-custom-background", "#page-section", { extra: () => page.evaluate(() => window.design.getDocument().pages[0].background) });
+
+    } // legacy
 
     const file = path.join(OUT, "metrics.json");
     let previous = [];

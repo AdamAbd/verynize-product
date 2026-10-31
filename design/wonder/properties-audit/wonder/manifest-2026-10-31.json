@@ -1,0 +1,951 @@
+{
+  "date": "2026-10-31",
+  "method": "cliclick + screencapture -x -R; native 2x",
+  "files": [
+    {
+      "filename": "D1-click-created.png",
+      "width": 2880,
+      "height": 1740,
+      "sha256": "0f59b46783a715ffcc8cfe067a8963da59c2098927d3acd079dde44af6954364",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D1-collapsed.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "c5fb568a283e97c79b127ba81705312437e6dba03ea665782e31cb40e32df620",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D1-desktop.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "380f856734f0617f7339888c46660ffec24a8c3efabb264a4c67ff0c995bea3c",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D1-drag-created.png",
+      "width": 2880,
+      "height": 1740,
+      "sha256": "13451c37837cf36f9ca90aaf2ae50da53e79e11d7f21e1d6b35e0cbb6d61a66a",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D1-paper.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "7637a7b4111201d94ea41198ac1f9c8d29eb885932112c30f77153748ab3bcd3",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D1-phone.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "a3bc9ab91f9261a63af4c00dfe3ee80d14525380023e37ad86c12b7d554f58d0",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D1-presentation.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "882eda7ea9d268653cbebc4f8136b167d8086e648065cb3990b0074726307337",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D1-preset-created.png",
+      "width": 2880,
+      "height": 1740,
+      "sha256": "b29199c869b94759458ff98ec4c1daac0be4cb9f2094ba89a27a96164c05b23d",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D1-smartwatch.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "724f013dd9caff1c98cb3086ab86fd0286f683165a02038400215588ff0312e9",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D1-social.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "161c794b46d130952592f45524594998ef883119cf951497d73a6e30ed82d4dc",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D1-tablet.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "eaa738e52da9285eb9435b94e3af2e6901781781d63f1cd8beb4eb0bb82aaa5d",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D2-click.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "054e48b4ec064ab7588361164f486655b873d230c344dcda17cd166899345caa",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D2-corner-zoom.png",
+      "width": 2320,
+      "height": 1660,
+      "sha256": "e2ee2730e169af20ed36bb6e8adbec771638bfc141d21c0e0b72d6c5e3d9b494",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D2-drag.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "fbb0a7435a49924bad8976cd4f7176a8cd3bc7161905d4d94d90d8b70c67b11e",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "D2-preset.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "9329e86eeea1caa0709e6b1dac86424f5123a9bbb9d967ed6154f441ff326785",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-escape.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "061508f9b6279de900a0ff73dcf76290ca89d9cabf75e682f0870f21d88eb552",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-final-context.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "146c8cff74da428f13eeb9821281acc0093f8941a9a950b087dc53f6caf2ca42",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-gap-slow.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "36acfa833528218964f2f51a59e65ba0eb73c75d9cc2ba3baced62711c6300b2",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-gap.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "d90bb21f1b2a54b072e30d6a7363d68f202fce524066dea1836d829cb95d91ce",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-max-menu.png",
+      "width": 720,
+      "height": 1434,
+      "sha256": "77a428a914b663917d4089566aad0479fd7eeeb5e8dbcbd6c4d4780e17e59a39",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-max-width.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "1676a35365a11733260b73aafb0a332b7dbe7a1e9eb0a75c73e1cc2bda66950a",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-min-width.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "1f62fb184a58c451fe17992b1da560e2075e0b9b580765760364ccbc0a87eda0",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-padding-slow.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "f23378174e9fcb06dc306d5d38901e303d400e7d47885712a5cf5a23aa16f346",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-padding.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "0a981dae720d7f531d7d7f049a87670d16431927a4ceb19596bbb663f1df526f",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-radius-slow.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "791b3740e3311c71028716957fd422beb145ecd7ecb161fa4b70bd4ac9f29bff",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-radius.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "315258dadfbbd5a9c9ef7daf5890159c30dd3950474fdea6f1100f3d1c612b15",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-top-context.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "146c8cff74da428f13eeb9821281acc0093f8941a9a950b087dc53f6caf2ca42",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-width-enter.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "5ebcc8c205bb3ac3451538de990643639c0eba1cf099360b78fe585d03dd8a3f",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-width-menu.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "c1b11bc476ebfac47464264f828e03fd53381c7187a4cdb780ea630d8d5f50db",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G1-width-suggestions.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "7dc4f0375f3b84db1b69051aa10e7f0723808ab4b50955bcfaf197d57dbfa55c",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G2-added.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "5d39ba686e3f9ddd016e9779039b72f65400168468ff5f074450a0dae3c6390c",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G2-format-menu.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "6f875f695284c2703c508437f9a10821cd3052253f8d46fecee851b6bbb2bdfc",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G2-scale-menu.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "547b7d3decf086c2103a2c737915832d05b11338caa9b0ef2d66814479fa675d",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-alpha50-border-bottom.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "0ca6df1a1247e658d7d92524f6162811bd1923f1d006d53be1ad7403794434e8",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-alpha50-border.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "74806640d9f2412428207d32a912757ed30748a4fd28c05c1f4570d945ea2801",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-alpha50-editor.png",
+      "width": 1180,
+      "height": 1600,
+      "sha256": "fb75c04cf5847b3c54d095f1613733cb182bc5470a21287bb7bf4470e03c94f1",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-border-picker.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "b3c0fba3517cb511b077b7ee8381b9acb9393a262153d557d7b2480d43b24411",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-bound-confirmed.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "72207fcb1c51c1985b9f2dc962663a865b6df1816a4315588c4cc2d7f3c58acd",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-bound.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "fe1aba9c8f7818e8457fde2e19d3ba4ad5e54daf785c35c1d292a72449bb1fac",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G3-fill-bind-picker.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "898a5e1256c2640b484172ee7a10e992560e1a269e3972cbb028f23322da104b",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-fill-border-shared.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "5c7b7200273ea1f44dcbb41076db5fda88a1d1354532884543234d1d1138b29a",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-swatch-tight.png",
+      "width": 80,
+      "height": 60,
+      "sha256": "7ec3f1a859eeadf01d4ca66da5b94c078671dd28e41a6cfed013f8c0a42f186e",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-variable-editor.png",
+      "width": 1180,
+      "height": 1600,
+      "sha256": "8c3a20f7b9939991afce227837e60cbb76e3f02f5a8c7fd3fab57fd0e2bff9eb",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-variable-list.png",
+      "width": 560,
+      "height": 1600,
+      "sha256": "942b34b60ba777104a8d689428c1183f50ec06c0159bac331254992ccef78d93",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G3-variables.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "a74de9743c25e1225176c562af2a434d0d54244c2228522ae438b945a86c3cc0",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-column-11-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "88a4a3fddf39b14e2054381e536bf12a96f672163608344f2a8f27a737f8c7a8",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-column-11.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "e701f166c8e95dead26b3c14b107f286fe8a4fdbbe954ce7bc8f3a5fa12c02da",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-column-12-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "5aa5381773bb3edc3752decfbda984853e80469578e9c7f3f23c94b532c1e6ac",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-column-12.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "d2583a1c1c73febe8a5c17ba868c7f47115bbfd66d32a73f4934e6e93cf3fe9a",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-column-13-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "0ef5ddbf20e5eefbf1acea0ccefd1e96950e1e898b3fade928b7a0b0f761f598",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-column-13.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "caa9297dd155750f064b57863303a6ee64804131a34b9fdcb602c895d56ee6a6",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-column-21-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "b98bb1053a3179dbad90bb484b41efed76ccd69bd16787e683533d11add455e3",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-column-21.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "36c158a95a405c694045ceae5a28d3923d7121ae792e5fa2d324e6869b6e5512",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-column-22-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "1e99a6057af920b3f34daec4e144ab5fd2bc8916f6056acde69b614083353547",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-column-22.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "36c158a95a405c694045ceae5a28d3923d7121ae792e5fa2d324e6869b6e5512",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-column-23-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "686f17d4b534b0b8fd415afcd330ea79357d637d7dcca228fce1080383a4a224",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-column-23.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "36c158a95a405c694045ceae5a28d3923d7121ae792e5fa2d324e6869b6e5512",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-column-31-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "b91e4c583fcfc9f669500301f9913e03f2fe48e268f3481f3caeabf1e898be4b",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-column-31.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "36c158a95a405c694045ceae5a28d3923d7121ae792e5fa2d324e6869b6e5512",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-column-32-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "a8321368d3b96bec218ec3198caf7f4336429cb8821fc756bd59bbaa9729d0f5",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-column-32.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "e9faab55e27109689b038446002cea7b4b628d18c9c9a1fe737b594710f1ad53",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-column-33-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "a226f07962e3bd66e349301836a83928a71aef2d3d3a46d0c4abc24e0ccd9000",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-column-33.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "2fb640083b44766e81317a471be9172bd8d5a421b93c6dd7a59b0311169e0e24",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-flex-ready.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "cd3a15f4073e46816d33b6ba8c91ae9efcba8a0340b94859bc1a8a1d582136dd",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-flex-state.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "3518e226c843d457de66b24a3bac112d864f3c8b1ea6726067cde57d41beba7c",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-retake-context.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "ad9ff62075d83ec432fb88bd89bcec5013bbcaea11e808250162a406e4be6075",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-row-11-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "11f12555ac47c73716336839bb8cd8bef4d73dbfeb93313da2ac39c36c6b7531",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-row-11.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "11f12555ac47c73716336839bb8cd8bef4d73dbfeb93313da2ac39c36c6b7531",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-row-12-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "1572962ba9e23db0a11bf14b2d70bba2ba460d45c7affdd0d42a20c23048e938",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-row-12.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "1572962ba9e23db0a11bf14b2d70bba2ba460d45c7affdd0d42a20c23048e938",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-row-13-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "cdb147334fe8a95d2420e3f662838437ddb27ebe34a7ede57285105de6821db7",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-row-13.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "cdb147334fe8a95d2420e3f662838437ddb27ebe34a7ede57285105de6821db7",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-row-21-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "74ed32fbfdfc5d85d0c2042d6b65a36e4f3de9ae7a5536b17d293465e1002faa",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-row-21.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "74ed32fbfdfc5d85d0c2042d6b65a36e4f3de9ae7a5536b17d293465e1002faa",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-row-22-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "11b1847edf206518eaa3fface630647b712973dead0baa9fccbb9597fbd60e60",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-row-22.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "11b1847edf206518eaa3fface630647b712973dead0baa9fccbb9597fbd60e60",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-row-23-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "f2db51012960c8b69bebe9db87d8ede4a6ce8887748b427ab512842b0dd341c7",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-row-23.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "f2db51012960c8b69bebe9db87d8ede4a6ce8887748b427ab512842b0dd341c7",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-row-31-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "704382bca35a3b8d089b02cf3135616296ede49f0f7461d2c5beea2c2536bd9b",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-row-31.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "704382bca35a3b8d089b02cf3135616296ede49f0f7461d2c5beea2c2536bd9b",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-row-32-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "28f8c6c4c1f594ced3cadf0d0fa0e800654f6c2d962f4acdbc74c8835c342277",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-row-32.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "28f8c6c4c1f594ced3cadf0d0fa0e800654f6c2d962f4acdbc74c8835c342277",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G4-row-33-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "95e83df3eec15fd7731a922ef8b4e33266a87de6ef0c883d267358d9e6822d3e",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G4-row-33.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "95e83df3eec15fd7731a922ef8b4e33266a87de6ef0c883d267358d9e6822d3e",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "G5-four-columns.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "eb9e32aa426197bd3dd4eb3c34f8e1b3cd369a5d396ca3f7a77c6fd16d8c1c7f",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G5-four-two.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "23c1b3462a752698e65e0ac3b743bb27952ae7af068a1ccd275a0cf908b32fd9",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G5-row-added.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "da66f3821808c58e2f658c18bb80ba3ee4bd860be0cbfa873cdc2efa3be30420",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G5-three-columns.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "7f9ecff0921be8dfbda3945cf1873807d0873a51f94423c611233d7a49e98783",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G5-track-editor.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "f003f05feca6226679594ad2c8abd5442d867c7db2978264493411ac12a8d2c9",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G5-two-columns.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "34734848775493ef16487430ab7f3694ec15b1e86d90db20e70122bcb03d778c",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-add-stop.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "7054f4242236678a6cfeb45cf73c47cc42ef07fa1edf410aa7a13a63dc33560b",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-conic.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "4e19bd222460357ed3d9b22649bba975038678aeceedf621d024982dad41e0a0",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-fill-picker.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "a0e0a03a3d9ba61752bdd9d7051c0e125af7eb1794fca5b7ece8a101f351daea",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-linear.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "ea3c9335144d5433f2c815d36c079ab6efef86039b290f172414a607cb443c90",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-radial.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "da8b022172563bad1f1938d3e58518c32536c489ad253c23e406ca86da27c990",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-select-stop.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "ed3c4cb3568fd67b367a956d65e14945d2ae74ba577cf6f0512fa13ada89c32e",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-shadow-added.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "5657e68c72251ab9db834b715f709becb2ff5eb18469608fde7dd03a30106524",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-shadow-bound.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "d41964db3573f8f713d42ad375cbb4d277990c87bd8b071a0bc2433d1aa838c1",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-shadow-color.png",
+      "width": 1780,
+      "height": 1434,
+      "sha256": "f15a446af0fed7a947d7c114f495f3d370bfe8410d40badb19a0455c6ff11a36",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-shadow-editor.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "621dbaa068b434e993db1631a600a49e46586862457de4f06e2f97cfe41671a1",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "G6-type-menu.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "f748c9df83bb21a90bba16f043af676426881452a465a9e6026f7d74fa764e80",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H1-flex-after.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "d085bf531cbc2542ebe74c94ddeb2d927cb5da5b061955cea69ea86241cffca9",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H1-parent-after.png",
+      "width": 2320,
+      "height": 1434,
+      "sha256": "3c8995b7b8e4a145c050c8b2afe466672b8ed5a423d43452fa49ac7da0e49398",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H1-parent-before.png",
+      "width": 2320,
+      "height": 1434,
+      "sha256": "86138c1feb5403c0e4f8081ce114d4fbb1d97a073d364a852a80e747c06e8e19",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H1-tooltip.png",
+      "width": 780,
+      "height": 1434,
+      "sha256": "be5da902e839b2f08aa7eb030fc522441d5f787b33314c934ba57d89c60cecf8",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H2-target-after.png",
+      "width": 2880,
+      "height": 1740,
+      "sha256": "3e48df282a8b3f87a61f7bce568638cc48de8f7cfc8b5253d62c0954eff89bcb",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H2-target-tooltip.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "94af57c406ca56f6a68de6e40e2f850755b9252b8d063520a467a5b4d8fcbc04",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H3-fill-replaced.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "f2d33303abb66f4945c8c6d5b3f7b9eea256047787e22c3e344abbd7bc4253c8",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H3-filters-mixed.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "1213cd3620ed29c3e7309d34081236093311dcdb9d2a1c353b46ab3df51d3238",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H3-mixed-sections.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "0957b6c1cf5a8921eb71e1777c4ff2c373106ae53b583a361fc6acd272899d05",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H3-multi.png",
+      "width": 2880,
+      "height": 1740,
+      "sha256": "b483acdfbe2e3b0d926d34794936f72f569a526e55a230690c77f1e670e843c1",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H3-shadow-replaced.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "dd5ababb9015f822c7f2f46b95a8568d9d2112832f6f4fb2894509db3716c302",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H4-all.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "78a1a8acc3174482621a7867d11c361f762639969c16d29794699bcdf3aa2ac3",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H4-four-plus.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "fcc5bb560ec835421d41a856ec8da5899b37f4caedcdf5e40c4b2d9ebcb02063",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H4-plus-all.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "f3da40029625c1740068b10f399f27f297cdf86f711ccb17756171d48d856dc2",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H5-child.png",
+      "width": 2880,
+      "height": 1740,
+      "sha256": "8ab2d63f87b27150c5dab02d82dba13b800b37a955d9a6f0ee7d2415850ec1f2",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H5-horizontal-menu.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "a940c09b28e3a5e1a36457e4b9510f42d08246609d46180dc51d30d8d27201f8",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H5-vertical-menu.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "8d34870dba407c6d592ec4ed14b6fe86d3a578b1ef96e128507ee9f0b5f3dc25",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H6-open-confirmed.png",
+      "width": 1080,
+      "height": 1434,
+      "sha256": "f73213a3a856df19416a6f9580b1aa6c3c29b0dccf77742ada92af254dbaef94",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H6-open.png",
+      "width": 1080,
+      "height": 1434,
+      "sha256": "3a50914b46789fa71709a70959283e3b5c4aa76b96e40c71ab9ab54fe902b9a7",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "H6-tooltip-confirmed.png",
+      "width": 880,
+      "height": 1434,
+      "sha256": "e0d0d1db6fa64b8eca5de07b421a3ba5e8090b565b804afb47b02cb6be70e7b0",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H6-tooltip.png",
+      "width": 880,
+      "height": 1434,
+      "sha256": "3a591228337344923aeaf960ceafb3fdc819f32ef36c77095ef7685dc30d9d3d",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "H7-grid-header.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "cb964f10073386c10b2097a9fd9669e0060b614fb17ba92c54068e8342f07d02",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H7-wrap-off.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "8c076937ce6c6061dffc5168d0f4f7118604ddc69669f973d7052a1ba11c6ced",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H7-wrap-tooltip.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "0ec2b8ec9b5b6c8da972ee2eca5036520f2c3bb16e502108861a5a6872233069",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H8-before.png",
+      "width": 2320,
+      "height": 1434,
+      "sha256": "b3110f86c53826218449f28cac2fe54607e75e8aa9ab6e2bd43a5a4eef3c62dd",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H8-changed-hover.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "2a16458e124342424f0df466ec28ebf66caef49805c933f9622261ce890b3720",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H8-eye-hidden.png",
+      "width": 2320,
+      "height": 1434,
+      "sha256": "54e0a3c8d485e8a60df09b9ae714556b769e1ea4308720ae0cdc518bac411766",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H8-page-context.png",
+      "width": 880,
+      "height": 1434,
+      "sha256": "46f7cd02eeae53aebb8ffb858e438e43398b2095a283373c66557fc454522355",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H8-page-picker.png",
+      "width": 1180,
+      "height": 1434,
+      "sha256": "020d0ea3d035de58b4fa9eeb7b446f7f4c426abbaf9eb833b8f9df29def1f2c1",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H8-reset-hover.png",
+      "width": 560,
+      "height": 1434,
+      "sha256": "a6c8b327122bb3f8d9ee50391adb59bd10e6766883c8786bb4c3d8cb26d369c8",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H9-active-only.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "2fb640083b44766e81317a471be9172bd8d5a421b93c6dd7a59b0311169e0e24",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "H9-active-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "a226f07962e3bd66e349301836a83928a71aef2d3d3a46d0c4abc24e0ccd9000",
+      "status": "capture; see notes for scope"
+    },
+    {
+      "filename": "H9-hover-active.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "2fb640083b44766e81317a471be9172bd8d5a421b93c6dd7a59b0311169e0e24",
+      "status": "exploratory/not authoritative"
+    },
+    {
+      "filename": "H9-hover-verified.png",
+      "width": 216,
+      "height": 112,
+      "sha256": "75558b4bb39f75a32cc518d6ef0814985c3e78cfd0d6176f451bbd4be1e96928",
+      "status": "capture; see notes for scope"
+    }
+  ]
+}
