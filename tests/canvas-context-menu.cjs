@@ -134,7 +134,7 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await rightClick(await at('b'));
     assert.deepEqual(await selection(), ['a', 'b'], 'right-click inside a multi-selection keeps it');
     // Two siblings: Use as mask follows Layout (Wonder CM5-multi-verified, P5-mask-menu).
-    assert.deepEqual(await items(), [...without(FRAME_MENU, 'Copy link to selection', 'Hide label'), 'Use as mask'], 'multi-selection menu order');
+    { const multi = without(FRAME_MENU, 'Copy link to selection', 'Hide label'); multi.splice(multi.lastIndexOf('|'), 0, 'Use as mask'); assert.deepEqual(await items(), multi, 'multi-selection menu order (Use as mask after Layout, before Set as file thumbnail)'); }
     await close();
 
     // CM6: a locked layer is targeted although it is not hit-tested; its menu says Unlock.
