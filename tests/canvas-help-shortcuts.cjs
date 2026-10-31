@@ -65,16 +65,26 @@ const nodes = [
     assert.equal(parseInt(await p.locator('#zoom-reset').textContent()), 50, '#zoom-reset keeps the percentage');
     // Snap and saved views stay reachable (hidden proxies, palette, `+` menu).
     assert.equal(await p.locator('#snap').isChecked(), true);
+    // Toolbar toggle: the on-screen layout stays highlighted while the view reads "Design · edited" (Wonder T1, T3,
+    // T4, V3); the open views menu moves the highlight to `+` (T2-plus).
+    assert.equal(await p.locator('#layout-design').getAttribute('aria-pressed'), 'true');
+    assert.equal(await p.locator('#layout-details').getAttribute('aria-pressed'), 'false');
     await p.locator('#bd-view-menu-button').click();
     await p.getByRole('menuitem', {name: 'Save current view'}).waitFor();
+    assert.equal(await p.locator('#layout-design').getAttribute('aria-pressed'), 'false', 'the + takes the highlight while open');
     await p.keyboard.press('Escape');
+    await p.waitForFunction(() => document.querySelector('#layout-design')?.getAttribute('aria-pressed') === 'true');
 
     // ---- T5: the `?` help menu.
     await p.locator('#bd-canvas-help').click();
     const help = await p.locator('#bd-help-menu [role=menuitem]').evaluateAll(list => list.map(i => [i.textContent.trim(), i.hasAttribute('data-disabled')]));
-    assert.deepEqual(help.map(h => h[0]), ['Docs', 'Keyboard shortcuts', 'Restart onboarding', 'Give feedback', 'Contact us', 'Discord community', 'Export diagnostic logs', 'View all']);
+    assert.deepEqual(help.map(h => h[0]), ['Docs', 'Keyboard shortcuts', 'Restart onboarding', 'Give feedback', 'Contact us', 'Discord community', 'Export diagnostic logs', "What's new in Verynize 0.15October 31", 'View all']);
     assert.deepEqual(help.filter(h => h[1]).map(h => h[0]), [], 'every help item is enabled (placeholder URLs in help-links.ts)');
-    assert.equal(await p.locator('#bd-help-menu').getByText("What's new").count(), 1);
+    assert.equal(await p.locator('#bd-help-menu').getByText("What's new", {exact: true}).count(), 1);
+    // What's new lists placeholder entries (title over date, two-line 44px rows like Wonder T5-help) before View all.
+    const entry = p.locator('#bd-help-menu [data-whats-new]');
+    assert.equal(await entry.count(), 1);
+    assert.equal(await entry.evaluate(el => el.offsetHeight), 44);
     await p.locator('#help-onboarding').click();
     await p.locator('#onboarding').waitFor();
     await p.evaluate(() => { localStorage.setItem('verynize.onboarding', 'done'); });

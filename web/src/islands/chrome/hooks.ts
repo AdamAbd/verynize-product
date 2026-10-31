@@ -84,8 +84,9 @@ export function isExactLayout(): boolean {
   return body.contains("left-collapsed") || !body.contains("right-collapsed");
 }
 
-// The preset last chosen explicitly (toolbar, views menu, ⌥ shortcut). Wonder only highlights a pinned layout
-// button while its preset is applied unchanged; otherwise the views menu reads "<Layout> · edited" (11, 19, 22).
+// The preset last chosen explicitly (toolbar, views menu, ⌥ shortcut). Until it is chosen, or once the panels leave
+// it, the views menu reads "<Layout> · edited" (19, canvas audit T2-plus). The toolbar still highlights the toggle of
+// the layout on screen while the menu is closed (canvas audit T1-*-verified, T3, T4, V3).
 let applied: LayoutName | null = null;
 const appliedListeners = new Set<() => void>();
 export function useAppliedLayout(): LayoutName | null {
