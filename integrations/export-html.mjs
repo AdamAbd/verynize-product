@@ -33,7 +33,7 @@ export function exportHTML(document, pageId, { nodeId, lossless = false } = {}) 
   const render = (node, parent, lastInFlow) => {
     const color = safeCss(tokens[node.token] || node.color, node.type === 'text' ? '#25252e' : 'transparent');
     const { box, img, svgTint, src: recolored } = nodeStyle(node, parent, { color, svgColor: tokens[node.svgColorToken] || node.svgColor, lastInFlow, tokens });
-    const shaderAttrs = node.type === 'shader' ? ` data-shader-preset="${escape(node.shaderPreset || 'aurora')}" data-shader-speed="${escape(node.shaderSpeed ?? 1)}" data-shader-intensity="${escape(node.shaderIntensity ?? 1)}" data-shader-color="${escape(color)}"${paramsAttr(node, tokens) ? ` data-shader-params="${escape(paramsAttr(node, tokens))}"` : ''}` : '';
+    const shaderAttrs = node.type === 'shader' || node.shaderFill === true ? `${node.type === 'shader' ? '' : ' data-shader-fill="true"'} data-shader-preset="${escape(node.shaderPreset || 'aurora')}" data-shader-speed="${escape(node.shaderSpeed ?? 1)}" data-shader-intensity="${escape(node.shaderIntensity ?? 1)}" data-shader-color="${escape(color)}"${paramsAttr(node, tokens) ? ` data-shader-params="${escape(paramsAttr(node, tokens))}"` : ''}` : '';
     const attrs = `${shaderAttrs} data-id="${escape(node.id)}" data-design-type="${escape(node.type)}" data-name="${escape(node.name)}"${node.icon ? ` data-icon="${escape(node.icon)}"` : ''}${lossless ? losslessAttrs(node, styleText(box)) : ''} style="${escape(styleText(box))}"`;
     let inner = '';
     if (node.type === 'text') inner = richText(node);
@@ -45,7 +45,7 @@ export function exportHTML(document, pageId, { nodeId, lossless = false } = {}) 
     }
     return `<div${attrs}>${inner}</div>`;
   };
-  const runtime = page.nodes.some(n => n.type === 'shader') ? '<script>' + readFileSync(new URL('../web/shaders.js', import.meta.url), 'utf8').replace(/<\/script/gi, '<\\/script') + ';globalThis.BetterShaders.startAll();</script>' : '';
+  const runtime = page.nodes.some(n => n.type === 'shader' || n.shaderFill === true) ? '<script>' + readFileSync(new URL('../web/shaders.js', import.meta.url), 'utf8').replace(/<\/script/gi, '<\\/script') + ';globalThis.BetterShaders.startAll();</script>' : '';
   const width = only ? only.w : Number.isFinite(page.width) ? page.width : 1000, height = only ? only.h : Number.isFinite(page.height) ? page.height : 700;
   const body = only ? render({ ...only, x: 0, y: 0 }, null) : (kids.get(null) || []).map(n => render(n, null)).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(document.name)} — ${escape(page.name)}</title><style>${documentFontCss(document, body)}*{box-sizing:border-box}@keyframes design-gradient{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}@media(prefers-reduced-motion:reduce){*{animation:none!important}}</style></head><body style="margin:0;font-family:system-ui"><main style="position:relative;width:${width}px;height:${height}px;overflow:hidden">${body}</main>${runtime}</body></html>`;

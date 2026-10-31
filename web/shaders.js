@@ -4,6 +4,8 @@
  *  - parametric presets (Tidal Swirl, Ripple Pool, Pixel Bloom, Signal Grid families): four colours
  *    (center, edge, ripple, background; each `{color, token?}` in node.shaderColors) and five 0–100 sliders
  *    (aspect, size, density, distortion, grain in node.shaderParams); speed stays node.shaderSpeed (0–5).
+ * Shader layers use them as their content; any other layer with `shaderFill: true` (Shader mode) paints its fill
+ * with them, under its children (mount() prepends the surface at z-index -1 in an isolated element).
  * Absent fields fall back to the preset defaults. The library loads in Node too (no DOM access at load). */
 (function installBetterShaders(global) {
   'use strict';
@@ -54,6 +56,8 @@
     function validate(node) {
       if (!node || typeof node !== 'object') return 'Invalid shader layer';
       if (node.shaderPreset !== undefined && !presetIds.includes(node.shaderPreset)) return 'Invalid shader preset';
+      // Shader mode (Wonder H6): any non-shader layer may paint its fill with the shader fields below.
+      if (node.shaderFill !== undefined && (typeof node.shaderFill !== 'boolean' || (node.shaderFill && node.type === 'shader'))) return 'Invalid shader mode';
       if (node.shaderColors !== undefined) {
         if (!isObject(node.shaderColors)) return 'Invalid shader colours';
         for (const [role, c] of Object.entries(node.shaderColors)) {
@@ -142,14 +146,17 @@ gl_FragColor=vec4(col.rgb*col.a,col.a);}`;
       const canvas = document.createElement('canvas');
       canvas.className = 'shader-surface';
       canvas.setAttribute('aria-label', 'Animated WebGL ' + (params.preset || element.dataset.shaderPreset || 'aurora') + ' shader');
-      canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border-radius:inherit;pointer-events:none;';
-      element.append(canvas);
+      // Shader mode on a box (data-shader-fill): the surface paints the fill, under the layer's own content.
+      const fill = element.dataset.shaderFill === 'true';
+      canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border-radius:inherit;pointer-events:none;' + (fill ? 'z-index:-1;' : '');
+      if (fill) { element.style.isolation = 'isolate'; element.prepend(canvas); } else element.append(canvas);
       const resolved = readParams(params, element);
       let gl,program,buffer,frame=0,closed=false,observer;
       const shaders=[];
       function fallback(message) {
         element.dataset.shaderStatus='unavailable';
         canvas.remove();
+        if(fill)return ()=>{};
         const label=document.createElement('span');label.className='shader-fallback';label.textContent=message;
         label.style.cssText='position:absolute;inset:8px;font:11px system-ui;color:inherit;pointer-events:none;';element.append(label);
         return ()=>label.remove();
