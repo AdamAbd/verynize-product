@@ -3,12 +3,22 @@
 // ("@2x"); a custom suffix and the Selection / Page scope live in the "Export options" popover, whose trigger
 // sits inside the name field and shows on hover (or while an option differs from its default).
 // SVG is offered only when every exported layer is an SVG image; Code exports Tailwind JSX or HTML + CSS.
-import { useEffect, useState } from "react";
-import { SlidersHorizontal } from "lucide-react";
+// Size and format are Wonder's styled menus (properties-audit G2): ✓ on the current item, separators between the
+// size groups, 152px wide with 24px rows.
+import { Fragment, useEffect, useState } from "react";
+import { Check, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import type { DesignDocument } from "@/lib/bridge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Caption, Field, NativeSelect, OptionalSection } from "./controls";
+import { cn } from "@/lib/utils";
+import { Caption, Field, NativeSelect, OptionalSection, fieldShell } from "./controls";
 import {
   CODE_FLAVORS,
   EXPORT_SCALES,
@@ -22,6 +32,95 @@ import {
   type ExportFormat,
 } from "./export";
 import type { Node } from "./model";
+
+type Option = { value: string; label: string };
+
+/** Scale presets in Wonder's three menu groups: ×-scales, target heights (720p…), then 512w / 512h. */
+const scaleGroups = (options: Option[]) => {
+  const kind = (o: Option) => (o.value.endsWith("p") ? 1 : /[wh]$/.test(o.value) ? 2 : 0);
+  return [0, 1, 2].map((k) => options.filter((o) => kind(o) === k)).filter((g) => g.length);
+};
+
+/**
+ * Field-styled menu like the constraints menu: a Radix trigger with a ✓ list, plus a transparent native select on
+ * top (same id, no pointer or keyboard focus) so scripts and tests can still `selectOption("#artwork-scale")`.
+ */
+function MenuSelect({
+  id,
+  label,
+  value,
+  groups,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  groups: Option[][];
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const current = groups.flat().find((o) => o.value === value);
+  return (
+    <div className="relative min-w-0">
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild disabled={disabled}>
+          <button
+            type="button"
+            aria-label={label}
+            title={label}
+            data-export-menu={id}
+            className={cn(
+              fieldShell,
+              // Purple ring while the menu is open (G2-scale-menu); keyboard focus only otherwise.
+              "w-full justify-between pr-2.5 text-left outline-none focus-within:ring-0 focus-visible:ring-1 focus-visible:ring-ring aria-expanded:ring-1 aria-expanded:ring-ring disabled:bg-field-disabled disabled:text-field-disabled-foreground disabled:opacity-100",
+            )}
+          >
+            <span className="truncate">{current?.label ?? value}</span>
+            <ChevronDown
+              aria-hidden
+              className="size-3 shrink-0 text-muted-foreground group-aria-expanded/field:rotate-180 group-disabled/field:text-disabled-glyph"
+            />
+          </button>
+        </DropdownMenuTrigger>
+        {/* 152px wide, 24px rows (G2-format-menu); the inset is the shared menu surface, as in the constraints menu. */}
+        <DropdownMenuContent align="start" collisionPadding={2} className="w-38">
+          {groups.map((group, g) => (
+            <Fragment key={g}>
+              {g ? <DropdownMenuSeparator /> : null}
+              {group.map((o) => (
+                <DropdownMenuItem
+                  key={o.value}
+                  data-export-option={o.value}
+                  className="h-6"
+                  onSelect={() => onChange(o.value)}
+                >
+                  <span className="flex-1">{o.label}</span>
+                  {o.value === value ? <Check className="size-3.5 text-foreground" aria-hidden /> : null}
+                </DropdownMenuItem>
+              ))}
+            </Fragment>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <select
+        id={id}
+        aria-hidden
+        tabIndex={-1}
+        value={value}
+        disabled={disabled}
+        className="pointer-events-none absolute inset-0 size-full opacity-0"
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {groups.flat().map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 export function ExportSection({
   doc,
@@ -92,6 +191,8 @@ export function ExportSection({
       present={open}
       onAdd={() => setOpen(true)}
       onRemove={() => setOpen(false)}
+      // Wonder G2-added: the PNG export section is 136px from divider to divider (11px under the button).
+      bodyClassName="pb-2.75"
     >
       {/* The options popover is anchored to the whole name field so it opens beside the panel. */}
       <Popover open={options} onOpenChange={setOptions} modal={false}>
@@ -151,7 +252,7 @@ export function ExportSection({
         </PopoverContent>
       </Popover>
       <div className="grid grid-cols-2 gap-2">
-        <NativeSelect
+        <MenuSelect
           id="artwork-scale"
           label="Export size"
           value={unscaled ? "1" : scale}
@@ -160,14 +261,14 @@ export function ExportSection({
             setScale(value);
             setSuffix(null);
           }}
-          options={EXPORT_SCALES}
+          groups={scaleGroups(EXPORT_SCALES)}
         />
-        <NativeSelect
+        <MenuSelect
           id="artwork-format"
           label="Export format"
           value={active}
           onChange={(value) => setFormat(value as ExportFormat)}
-          options={formats}
+          groups={[formats]}
         />
       </div>
       {active === "CODE" ? (

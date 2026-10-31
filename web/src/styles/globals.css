@@ -17,6 +17,8 @@
   /* Surfaces */
   --background: #1c1c1c; /* panels, chrome, home */
   --canvas: #2b2b2b; /* canvas backdrop */
+  --page-checker-a: #2d2d2d; /* hidden page background: checkerboard (Wonder H8-eye-hidden) */
+  --page-checker-b: #252525;
   --settings: #1a1a1a; /* settings main area */
   --card: #222222; /* file cards, settings cards, composer */
   --popover: #222222; /* menus, popovers */
@@ -55,6 +57,8 @@
 html[data-ui-theme="light"] {
   --background: #f7f7f7;
   --canvas: #ececec;
+  --page-checker-a: #f4f4f4;
+  --page-checker-b: #e2e2e2;
   --settings: #f4f4f4;
   --card: #ffffff;
   --popover: #ffffff;
