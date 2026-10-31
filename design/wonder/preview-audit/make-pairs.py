@@ -16,10 +16,11 @@ GUTTER, MAGENTA = 20, (255, 0, 255)
 # Wonder retakes that supersede a failed first attempt (see wonder/notes.md, "Do not use attempted-state names").
 PREFER = ("-verified", "-final")
 # First attempts the Wonder notes exclude as evidence; they are never paired unless a retake exists.
+# PP2-stopped-verified is valid evidence of the discard confirmation (not of the stopped result, which is PS5-paused).
 EXCLUDED = {
     "PS1-hover.png", "PS2-card.png", "PS2-card-verified.png", "PS3-starting.png", "PF1-running.png", "PM1-toolbar.png",
     "PM1-toolbar-verified.png", "PM2-typed.png", "PM3-hover.png", "PF2-path.png", "PF2-path-about.png", "PF3-expanded.png",
-    "PS4-error.png", "PS4-transition.png", "PS4-logs.png", "PM5-context.png", "X4-more-actions.png", "PP2-stopped.png", "PP2-stopped-verified.png",
+    "PS4-error.png", "PS4-transition.png", "PS4-logs.png", "PM5-context.png", "X4-more-actions.png", "PP2-stopped.png",
 }
 
 
