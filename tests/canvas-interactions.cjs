@@ -186,29 +186,23 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     const order = async () => (await nodesOf()).filter(n => n.parentId === 'stack').map(n => n.id);
     await click(50, 30); assert.deepEqual(await selection(), ['s-a']);
     const during = await drag([50, 30], [50, 140], {steps: 10, during: () => page.evaluate(() => {
-      const box = e => { const r = e?.getBoundingClientRect(); return r && !e.hidden ? {x: r.x, y: r.y, w: r.width, h: r.height} : null; };
-      return {translate: document.querySelector('#canvas [data-id=s-a]').style.translate, child: box(document.querySelector('#canvas [data-id=s-a]')),
-        stack: box(document.querySelector('#canvas [data-id=stack]')), column: box(document.querySelector('#canvas-overlay .drop-column')),
-        fill: getComputedStyle(document.querySelector('#canvas-overlay .drop-column')).backgroundColor};
+      const top = id => document.querySelector(`#canvas [data-id=${id}]`).getBoundingClientRect().top - document.querySelector('#canvas [data-id=stack]').getBoundingClientRect().top;
+      return {a: top('s-a'), b: top('s-b'), c: top('s-c'), order: window.design.getDocument().pages[0].nodes.filter(n => n.parentId === 'stack').map(n => n.id)};
     })});
-    // Wonder TR7-out-during: the child keeps its (live) slot; a translucent column spans the stack across that slot.
-    assert.equal(during.translate, '', 'the dragged stack child stays in its slot');
-    assert.ok(during.column, 'a drop column shows while dragging a stack child');
-    near(during.column.y, during.child.y, 1, 'column top'); near(during.column.h, during.child.h, 1, 'column main size');
-    near(during.column.x, during.stack.x, 1, 'column spans the stack'); near(during.column.w, during.stack.w, 1, 'column cross size');
-    assert.equal(during.fill, 'rgba(196, 104, 247, 0.1)', 'the column is a 10% purple fill');
-    assert.deepEqual(await order(), ['s-b', 's-c', 's-a'], 'dragging a stack child reorders it live');
+    // Wonder R1-row-drag-slot / R1-row-small-drag: the child follows the pointer, its siblings stay put until release.
+    near(during.a, 120, 1, 'the dragged stack child follows the pointer'); near(during.b, 60, 1, 'siblings keep their slots'); near(during.c, 110, 1);
+    assert.deepEqual(during.order, ['s-a', 's-b', 's-c'], 'the stack is not reordered before release');
+    assert.deepEqual(await order(), ['s-b', 's-c', 's-a'], 'releasing a stack child reorders it to the slot under the pointer');
     assert.equal(await page.locator('#canvas [data-id=s-a]').evaluate(e => e.style.translate), '', 'the drag offset clears on drop');
     await page.keyboard.press('ArrowUp'); assert.deepEqual(await order(), ['s-b', 's-a', 's-c'], 'arrow keys step a stack child through the stack');
     await page.keyboard.press('Meta+z'); assert.deepEqual(await order(), ['s-b', 's-c', 's-a']);
     await page.keyboard.press('Meta+z'); assert.deepEqual(await order(), ['s-a', 's-b', 's-c'], 'a drag is one undo step');
     await click(50, 80); assert.deepEqual(await selection(), ['s-b']);
     const landing = await drag([50, 80], [470, 90], {steps: 10, during: () => page.evaluate(() => {
-      const r = document.querySelector('#canvas-overlay .drop-column').getBoundingClientRect(), w = document.querySelector('#canvas-wrap').getBoundingClientRect(), c = window.design.getCamera();
-      return {x: (r.x - w.x - c.x) / c.zoom, y: (r.y - w.y - c.y) / c.zoom, w: r.width / c.zoom, h: r.height / c.zoom, translate: document.querySelector('#canvas [data-id=s-b]').style.translate};
+      const r = document.querySelector('#canvas [data-id=s-b]').getBoundingClientRect(), w = document.querySelector('#canvas-wrap').getBoundingClientRect(), c = window.design.getCamera();
+      return {x: (r.x - w.x - c.x) / c.zoom, y: (r.y - w.y - c.y) / c.zoom};
     })});
-    assert.equal(landing.translate, '', 'a stack child dragged out keeps its slot until the drop');
-    near(landing.x, 430, 1, 'landing column x'); near(landing.y, 70, 1, 'landing column y'); near(landing.w, 100, 1); near(landing.h, 40, 1);
+    near(landing.x, 430, 1, 'a stack child dragged out follows the pointer x'); near(landing.y, 70, 1, 'and y');
     let moved = await node('s-b');
     assert.equal(moved.parentId, 'side', 'dropping on a frame re-parents into it');
     near(moved.x, 30, 1, 'keeps its screen x'); near(moved.y, 70, 1, 'keeps its screen y');
@@ -216,7 +210,6 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.ok(indicator, 'a slot indicator shows while dragging into a stack');
     assert.deepEqual(await order(), ['s-a', 's-b', 's-c'], 'dropping into a stack takes the slot under the pointer');
     assert.equal(await page.locator('#canvas-overlay .drop-target').isVisible(), false, 'drop feedback clears on release');
-    assert.equal(await page.locator('#canvas-overlay .drop-column').isVisible(), false, 'the drop column clears on release');
 
     // ---- 3c. Dragging onto a frame nests live, clips, and snaps to the frame ----
     await seed([{id: 'F', name: 'Frame 1', type: 'frame', x: 0, y: 0, w: 400, h: 300, color: '#ffffff', layout: 'free', clipContent: true}, rect('R', 500, 100, 150, 100)]);

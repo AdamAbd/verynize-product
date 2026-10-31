@@ -1,10 +1,12 @@
 // Scale section (Wonder T4-scale-retry, design/wonder/canvas-audit/wonder): while the Scale tool (K) is active with
-// one layer selected, the Properties panel shows only "Scale" with a close ✕, a W | H row and a full-width % row
+// one or more layers selected, the Properties panel shows only "Scale" with a close ✕, a W | H row and a full-width % row
 // ("W 150 · H 105 · 150 %" after a 100×70 frame was scaled up by half). Geometry is the standard section: 31px
 // header, 24px fields 8px apart (W 1172–1296, H 1304–1428, % 1172–1428 CSS px).
 // The percentage is relative to the size the layer had when the section appeared (tool armed or layer selected), so
 // a Scale-tool drag reads 150 % there. Editing W, H or % scales the layer the way the tool does — proportionally,
 // children, type size, radius, gap, padding and border included — through `transform.scaleBy` (one undo step).
+// With several layers (R2-multi-scale-before/after) W, H and % read the primary layer (100×60 → 150×90, 150 %) while
+// every selected layer scales about the union's top-left.
 import { useState } from "react";
 import { ChevronDown, SquareArrowUpRight, X } from "lucide-react";
 import {
@@ -16,13 +18,13 @@ import {
 import { Affix, Field, IconAffix, IconButton, Section } from "./controls";
 import { fmt, type Node } from "./model";
 
-// Quick percentages behind the % field's chevron. Wonder's menu content was not captured (assumption).
-const PRESETS = [50, 100, 200];
+// The % field's chevron menu (Wonder R2-single-presets): nine multipliers of the reference size, 152 px wide, 25 px
+// rows, right-aligned under the field.
+const PRESETS = [0.25, 0.5, 0.75, 1, 2, 3, 4, 5, 10];
 
-const scaleBy = (id: string, factor: number) =>
-  window.design.runCommand("transform.scaleBy", { id, factor });
-
-export function ScaleSection({ node }: { node: Node }) {
+export function ScaleSection({ node, selection }: { node: Node; selection: string[] }) {
+  const scaleBy = (_id: string, factor: number) =>
+    window.design.runCommand("transform.scaleBy", { ids: selection, factor });
   // The reference size: the layer's size when this section mounted (it is keyed by the layer id).
   const [base] = useState(() => ({ w: Number(node.w) || 0, h: Number(node.h) || 0 }));
   const w = Number(node.w) || 0;
@@ -90,15 +92,15 @@ export function ScaleSection({ node }: { node: Node }) {
                   />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" alignOffset={-4} sideOffset={8} className="w-24">
+              <DropdownMenuContent align="end" alignOffset={-8} sideOffset={4} className="w-38">
                 {PRESETS.map((p) => (
                   <DropdownMenuItem
                     key={p}
-                    className="h-6"
+                    className="h-6.25"
                     data-scale-preset={p}
-                    onSelect={() => toPercent(p)}
+                    onSelect={() => toPercent(p * 100)}
                   >
-                    {p}%
+                    {p}×
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
