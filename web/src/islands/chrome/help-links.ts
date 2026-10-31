@@ -15,6 +15,20 @@ export const HELP_LINKS: Record<
   whatsNew: "https://verynize.example/changelog",
 };
 
+// What's new entries listed above "View all" (Wonder T5-help: a short title over a date, newest first, e.g.
+// "Wonder Capture / August 18"). PLACEHOLDER: one entry for the current release pointing at the placeholder
+// changelog until Verynize publishes release notes.
+// TODO(help-links): replace with real release-note entries.
+export type WhatsNewEntry = { id: string; title: string; date: string; url: string };
+export const WHATS_NEW: WhatsNewEntry[] = [
+  {
+    id: "0.17",
+    title: "Verynize 0.17",
+    date: "October 31",
+    url: "https://verynize.example/changelog/0.17",
+  },
+];
+
 export function openExternal(url: string) {
   const desktop = (
     window as unknown as { desktop?: { openExternal?: (url: string) => Promise<unknown> } }

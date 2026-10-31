@@ -3,19 +3,24 @@
 #workspace>.canvas-title{position:absolute;top:8px;left:12px;right:12px;margin:0;z-index:6}
 #workspace>footer{position:absolute;left:12px;bottom:8px;padding:0!important;z-index:6;pointer-events:none;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #canvas-wrap{position:absolute!important;inset:0;width:auto!important;height:auto!important;margin:0!important;overflow:hidden;touch-action:none}
+/* Canvas selection chrome colours, sampled from Wonder (canvas-audit S1-hover-final, S4-frame-ready): outline, handle
+   border, name label and hover #c468f7 (196,104,247); size badge #a245d3 (162,69,211). The app accent (buttons, focus)
+   stays --shell-accent. */
+:root{--canvas-select:#c468f7;--canvas-select-badge:#a245d3}
 #canvas{--iz:1;position:absolute;left:0;top:0;width:1000px;height:700px;transform-origin:0 0;overflow:visible!important}
 /* Promoted only while panning (see applyCamera in canvas-interactions.js): a permanent layer keeps a stale raster scale and exhausts tile memory. */
 #canvas.camera-moving{will-change:transform}
 #canvas .layer{cursor:default}
-#canvas .layer.selected:not([data-outline]){outline-width:calc(1.5px * var(--iz))!important;outline-offset:0!important}
+#canvas .layer.selected:not([data-outline]){outline-width:calc(1px * var(--iz))!important;outline-offset:calc(-.5px * var(--iz))!important;outline-color:var(--canvas-select)!important}
 /* A layer with its own outline keeps it while selected; the selection ring is drawn inside the box instead. */
-#canvas .layer.selected[data-outline]::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:inherit;outline:calc(1.5px * var(--iz)) solid var(--shell-accent,#9371ff);outline-offset:calc(-1.5px * var(--iz));z-index:2147483647}
+#canvas .layer.selected[data-outline]::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:inherit;outline:calc(1px * var(--iz)) solid var(--canvas-select);outline-offset:calc(-.5px * var(--iz));z-index:2147483647}
 
-#canvas .layer>.handle{width:calc(8px * var(--iz))!important;height:calc(8px * var(--iz))!important;border-width:calc(1px * var(--iz))!important}
-#canvas .layer>.handle[data-corner=nw]{left:calc(-4px * var(--iz))!important;top:calc(-4px * var(--iz))!important}
-#canvas .layer>.handle[data-corner=ne]{right:calc(-4px * var(--iz))!important;top:calc(-4px * var(--iz))!important}
-#canvas .layer>.handle[data-corner=sw]{left:calc(-4px * var(--iz))!important;bottom:calc(-4px * var(--iz))!important}
-#canvas .layer>.handle[data-corner=se]{right:calc(-4px * var(--iz))!important;bottom:calc(-4px * var(--iz))!important}
+/* Wonder S4 handles: 9×9 white squares with a 1px border, centred on the edge. */
+#canvas .layer>.handle{width:calc(9px * var(--iz))!important;height:calc(9px * var(--iz))!important;border-width:calc(1px * var(--iz))!important;border-color:var(--canvas-select)!important;background:#fff!important}
+#canvas .layer>.handle[data-corner=nw]{left:calc(-4.5px * var(--iz))!important;top:calc(-4.5px * var(--iz))!important}
+#canvas .layer>.handle[data-corner=ne]{right:calc(-4.5px * var(--iz))!important;top:calc(-4.5px * var(--iz))!important}
+#canvas .layer>.handle[data-corner=sw]{left:calc(-4.5px * var(--iz))!important;bottom:calc(-4.5px * var(--iz))!important}
+#canvas .layer>.handle[data-corner=se]{right:calc(-4.5px * var(--iz))!important;bottom:calc(-4.5px * var(--iz))!important}
 #workspace[data-tool=frame] #canvas-wrap,#workspace[data-tool=rectangle] #canvas-wrap,#workspace[data-tool=shader] #canvas-wrap,#workspace[data-tool=frame] #canvas .layer,#workspace[data-tool=rectangle] #canvas .layer,#workspace[data-tool=shader] #canvas .layer{cursor:crosshair}
 #workspace[data-tool=text] #canvas-wrap,#workspace[data-tool=text] #canvas .layer{cursor:text}
 #workspace[data-tool=hand] #canvas-wrap,#workspace[data-tool=hand] #canvas .layer,#workspace.space-pan #canvas-wrap,#workspace.space-pan #canvas .layer{cursor:grab}
@@ -35,15 +40,16 @@
 #canvas-overlay .guide-label.measure[data-axis=x]{transform:translate(-50%,4px)}
 #canvas-overlay .guide-label.measure[data-axis=y]{transform:translate(5px,-50%)}
 #canvas-overlay[data-measuring="1"] .hover-box{border:1px solid var(--guide-blue)}
-#canvas-overlay .marquee{position:absolute;border:1px solid var(--shell-accent,#b93cdb);background:color-mix(in srgb,var(--shell-accent,#b93cdb) 10%,transparent)}
+#canvas-overlay .marquee{position:absolute;border:1px solid #c468f7;background:rgba(196,104,247,.1)}
 #canvas-overlay .marquee[data-kind=draw]{background:transparent}
-#canvas-overlay .hover-box,#canvas-overlay .drop-target{position:absolute;box-sizing:border-box;border:1.5px solid var(--shell-accent,#b93cdb)}
-#canvas-overlay .hover-child{position:absolute;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--shell-accent,#b93cdb) 60%,transparent)}
-#canvas-overlay .selection-ring{position:absolute;box-sizing:border-box;border:1.5px solid var(--shell-accent,#9371ff)}
-#canvas-overlay .selection-ring>.handle{position:absolute;width:8px;height:8px;box-sizing:border-box;background:#fff;border:1px solid var(--shell-accent,#9371ff);pointer-events:auto}
-#canvas-overlay .selection-ring>.handle[data-corner=nw]{left:-5px;top:-5px;cursor:nwse-resize}#canvas-overlay .selection-ring>.handle[data-corner=ne]{right:-5px;top:-5px;cursor:nesw-resize}#canvas-overlay .selection-ring>.handle[data-corner=sw]{left:-5px;bottom:-5px;cursor:nesw-resize}#canvas-overlay .selection-ring>.handle[data-corner=se]{right:-5px;bottom:-5px;cursor:nwse-resize}
+/* Hover (S1-hover-final) and the clip-proof ring: 1px straddling the edge, turned with the layer (frameOf in
+   selection-chrome.js). An outline with a -0.5px offset keeps the box itself at the layer's exact bounds. */
+#canvas-overlay .hover-box,#canvas-overlay .selection-ring{position:absolute;box-sizing:border-box;outline:1px solid var(--canvas-select);outline-offset:-.5px;transform-origin:50% 50%}
+#canvas-overlay .drop-target{position:absolute;box-sizing:border-box;outline:1px solid var(--canvas-select);outline-offset:-.5px}
+#canvas-overlay .selection-ring>.handle{position:absolute;width:9px;height:9px;box-sizing:border-box;background:#fff;border:1px solid var(--canvas-select);pointer-events:auto}
+#canvas-overlay .selection-ring>.handle[data-corner=nw]{left:-4.5px;top:-4.5px;cursor:nwse-resize}#canvas-overlay .selection-ring>.handle[data-corner=ne]{right:-4.5px;top:-4.5px;cursor:nesw-resize}#canvas-overlay .selection-ring>.handle[data-corner=sw]{left:-4.5px;bottom:-4.5px;cursor:nesw-resize}#canvas-overlay .selection-ring>.handle[data-corner=se]{right:-4.5px;bottom:-4.5px;cursor:nwse-resize}
 .moving #canvas-overlay .clipped-selection,#canvas.spacing-measure~#canvas-overlay .clipped-selection{display:none}
-#canvas-overlay .drop-line{position:absolute;background:var(--shell-accent,#b93cdb);border-radius:1px}
+#canvas-overlay .drop-line{position:absolute;background:var(--canvas-select);border-radius:1px}
 #canvas-overlay [hidden]{display:none}
 /* Spacing handles (selected auto-layout frame). At rest only Wonder's short ticks show (TR8: 10×1.5px, padding #66a0f8,
    gap #e25727); hovering or dragging a band hatches it and shows the value badge. */
@@ -64,7 +70,7 @@
 #workspace[data-spacing-drag=y] #canvas-wrap,#workspace[data-spacing-drag=y] #canvas-wrap *{cursor:row-resize!important}
 #workspace[data-spacing-drag=x] #canvas-wrap,#workspace[data-spacing-drag=x] #canvas-wrap *{cursor:col-resize!important}
 #canvas-overlay .frame-label{position:absolute;pointer-events:auto;cursor:default;color:#9a9a9a;font:11px/16px Inter,system-ui,sans-serif;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;user-select:none}
-#canvas-overlay .frame-label:hover{color:var(--shell-accent,#b93cdb)}
+#canvas-overlay .frame-label:hover,#canvas-overlay .frame-label.hovered{color:var(--canvas-select)}
 
 #canvas-toolbar button.tool-active,#canvas-toolbar #select-tool.tool-active{background:#3d3d3d}
 #canvas-toolbar #select-tool:not(.tool-active){background:transparent}

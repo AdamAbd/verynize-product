@@ -124,6 +124,9 @@ export function validateDocument(document) {
     }
   }
   if(document.views!==undefined){if(!Array.isArray(document.views)||document.views.length>100)throw Error('Invalid saved views');const ids=new Set();for(const view of document.views){requireString(view.id,'View id');requireString(view.name,'View name',100);if(ids.has(view.id)||!document.pages.some(p=>p.id===view.page)||!Number.isFinite(view.zoom)||view.zoom<.05||view.zoom>32||!['scrollLeft','scrollTop'].every(k=>Number.isFinite(view[k])&&view[k]>=0&&view[k]<=1e7)||!['x','y'].every(k=>view[k]===undefined||(Number.isFinite(view[k])&&Math.abs(view[k])<=1e7)))throw Error('Invalid saved view');ids.add(view.id);}}
+  // "Set as file thumbnail" (Wonder P4): the layer the Files card draws. It may dangle after the layer is deleted;
+  // the card then falls back to the active page. Mirrors validate() in web/app.js.
+  if(document.thumbnailNodeId!==undefined && (typeof document.thumbnailNodeId!=='string' || !document.thumbnailNodeId || document.thumbnailNodeId.length>200)) throw new Error('Invalid file thumbnail');
   if(document.activePage && !document.pages.some(p=>p.id===document.activePage)) throw new Error('Invalid active page');
   if(Buffer.byteLength(JSON.stringify(document))>LIMIT)throw new Error('Document exceeds 20 MiB');
   return document;

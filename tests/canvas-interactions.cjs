@@ -153,10 +153,10 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await click(600, 600); assert.deepEqual(await selection(), [], 'empty click clears');
     assert.equal(await page.evaluate(() => window.appPreferences.get().selection), 'classic', 'parent-first selection is the default');
     assert.equal(await page.locator('#canvas [data-id=c1]').evaluate(e => getComputedStyle(e).cursor), 'default', 'layers show the arrow cursor, not a move cursor');
-    // Hover outlines what a click would pick (the artboard's direct child) and dashes its children.
+    // Hover outlines what a click would pick (the artboard's direct child), and only that (Wonder S1-hover-final).
     const hoverAt = async (x, y) => { const p = await screen(x, y); await page.mouse.move(p.x, p.y, {steps: 2}); return page.locator('#canvas-overlay').getAttribute('data-hover'); };
     assert.equal(await hoverAt(30, 230), 'group', 'hover targets the outermost layer inside the artboard');
-    assert.equal(await page.locator('#canvas-overlay .hover-child').count(), 2, 'hovered frame children are outlined');
+    assert.equal(await page.locator('#canvas-overlay [class*=hover]:not(.hover-box)').count(), 0, 'hovering a frame does not outline its children');
     await click(30, 230); assert.deepEqual(await selection(), ['group'], 'a click inside an artboard picks its direct child, not the deep leaf');
     assert.equal(await hoverAt(120, 230), 'c2', 'with the frame selected, hover shows the child a click would pick');
     await click(30, 230); assert.deepEqual(await selection(), ['c1'], 'clicking inside the selected frame drills one level in');
@@ -185,15 +185,24 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
       {id: 'side', name: 'Side', type: 'frame', x: 400, y: 0, w: 200, h: 200, color: '#eeeeee', layout: 'free'}]);
     const order = async () => (await nodesOf()).filter(n => n.parentId === 'stack').map(n => n.id);
     await click(50, 30); assert.deepEqual(await selection(), ['s-a']);
-    const ghost = await drag([50, 30], [50, 140], {steps: 10, during: () => page.locator('#canvas [data-id=s-a]').evaluate(e => e.style.translate)});
-    assert.ok(ghost && ghost !== 'none', 'the dragged stack child follows the pointer');
-    assert.deepEqual(await order(), ['s-b', 's-c', 's-a'], 'dragging a stack child reorders it live');
+    const during = await drag([50, 30], [50, 140], {steps: 10, during: () => page.evaluate(() => {
+      const top = id => document.querySelector(`#canvas [data-id=${id}]`).getBoundingClientRect().top - document.querySelector('#canvas [data-id=stack]').getBoundingClientRect().top;
+      return {a: top('s-a'), b: top('s-b'), c: top('s-c'), order: window.design.getDocument().pages[0].nodes.filter(n => n.parentId === 'stack').map(n => n.id)};
+    })});
+    // Wonder R1-row-drag-slot / R1-row-small-drag: the child follows the pointer, its siblings stay put until release.
+    near(during.a, 120, 1, 'the dragged stack child follows the pointer'); near(during.b, 60, 1, 'siblings keep their slots'); near(during.c, 110, 1);
+    assert.deepEqual(during.order, ['s-a', 's-b', 's-c'], 'the stack is not reordered before release');
+    assert.deepEqual(await order(), ['s-b', 's-c', 's-a'], 'releasing a stack child reorders it to the slot under the pointer');
     assert.equal(await page.locator('#canvas [data-id=s-a]').evaluate(e => e.style.translate), '', 'the drag offset clears on drop');
     await page.keyboard.press('ArrowUp'); assert.deepEqual(await order(), ['s-b', 's-a', 's-c'], 'arrow keys step a stack child through the stack');
     await page.keyboard.press('Meta+z'); assert.deepEqual(await order(), ['s-b', 's-c', 's-a']);
     await page.keyboard.press('Meta+z'); assert.deepEqual(await order(), ['s-a', 's-b', 's-c'], 'a drag is one undo step');
     await click(50, 80); assert.deepEqual(await selection(), ['s-b']);
-    await drag([50, 80], [470, 90], {steps: 10});
+    const landing = await drag([50, 80], [470, 90], {steps: 10, during: () => page.evaluate(() => {
+      const r = document.querySelector('#canvas [data-id=s-b]').getBoundingClientRect(), w = document.querySelector('#canvas-wrap').getBoundingClientRect(), c = window.design.getCamera();
+      return {x: (r.x - w.x - c.x) / c.zoom, y: (r.y - w.y - c.y) / c.zoom};
+    })});
+    near(landing.x, 430, 1, 'a stack child dragged out follows the pointer x'); near(landing.y, 70, 1, 'and y');
     let moved = await node('s-b');
     assert.equal(moved.parentId, 'side', 'dropping on a frame re-parents into it');
     near(moved.x, 30, 1, 'keeps its screen x'); near(moved.y, 70, 1, 'keeps its screen y');

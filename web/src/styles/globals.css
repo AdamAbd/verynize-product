@@ -40,6 +40,7 @@
   --foreground-2: #d4d4d4;
   --foreground-3: #a8a8a8;
   --muted-foreground: #909090;
+  --menu-label: #969696; /* help menu "What's new" section label (Wonder T5-help, R6-help-menu: solid RGB 150) */
   --subtle-foreground: #707070;
 
   /* Brand */
@@ -76,6 +77,7 @@ html[data-ui-theme="light"] {
   --foreground-2: #2b2b2b;
   --foreground-3: #555555;
   --muted-foreground: #6b6b6b;
+  --menu-label: #6b6b6b;
   --subtle-foreground: #8a8a8a;
   --primary-text: #8f2fc0;
   --primary-tint: #f3e8fa;
@@ -110,6 +112,7 @@ html[data-ui-theme="light"] {
   --color-secondary-foreground: var(--foreground-2);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-menu-label: var(--menu-label);
   --color-subtle-foreground: var(--subtle-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--foreground);
@@ -379,6 +382,57 @@ body {
   stroke-width: 1.75px;
 }
 
+/* <command-palette-tokens> */
+/*
+ * ⌘K command palette (web/src/islands/chrome/CommandPalette.tsx). Measured from Wonder canvas-audit P2-empty /
+ * P2-select / P2-frame (1440 × 870): 672 × 480 at y122, 16px radius, 0.5px #2e2e2e edge, body rgb(24,24,24), active
+ * row rgb(41,41,41), footer and keycaps rgb(34,34,34) with a 0.5px #2b2b2b keycap edge, input strip 44px with a
+ * 0.5px #242424 rule, footer 38px with a 0.5px #2e2e2e rule, 32px rows, 36px section headings, 18px row keycaps,
+ * 20px footer keycaps. The page behind is dimmed to about half (canvas 43 → 23).
+ */
+:root {
+  --command-palette: #181818;
+  --command-palette-highlight: #292929;
+  --command-palette-footer: #222222;
+  --command-palette-keycap: #222222;
+  --command-palette-scrim: rgb(0 0 0 / 0.5);
+  --command-palette-edge: #2e2e2e;
+  --command-palette-rule: #242424;
+  --command-palette-keycap-edge: #2b2b2b;
+}
+html[data-ui-theme="light"] {
+  --command-palette: #ffffff;
+  --command-palette-highlight: #ececec;
+  --command-palette-footer: #f7f7f7;
+  --command-palette-keycap: #f7f7f7;
+  --command-palette-scrim: rgb(0 0 0 / 0.2);
+  --command-palette-edge: #dcdcdc;
+  --command-palette-rule: #e6e6e6;
+  --command-palette-keycap-edge: #dcdcdc;
+}
+@theme inline {
+  --color-command-palette: var(--command-palette);
+  --color-command-palette-highlight: var(--command-palette-highlight);
+  --color-command-palette-footer: var(--command-palette-footer);
+  --color-command-palette-keycap: var(--command-palette-keycap);
+  --color-command-palette-scrim: var(--command-palette-scrim);
+  --color-command-palette-edge: var(--command-palette-edge);
+  --spacing-palette: 672px; /* width */
+  --spacing-palette-height: 480px;
+  --spacing-palette-top: 122px; /* from the window top */
+  --spacing-palette-input: 44px;
+  --spacing-palette-footer: 38px;
+  --spacing-palette-heading: 36px;
+  --spacing-palette-keycap: 18px;
+  --spacing-palette-footer-keycap: 20px;
+  --radius-palette: 16px;
+  --shadow-palette: 0 0 0 0.5px var(--command-palette-edge), 0 24px 64px rgb(0 0 0 / 0.45);
+  --shadow-palette-input: inset 0 -0.5px 0 var(--command-palette-rule);
+  --shadow-palette-footer: inset 0 0.5px 0 var(--command-palette-edge);
+  --shadow-palette-keycap: inset 0 0 0 0.5px var(--command-palette-keycap-edge);
+}
+/* </command-palette-tokens> */
+
 /* <terminal-tokens> */
 /*
  * Integrated terminal (web/src/islands/code/terminal-panel.tsx). Measured from the Wonder code-mode capture: surface
@@ -440,13 +494,16 @@ html[data-ui-theme="light"] {
 :root {
   --context-menu: #1c1c1c; /* menu surface, rgb(28,28,28) */
   --context-menu-highlight: #4c305b; /* highlighted row, rgb(76,48,91) */
+  --context-menu-destructive-disabled: #844544; /* disabled Delete, rgb(132,69,68) (R3-delete-hover) */
 }
 html[data-ui-theme="light"] {
   --context-menu: #ffffff;
   --context-menu-highlight: #ecdaf6;
+  --context-menu-destructive-disabled: color-mix(in srgb, var(--destructive) 50%, transparent);
 }
 @theme inline {
   --color-context-menu: var(--context-menu);
   --color-context-menu-highlight: var(--context-menu-highlight);
+  --color-context-menu-destructive-disabled: var(--context-menu-destructive-disabled);
 }
 /* </context-menu-tokens> */

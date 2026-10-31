@@ -72,6 +72,11 @@ const fs = require("node:fs/promises"),
     await page.locator("#typography-section [name=lineHeight]").press("Enter");
     assert.equal((await node("title")).lineHeight, "auto");
     assert.ok((await top(lhShell)) > (await top(sizeShell)));
+    // New text stores line height Auto and the inspector reads "Auto" (Wonder CM3 / TX1-click), then back to Title.
+    const added = await page.evaluate(() => window.design.addNode("text"));
+    assert.equal((await node(added)).lineHeight, "auto");
+    assert.equal(await page.locator("#typography-section [name=lineHeight]").inputValue(), "Auto");
+    await page.evaluate((id) => { window.design.runCommand("edit.undo"); window.design.setSelection(["title"]); }, added);
 
     // --- Vertical alignment ----------------------------------------------------------------------------------
     assert.equal(await page.getByRole("radio", { name: "Align top" }).getAttribute("data-state"), "on");

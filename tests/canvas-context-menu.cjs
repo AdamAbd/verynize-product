@@ -5,7 +5,7 @@ const {_electron} = require('@playwright/test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
-const FRAME_MENU = ['Add context', '|', 'Copy', 'Copy as', 'Copy link to selection', '|', 'Select layer', 'Paste', 'Paste to replace', 'Paste over selection', 'Duplicate', '|', 'Hide', 'Lock', 'Hide label', '|', 'Arrange', '|', 'Layout'];
+const FRAME_MENU = ['Add context', '|', 'Copy', 'Copy as', 'Copy link to selection', '|', 'Select layer', 'Paste', 'Paste to replace', 'Paste over selection', 'Duplicate', '|', 'Hide', 'Lock', 'Hide label', '|', 'Arrange', '|', 'Layout', '|', 'Set as file thumbnail'];
 const without = (list, ...drop) => list.filter(x => !drop.includes(x));
 
 (async () => {
@@ -133,7 +133,8 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await page.evaluate(() => window.design.setSelection(['a', 'b']));
     await rightClick(await at('b'));
     assert.deepEqual(await selection(), ['a', 'b'], 'right-click inside a multi-selection keeps it');
-    assert.deepEqual(await items(), without(FRAME_MENU, 'Copy link to selection', 'Hide label'), 'multi-selection menu order');
+    // Two siblings: Use as mask follows Layout (Wonder CM5-multi-verified, P5-mask-menu).
+    { const multi = without(FRAME_MENU, 'Copy link to selection', 'Hide label'); multi.splice(multi.lastIndexOf('|'), 0, 'Use as mask'); assert.deepEqual(await items(), multi, 'multi-selection menu order (Use as mask after Layout, before Set as file thumbnail)'); }
     await close();
 
     // CM6: a locked layer is targeted although it is not hit-tested; its menu says Unlock.
@@ -163,7 +164,9 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     const labelBox = await label.boundingBox();
     await rightClick({x: labelBox.x + 6, y: labelBox.y + labelBox.height / 2});
     assert.deepEqual(await selection(), ['side'], 'the label selects its frame');
-    assert.deepEqual(await items(), FRAME_MENU, 'label menu = frame menu');
+    // Wonder CM9-label: the row menu (no Select layer; Copy link to selection is followed directly by Paste).
+    const ROW_MENU = without(FRAME_MENU, 'Select layer').filter((x, i, list) => !(x === '|' && list[i + 1] === 'Paste'));
+    assert.deepEqual(await items(), ROW_MENU, 'label menu has no Select layer');
     await item('menu.hideLabel').click();
     assert.equal((await node('side')).labelHidden, true, 'Hide label');
     await page.evaluate(() => window.design.setSelection([]));
@@ -178,6 +181,13 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await page.evaluate(() => window.design.runCommand('edit.copy'));
     await rightClick(await at('a'));
     assert.equal(await disabled('edit.paste'), false, 'Paste is enabled once layers are copied');
+    assert.ok(!(await items()).includes('Paste styles'), 'no Paste styles before Copy styles (Wonder CM2/CM5/CM10)');
+    await close();
+    // Paste styles ⌘⌥V follows Paste once styles are copied (Wonder P3-inside-menu, P5-mask-menu).
+    await page.evaluate(() => window.design.runCommand('edit.copyStyle'));
+    await rightClick(await at('a'));
+    { const list = await items(); assert.deepEqual(list.slice(list.indexOf('Paste'), list.indexOf('Paste') + 3), ['Paste', 'Paste styles', 'Paste to replace'], 'Paste styles after Paste'); }
+    assert.equal(await page.locator('[data-bd-context-menu] [data-command="edit.pasteStyle"]').first().textContent().then(t => t.includes('⌘⌥V')), true, 'Paste styles shortcut');
     const before = (await activeNodes()).length;
     await item('edit.paste').click();
     await page.waitForTimeout(100);
@@ -201,10 +211,14 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await page.locator('[data-page-id="p1"]').click({button: 'right'});
     assert.deepEqual(await items('[data-bd-context-menu][data-target=page]'), ['Rename', '|', 'Delete']);
     assert.equal(await disabled('page.delete'), true, 'the only page cannot be deleted');
+    // Wonder R3-delete-hover: label and delete-key glyph in a solid muted red, rgb(132,69,68).
+    assert.deepEqual(await item('page.delete').evaluate(el => [getComputedStyle(el).color, getComputedStyle(el.querySelector('svg')).color]),
+      ['rgb(132, 69, 68)', 'rgb(132, 69, 68)'], 'disabled Delete is muted red');
     await close();
     await seed(FIXTURE, 2);
     await page.locator('[data-page-id="p2"]').click({button: 'right'});
     assert.equal(await disabled('page.delete'), false);
+    assert.notEqual(await item('page.delete').evaluate(el => getComputedStyle(el).color), 'rgb(132, 69, 68)', 'an enabled Delete keeps the full red');
     await item('page.delete').click();
     await page.waitForTimeout(150);
     assert.deepEqual(await page.evaluate(() => window.design.getDocument().pages.map(p => p.id)), ['p1'], 'Delete removes the page');

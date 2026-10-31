@@ -1,5 +1,6 @@
 // Layers panel drag & drop (reorder / re-parent / multi-select / locked / cancel), flip and rotate 90°,
-// eyedropper (EyeDropper API and click-to-sample fallback), ellipse shapes and the extra context-menu commands.
+// eyedropper (EyeDropper API and click-to-sample fallback), ellipse shapes, the extra context-menu commands and the
+// Layers preview of a canvas drag out of an auto layout (Wonder R1).
 const {_electron} = require('@playwright/test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
@@ -199,9 +200,9 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     // ---- 9. Copy as code / PNG ----
     await page.evaluate(() => window.design.setSelection(['a']));
     await page.keyboard.press('Meta+Shift+KeyC');
-    await page.waitForFunction(() => /Copied selection as HTML/.test(document.querySelector('#workspace footer, footer')?.textContent || ''));
+    await page.waitForFunction(() => /Copied selection as code/.test(document.querySelector('#workspace footer, footer')?.textContent || ''));
     const code = await app.evaluate(({clipboard}) => clipboard.readText());
-    assert.match(code, /<!doctype html>/i); assert.match(code, /data-id="a"/);
+    assert.match(code, /^\/\*\*\n \* Made with Verynize\n/); assert.match(code, /export default function [\s\S]*className=/); // Tailwind TSX (Wonder P1-copy-code.txt)
     assert.ok(await page.evaluate(() => window.design.runCommand('edit.copyPng')));
     await page.waitForFunction(() => /PNG/.test(document.querySelector('#workspace footer, footer')?.textContent || ''));
     const footerText = await page.evaluate(() => document.querySelector('#workspace footer, footer').textContent);
@@ -214,6 +215,90 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
       const size = await page.evaluate(async src => { const img = new Image(); img.src = src; await img.decode(); return [img.naturalWidth, img.naturalHeight]; }, html.match(/src="(data:image\/png;base64,[^"]+)"/)[1]);
       assert.deepEqual(size, [200, 160], 'clipboard HTML carries the 2× PNG');
     }
+
+    // ---- 10. Canvas drag out of an auto layout previews the new hierarchy (Wonder R1-row-drag-out / -far) ----
+    // While the pointer is held the Layers tree already lists the child at the top level; returning into the row or
+    // pressing Escape reverts the tree. The preview is view state only: no document change, no save, no undo step.
+    await seed([frame('row', 0, 0, 380, 160, {layout: 'flex', direction: 'row', gap: 20, padding: 20, wMode: 'hug', hMode: 'hug'}),
+      frame('k1', 0, 0, 100, 60, {parentId: 'row'}), frame('k2', 0, 0, 100, 120, {parentId: 'row'}), frame('k3', 0, 0, 100, 90, {parentId: 'row'})]);
+    await page.evaluate(() => window.design.setSelection(['k2']));
+    await row('k2').waitFor();
+    const rowsNow = () => page.locator('#bd-layer-tree .layer-row').evaluateAll(els => els.map(e => e.dataset.id + ':' + e.getAttribute('aria-level')));
+    // The tree re-renders on React's schedule: wait (briefly) for an expected order before comparing.
+    const settle = async want => { for (let i = 0; i < 20; i++) { const now = await rowsNow(); if (want.every((v, k) => now[k] === v) && now.length === want.length) return now; await page.waitForTimeout(25); } return rowsNow(); };
+    const tree = want => (want ? settle(want) : rowsNow());
+    const atWorld = (x, y) => page.evaluate(([x, y]) => { const r = document.querySelector('#canvas-wrap').getBoundingClientRect(), c = window.design.getCamera(); return {x: r.left + c.x + x * c.zoom, y: r.top + c.y + y * c.zoom}; }, [x, y]);
+    const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('verynize-v2') || '{}').pages?.[0]?.nodes?.find(n => n.id === 'k2')?.parentId ?? null);
+    const nested = ['row:1', 'k3:2', 'k2:2', 'k1:2'], out = ['k2:1', 'row:1', 'k3:2', 'k1:2'];
+    assert.deepEqual(await tree(nested), nested, 'the child starts inside its row');
+    await page.evaluate(() => window.design.updateNodes(['k1'], {name: 'renamed'})); // a known last undo step
+    let p = await atWorld(170, 80);
+    await page.mouse.move(p.x, p.y); await page.mouse.down();
+    p = await atWorld(220, 330); await page.mouse.move(p.x, p.y, {steps: 8});
+    assert.deepEqual(await tree(out), out, 'dragged out of the row, the tree shows it at the top level while held');
+    assert.equal(await page.locator('#bd-layer-tree .layer-row[data-id=k2]').evaluate(e => e.getAttribute('aria-selected')), 'true', 'still selected');
+    assert.equal((await node('k2')).parentId, 'row', 'the document is unchanged until release');
+    assert.equal(await stored(), 'row', 'nothing is saved');
+    p = await atWorld(290, 80); await page.mouse.move(p.x, p.y, {steps: 8});
+    assert.deepEqual(await tree(nested), nested, 'back inside the row, the preview reverts');
+    p = await atWorld(220, 330); await page.mouse.move(p.x, p.y, {steps: 8});
+    assert.deepEqual(await tree(out), out);
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await tree(nested), nested, 'Escape cancels the drag and the preview');
+    assert.equal(await page.locator('#canvas [data-id=k2]').evaluate(e => e.style.translate), '', 'the dragged copy goes back to its slot');
+    await page.mouse.up();
+    assert.equal((await node('k2')).parentId, 'row', 'releasing after Escape changes nothing');
+    assert.deepEqual(await selection(), ['k2'], 'Escape during the drag keeps the selection');
+    await undo();
+    assert.equal((await node('k1')).name, 'k1', 'the cancelled drag left no undo step (undo reverts the earlier rename)');
+    // A real drop out of the row: one undo step, and the tree follows the document.
+    await page.evaluate(() => window.design.setSelection(['k2']));
+    p = await atWorld(170, 80); await page.mouse.move(p.x, p.y); await page.mouse.down();
+    p = await atWorld(220, 330); await page.mouse.move(p.x, p.y, {steps: 8}); await page.mouse.up();
+    assert.equal((await node('k2')).parentId, null, 'released outside, the child is top-level');
+    assert.deepEqual(await tree(out), out, 'the tree keeps the previewed order after release');
+    await undo();
+    assert.equal((await node('k2')).parentId, 'row', 'the drop is one undo step');
+    assert.deepEqual(await tree(nested), nested);
+    // R1-row-return-during: a top-level frame dragged over the row is listed inside it, at its slot, before release,
+    // and the slot bar is Wonder's 3px solid #c468f7.
+    await seed([frame('row', 0, 0, 380, 160, {layout: 'flex', direction: 'row', gap: 20, padding: 20, wMode: 'hug', hMode: 'hug'}),
+      frame('k1', 0, 0, 100, 60, {parentId: 'row'}), frame('k3', 0, 0, 100, 90, {parentId: 'row'}), frame('r', 100, 300, 100, 80)]);
+    await page.evaluate(() => window.design.setSelection(['k1'])); await page.evaluate(() => window.design.setSelection(['r'])); // row expanded
+    assert.deepEqual(await tree(['r:1', 'row:1', 'k3:2', 'k1:2']), ['r:1', 'row:1', 'k3:2', 'k1:2']);
+    p = await atWorld(150, 340); await page.mouse.move(p.x, p.y); await page.mouse.down();
+    p = await atWorld(125, 60); await page.mouse.move(p.x, p.y, {steps: 8});
+    const entering = await tree(['row:1', 'k3:2', 'r:2', 'k1:2']);
+    const heldParent = (await node('r')).parentId;
+    const bar = await page.locator('#canvas-overlay .drop-line').evaluate(e => ({hidden: e.hidden, w: e.getBoundingClientRect().width, color: getComputedStyle(e).backgroundColor}));
+    await page.mouse.up();
+    assert.deepEqual(entering, ['row:1', 'k3:2', 'r:2', 'k1:2'], 'entering the row, the tree lists it at the slot it will take');
+    assert.equal(heldParent, null, 'still top-level in the document while held');
+    assert.deepEqual(bar, {hidden: false, w: 3, color: 'rgb(196, 104, 247)'}, 'the slot bar is 3px #c468f7');
+    assert.equal((await node('r')).parentId, 'row', 'released, the top-level frame joins the row');
+    assert.deepEqual(await siblings('row'), ['k1', 'r', 'k3'], 'at the slot under the pointer');
+    await undo();
+    assert.deepEqual(await tree(['r:1', 'row:1', 'k3:2', 'k1:2']), ['r:1', 'row:1', 'k3:2', 'k1:2'], 'one undo step');
+    assert.equal((await node('r')).parentId, null, 'undo returns it to the page');
+
+    // A top-level frame dropped on a free (non-stack) frame stays top-level: R1 proves stacks only.
+    await seed([frame('free', 0, 0, 300, 200), frame('r', 100, 300, 100, 80)]);
+    await page.evaluate(() => window.design.setSelection(['r']));
+    p = await atWorld(150, 340); await page.mouse.move(p.x, p.y); await page.mouse.down();
+    p = await atWorld(150, 100); await page.mouse.move(p.x, p.y, {steps: 8}); await page.mouse.up();
+    assert.equal((await node('r')).parentId, null, 'a top-level frame is not nested in a free frame');
+    assert.equal((await node('r')).y, 60, 'it just moves');
+
+    // Cycle safety: a top-level stack dragged over its own nested stack never goes inside it.
+    await seed([frame('outer', 0, 0, 400, 200, {layout: 'flex', direction: 'row', gap: 20, padding: 20}),
+      frame('inner', 0, 0, 200, 120, {parentId: 'outer', layout: 'flex', direction: 'row', gap: 10, padding: 10}),
+      frame('leaf', 0, 0, 50, 50, {parentId: 'inner'})]);
+    await page.evaluate(() => window.design.setSelection(['outer']));
+    p = await atWorld(380, 180); await page.mouse.move(p.x, p.y); await page.mouse.down();
+    p = await atWorld(420, 200); await page.mouse.move(p.x, p.y, {steps: 4});
+    p = await atWorld(450, 220); await page.mouse.move(p.x, p.y, {steps: 4}); await page.mouse.up();
+    assert.equal((await node('outer')).parentId, null, 'a frame never enters its own descendant');
+    assert.equal((await node('inner')).parentId, 'outer');
 
     assert.deepEqual(errors, [], 'no page errors');
     console.log('canvas layers dnd tests passed');
