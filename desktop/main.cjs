@@ -1,7 +1,6 @@
 const {onWindowClosed}=require('./window-cleanup.cjs');
-const { app, BrowserWindow, session, dialog, Notification, shell, screen } = require('electron');
+const { app, BrowserWindow, session, dialog, Notification, shell, screen, protocol } = require('electron');
 const path = require('node:path');
-const {pathToFileURL}=require('node:url');
 const {Project}=require('./projects.cjs');
 const agents=require('./agents.cjs');
 const {registerPreview}=require('./preview.cjs');
@@ -15,12 +14,17 @@ const {RepositoryRegistry,registerRepositories,createProjectFolder}=require('./r
 const mcpBridge=require('./mcp-bridge.cjs'); // agent-bridge hook: live MCP server (getBridgeInfo for agent runtimes)
 const {registerAgentRuntime}=require('./agent-runtime.cjs'); // agent chat runtime (Claude Agent SDK / Codex app-server)
 const agentBehavior=require('./agent-behavior.cjs'); // Settings › Agents: follow-ups, response style, attribution, folder, branch prefix, modes, allowed rules
-const entry=path.join(__dirname,'../web/index.html');
+// The editor is served from app://verynize/ (desktop/app-protocol.cjs), not file://: IPC trust is
+// origin-based, so client-side routes (app://verynize/editor) keep working.
+const appProtocol=require('./app-protocol.cjs');
+appProtocol.registerSchemes(protocol); // must run before app ready
 let primaryRuntime=null,repositories=null,behaviorStore=null,agentStores=null;const liveRuntimes=new Set(); // agent runtime of the latest editor window (serves ask_agent)
 app.setName('Verynize');
 require('./app-preferences.cjs').attachDeepLinks(app); // verynize:// design links (Settings › Preferences › Advanced)
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  appProtocol.registerHandler(protocol);
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  await require('./storage-migration.cjs').migrateStorage({app,BrowserWindow}); // one-time file:// → app://verynize localStorage/IndexedDB copy
   // Design preferences: one file shared by the agent persona (agent-runtime.cjs) and the MCP tools.
   if(!process.env.VERYNIZE_PREFERENCES)process.env.VERYNIZE_PREFERENCES=path.join(app.getPath('userData'),'design-preferences.json');
   // ask_agent MCP tool: nested read-only helper run on the most recent window's agent runtime.
@@ -40,11 +44,11 @@ app.whenReady().then(() => {
     let project=null,agentRuntime=null;const agentsBusy=()=>agentRuntime?.active()>0;
     const current=()=>{if(!project)throw Error('Open a project folder first');return project;};
     const handle=(name,fn)=>win.webContents.ipc.handle('desktop:'+name,(event,...args)=>{
-      if(event.sender!==win.webContents||!event.senderFrame||event.senderFrame!==event.sender.mainFrame||event.senderFrame.url!==pathToFileURL(entry).href)throw Error('Untrusted IPC sender');return fn(...args);
+      if(!appProtocol.isTrustedSender(event,win))throw Error('Untrusted IPC sender');return fn(...args);
     });
     registerPreview(handle,win);
     const designFiles=registerDesignFiles(handle,win);
-    mcpBridge.registerWindow(win,{designFiles,entryURL:pathToFileURL(entry).href}); // agent-bridge hook
+    mcpBridge.registerWindow(win,{designFiles,trusted:event=>appProtocol.isTrustedSender(event,win)}); // agent-bridge hook
     registerGeneration(handle,win);
     registerFigma(handle,win);
     require('./figma-oauth.cjs').registerFigmaOAuth(handle,win); // Figma account (OAuth PKCE, safeStorage tokens)
@@ -115,8 +119,10 @@ app.whenReady().then(() => {
     require('./terminal.cjs').setTerminalCwdValidator(async(real,{defaultAllowed})=>{if(defaultAllowed)return true;try{await repositories.resolveRoot(real);return true}catch{return false}});
     // --- end integrated terminal ---
     win.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
-    win.webContents.on('will-navigate', event => event.preventDefault());
-    win.loadFile(entry);
+    // Same-origin navigations (a client-side route reloaded as app://verynize/editor) are allowed; anything else is blocked.
+    win.webContents.on('will-navigate', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
+    win.webContents.on('will-redirect', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
+    win.loadURL(appProtocol.ENTRY_URL);
   };
   createWindow();
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
