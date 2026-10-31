@@ -1,7 +1,7 @@
 // Staged preview edits (Wonder X2 / PP2): the amber "N changes" badge on each preview frame with its "Preview changes"
 // popover, and the "Discard preview edits?" confirmation that stop paths await (window.previewEdits.confirmBeforeStop).
 // The edits themselves live in web/preview-edit.js; this file only renders them.
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertDialog, Popover } from "radix-ui";
 import {
@@ -118,6 +118,19 @@ function ChangesBadge({ frameId, host }: { frameId: string; host: HTMLElement })
   useEffect(() => {
     if (!count) setOpen(false);
   }, [count]);
+  // Wonder PF4-resize: the badge shares the breadcrumb row, so the breadcrumb ends before it and truncates.
+  const badge = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const width = count ? (badge.current?.offsetWidth ?? 0) : 0;
+    if (width) host.style.setProperty("--pf-badge-space", width + 8 + "px");
+    else host.style.removeProperty("--pf-badge-space");
+  }, [count, host]);
+  useEffect(
+    () => () => {
+      host.style.removeProperty("--pf-badge-space");
+    },
+    [host],
+  );
   if (!api) return null;
   const changes = api.changes(frameId);
   const groups = [
@@ -129,6 +142,7 @@ function ChangesBadge({ frameId, host }: { frameId: string; host: HTMLElement })
       <Popover.Trigger asChild>
         <button
           type="button"
+          ref={badge}
           data-pe="preview-changes-badge"
           data-frame-id={frameId}
           hidden={!count}

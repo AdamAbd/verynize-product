@@ -260,12 +260,15 @@
     text: "Text",
     width: "Width",
     height: "Height",
+    "min-width": "Min width",
+    "min-height": "Min height",
     "padding-inline": "Horizontal padding",
     "padding-block": "Vertical padding",
     "margin-inline": "Horizontal margin",
     "margin-block": "Vertical margin",
     opacity: "Opacity",
     "border-radius": "Corner radius",
+    overflow: "Clip content",
     "font-family": "Font",
     "font-weight": "Weight",
     "font-size": "Font size",
@@ -460,12 +463,15 @@
       {
         width: st.width,
         height: st.height,
+        "min-width": st.minWidth,
+        "min-height": st.minHeight,
         "padding-inline": st.paddingLeft,
         "padding-block": st.paddingTop,
         "margin-inline": st.marginLeft,
         "margin-block": st.marginTop,
         opacity: st.opacity,
         "border-radius": st.borderRadius,
+        overflow: st.overflow,
         "font-family": st.fontFamily,
         "font-weight": st.fontWeight,
         "font-size": st.fontSize,
@@ -494,6 +500,9 @@
       pageId: doc.activePage,
       type: "element",
     });
+    // Wonder PM5: the composer shows only the element chip. The preview frame's own selection chip is dismissed
+    // (until the canvas selection changes), so the agent is not handed the whole frame as well.
+    if (ctx.frameId) ws.removeMention?.(ctx.frameId);
     requestAnimationFrame(() => document.getElementById("project-prompt")?.focus());
     return true;
   }

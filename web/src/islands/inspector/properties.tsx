@@ -71,7 +71,7 @@ import {
 type Props = { doc: DesignDocument; node: Node; selection: string[] };
 
 /* ---------- Position ---------- */
-const ALIGN_GROUPS: { id: string; label: string; icon: IconType }[][] = [
+export const ALIGN_GROUPS: { id: string; label: string; icon: IconType }[][] = [
   [
     { id: "left", label: "Align left", icon: AlignLeftBarsIcon },
     { id: "center", label: "Align horizontal centers", icon: AlignCenterXBarsIcon },
@@ -84,7 +84,7 @@ const ALIGN_GROUPS: { id: string; label: string; icon: IconType }[][] = [
   ],
 ];
 
-function ToolGroup({ children, disabled }: { children: ReactNode; disabled?: boolean }) {
+export function ToolGroup({ children, disabled }: { children: ReactNode; disabled?: boolean }) {
   return (
     <div
       role="group"
@@ -99,7 +99,7 @@ function ToolGroup({ children, disabled }: { children: ReactNode; disabled?: boo
   );
 }
 
-function ToolButton({
+export function ToolButton({
   id,
   label,
   icon: Icon,
@@ -423,7 +423,7 @@ function shared(doc: DesignDocument, selection: string[], key: string) {
 }
 
 /* ---------- Appearance ---------- */
-function InspectorCheckbox({
+export function InspectorCheckbox({
   name,
   label,
   checked,

@@ -62,7 +62,10 @@ async function makeSandbox(repo) {
     page.on("pageerror", (e) => errors.push(e.message));
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 870));
     await page.waitForFunction(() => !!window.livePreview?.frameInternals && !!window.agentWorkspace && !!window.previewEdits && !!window.previewTab);
-    await page.evaluate(() => { const doc = window.design.getDocument(); for (const p of doc.pages) p.background = "#2b2b2b"; window.design.setDocument(doc); });
+    // The starter layers (Heading, Caption, Violet card) sat just left of the preview frame and showed through at the
+    // canvas edge (a violet bar and stray text next to the Layers panel). Wonder's other frames are off screen, so park
+    // them 4000 px to the left; they stay in the Layers list.
+    await page.evaluate(() => { const doc = window.design.getDocument(); for (const p of doc.pages) { p.background = "#2b2b2b"; for (const n of p.nodes) if (!n.parentId) n.x -= 4000; } window.design.setDocument(doc); });
     await page.waitForTimeout(500);
 
     /* ---------- helpers ---------- */
@@ -239,7 +242,7 @@ async function makeSandbox(repo) {
       await away(); await shot("PF4-presets", { items: await page.locator("#screen-template-menu [data-preset]").allTextContents() });
       await page.locator('#screen-template-menu [data-preset="iPhone 17"]').click();
       await page.locator("#screen-template-menu").waitFor({ state: "detached" }); await wait(900);
-      await away(); await shot("PF4-resize", { viewport: await app_().evaluate(() => [innerWidth, innerHeight]) });
+      metrics.seams.phoneViewport = await app_().evaluate(() => [innerWidth, innerHeight]);
       await page.locator("#screen-template").click();
       await page.locator(`#screen-template-menu [data-preset='MacBook Pro 14"']`).click();
       await page.locator("#screen-template-menu").waitFor({ state: "detached" }); await wait(900);
@@ -340,6 +343,21 @@ async function makeSandbox(repo) {
       await page.locator("#preview-changes").waitFor(); await wait(300);
       await away(); await shot("X2-changes", { text: (await page.locator("#preview-changes").innerText()).replace(/\s+/g, " ") });
       await esc();
+    });
+    // PF4-resize is shot here, with the staged edit's "1 change" badge, as in Wonder (its breadcrumb truncates to fit).
+    await step("PF4-resize", async () => {
+      await select(); await frameView();
+      await page.locator("#screen-template").click(); await page.locator("#screen-template-menu").waitFor();
+      await page.locator('#screen-template-menu [data-preset="iPhone 17"]').click();
+      await page.locator("#screen-template-menu").waitFor({ state: "detached" }); await wait(900);
+      await away();
+      await shot("PF4-resize", {
+        viewport: await app_().evaluate(() => [innerWidth, innerHeight]),
+        crumbTruncated: await page.locator(`${pf()} .pf-crumb-text`).evaluate((el) => el.scrollWidth > el.clientWidth),
+      });
+      await page.locator("#screen-template").click();
+      await page.locator(`#screen-template-menu [data-preset='MacBook Pro 14"']`).click();
+      await page.locator("#screen-template-menu").waitFor({ state: "detached" }); await wait(900);
     });
     await step("PM5", async () => {
       await select();
