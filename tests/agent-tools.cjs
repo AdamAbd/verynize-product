@@ -316,7 +316,7 @@ test('runtime: defaults keep connectors and artifacts, pass --no-chrome; Codex g
   assert.equal(record.options.env.ENABLE_CLAUDEAI_MCP_SERVERS, undefined);
   assert.equal(record.options.env.CLAUDE_CODE_DISABLE_ARTIFACT, undefined);
   assert.deepEqual(record.options.extraArgs, { 'no-chrome': null });
-  assert.equal(record.options.hooks.PreToolUse, undefined, 'no create gate while createFiles is on');
+  assert.ok(!(record.options.hooks.PreToolUse || []).some(h => !h.matcher), 'no create gate while createFiles is on');
   // Sharing off: Codex's memories stay out, but ~/.codex/AGENTS.md is still given to Claude as personal instructions (Settings › Memory).
   assert.doesNotMatch(record.options.systemPrompt.append, /CODEX-MEMORY-MARKER/);
   assert.equal(record.options.systemPrompt.append.match(/SHARED-FROM-CODEX/g)?.length, 1);

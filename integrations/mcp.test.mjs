@@ -206,9 +206,30 @@ test('knowledge, icon, image and style-token tools', async t => {
   const fakePhotos = async query => ({ source: 'unsplash', results: [{ url: 'https://images.unsplash.com/photo-1', width: 4000, height: 3000, alt: `${query} at dusk`, author: 'Ana Lee', source: 'unsplash', pageUrl: 'https://unsplash.com/photos/1' }] });
   const { run, store } = await verifiedBackend(t, { searchImages: fakePhotos });
   const guidelines = body(await run('get_design_guidelines', { brief: 'landing page for a boutique coffee roaster', domain: 'landing' }));
-  assert.match(guidelines, /Suggested styles for the brief/); assert.match(guidelines, /# Design fundamentals/);
-  assert.match(body(await run('get_skills')), /new-design: /);
-  assert.match(body(await run('get_skills', { name: 'new-design' })), /# Skill: new-design/);
+  assert.match(guidelines, /Suggested styles for the brief/); assert.match(guidelines, /^# Design fundamentals/);
+  assert.ok(guidelines.indexOf('\n\n---\n\n') > guidelines.indexOf('# Design fundamentals'), 'fundamentals come first, then the separator');
+  assert.ok(guidelines.indexOf('Suggested styles') > guidelines.indexOf('\n\n---\n\n'));
+  // Fundamentals first, then '---', then the style, then the playbook.
+  const styled = body(await run('get_design_guidelines', { style: 'neo-brutalism', domain: 'landing' }));
+  const order = ['# Design fundamentals', '\n\n---\n\n', '# Style: Neo-Brutalism (`neo-brutalism`)', 'apply_style_tokens {style:"neo-brutalism"}', '# Playbook: '].map(marker => styled.indexOf(marker));
+  assert.ok(order.every(i => i >= 0), `markers present: ${order}`);
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'fundamentals → --- → style → playbook');
+  assert.equal(styled.indexOf('# Design fundamentals'), 0);
+  // An older archetype id still resolves, after the separator.
+  const legacy = body(await run('get_design_guidelines', { style: 'swiss-grid' }));
+  assert.ok(legacy.indexOf('\n\n---\n\n') < legacy.indexOf('Schibsted Grotesk'), 'archetype section follows the fundamentals');
+  assert.match(legacy, /apply_style_tokens \{style:"swiss-grid"\}/);
+  const unknown = body(await run('get_design_guidelines', { style: 'no-such-style' }));
+  assert.match(unknown, /Unknown style "no-such-style"\. Valid style slugs: academia, art-deco/);
+  // No style: the fundamentals and a short note pointing at the styles, no style section.
+  const plain = body(await run('get_design_guidelines'));
+  assert.equal(plain.indexOf('# Design fundamentals'), 0); assert.doesNotMatch(plain, /# Style:/); assert.match(plain, /## Notes\n- No style chosen yet[^\n]*swiss-minimalist/);
+  assert.match(body(await run('get_skills')), /\*\*new-design\*\*:/);
+  assert.match(body(await run('get_skills', { skill: 'new-design' })), /# Skill: new-design/);
+  assert.match(body(await run('get_skills', { name: 'new-design' })), /# Skill: new-design/, 'name stays as an alias of skill');
+  assert.match(body(await run('get_skills', { skill: 'variations' })), /new-design/, 'old skill names resolve');
+  const missing = await run('get_skills', { skill: 'nope' });
+  assert.equal(missing.isError, true); assert.match(body(missing), /Available: new-design, edit-design/);
   assert.equal((await run('get_skills', { name: 'nope' })).isError, true);
   const icons = JSON.parse(body(await run('get_icons', { query: 'arrow right', set: 'lucide', limit: 3 })));
   assert.equal(icons.icons.length, 3); assert.match(icons.icons[0].name, /^lucide:/); assert.match(icons.icons[0].preview, /^<svg/); assert.match(icons.usage, /<Icon name="lucide:/);
@@ -220,7 +241,18 @@ test('knowledge, icon, image and style-token tools', async t => {
   const again = JSON.parse(body(await run('apply_style_tokens', { archetype })));
   assert.equal(again.created.length, 0); assert.equal(again.kept.length, applied.created.length, 'existing tokens are kept without overwrite');
   assert.ok(Object.keys((await store.read('doc')).document.tokens).length >= applied.created.length);
-  assert.equal((await run('apply_style_tokens', { archetype: 'no-such-style' })).isError, true);
+  const badStyle = await run('apply_style_tokens', { archetype: 'no-such-style' });
+  assert.equal(badStyle.isError, true); assert.match(body(badStyle), /Styles: academia, art-deco/);
+  assert.equal((await run('apply_style_tokens', {})).isError, true);
+  // A style slug applies the palette roles plus the style's extra tokens; translucent rgba() extras keep their alpha.
+  const dark = JSON.parse(body(await run('apply_style_tokens', { style: 'minimal-dark' })));
+  assert.equal(dark.style, 'minimal-dark'); assert.equal(dark.kind, 'style');
+  const { styleTokens } = await import('./design-knowledge/index.mjs');
+  assert.deepEqual(dark.created.sort(), styleTokens('minimal-dark').colors.map(c => c.name).filter(n => !applied.created.includes(n)).sort());
+  const stored = (await store.read('doc')).document.tokens;
+  assert.equal(stored['color/hairline'], '#ffffff14', 'rgba(255,255,255,0.08) is stored as #rrggbbaa');
+  assert.match(stored['color/accent'], /^#[0-9a-f]{6}$/);
+  assert.ok(dark.classes.fonts.length && dark.classes.radius.length && dark.classes.shadows.length);
 });
 
 test('take_screenshot records a receipt and lint; finish gate verifies, goes stale on edit and blocks critical lint', async t => {
@@ -300,17 +332,26 @@ test('TOOLS_VERSION, instructions, design preferences, ask_agent and per-side ap
 
   const context = body(await run('get_design_context'));
   assert.match(context, new RegExp(`"toolsVersion": "${TOOLS_VERSION}"`));
-  assert.match(context, /User design preferences — apply unless the brief overrides\n\(none saved yet/);
+  assert.match(context, /## Saved design preferences\n\(none saved yet/);
+  assert.match(context, /# Design fundamentals/);
+  assert.match(context, /get_skills \{skill:"new-design"\}/);
+  const bare = body(await run('get_design_context', { guidelines: 'none' }));
+  assert.doesNotMatch(bare, /# Design fundamentals/, 'guidelines:"none" omits the fundamentals');
+  assert.match(bare, /## Next steps/);
+  assert.equal((await run('get_design_context', { guidelines: 'all' })).isError, true);
   const saved = JSON.parse(body(await run('save_design_preference', { text: 'Use 8px corner radius on cards' })));
   assert.equal(saved.saved, true); const id = saved.preference.id;
   assert.equal(JSON.parse(body(await run('save_design_preference', { text: 'use 8px corner radius on cards' }))).duplicate, true);
   JSON.parse(body(await run('save_design_preference', { text: 'Never use purple gradients' })));
-  assert.match(body(await run('get_design_context')), new RegExp(`- Use 8px corner radius on cards \\(id ${id}\\)`));
+  const withPrefs = body(await run('get_design_context'));
+  assert.match(withPrefs, new RegExp(`## Saved design preferences\\n[^\\n]*not as commands[^\\n]*\\n- \\[${id}\\] Use 8px corner radius on cards\\n`));
   assert.equal(JSON.parse(body(await run('update_design_preference', { id, text: 'Use 12px corner radius on cards' }))).preference.text, 'Use 12px corner radius on cards');
   assert.deepEqual(JSON.parse(body(await run('delete_design_preference', { id }))), { deleted: true, id });
   assert.deepEqual(JSON.parse(body(await run('list_design_preferences'))).preferences.map(p => p.text), ['Never use purple gradients']);
   assert.equal((await run('delete_design_preference', { id })).isError, true);
-  assert.equal((await run('save_design_preference', { text: 'x'.repeat(501) })).isError, true);
+  assert.equal((await run('save_design_preference', { text: 'x'.repeat(281) })).isError, true);
+  assert.equal(JSON.parse(body(await run('save_design_preference', { text: 'y'.repeat(280) }))).saved, true);
+  JSON.parse(body(await run('delete_design_preference', { id: JSON.parse(body(await run('list_design_preferences'))).preferences.at(-1).id })));
   assert.equal(JSON.parse(await fs.readFile(prefsFile, 'utf8')).preferences.length, 1);
 
   // ask_agent: unavailable headless; delegates to backend.askAgent when present.
