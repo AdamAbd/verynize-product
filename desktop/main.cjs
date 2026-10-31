@@ -92,7 +92,7 @@ app.whenReady().then(async () => {
     handle('readMemory',()=>current().memory());handle('writeMemory',text=>current().write('VERYNIZE.md',text));
     handle('discoverAgents',()=>agents.discover());
     // --- agent chat runtime (desktop/agent-runtime.cjs): runAgent, cancelAgent, respondAgentPermission, listAgentModels, saveAgentImage ---
-    // --- also: respondAgentQuestion, steerAgent, listAgentRuns, listAllowRules, removeAllowRule, agentToolsVersion, agentTitle, designPreferences* ---
+    // --- also: respondAgentQuestion, steerAgent, listAgentRuns, listAllowRules, removeAllowRule, agentToolsVersion, agentTitle, designPreferences*, designStylesList ---
     agentRuntime=registerAgentRuntime(handle,win,{userData:app.getPath('userData'),getProject:()=>project,resolveProject:async root=>{const resolved=await repositories.resolveRoot(root);const opened=await Project.open(resolved.root);opened.repositoryRoot=resolved.repository.root;return opened;},getBehavior:()=>behaviorStore.get(),...agentStores});
     const windowRuntime=agentRuntime;liveRuntimes.add(windowRuntime);onWindowClosed(win,()=>liveRuntimes.delete(windowRuntime));
     // Global search and history-preserving moves (desktop/project-search.cjs, desktop/repository-moves.cjs): projectSearch*, repositoryMove*, repositoryRelocate.

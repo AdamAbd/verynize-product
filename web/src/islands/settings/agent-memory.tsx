@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckIcon, PencilIcon, PlusIcon, ShieldCheckIcon, Trash2Icon, XIcon } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { Card, Row, Section, SettingsButton, TextField } from "./controls";
 import { platform } from "@/lib/platform";
 
@@ -15,7 +16,24 @@ export type PreferencesIpc = {
 };
 export type AllowRule = string | ({ id?: string; label?: string; rule?: string; pattern?: string; tool?: string; agent?: string; description?: string } & Record<string, unknown>);
 const desktop = () => platform.desktop;
-export const MAX_PREFERENCE_LENGTH = 500;
+export const MAX_PREFERENCE_LENGTH = 280;
+/** How many design preferences the runtime keeps (desktop enforces the same limit). */
+export const MAX_PREFERENCES = 50;
+
+/** "n / 280" under a preference field; turns to the warning color near the limit. */
+function CharCounter({ length, id }: { length: number; id?: string }) {
+  const near = length >= MAX_PREFERENCE_LENGTH - 20;
+  return (
+    <span
+      id={id}
+      data-preference-counter
+      aria-live="polite"
+      className={cn("shrink-0 text-xs tabular-nums", near ? "text-warning" : "text-subtle-foreground")}
+    >
+      {length} / {MAX_PREFERENCE_LENGTH}
+    </span>
+  );
+}
 
 export function preferencesIpc(): PreferencesIpc | null {
   const ipc: Partial<PreferencesIpc> | undefined = desktop()?.designPreferences;
@@ -61,9 +79,10 @@ export function DesignPreferencesSection() {
       setBusy(false);
     }
   };
+  const full = (items?.length ?? 0) >= MAX_PREFERENCES;
   const add = async () => {
     const text = draft.trim();
-    if (text && (await run(() => ipc!.save(text), "Design preference saved"))) setDraft("");
+    if (text && !full && (await run(() => ipc!.save(text), "Design preference saved"))) setDraft("");
   };
   const commitEdit = async () => {
     if (!editing) return;
@@ -76,7 +95,15 @@ export function DesignPreferencesSection() {
     <Section
       id="settings-design-preferences"
       title="Design preferences"
-      description="What agents apply to your designs. Chat instructions win."
+      description="Your taste in visual work: agents weigh these whenever they design for you, and what you ask in a chat takes precedence."
+      action={
+        ipc &&
+        items !== null && (
+          <span id="settings-design-preference-count" data-preference-count className="shrink-0 text-sm text-muted-foreground tabular-nums">
+            {items.length} / {MAX_PREFERENCES}
+          </span>
+        )
+      }
     >
       {!ipc ? (
         <Card>
@@ -87,7 +114,7 @@ export function DesignPreferencesSection() {
           {items !== null && items.length === 0 && (
             <Row
               title="No saved preferences yet"
-              description="Ask an agent to remember a preference, like “use 8px corner radius”, or add one below."
+              description="Note what you like to see, such as “warm off-white backgrounds, never pure white”, or tell an agent to remember it."
             />
           )}
           {(items ?? []).map((pref) =>
@@ -96,6 +123,7 @@ export function DesignPreferencesSection() {
                 <TextField
                   autoFocus
                   aria-label="Edit design preference"
+                  aria-describedby="settings-design-preference-edit-counter"
                   data-preference-edit
                   maxLength={MAX_PREFERENCE_LENGTH}
                   className="min-w-0 flex-1"
@@ -110,6 +138,7 @@ export function DesignPreferencesSection() {
                     }
                   }}
                 />
+                <CharCounter id="settings-design-preference-edit-counter" length={editing.text.length} />
                 <SettingsButton aria-label="Save preference" data-preference-save disabled={busy} onClick={() => void commitEdit()}>
                   <CheckIcon />
                 </SettingsButton>
@@ -145,14 +174,17 @@ export function DesignPreferencesSection() {
             <TextField
               id="settings-design-preference-new"
               aria-label="New design preference"
+              aria-describedby="settings-design-preference-new-counter"
               maxLength={MAX_PREFERENCE_LENGTH}
-              placeholder="Add a preference, e.g. “Cards use 12px radius and no shadows”"
+              disabled={full}
+              placeholder={full ? `All ${MAX_PREFERENCES} spots are used; edit or delete one first` : "Add a taste note, e.g. “Muted earth tones with one bold accent”"}
               className="min-w-0 flex-1"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && void add()}
             />
-            <SettingsButton id="settings-design-preference-add" disabled={busy || !draft.trim()} onClick={() => void add()}>
+            <CharCounter id="settings-design-preference-new-counter" length={draft.length} />
+            <SettingsButton id="settings-design-preference-add" disabled={busy || full || !draft.trim()} onClick={() => void add()}>
               <PlusIcon />
               Add
             </SettingsButton>

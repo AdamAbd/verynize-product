@@ -151,7 +151,7 @@ export function MemoryView({ api }: { api: SettingsApi }) {
     <>
       <PageHeader
         title="Memory"
-        description="Agent memory stays on this computer and is shared by everyone who uses it. Design preferences are stored on this computer by Verynize."
+        description="Agent memory stays on this computer and is shared by everyone who uses it. Design preferences, your visual taste, are kept on this computer by Verynize."
       />
       <div className="flex flex-col gap-12.5">
         <DesignPreferencesSection />

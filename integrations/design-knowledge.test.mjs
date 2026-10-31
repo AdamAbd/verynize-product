@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   fundamentals, archetypes, listArchetypes, getArchetype, pickArchetype, archetypeTokens,
   playbooks, getPlaybook, skills, getSkill, listSkills, persona, getDesignGuidelines, contrastRatio,
+  styles, styleIds, listStyles, getStyle, pickStyle, styleTokens, styleMarkdown,
+  skillCatalog, skillAliases, resolveSkillName, resolveStyle, designTokens,
 } from './design-knowledge/index.mjs';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -111,13 +113,21 @@ test('playbooks have numeric contracts', () => {
 
 test('skills exist, are routed by name, and carry the key rules', () => {
   const names = listSkills().map(s => s.name);
-  for (const n of ['new-design', 'edit-design', 'design-review', 'variations', 'code-to-design', 'design-system']) assert.ok(names.includes(n), n);
+  for (const n of ['new-design', 'edit-design', 'design-to-code', 'code-to-design', 'design-library', 'generate-assets', 'design-review']) assert.ok(names.includes(n), n);
+  // Old names keep resolving to the skills that absorbed them.
+  assert.equal(resolveSkillName('variations'), 'new-design');
+  assert.equal(resolveSkillName('design-system'), 'design-library');
+  assert.equal(resolveSkillName('nope'), null);
+  assert.ok(Object.keys(skillAliases).every(alias => names.includes(alias)), 'aliases are listed');
+  assert.ok(!listSkills({ aliases: false }).some(s => s.kind === 'alias'));
   for (const s of Object.values(skills)) assert.ok(words(s.body) > 120 && s.summary.length > 20, s.name);
   assert.match(getSkill('new-design'), /skeleton/i);
   assert.match(getSkill('new-design'), /take_screenshot/);
   assert.match(getSkill('design-review'), /3 repair iterations/);
   assert.match(getSkill('design-review'), /element id/);
-  assert.match(getSkill('variations'), /at most 4/);
+  assert.match(getSkill(resolveSkillName('variations')), /4 variations|at most 4|up to 4/i);
+  assert.match(getSkill('variations'), /new-design/);
+  assert.match(skillCatalog(), /\*\*new-design\*\*:/);
   assert.match(getSkill('Design Review'), /Hierarchy/);
   assert.throws(() => getSkill('nope'), /Unknown skill/);
 });
@@ -128,10 +138,45 @@ test('persona and getDesignGuidelines', () => {
   for (const k of ['get_design_guidelines', 'get_skills', 'take_screenshot', 'design-review', 'finish_artboard']) assert.ok(persona.includes(k), k);
   const base = getDesignGuidelines();
   assert.equal(base.fundamentals, fundamentals);
+  assert.equal(base.styleSection, undefined);
   assert.equal(base.archetype, undefined);
+  assert.equal(base.notes.length, 1); assert.match(base.notes[0], /swiss-minimalist/);
+
+  // Named styles resolve first.
+  const styled = getDesignGuidelines({ style: 'neo-brutalism', domain: 'landing' });
+  assert.equal(styled.styleKind, 'style'); assert.equal(styled.styleId, 'neo-brutalism');
+  assert.equal(styled.styleSection, styleMarkdown('neo-brutalism'));
+  assert.equal(styled.archetype, undefined);
+  assert.match(styled.playbook, /1440×900/);
+  assert.equal(getDesignGuidelines({ style: 'Swiss Minimalist' }).styleId, 'swiss-minimalist');
+
+  // Archetype ids remain available as a fallback.
   const full = getDesignGuidelines({ style: 'swiss-grid', domain: 'landing' });
-  assert.match(full.archetype, /Schibsted Grotesk/);
+  assert.equal(full.styleKind, 'archetype'); assert.equal(full.styleId, 'swiss-grid');
+  assert.match(full.styleSection, /Schibsted Grotesk/); assert.equal(full.archetype, full.styleSection);
   assert.match(full.playbook, /1440×900/);
+
   const bad = getDesignGuidelines({ style: 'x', domain: 'y' });
   assert.equal(bad.notes.length, 2);
+  assert.match(bad.notes[0], /Valid style slugs: academia, art-deco/); assert.match(bad.notes[0], /swiss-grid/);
+
+  const suggested = getDesignGuidelines({ brief: 'landing page for a developer CLI with a terminal feel' });
+  assert.equal(suggested.suggestions.length, 3); assert.ok(suggested.suggestions.every(p => getStyle(p.id)));
+  assert.ok(suggested.archetypeSuggestions.every(p => getArchetype(p.id)));
+  assert.match(suggested.notes[0], /from the suggestions/);
+});
+
+test('styles API is re-exported and style tokens resolve before archetypes', () => {
+  assert.equal(styles.length, 31); assert.equal(styleIds.length, 31); assert.equal(listStyles().length, 31);
+  assert.equal(pickStyle('anything').length, 3);
+  assert.equal(resolveStyle('saas').kind, 'style');
+  assert.equal(resolveStyle('ledger-precision').kind, 'archetype');
+  assert.equal(resolveStyle('nope'), null);
+  const s = designTokens('minimal-dark');
+  assert.equal(s.kind, 'style'); assert.equal(s.style, 'minimal-dark');
+  assert.deepEqual(s.colors, styleTokens('minimal-dark').colors);
+  assert.ok(s.colors.some(c => c.name === 'color/hairline' && /^rgba\(/.test(c.value)), 'extra translucent tokens are included');
+  const a = designTokens('ledger-precision');
+  assert.equal(a.kind, 'archetype'); assert.equal(a.archetype, 'ledger-precision');
+  assert.throws(() => designTokens('nope'), /Unknown style "nope"\. Styles: academia/);
 });
