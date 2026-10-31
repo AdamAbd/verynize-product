@@ -29,3 +29,16 @@ These declarations do not establish runtime registration, reachability, successf
 ## Implementation priorities
 
 Use the visible setup/run/port review flow, explicit startup/error/paused/running states, actionable logs, and persistent canvas placement as the core interaction reference. Preserve Verynize's own implementation and security boundaries. Treat inspection, capture, and publishing as separate capabilities requiring working backends and their own validation before claiming support.
+
+## Live reference (2026-10-31)
+
+Wonder's preview was later driven live against a sandbox repository (`/tmp/preview-sandbox`).
+- Steps, exact strings, measurements and per-id verdicts are in `design/wonder/preview-audit/wonder/notes.md`; read its "Do not use" list before relying on a screenshot.
+- The live pass refines this page:
+  - In Auto access the agent saves the run profile directly, as a "Preview setup / Saved by auto mode" transcript card, and does not start the server.
+  - Stop asks "Discard preview edits?" when Edit-mode changes are staged.
+  - Capture of an element creates an editable Text layer 100 px right of the preview.
+  - Expand opens a separate internal Preview tab.
+- The Setup/Run/Port card above was not observed in Auto mode, but this does not refute it for other access levels.
+
+Verynize's side is in `design/wonder/preview-audit/README.md`: before and after pairs (`pairs/`, `pairs-after/`), per-id verdicts (Match / Close / Deliberate difference / Not observable in Wonder), the integration seam checks and the remaining gaps.
