@@ -60,13 +60,6 @@
 #canvas-toolbar button.tool-active,#canvas-toolbar #select-tool.tool-active{background:#3d3d3d}
 #canvas-toolbar #select-tool:not(.tool-active){background:transparent}
 #canvas-toolbar button.tool-active img{opacity:1}
-#frame-presets{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);width:260px;max-height:min(420px,48vh);overflow:auto;background:#1f1f1f;border:1px solid #333;border-radius:10px;padding:8px;z-index:31;box-shadow:0 8px 30px #0006}
-#frame-presets[hidden]{display:none}
-#frame-presets p{margin:2px 6px 8px;color:#888;font-size:10px;line-height:1.4}
-#frame-presets strong{display:block;font-size:10px;font-weight:500;color:#8a8a8a;margin:8px 6px 4px}
-#frame-presets button{display:flex;width:100%;justify-content:space-between;align-items:center;background:transparent;border:0;padding:5px 8px;font-size:11px;color:#ccc;border-radius:5px}
-#frame-presets button:hover{background:#333}
-#frame-presets small{color:#7a7a7a;font-size:10px}
 
 #canvas-menu{position:fixed;z-index:60;min-width:210px;background:#262626;border:1px solid #3a3a3a;border-radius:8px;padding:4px;box-shadow:0 10px 30px #0007}
 #canvas-menu button{display:flex;width:100%;justify-content:space-between;gap:20px;background:transparent;border:0;padding:6px 8px;font-size:11px;color:#ddd;border-radius:5px;text-align:left}
@@ -84,9 +77,12 @@
 .layer-row:hover .layer-toggle,.layer-toggle.on{display:flex}
 .layer-toggle.on img{opacity:1!important}
 #inspector select.sizing-mode{margin-top:4px;height:24px!important;font-size:10px!important;padding:2px 6px!important}
-html[data-ui-theme=light] #frame-presets,html[data-ui-theme=light] #canvas-menu{background:#fff;border-color:#ddd}
-html[data-ui-theme=light] #frame-presets button,html[data-ui-theme=light] #canvas-menu button{color:#333}
+html[data-ui-theme=light] #canvas-menu{background:#fff;border-color:#ddd}
+html[data-ui-theme=light] #canvas-menu button{color:#333}
 
 /* Measuring a child's smallest width for spacing drags: words do not break mid-word. */
 #canvas.measuring-min .layer{overflow-wrap:normal!important;word-break:normal!important}
 #canvas.spacing-measure .layer>.handle{display:none!important}
+/* Hidden page background (Wonder H8): the page is transparent, shown as a checkerboard (tokens in globals.css);
+   outranks the chrome island's body.bd-chrome>main>#workspace background. */
+html>body>main>#workspace.page-transparent{background-color:var(--page-checker-a);background-image:repeating-conic-gradient(var(--page-checker-b) 0% 25%,var(--page-checker-a) 0% 50%);background-size:12px 12px}

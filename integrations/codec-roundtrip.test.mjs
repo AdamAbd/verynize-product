@@ -225,7 +225,9 @@ function buildSink() {
     shaderColors: { center: { color: "#ff0000" }, edge: { color: "#00ff00", token: "glow" } },
     shaderParams: { size: 40, grain: 10 },
   });
-  Object.assign(by("Free"), { columns: 4, direction: "column", gap: 12, clipContent: true });
+  Object.assign(by("Free"), { columns: 4, direction: "column", gap: 12, clipContent: true, columnSizes: [2, 1, 1, 1] });
+  // Grid settings: fr-weighted Fill tracks and Automatic positioning off (G5 / H7).
+  Object.assign(by("Grid"), { columnSizes: [1, 2, 1], rowSizes: [1, 3], autoPosition: false });
   Object.assign(by("Grow"), {
     fontFamily: "Inter",
     bindings: { fontFamily: "font/body", fontWeight: "weight/strong" },
@@ -264,6 +266,14 @@ function buildSink() {
     outlineHidden: true,
   });
   Object.assign(by("Second"), { variantClasses: "md:p-8 hover:opacity-90 dark:bg-black" });
+  // Shader mode (Wonder H6): a frame paints its fill with a shader preset; the paint stack stays as the fallback.
+  Object.assign(by("Second"), {
+    shaderFill: true,
+    shaderPreset: "ripple-pool-2",
+    shaderSpeed: 2,
+    shaderColors: { center: { color: "#ff0000" }, ripple: { color: "#22d3ee", token: "glow" } },
+    shaderParams: { density: 60 },
+  });
   reflow(page, null, [], doc);
   return validateDocument(doc);
 }

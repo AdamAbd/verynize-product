@@ -61,9 +61,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { BindableField } from "./bind";
+import { GridHeaderTools, GridPreview } from "./grid-settings";
+import { Tip } from "../chrome/tip";
 import {
   Affix,
   Caption,
@@ -419,6 +420,7 @@ function SizeField({
       field={axis}
       label={label}
       prefix={<Affix>{axis.toUpperCase()}</Affix>}
+      typeBind="typing"
     >
       {(bind) => (
         <Field
@@ -547,6 +549,7 @@ function LimitRows({
               label={l.label}
               prefix={<IconAffix icon={icon} />}
               className="col-span-2"
+              typeBind="empty"
             >
               {(bind) => (
                 <Field
@@ -627,6 +630,11 @@ const indexOf = (value: unknown) =>
 const DISTRIBUTED = ["space-around", "space-between", "space-evenly"];
 const EDGE = ["items-start", "items-center", "items-end"];
 const EDGE_X = ["justify-start", "justify-center", "justify-end"];
+const CELL_Y = ["top", "center", "bottom"];
+const CELL_X = ["left", "center", "right"];
+/** Wonder's cell tooltip (H9-hover-verified: "Align bottom right"); the middle cell reads "Align center". */
+const cellTip = (row: number, col: number) =>
+  row === 1 && col === 1 ? "Align center" : `Align ${CELL_Y[row]} ${CELL_X[col]}`;
 
 /**
  * Wonder's active-cell glyph (C3): three 2px bars 2px apart along the main axis, the middle one longer (6 / 10 / 6),
@@ -672,7 +680,8 @@ function Matrix({
       role="group"
       aria-label={label}
       className={cn(
-        "grid h-14 grid-cols-3 grid-rows-3 rounded-md bg-input p-0.5 shadow-field",
+        // 3px inset (Wonder G4): 34px columns centred at x 20 / 54 / 88, and edge-cell bars 3px from the well's edge.
+        "grid h-14 grid-cols-3 grid-rows-3 rounded-md bg-input p-0.75 shadow-field",
         className,
       )}
     >
@@ -680,26 +689,26 @@ function Matrix({
         [0, 1, 2].map((col) => {
           const active = isActive(row, col);
           return (
-            <button
-              key={row + "-" + col}
-              type="button"
-              data-cell={row + "-" + col}
-              aria-label={`${label}: ${AXIS[row]} ${AXIS[col]}`}
-              aria-pressed={active}
-              title={`${AXIS[row]} ${AXIS[col]}`}
-              className={cn(
-                // Dots sit at the cell centres; the hovered cell shows Wonder's #363636 box (C3-flex-align-center).
-                "group/cell flex rounded-sm px-1 outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring",
-                active && place ? place(row, col) : "items-center justify-center",
-              )}
-              onClick={() => onPick(row, col)}
-            >
-              {active ? (
-                glyph
-              ) : (
-                <span className="size-0.5 rounded-full bg-muted-foreground group-hover/cell:bg-foreground" />
-              )}
-            </button>
+            <Tip key={row + "-" + col} label={cellTip(row, col)}>
+              <button
+                type="button"
+                data-cell={row + "-" + col}
+                aria-label={`${label}: ${AXIS[row]} ${AXIS[col]}`}
+                aria-pressed={active}
+                className={cn(
+                  // Dots sit at the cell centres; the hovered cell shows Wonder's #363636 box (C3-flex-align-center).
+                  "group/cell flex rounded-sm outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring",
+                  active && place ? place(row, col) : "items-center justify-center",
+                )}
+                onClick={() => onPick(row, col)}
+              >
+                {active ? (
+                  glyph
+                ) : (
+                  <span className="size-0.5 rounded-full bg-muted-foreground group-hover/cell:bg-foreground" />
+                )}
+              </button>
+            </Tip>
           );
         }),
       )}
@@ -797,6 +806,7 @@ function GapField({
         field="gap"
         label={label}
         prefix={<IconAffix icon={icon} />}
+        typeBind="typing"
       >
         {(suffix) => (
           <Field
@@ -859,7 +869,7 @@ function FlexGroup(props: Props) {
             glyph={<Bars column={column} cross={cross} stretch={node.alignItems === "stretch"} />}
             // The glyph is centred along the main axis and pushed to its cross-axis edge.
             place={(row, col) =>
-              column ? cn("items-center", EDGE_X[col]) : cn("justify-center px-0", EDGE[row])
+              column ? cn("items-center", EDGE_X[col]) : cn("justify-center", EDGE[row])
             }
             onPick={(row, col) => {
               const [m, c] = column ? [row, col] : [col, row];
@@ -913,97 +923,6 @@ function FlexGroup(props: Props) {
 }
 
 /* ---------- Grid ---------- */
-/**
- * Wonder C4: in grid mode the Layout header adds the wrap glyph (purple while on) at 188 and a grid icon at 222,
- * before the auto-layout glyph at 256. Their actions were not captured; here wrap means Auto rows (children wrap into
- * as many rows as they need; off pins the current row count) and the grid icon opens the track editor.
- */
-function GridHeaderTools({ doc, node, selection }: Props) {
-  const wrap = !(num(node.rows) >= 1);
-  const columns = Math.max(1, Math.floor(num(node.columns, 2)));
-  const children = pageNodes(doc).filter((n) => n.parentId === node.id).length;
-  return (
-    <>
-      <IconButton
-        icon={WrapIcon}
-        label={wrap ? "Fix grid rows" : "Wrap into rows"}
-        active={wrap}
-        aria-pressed={wrap}
-        data-grid-wrap={wrap ? "auto" : "fixed"}
-        className={TOGGLE}
-        onClick={() =>
-          patchNodes(selection, () => ({
-            rows: wrap ? Math.min(12, Math.max(1, Math.ceil(children / columns))) : undefined,
-          }))
-        }
-      />
-      <IconButton
-        icon={GridLayoutIcon}
-        label="Edit grid tracks"
-        data-grid-tracks-tool
-        onClick={() => document.getElementById("grid-tracks")?.click()}
-      />
-    </>
-  );
-}
-
-function TrackEditor({ node, selection }: Props) {
-  const columns = Math.max(1, Math.floor(num(node.columns, 2)));
-  const rows = num(node.rows) >= 1 ? Math.floor(num(node.rows)) : 0;
-  const commit = (key: "columns" | "rows") => (raw: string) => {
-    if (key === "rows" && (raw.trim() === "" || /^auto$/i.test(raw.trim()))) {
-      patchNodes(selection, () => ({ rows: undefined }));
-      return;
-    }
-    const v = parseLength(raw, 1);
-    if (v !== null) patchNodes(selection, () => ({ [key]: Math.min(12, Math.round(v)) }));
-  };
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          id="grid-tracks"
-          aria-label="Grid tracks"
-          title="Edit grid tracks"
-          // Wonder C4: a 60px dark well (#181818, 1px #242424 edge) with one outlined box per column.
-          className="relative flex h-15 w-full items-stretch gap-px rounded-md border border-well-edge bg-well p-1 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          {Array.from({ length: Math.min(columns, 12) }, (_, i) => (
-            <span key={i} aria-hidden className="flex-1 rounded-xs border border-well-edge" />
-          ))}
-          <span className="absolute inset-0 flex items-center justify-center">
-            {columns} × {rows || "Auto"}
-          </span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent side="left" align="start" sideOffset={12} className="w-52">
-        <div className="flex flex-col gap-2">
-          <Caption label="Columns">
-            <NumberField
-              name="columns"
-              label="Grid columns"
-              icon={ColumnsIcon}
-              value={String(columns)}
-              onCommit={commit("columns")}
-            />
-          </Caption>
-          <Caption label="Rows">
-            <NumberField
-              name="rows"
-              label="Grid rows"
-              icon={RowsIcon}
-              value={rows ? String(rows) : ""}
-              placeholder="Auto"
-              onCommit={commit("rows")}
-            />
-          </Caption>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 function GridGroup(props: Props) {
   const { node, selection } = props;
   const stretched = (v: unknown) => v === undefined || v === "stretch" || v === "normal";
@@ -1014,7 +933,7 @@ function GridGroup(props: Props) {
     <>
       <Row className={GROUP}>
         <Caption label="Grid">
-          <TrackEditor {...props} />
+          <GridPreview node={props.node} />
         </Caption>
         <Caption label="Gap">
           {/* Two stacked 24px fields, 8px apart, beside the 60px track preview (Wonder C4). */}
@@ -1361,7 +1280,7 @@ export function LayoutSection(props: Props) {
       tools={
         frame ? (
           <div className="flex items-center gap-2.5">
-            {layout === "grid" ? <GridHeaderTools doc={doc} node={node} selection={selection} /> : null}
+            {layout === "grid" ? <GridHeaderTools node={node} selection={selection} /> : null}
             {/* Wonder keeps this a quiet glyph without a fill in both states (05, 06, 14). */}
             <IconButton
               icon={AutoLayoutIcon}

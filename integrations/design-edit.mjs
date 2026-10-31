@@ -104,7 +104,7 @@ export function elementCode(document, page, node, depth = Infinity) {
 
 const BOX_KEYS = ['fill', 'gradient', 'strokeWidth', 'padding', 'radius', 'shadow', 'ringWidth', 'cornerRadii'];
 const COMMON_KEYS = ['variantClasses', 'opacity', 'rotation', 'flipX', 'flipY', 'zIndex', 'clipContent', 'mask', 'animated', 'shadow', 'strokeColor', 'strokeStyle', 'ringWidth', 'ringColor', 'ringInset', 'hidden', 'aspectRatio', 'grow', 'shrink', 'basis', 'alignSelf', 'colSpan', 'rowSpan', 'blendMode', 'outlineWidth', 'outlineOffset', 'outlineColor', 'outlineStyle'];
-const FRAME_KEYS = ['layout', 'direction', 'reverse', 'columns', 'rows', 'alignItems', 'justifyContent', 'justifyItems', 'flexWrap'];
+const FRAME_KEYS = ['layout', 'direction', 'reverse', 'columns', 'rows', 'columnSizes', 'rowSizes', 'alignItems', 'justifyContent', 'justifyItems', 'flexWrap'];
 const TEXT_ONLY_KEYS = ['truncate', 'noWrap', 'lineClamp', 'textWrap'];
 const TEXT_SPEC_KEYS = ['ink', 'inkToken', 'fontSize', 'fontWeight', 'fontFamily', 'textAlign', 'lineHeight', 'lineHeightPx', 'letterSpacing', 'letterSpacingEm', 'textTransform', 'textDecoration', 'fontStyle', 'textWrap'];
 const OWN_KEY = { ink: 'color', inkToken: 'color', fontSize: 'fontSize', fontWeight: 'fontWeight', fontFamily: 'fontFamily', textAlign: 'textAlign', lineHeight: 'lineHeight', lineHeightPx: 'lineHeight',
@@ -187,6 +187,9 @@ export function applySpec(node, spec, tokens) {
   }
   if (node.type === 'frame') {
     for (const key of FRAME_KEYS) if (key in p) node[key] = p[key];
+    // Equal tracks in the classes drop stale fr weights.
+    if ('columns' in p && !('columnSizes' in p)) delete node.columnSizes;
+    if ('rows' in p && !('rowSizes' in p)) delete node.rowSizes;
     if ('direction' in p && !('layout' in p) && (node.layout === 'free' || node.layout === 'block')) node.layout = 'flex';
     if (['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].some(k => k in p)) setPadding(node, mergeFour(sidesOf(node, 'padding', Number(node.padding) || 0), [p.paddingTop, p.paddingRight, p.paddingBottom, p.paddingLeft]));
     if ('gapX' in p || 'gapY' in p) {

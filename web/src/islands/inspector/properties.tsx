@@ -1,5 +1,5 @@
 // Properties sections (design/wonder 22, 25, 43, 45–46, 55–56).
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, ChevronDown, Expand, Eye, RotateCcw, Scan, Check } from "lucide-react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
 import { activePage, type DesignDocument } from "@/lib/bridge";
@@ -18,10 +18,12 @@ import {
   type IconType,
 } from "./controls";
 import { formClick, notify } from "./legacy";
+import { Tip } from "../chrome/tip";
 import { ColorPopover } from "./color-picker";
 import { BindableField } from "./bind";
 import { CORNER_KEYS } from "./vars";
 import { ExportSection } from "./export-section";
+import { FramePresetsSection, useCanvasTool } from "./frame-presets";
 import { FillTools, PaintStack, hasPaintRows } from "./paints";
 import { parseColor, toHex } from "./color";
 import {
@@ -52,6 +54,7 @@ import { FilterSection } from "./filters";
 import { MaskSection } from "./masks";
 import { BorderSection } from "./border-colors";
 import {
+  ShaderFill,
   ShaderParameters,
   ShaderPicker,
   isParam,
@@ -182,10 +185,9 @@ function toggleAbsolute(doc: DesignDocument, selection: string[], on: boolean) {
 }
 
 /**
- * The Position header's expand tool: resize a frame to fit its content. Flow frames hug both axes; a free frame
- * takes the bounds of its visible children (which keep their place on the canvas). Wonder's behaviour for this
- * icon was never captured (properties-audit §6), so this is the most plausible reading of the glyph; the captures
- * only show it dimmed, and every captured selection had no children.
+ * The Position header's expand tool, Wonder's "Resize to fill" (⌘⇧⌥F): flow frames hug both axes; a free frame
+ * takes the bounds of its visible children (which keep their place on the canvas). Matches Wonder H1-parent-after
+ * (the parent shrinks and moves around its child) and H1-flex-after (an already-fitting flex parent stays put).
  */
 function fitToContent(doc: DesignDocument, frame: Node) {
   const kids = pageNodes(doc).filter((n) => n.parentId === frame.id && !n.hidden);
@@ -243,16 +245,38 @@ function PositionSection({ doc, node, selection }: Props) {
   const fitEnabled =
     !many && node.type === "frame" && nodes.some((n) => n.parentId === node.id && !n.hidden);
   const constraints = readConstraints(selection);
+  // ⌘⇧⌥F runs the expand tool (Wonder's shortcut) while the canvas, not a field, has the keyboard.
+  // Captured on window so ⌘⇧F (global search) does not also see it.
+  const fit = useRef<(() => void) | null>(null);
+  fit.current = fitEnabled ? () => fitToContent(doc, node) : null;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.code !== "KeyF" || !event.shiftKey || !event.altKey || event.repeat) return;
+      if (!(navigator.platform.includes("Mac") ? event.metaKey : event.ctrlKey)) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.("input, textarea, select, [contenteditable=true]") || !fit.current) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      fit.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   const tools = (
     <>
-      <IconButton
-        id="position-fit-content"
-        icon={Expand}
-        label="Resize to fit content"
-        disabled={!fitEnabled}
-        className="disabled:opacity-50"
-        onClick={() => fitToContent(doc, node)}
-      />
+      {/* Wonder H1-tooltip: "Resize to fill ⌘⇧⌥F" (the parent shrinks and moves around its children). */}
+      <Tip label="Resize to fill" shortcut="⌘⇧⌥F">
+        <IconButton
+          id="position-fit-content"
+          icon={Expand}
+          label="Resize to fill"
+          title={undefined}
+          aria-keyshortcuts="Meta+Shift+Alt+F"
+          disabled={!fitEnabled}
+          className="disabled:opacity-50"
+          onClick={() => fitToContent(doc, node)}
+        />
+      </Tip>
       {node.parentId ? (
         <IconButton
           id="position-absolute"
@@ -720,6 +744,13 @@ function ShaderSettings({ node, selection }: { node: Node | undefined; selection
   );
 }
 
+const ANIMATED = [
+  { value: "", label: "None" },
+  { value: "aurora", label: "Aurora" },
+  { value: "sunset", label: "Sunset" },
+  { value: "ocean", label: "Ocean" },
+];
+
 function FillSection({
   doc,
   node,
@@ -745,20 +776,38 @@ function FillSection({
       {/* Wonder A1: an empty fill is the 32 px header only; a row starts 5 px under it and ends 12 px above the divider. */}
       <div
         className={cn(
-          node && (hasPaintRows(node) || node.gradient) ? "flex" : "hidden",
+          node && (hasPaintRows(node) || node.gradient || node.animated) ? "flex" : "hidden",
           "flex-col gap-2 px-3 pt-1.25 pb-3",
         )}
       >
         <ShaderSettings node={node} selection={selection} />
         {node ? <ShaderParameters doc={doc} node={node} selection={selection} /> : null}
+        {/* Shader mode (H6): preset dropdown + colours in place of the paint rows (Text Fill has no shader mode). */}
+        {node && node.type !== "text" ? (
+          <ShaderFill doc={doc} node={node} selection={selection} />
+        ) : null}
         {node ? (
           <>
             {/* Parametric shaders take their colours from the rows above; the single fill colour only drives the classic presets. */}
             {node.type === "shader" && isParam(node.shaderPreset) ? null : (
               <PaintStack doc={doc} node={node} selection={selection} />
             )}
-            {/* Free-form CSS gradients (older documents, codec input) stay editable until cleared. The animated
-                gradient lives behind the header's wavy-square tool (FillTools). */}
+            {/* Older animated gradients (`animated`, replaced by Shader mode) keep rendering and stay editable
+                until cleared; turning Shader mode on clears them too. */}
+            {node.animated ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Caption label="Animated gradient">
+                  <NativeSelect
+                    name="animated"
+                    label="Animated gradient"
+                    value={node.animated}
+                    onChange={set("animated")}
+                    options={ANIMATED}
+                  />
+                </Caption>
+              </div>
+            ) : null}
+            {/* Free-form CSS gradients (older documents, codec input) stay editable until cleared. */}
             {node.gradient ? (
               <div className="grid grid-cols-2 gap-2">
                 <Caption label="CSS gradient">
@@ -802,6 +851,7 @@ function TextBackgroundFillSection({
       </div>
       {hasPaintRows(node, "backgroundFills") ? (
         <div className="flex flex-col gap-2 px-3 pt-1.25 pb-3">
+          <ShaderFill doc={doc} node={node} selection={selection} />
           <PaintStack doc={doc} node={node} selection={selection} target="backgroundFills" />
         </div>
       ) : null}
@@ -863,13 +913,13 @@ function PageSection({ doc }: { doc: DesignDocument }) {
               className="flex size-4 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
               onClick={() => setOpen(!open)}
             >
-              <Swatch color={color} className="size-4 rounded-sm ring-swatch-ring" />
+              <Swatch color={color} checker={hidden} className="size-4 rounded-sm ring-swatch-ring" />
             </button>
             <Field
               label="Page hex colour"
               value={hexLabel(color)}
               className="h-5 flex-1 bg-transparent px-0 shadow-none focus-within:ring-0"
-              inputClassName="uppercase"
+              inputClassName={cn("uppercase", hidden && "text-muted-foreground")}
               onCommit={(value) => {
                 const hex =
                   parseHex(value, color) ?? (parseColor(value) ? toHex(parseColor(value)!) : null);
@@ -889,9 +939,14 @@ function PageSection({ doc }: { doc: DesignDocument }) {
                 <RotateCcw className="size-3.5" aria-hidden />
               </button>
             ) : null}
-            {/* Page backgrounds are opaque hex colours; the opacity is shown, not edited. */}
-            <span className="shrink-0 select-none tabular-nums" title="Page colour opacity">
-              100 <span className="text-muted-foreground">%</span>
+            {/* Page backgrounds are opaque hex colours; the opacity is shown, not edited. The eye hides the page
+                background: Wonder (H8-eye-hidden) then reads 0 %, dims the field and keeps the hex. */}
+            <span
+              className={cn("shrink-0 select-none tabular-nums", hidden && "text-muted-foreground")}
+              title="Page colour opacity"
+              data-page-opacity={hidden ? 0 : 100}
+            >
+              {hidden ? 0 : 100} <span className="text-muted-foreground">%</span>
             </span>
           </div>
         </ColorPopover>
@@ -965,6 +1020,8 @@ export function PropertiesBody({
   const fillsMixed = many && mixedFills(doc, selection);
   const shadowsMixed = many && mixedShadows(doc, selection);
   const filtersMixed = many && mixedFilters(doc, selection);
+  // Wonder D1: the armed Frame tool with nothing selected offers frame presets in place of the Page section.
+  const framePresets = useCanvasTool() === "frame" && !node;
   return (
     <>
       {node ? <PositionSection doc={doc} node={node} selection={selection} /> : null}
@@ -1024,7 +1081,8 @@ export function PropertiesBody({
       ) : null}
       {node ? <SelectionColorsSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <ExportSection doc={doc} node={node} selection={selection} /> : null}
-      {!node ? <PageSection doc={doc} /> : null}
+      {framePresets ? <FramePresetsSection /> : null}
+      {!node && !framePresets ? <PageSection doc={doc} /> : null}
       <LayerCommands />
     </>
   );

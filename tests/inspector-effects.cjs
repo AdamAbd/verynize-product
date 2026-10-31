@@ -158,10 +158,40 @@ const path = require("node:path");
     assert.deepEqual([b.strokeWidth, b.strokeStyle, b.strokeColor], [2, "dashed", "#ff0000"]);
     assert.equal(await css("card", "border-top-width"), "2px");
 
-    // Individual sides (Wonder A2): the Sides tool splits "All" into four complete entries (width, side, eye,
-    // `−`, colour); with all four the header `+` is disabled. Each side hides and removes on its own.
     const sides = () =>
       page.locator("#border-section [data-border-side]").evaluateAll((els) => els.map((el) => el.dataset.borderSide));
+    // Wonder H4: in All mode `+` splits into Top and Right (both keep the All values; Bottom and Left draw
+    // nothing), the next `+` adds Bottom, then Left, and with four sides `+` is disabled. One undo step each.
+    const sidesGlyph = () =>
+      page
+        .getByRole("button", { name: "Independent border sides", exact: true })
+        .locator("svg")
+        .getAttribute("data-sides");
+    await page.locator("#border-section .insp-add").click();
+    b = await node("card");
+    assert.deepEqual([b.strokeWidths, b.strokeWidth], [[2, 2, 0, 0], 2]);
+    assert.deepEqual(b.strokeColors, Array(4).fill({ color: "#ff0000" }));
+    assert.deepEqual(await sides(), ["top", "right"]);
+    assert.deepEqual(
+      await Promise.all(["top", "right", "bottom", "left"].map((s) => css("card", `border-${s}-width`))),
+      ["2px", "2px", "0px", "0px"],
+    );
+    assert.equal(await sidesGlyph(), "1100", "the Sides glyph draws Top and Right solid");
+    assert.equal(await page.locator("#border-section .insp-add").isEnabled(), true);
+    await page.locator("#border-section .insp-add").click();
+    assert.deepEqual((await node("card")).strokeWidths, [2, 2, 2, 0]);
+    assert.deepEqual(await sides(), ["top", "right", "bottom"]);
+    await page.locator("#border-section .insp-add").click();
+    assert.deepEqual((await node("card")).strokeWidths, [2, 2, 2, 2]);
+    assert.deepEqual(await sides(), ["top", "right", "bottom", "left"]);
+    assert.equal(await page.locator("#border-section .insp-add").isDisabled(), true);
+    assert.equal(await sidesGlyph(), null, "four sides show the full Sides glyph");
+    for (let i = 0; i < 3; i++) await undo();
+    b = await node("card");
+    assert.deepEqual([b.strokeWidths, b.strokeWidth], [undefined, 2]);
+
+    // Individual sides (Wonder A2): the Sides tool splits "All" into four complete entries (width, side, eye,
+    // `−`, colour); with all four the header `+` is disabled. Each side hides and removes on its own.
     await page.getByRole("button", { name: "Independent border sides", exact: true }).click();
     b = await node("card");
     assert.deepEqual([b.strokeWidths, b.strokeColors], [[2, 2, 2, 2], Array(4).fill({ color: "#ff0000" })]);

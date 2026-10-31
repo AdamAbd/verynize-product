@@ -1,5 +1,5 @@
 // Headless layout for Verynize documents: a small CSS-like engine (block flow, flex row and
-// column with wrap/grow/shrink, equal-column grid, absolute children, free frames) that turns the
+// column with wrap/grow/shrink, grid with equal or fr-weighted tracks, absolute children, free frames) that turns the
 // node tree into x/y/w/h. Text is measured with a font-aware character-width estimate, so every
 // node it touches is marked `measured: false` until a real renderer measures it.
 //
@@ -11,7 +11,7 @@
 //     `inset`/`translate`. The canvas renderer lays flow children out with real CSS and ignores
 //     their stored x/y.
 
-import { parseCalc, BLOCK_ALIGN } from './node-style.mjs';
+import { parseCalc, BLOCK_ALIGN, trackWeight } from './node-style.mjs';
 
 const SIDES4 = [0, 0, 0, 0];
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -150,7 +150,12 @@ export function layoutPage(page, rootIds = null) {
       let max = 0, min = 0;
       if (!parts.length) { max = 0; min = 0; }
       else if (n.layout === 'flex' && n.direction !== 'column') { max = parts.reduce((s, p) => s + p.max, 0) + gapXOf(n) * (parts.length - 1); min = n.flexWrap ? Math.max(...parts.map(p => p.min)) : parts.reduce((s, p) => s + p.min, 0) + gapXOf(n) * (parts.length - 1); }
-      else if (n.layout === 'grid') { const cols = Math.max(1, num(n.columns) || 1); max = Math.max(...parts.map(p => p.max)) * cols + gapXOf(n) * (cols - 1); min = Math.max(...parts.map(p => p.min)) * cols + gapXOf(n) * (cols - 1); }
+      else if (n.layout === 'grid') {
+        // Fill tracks share by fr weight: the narrowest track must still hold the widest item.
+        const cols = Math.max(1, num(n.columns) || 1), w = Array.from({ length: cols }, (_, i) => trackWeight(n.columnSizes, i));
+        const scale = w.reduce((a, b) => a + b, 0) / Math.min(...w);
+        max = Math.max(...parts.map(p => p.max)) * scale + gapXOf(n) * (cols - 1); min = Math.max(...parts.map(p => p.min)) * scale + gapXOf(n) * (cols - 1);
+      }
       else if (n.layout === 'free') { max = Math.max(...list.map(k => num(k.x) + num(k.w))); min = max; }
       else { max = Math.max(...parts.map(p => p.max)); min = Math.max(...parts.map(p => p.min)); }
       result = { max: clampW(n, max + c.x), min: clampW(n, min + c.x) };
@@ -341,7 +346,10 @@ export function layoutPage(page, rootIds = null) {
 
   const grid = (n, list, c, cw, innerH) => {
     const cols = Math.max(1, num(n.columns) || 1), gapX = gapXOf(n), gapY = gapYOf(n);
-    const colW = Math.max(1, (cw - gapX * (cols - 1)) / cols);
+    // Fill tracks (minmax(0, Nfr)) split the free width by their fr weights (columnSizes; equal by default).
+    const colWeights = Array.from({ length: cols }, (_, i) => trackWeight(n.columnSizes, i)), colTotal = colWeights.reduce((a, b) => a + b, 0);
+    const colWs = colWeights.map(w => Math.max(1, (cw - gapX * (cols - 1)) * w / colTotal));
+    const colX = colWs.map((_, i) => colWs.slice(0, i).reduce((a, b) => a + b + gapX, 0));
     const rows = []; let row = [], used = 0;
     for (const k of list) {
       const span = k.colSpan === 'full' ? cols : Math.min(cols, Math.max(1, num(k.colSpan) || 1));
@@ -349,23 +357,24 @@ export function layoutPage(page, rootIds = null) {
       row.push({ k, span, col: used }); used += span;
     }
     if (row.length) rows.push(row);
-    // Explicit equal rows (grid-template-rows: repeat(N, minmax(0, 1fr))) share a definite height; extra rows are auto.
-    const fixedRows = Math.floor(num(n.rows)), equalH = fixedRows >= 1 && innerH !== undefined ? Math.max(0, (innerH - gapY * (fixedRows - 1)) / fixedRows) : undefined;
+    // Explicit rows (grid-template-rows of minmax(0, Nfr)) share a definite height by weight; extra rows are auto.
+    const fixedRows = Math.floor(num(n.rows)), rowWeights = Array.from({ length: Math.max(0, fixedRows) }, (_, i) => trackWeight(n.rowSizes, i)), rowTotal = rowWeights.reduce((a, b) => a + b, 0);
+    const fixedH = ri => (fixedRows >= 1 && innerH !== undefined && ri < fixedRows ? Math.max(0, (innerH - gapY * (fixedRows - 1)) * rowWeights[ri] / rowTotal) : undefined);
     const offset = (align, space) => (space > 0 ? (align === 'center' ? space / 2 : align === 'flex-end' || align === 'end' ? space : 0) : 0);
     let y = c.top;
     for (const [ri, r] of rows.entries()) {
       for (const cell of r) {
-        const area = colW * cell.span + gapX * (cell.span - 1);
+        const area = colWs.slice(cell.col, cell.col + cell.span).reduce((a, b) => a + b, 0) + gapX * (cell.span - 1);
         const avail = Math.max(1, area - hMarg(cell.k));
         layoutBox(cell.k, wMode(cell.k) === 'fixed' || wMode(cell.k) === 'hug' || wMode(cell.k) === 'calc' ? childWidth(cell.k, avail, false) : avail, undefined, innerH);
         cell.area = area;
       }
-      const rowH = equalH !== undefined && ri < fixedRows ? equalH : Math.max(...r.map(cell => cell.k.h + vMarg(cell.k)));
+      const rowH = fixedH(ri) ?? Math.max(...r.map(cell => cell.k.h + vMarg(cell.k)));
       for (const cell of r) {
         const align = crossAlign(n, cell.k);
         if (!definite(hMode(cell.k)) && align === 'stretch' && !cell.k.aspectRatio) layoutBox(cell.k, cell.k.w, Math.max(1, rowH - vMarg(cell.k)), innerH);
         const m = marginOf(cell.k);
-        cell.k.x = round(c.left + cell.col * (colW + gapX) + numericMargin(m[3]) + offset(n.justifyItems, cell.area - cell.k.w - hMarg(cell.k)));
+        cell.k.x = round(c.left + colX[cell.col] + numericMargin(m[3]) + offset(n.justifyItems, cell.area - cell.k.w - hMarg(cell.k)));
         cell.k.y = round(y + numericMargin(m[0]) + offset(align, rowH - cell.k.h - vMarg(cell.k)));
       }
       y += rowH + gapY;
