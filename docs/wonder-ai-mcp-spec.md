@@ -359,7 +359,9 @@ Wonder's hosted server edits the shared document on the server and open tabs fol
 
 8. **Streamed canvas edits.** Watch `input_json_delta` for `create_artboard` / `update_elements`. Once the parse is far enough, forward complete top-level elements to the renderer as a **ghost preview**, then commit on the real tool call. Simplest version: no `streamRef` redemption; the final call replaces the ghost.
 9. **Skills and guidelines.** Add `get_skills(name)` serving our own markdown playbooks (new-design, edit-design, design-to-code, code-to-design, design-library) from `integrations/skills/`. Add `get_design_guidelines`. These must be written fresh; do not copy Wonder's.
+   - *Status (2026-10-31):* implemented, but in `integrations/design-knowledge/` (not `integrations/skills/`): skills are JavaScript modules in `skills.mjs` (12 skills, `variations` and `design-system` as aliases), fundamentals in `fundamentals.mjs`, 31 named styles in `styles/`. Served by `get_skills` and `get_design_guidelines` in `integrations/design-tools.mjs`. See `docs/design-harness.md`.
 10. **Design preferences.** A local store plus a `<saved-design-preferences>` block, with save/update/delete tools gated on explicit user intent.
+   - *Status (2026-10-31):* implemented. Store `integrations/preferences.mjs` (50 × 280), block and gate in `desktop/agent-runtime.cjs` / `desktop/agent-access.cjs`: Claude SDK asks for every write, Ask/plan-first/helper/CLI-fallback runs refuse, Codex app-server Edit/Auto/Full chats rely on the persona rule. See `docs/agent-workflows.md`.
 11. **Assets.** `prepare_image_upload` equivalent (a local `import_image {pageId, path}` is simpler on desktop), plus `generate_image` / `vectorize_image` via `desktop/generate.cjs`.
 12. **Code bridge.** An "Implement this design" action that builds a prompt with `verynize://node/…` URIs, plus a Preview "apply inspect edits" prompt (`desktop/preview.cjs` / `web/live-preview.js`).
 
