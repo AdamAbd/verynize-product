@@ -1062,16 +1062,18 @@ export function PropertiesBody({
   // Wonder D1: the armed Frame tool with nothing selected offers frame presets in place of the Page section.
   const tool = useCanvasTool();
   const framePresets = tool === "frame" && !node;
-  // Wonder T4-scale-retry: the armed Scale tool with one layer selected shows only the Scale section. The other
-  // sections stay mounted but hidden (legacy render() writes into the Fill section's #shader-settings).
-  const scaling = tool === "scale" && !!node && !many;
+  // Wonder T4-scale-retry / R2: the armed Scale tool with one or more layers selected shows only the Scale section.
+  // The other sections stay mounted but hidden (legacy render() writes into the Fill section's #shader-settings).
+  const scaling = tool === "scale" && !!node;
   // Preview audit PF6: a live preview frame gets a viewport inspector (Screen template, Position, Layout,
   // Appearance, Export) without the ordinary frame sections.
   const preview = !many && isPreviewFrame(node);
   const plain = node && !preview ? node : undefined;
   return (
     <>
-      {scaling ? <ScaleSection key={"scale-" + node.id} node={node} /> : null}
+      {scaling ? (
+        <ScaleSection key={"scale-" + selection.join(",")} node={node} selection={selection} />
+      ) : null}
       <div className={scaling ? "hidden" : "contents"}>
         {node && preview ? <PreviewTemplateSection node={node} /> : null}
         {node ? <PositionSection doc={doc} node={node} selection={selection} /> : null}

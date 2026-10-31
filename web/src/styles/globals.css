@@ -491,13 +491,16 @@ html[data-ui-theme="light"] {
 :root {
   --context-menu: #1c1c1c; /* menu surface, rgb(28,28,28) */
   --context-menu-highlight: #4c305b; /* highlighted row, rgb(76,48,91) */
+  --context-menu-destructive-disabled: #844544; /* disabled Delete, rgb(132,69,68) (R3-delete-hover) */
 }
 html[data-ui-theme="light"] {
   --context-menu: #ffffff;
   --context-menu-highlight: #ecdaf6;
+  --context-menu-destructive-disabled: color-mix(in srgb, var(--destructive) 50%, transparent);
 }
 @theme inline {
   --color-context-menu: var(--context-menu);
   --color-context-menu-highlight: var(--context-menu-highlight);
+  --color-context-menu-destructive-disabled: var(--context-menu-destructive-disabled);
 }
 /* </context-menu-tokens> */

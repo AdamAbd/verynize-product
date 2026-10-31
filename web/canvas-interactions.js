@@ -50,10 +50,10 @@
 
 
     // ---------- Hover: outline what a click would select and tint its name label (Wonder S1-hover-final) ----------
-    const hoverBox = document.createElement('div'), dropBox = document.createElement('div'), dropLine = document.createElement('div'), dropColumn = document.createElement('div');
-    hoverBox.className = 'hover-box'; dropBox.className = 'drop-target'; dropLine.className = 'drop-line'; dropColumn.className = 'drop-column';
-    hoverBox.hidden = dropBox.hidden = dropLine.hidden = dropColumn.hidden = true;
-    overlay.append(hoverBox, dropBox, dropLine, dropColumn);
+    const hoverBox = document.createElement('div'), dropBox = document.createElement('div'), dropLine = document.createElement('div');
+    hoverBox.className = 'hover-box'; dropBox.className = 'drop-target'; dropLine.className = 'drop-line';
+    hoverBox.hidden = dropBox.hidden = dropLine.hidden = true;
+    overlay.append(hoverBox, dropBox, dropLine);
     // A clipping ancestor cuts off the selection ring and handles drawn inside the layer, so selected layers inside
     // one get their chrome redrawn here, over the clip.
     const clippedSelection = document.createElement('div');
@@ -743,13 +743,17 @@
       if (first.parentId) { const p = worldRect(first.parentId); if (p) targets.push({...p, parent: true}); }
       return targets;
     }
-    // Drag-move. Free layers follow the pointer through x/y (with snapping). Auto-layout children stay in their slot
-    // (reordering live inside their stack) under a translucent drop column that marks where they land (Wonder TR7). Dropping over another frame re-parents the layers into
-    // it (at the stack slot under the pointer when that frame is an auto layout); top-level frames stay top-level.
+    // Drag-move. Free layers follow the pointer through x/y (with snapping). Auto-layout children follow it as a
+    // translated ghost while their slot stays open and their siblings stay put (Wonder R1-row-drag-slot,
+    // R1-row-small-drag); the stack takes its new order on release. Dropping over another frame re-parents the layers
+    // into it (at the stack slot under the pointer when that frame is an auto layout); top-level frames stay top-level.
+    // There is no "drop column": the tall translucent purple box in Wonder's TR7-out-during is a marquee. Its corner
+    // starts in the empty gap left of the child (not on it), the child has not moved and the inspector shows Z Auto
+    // (a real drag shows Z 9999, R1), and the sibling capture TR7-reorder-during ends with "2 nodes selected".
     function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
       const g = gesture(), start = {x: e.clientX, y: e.clientY};
-      let free = null, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null, last = {dx: 0, dy: 0};
+      let free = null, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null;
       const begin = ev => {
         g.commit();
         if (ev.altKey) moving = duplicateNodes(moving, 0);
@@ -780,9 +784,7 @@
         for (const s of free) {
           s.n.x = r2(s.x + dx); s.n.y = r2(s.y + dy);
         }
-        // Live reorder inside the stack the layers came from.
-        const reordered = drop.index !== undefined && !drop.parent && placeInStack(home, stacked, drop.index);
-        if (free.length || reordered) ed.render();
+        if (free.length) ed.render();
         // Free layers move into a free frame (or back onto the page) as soon as the pointer crosses into it, so the
         // frame clips them and its edges and centre lines become snap targets for the rest of the drag.
         if (drop.parent && free.length && !stacked.length && drop.index === undefined) {
@@ -793,17 +795,16 @@
           targets = guideTargets(free.map(s => s.n.id));
           drop = {};
         }
-        last = {dx, dy};
-        if (stacked.length) ed.updateMeasurement();
-        drawGuides(guides); drawDrop(drop); drawColumn(drop, home, stacked, grab, dx, dy);
+        placeGhosts(stacked, grab, dx, dy);
+        if (stacked.length) ed.updateMeasurement(); // name and size badges follow the dragged copy
+        drawGuides(guides); drawDrop(drop);
       }, () => {
         workspace.classList.remove('moving');
         if (!free) { onClick?.(); return; }
-        drawGuides([]); drawDrop(null); drawColumn(null);
-        // Stack children leaving their stack land where the pointer put them: measure them there, then re-parent.
-        if (drop?.parent && stacked.length) placeGhosts(stacked, grab, last.dx, last.dy);
+        drawGuides([]); drawDrop(null);
+        // Stack children leaving their stack land where the pointer put them (relocate measures the ghosts).
         if (drop?.parent) relocate(moving.map(find).filter(Boolean), drop.parent.id === '' ? null : drop.parent.id, drop.index);
-        else if (stacked.length) clearGhosts(stacked);
+        else if (stacked.length) { if (drop?.index !== undefined) placeInStack(home, stacked, drop.index); clearGhosts(stacked); }
         ed.render();
       });
     }
@@ -895,37 +896,6 @@
         const ref = at || prev, x = at && prev && Math.abs(prev.top - at.top) < 1 ? (prev.left + prev.width + at.left) / 2 : at ? at.left - 2 : prev ? prev.left + prev.width + 2 : b.left + b.width / 2;
         placeBox(dropLine, {left: x - 1, top: ref ? ref.top : b.top + 4, width: 2, height: ref ? ref.height : Math.max(0, b.height - 8)});
       }
-    }
-
-    // Wonder TR7: while a stack child is dragged it keeps its slot and a translucent column shows where it lands —
-    // its slot across the whole stack when it stays in (or enters) a stack, else its box at the pointer.
-    function drawColumn(drop, home, stacked, grab, dx, dy) {
-      dropColumn.hidden = true;
-      if (!drop || !stacked?.length) return;
-      dropLine.hidden = true;
-      const moving = union(stacked.map(n => grab.get(n.id))); if (!moving) return;
-      const targetId = drop.parent ? (isFlow(find(drop.parent.id)) ? drop.parent.id : null) : (isFlow(find(home)) ? home : null);
-      let b;
-      if (targetId) {
-        const t = screenBox(targetId); if (!t) return;
-        const node = find(targetId), column = node.layout === 'flex' && !node.flexWrap && node.direction === 'column';
-        const mainSize = (column ? moving.h : moving.w) * cam.zoom;
-        let start;
-        if (!drop.parent) { // live-reordered: the children already sit in their slot
-          const slots = stacked.map(n => screenBox(n.id)).filter(Boolean); if (!slots.length) return;
-          start = column ? Math.min(...slots.map(r => r.top)) : Math.min(...slots.map(r => r.left));
-        } else {
-          const kids = ed.nodes().filter(n => n.parentId === targetId && !sel().has(n.id)).map(n => (n.hidden || n.position === 'absolute' ? null : screenBox(n.id)));
-          const at = kids.slice(drop.index).find(Boolean), prev = kids.slice(0, drop.index).findLast(Boolean);
-          const end = r => (column ? r.top + r.height : r.left + r.width), begin = r => (column ? r.top : r.left);
-          const mid = at && prev ? (end(prev) + begin(at)) / 2 : at ? begin(at) : prev ? end(prev) : (column ? t.top + t.height / 2 : t.left + t.width / 2);
-          start = mid - mainSize / 2;
-        }
-        b = column ? {left: t.left, top: start, width: t.width, height: mainSize} : {left: start, top: t.top, width: mainSize, height: t.height};
-      } else {
-        b = {left: (moving.x + dx) * cam.zoom + cam.x, top: (moving.y + dy) * cam.zoom + cam.y, width: moving.w * cam.zoom, height: moving.h * cam.zoom};
-      }
-      placeBox(dropColumn, b); dropColumn.hidden = false;
     }
 
     // Snap a moving box to sibling/parent edges and centers, or to equal spacing.
@@ -1523,8 +1493,8 @@
       {id: 'align.bottom', label: 'Align bottom', section: 'Alignment', keys: ['alt+s'], when: needsSelection, run: () => ed.align('bottom')},
       {id: 'align.distributeX', label: 'Distribute horizontal spacing', section: 'Alignment', keys: ['ctrl+alt+h'], when: needsSelection, run: () => ed.align('horizontal')},
       {id: 'align.distributeY', label: 'Distribute vertical spacing', section: 'Alignment', keys: ['ctrl+alt+v'], when: needsSelection, run: () => ed.align('vertical')},
-      // Inspector Scale section (Scale tool, Wonder T4): window.design.runCommand('transform.scaleBy', {id, factor}).
-      {id: 'transform.scaleBy', label: 'Scale layer', section: 'Transform', keys: [], hidden: true, run: arg => chrome.scaleBy(arg?.id, arg?.factor)},
+      // Inspector Scale section (Scale tool, Wonder T4 / R2): runCommand('transform.scaleBy', {id | ids, factor}).
+      {id: 'transform.scaleBy', label: 'Scale layer', section: 'Transform', keys: [], hidden: true, run: arg => chrome.scaleBy(arg?.ids || arg?.id, arg?.factor)},
       ...Array.from({length: 10}, (_, d) => ({id: 'opacity.' + d, label: `Opacity ${d ? d * 10 : 100}%`, section: 'Shape', keys: [String(d)], when: needsSelection, hidden: true, run: () => { ed.checkpoint(); selectedNodes().forEach(n => { n.opacity = d ? d * 10 : 100; }); ed.render(); }})),
     ];
     const KEY_NAMES = {BracketLeft: '[', BracketRight: ']', Equal: '=', Minus: '-', Backslash: '\\', NumpadAdd: 'plus', NumpadSubtract: '-', Enter: 'enter', NumpadEnter: 'enter', Tab: 'tab', Escape: 'escape', Delete: 'delete', Backspace: 'backspace'};

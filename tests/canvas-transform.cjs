@@ -177,11 +177,58 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     f = await node('f');
     assert.deepEqual([f.w, f.h], [50, 35]);
     assert.equal(await scaleField('scalePercent').inputValue(), '50');
+    // Wonder R2-single-presets: the chevron menu lists nine multipliers of the reference size.
+    await page.locator('#scale-section [aria-label="Scale presets"]').click();
+    const presetMenu = page.locator('[role=menu]:has([data-scale-preset])');
+    await presetMenu.waitFor(); await page.waitForTimeout(300); // open animation (zoom-in-95)
+    assert.deepEqual((await presetMenu.locator('[data-scale-preset]').allTextContents()).map(s => s.trim()), ['0.25×', '0.5×', '0.75×', '1×', '2×', '3×', '4×', '5×', '10×']);
+    const pm = await presetMenu.boundingBox(), row = await presetMenu.locator('[data-scale-preset]').first().boundingBox();
+    near(pm.width, 152, 1, 'preset menu width'); near(row.height, 25, 0.5, 'preset row pitch');
+    near(pm.x + pm.width, sp.x + sp.width, 2, 'menu right-aligned with the % field');
+    await presetMenu.locator('[data-scale-preset="2"]').click();
+    f = await node('f');
+    assert.deepEqual([f.w, f.h], [200, 140], '2× scales to twice the reference size');
+    assert.equal(await scaleField('scalePercent').inputValue(), '200');
+    await page.evaluate(() => window.design.runCommand('edit.undo'));
     // ✕ leaves the Scale tool and restores the regular inspector.
     await page.locator('#scale-close').click();
     await page.locator('#scale-section').waitFor({state: 'detached'});
     assert.equal(await page.evaluate(() => window.design.getTool()), 'move');
     assert.equal(await page.locator('#insp-properties [name=x]').isVisible(), true);
+
+    // ---------- R2: Scale with several layers scales the union (Wonder R2-multi-scale-before/after) ----------
+    // 100×60 and 100×120 frames 40 apart: union 240×120 → 360×180, frames 150×90 and 150×180, gap 60, all content too.
+    await seed([{id: 'm1', name: 'Frame', type: 'frame', x: 0, y: 0, w: 100, h: 60, color: '#ffffff'},
+      {id: 'm2', name: 'Frame', type: 'frame', x: 140, y: 0, w: 100, h: 120, color: '#ffffff'},
+      {id: 'mt', name: 'Label', type: 'text', parentId: 'm2', x: 10, y: 10, w: 60, h: 20, text: 'Hi', fontSize: 12, color: '#000000'}], ['m1', 'm2']);
+    await page.evaluate(() => window.design.runCommand('tool.scale'));
+    await page.locator('#scale-section').waitFor();
+    assert.deepEqual([await scaleField('scaleW').inputValue(), await scaleField('scaleH').inputValue(), await scaleField('scalePercent').inputValue()], ['100', '60', '100'], 'W/H read the primary layer');
+    assert.equal(await page.locator('#selection-measure').textContent(), '240 x 120');
+    await dragFrom(await center('#canvas-overlay .selection-union > .union-handle[data-corner=se]'), 120, 60);
+    const [m1, m2, mt] = [await node('m1'), await node('m2'), await node('mt')];
+    assert.deepEqual([m1.x, m1.y, m1.w, m1.h], [0, 0, 150, 90], 'first frame 150×90 at the anchor');
+    assert.deepEqual([m2.x, m2.y, m2.w, m2.h], [210, 0, 150, 180], 'second frame 150×180, gap 40 → 60');
+    assert.deepEqual([mt.x, mt.y, mt.w, mt.fontSize], [15, 15, 90, 18], 'children and type scale too');
+    assert.equal(await page.locator('#selection-measure').textContent(), '360 x 180');
+    await page.waitForFunction(() => document.querySelector('#scale-section [name=scaleW]')?.value === '150', null, {timeout: 3000}).catch(() => {});
+    assert.deepEqual([await scaleField('scaleW').inputValue(), await scaleField('scaleH').inputValue(), await scaleField('scalePercent').inputValue()], ['150', '90', '150']);
+    await page.evaluate(() => window.design.runCommand('edit.undo'));
+    assert.deepEqual([(await node('m2')).x, (await node('m2')).w, (await node('mt')).fontSize], [140, 100, 12], 'one undo step');
+    // The top-left corner handle scales about the bottom-right; the inspector scales about the union's top-left.
+    await dragFrom(await center('#canvas-overlay .selection-union > .union-handle[data-corner=nw]'), 120, 60);
+    let n1 = await node('m1'), n2 = await node('m2');
+    assert.deepEqual([n1.x, n1.y, n1.w, n1.h, n2.x, n2.y, n2.w, n2.h], [120, 60, 50, 30, 190, 60, 50, 60], 'nw drag keeps the bottom-right corner');
+    await page.evaluate(() => window.design.runCommand('edit.undo'));
+    await scaleField('scalePercent').fill('200');
+    await scaleField('scalePercent').press('Enter');
+    n1 = await node('m1'); n2 = await node('m2');
+    assert.deepEqual([n1.x, n1.w, n2.x, n2.w, n2.h], [0, 200, 280, 200, 240], '200 % scales every layer about the union top-left');
+    await page.evaluate(() => window.design.runCommand('edit.undo'));
+    // With the Move tool the union corners stay marks only.
+    await page.evaluate(() => window.design.runCommand('tool.move'));
+    await page.locator('#scale-section').waitFor({state: 'detached'});
+    assert.equal(await page.locator('#canvas-overlay .selection-union > .union-handle[data-corner=se]').evaluate(e => getComputedStyle(e).pointerEvents), 'none');
 
     // ---------- TR2: the rotation field shows "-47.19" in full (Wonder TR2-rotate-verified) ----------
     await seed([rect('r', 150, 300, 100, 70, {rotation: -47.19})], ['r']);
@@ -197,7 +244,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     near(zr.y - wrapBox.y, 64, 1, 'selection sits 64px below the top edge');
 
     assert.deepEqual(errors, []);
-    console.log('canvas transform: PASS badge text and gap, chat chip, multi-selection box, rotate zones with Shift snap, edge resize with Shift/Alt and no guides, proportional Scale tool, Scale section, rotation field width, zoom-to-selection margins');
+    console.log('canvas transform: PASS badge text and gap, chat chip, multi-selection box, rotate zones with Shift snap, edge resize with Shift/Alt and no guides, proportional Scale tool, Scale section and presets, multi-selection Scale, rotation field width, zoom-to-selection margins');
   } finally {
     await app.close();
     await fs.rm(dir, {recursive: true, force: true});
