@@ -1,0 +1,242 @@
+'use strict';
+// Selection chrome and transform gestures (Wonder S4 / TR1 / TR2 / T4), installed by canvas-interactions.js.
+// - Chrome: the name label, the size badge and the add-to-chat chip ride in a box that follows the node's rotation,
+//   turned by a multiple of 90° so the text never reads more than 45° off upright (TR2-rotate-verified). A
+//   multi-selection gets one union box with corner marks, the chip and a combined badge (CM5-multi-verified).
+// - Gestures: invisible edge zones resize one axis (TR1), zones just outside each corner rotate around the centre
+//   (TR2), and corner/edge resize keeps Shift (aspect), Alt (from the centre) and the Scale tool (T4, proportional by
+//   the drag projected on the box diagonal).
+// Everything here is screen-space DOM in #canvas-overlay; the canvas itself stays imperative.
+(() => {
+  const ZONE = 18; // rotate zone size outside each corner (screen px)
+  const NOTCH = 6; // the zone corner nearest the node is left to the resize handle
+  const EDGE = 4; // half the edge zone thickness (straddles the edge)
+  const EDGE_INSET = 6; // edge zones stop short of the corner handles
+  const EDGE_MIN = 24; // boxes smaller than this on screen get corner handles only
+  const BADGE_GAP = 10; // Wonder: badge 22 px high, 10 px below the box
+  const NAME_OFFSET = 20; // label line box (18 px) sits just above the box
+  const CHIP_SIZE = 12, CHIP_INSET = 4, CHIP_RISE = 14; // ⊕: 12 px circle, right edge 4 px inside the box, centre 14 px above
+  const MIN_SIZE = 10;
+  const r2 = v => Math.round(v * 100) / 100;
+  // Rotation in degrees, rounded to 0.01 and normalised to (−180, 180].
+  function normalize(deg) { const r = ((r2(deg) + 180) % 360 + 360) % 360 - 180; return r === -180 ? 180 : r2(r) || 0; }
+  // The chrome turns with the node by a multiple of 90° so that its own angle stays within (−45, 45].
+  function chromeAngle(deg) { let a = ((deg % 90) + 90) % 90; if (a > 45) a -= 90; return r2(a) || 0; }
+  // Proportional scale factor for a corner drag: the new diagonal projected on the old one (Wonder T4: 100×70 → 150×105).
+  function diagonalFactor(w0, h0, w1, h1) { const d = w0 * w0 + h0 * h0; return d ? (w1 * w0 + h1 * h0) / d : 1; }
+  // Clip path for a corner zone (size z) with a notch of size h cut at the zone corner that touches the node corner.
+  function notchedSquare(corner, z, h) {
+    const px = corner.includes('e') ? 0 : z, py = corner.includes('s') ? 0 : z;
+    const square = [[0, 0], [z, 0], [z, z], [0, z]], i = square.findIndex(([x, y]) => x === px && y === py);
+    const prev = square[(i + 3) % 4], next = square[(i + 1) % 4], unit = ([x, y]) => [Math.sign(x - px), Math.sign(y - py)];
+    const [ax, ay] = unit(prev), [bx, by] = unit(next);
+    const notch = [[px + ax * h, py + ay * h], [px + (ax + bx) * h, py + (ay + by) * h], [px + bx * h, py + by * h]];
+    const points = [...square.slice(0, i), ...notch, ...square.slice(i + 1)];
+    return 'polygon(' + points.map(([x, y]) => x + 'px ' + y + 'px').join(', ') + ')';
+  }
+  const ROTATE_CURSOR = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17a8 8 0 0 1 11-11" stroke="#fff" stroke-width="4"/><path d="M14 4l3 2-2 3M4 14l2 3 3-2" stroke="#fff" stroke-width="4"/><path d="M6 17a8 8 0 0 1 11-11" stroke="#000" stroke-width="1.5"/><path d="M14 4l3 2-2 3M4 14l2 3 3-2" stroke="#000" stroke-width="1.5"/></g></svg>') + '") 12 12, crosshair';
+  const EDGE_CURSORS = ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize'];
+
+  const STYLE = `
+#canvas-overlay .selection-chrome{position:absolute;inset:0;pointer-events:none}
+#canvas-overlay .sel-box,#canvas-overlay .sel-text-box{position:absolute;transform-origin:50% 50%}
+#canvas-overlay .resize-edge,#canvas-overlay .rotate-zone{position:absolute;pointer-events:auto;touch-action:none}
+#canvas-overlay .rotate-zone{width:${ZONE}px;height:${ZONE}px;cursor:${ROTATE_CURSOR}}
+#canvas-overlay #selection-name{position:absolute!important;left:0!important;top:${-NAME_OFFSET}px!important;transform:none!important;max-width:none}
+#canvas-overlay #selection-measure{position:absolute!important;left:50%!important;top:calc(100% + ${BADGE_GAP}px)!important;transform:translateX(-50%)!important;height:22px;box-sizing:border-box;padding:0 6px!important;font:12px/22px Inter,system-ui,sans-serif!important;border-radius:4px!important;background:#a245d3!important;color:#fff!important;white-space:nowrap;pointer-events:none;font-feature-settings:'calt' 0!important}
+#canvas-overlay #selection-chat-chip{position:absolute;right:${CHIP_INSET}px;top:${-CHIP_RISE - CHIP_SIZE / 2}px;width:${CHIP_SIZE}px;height:${CHIP_SIZE}px;box-sizing:border-box;margin:0;padding:0;border:1px solid var(--shell-accent,#b93cdb);border-radius:50%;background:transparent;color:var(--shell-accent,#b93cdb);pointer-events:auto;cursor:pointer;display:flex;align-items:center;justify-content:center}
+#canvas-overlay #selection-chat-chip::before,#canvas-overlay #selection-chat-chip::after{content:'';position:absolute;left:50%;top:50%;width:6px;height:1px;background:currentColor;transform:translate(-50%,-50%)}
+#canvas-overlay #selection-chat-chip::after{transform:translate(-50%,-50%) rotate(90deg)}
+#canvas-overlay #selection-chat-chip:hover{background:color-mix(in srgb,var(--shell-accent,#b93cdb) 20%,transparent)}
+#canvas-overlay .selection-union{position:absolute;box-sizing:border-box;border:1px solid var(--shell-accent,#b93cdb)}
+#canvas-overlay .selection-union>.union-handle{position:absolute;width:8px;height:8px;box-sizing:border-box;background:#fff;border:1px solid var(--shell-accent,#b93cdb)}
+#canvas-overlay .selection-union>.union-handle[data-corner=nw]{left:-4.5px;top:-4.5px}
+#canvas-overlay .selection-union>.union-handle[data-corner=ne]{right:-4.5px;top:-4.5px}
+#canvas-overlay .selection-union>.union-handle[data-corner=sw]{left:-4.5px;bottom:-4.5px}
+#canvas-overlay .selection-union>.union-handle[data-corner=se]{right:-4.5px;bottom:-4.5px}
+#canvas[data-multi-select] .layer>.handle,#canvas-overlay[data-multi-select] .clipped-selection .handle{display:none!important}
+#canvas-overlay .frame-label.selected{color:var(--shell-accent,#b93cdb)}
+.transforming #canvas-overlay #selection-chat-chip,.moving #canvas-overlay #selection-chat-chip{visibility:hidden}
+.panning #canvas-overlay .resize-edge,.panning #canvas-overlay .rotate-zone,.space-pan #canvas-overlay .resize-edge,.space-pan #canvas-overlay .rotate-zone{pointer-events:none}`;
+
+  function install(ctx) {
+    const {ed, cam, wrap, overlay, workspace, find, sel, track, gesture, isFlow, unbindKeys, elementOf} = ctx;
+    if (!document.getElementById('selection-chrome-style')) {
+      const style = document.createElement('style'); style.id = 'selection-chrome-style'; style.textContent = STYLE; document.head.append(style);
+    }
+    const layer = document.createElement('div'); layer.className = 'selection-chrome';
+    const box = document.createElement('div'); box.className = 'sel-box'; // rotates exactly with the node: gesture zones
+    const textBox = document.createElement('div'); textBox.className = 'sel-text-box'; // rotates by the chrome angle: label, chip, badge
+    const union = document.createElement('div'); union.className = 'selection-union';
+    for (const corner of ['nw', 'ne', 'sw', 'se']) { const h = document.createElement('div'); h.className = 'union-handle'; h.dataset.corner = corner; union.append(h); }
+    const chip = document.createElement('button'); chip.type = 'button'; chip.id = 'selection-chat-chip'; chip.title = 'Add to chat'; chip.setAttribute('aria-label', 'Add selection to chat');
+    chip.addEventListener('click', e => { e.stopPropagation(); addToChat(); });
+    const edges = {}, zones = {};
+    for (const edge of ['n', 'e', 's', 'w']) { const z = document.createElement('div'); z.className = 'resize-edge'; z.dataset.edge = edge; edges[edge] = z; }
+    for (const corner of ['nw', 'ne', 'sw', 'se']) { const z = document.createElement('div'); z.className = 'rotate-zone'; z.dataset.corner = corner; z.style.clipPath = notchedSquare(corner, ZONE, NOTCH); zones[corner] = z; }
+    box.append(...Object.values(edges), ...Object.values(zones));
+    layer.append(union, box, textBox);
+    overlay.append(layer);
+    union.hidden = box.hidden = textBox.hidden = true;
+    let busy = false;
+    const tool = () => ctx.getTool();
+
+    const totalRotation = n => { let total = Number(n.rotation) || 0, a = n; while (a.parentId) { a = find(a.parentId); if (!a) break; total += Number(a.rotation) || 0; } return total; };
+    const viewport = () => wrap.getBoundingClientRect();
+    function screenFrame(n) {
+      const el = elementOf(n.id); if (!el) return null;
+      const r = el.getBoundingClientRect(), v = viewport(); if (!r.width && !r.height) return null;
+      return {cx: r.left - v.left + r.width / 2, cy: r.top - v.top + r.height / 2, w: el.offsetWidth * cam.zoom, h: el.offsetHeight * cam.zoom, angle: totalRotation(n)};
+    }
+    const place = (el, cx, cy, w, h, angle) => Object.assign(el.style, {left: cx - w / 2 + 'px', top: cy - h / 2 + 'px', width: w + 'px', height: h + 'px', transform: angle ? `rotate(${angle}deg)` : ''});
+    function topSelected() {
+      const list = ed.nodes().filter(n => sel().has(n.id));
+      return list.filter(n => !list.some(o => o.id !== n.id && ed.descendants(o.id).has(n.id)));
+    }
+
+    // ---------- Drawing ----------
+    function draw() {
+      const ids = [...sel()], multi = ids.length > 1;
+      const name = document.getElementById('selection-name'), badge = document.getElementById('selection-measure');
+      if (multi) { ed.canvas.dataset.multiSelect = ''; overlay.dataset.multiSelect = ''; } else { delete ed.canvas.dataset.multiSelect; delete overlay.dataset.multiSelect; }
+      union.hidden = box.hidden = textBox.hidden = true;
+      if (!ids.length || document.body.classList.contains('files-view')) return;
+      if (multi) {
+        const rects = topSelected().filter(n => !n.hidden).map(n => ctx.worldRect(n.id)).filter(Boolean);
+        if (!rects.length) return;
+        const x = Math.min(...rects.map(r => r.x)), y = Math.min(...rects.map(r => r.y));
+        const w = Math.max(...rects.map(r => r.x + r.w)) - x, h = Math.max(...rects.map(r => r.y + r.h)) - y;
+        const left = x * cam.zoom + cam.x, top = y * cam.zoom + cam.y;
+        Object.assign(union.style, {left: left + 'px', top: top + 'px', width: w * cam.zoom + 'px', height: h * cam.zoom + 'px'});
+        union.hidden = false;
+        if (name) name.hidden = true;
+        if (badge) { badge.hidden = false; badge.textContent = `${r2(w)} x ${r2(h)}`; union.append(badge); }
+        union.append(chip);
+        return;
+      }
+      const n = find(ids[0]), f = n && !n.hidden && screenFrame(n);
+      if (!f) return;
+      // Gesture zones: only for an unlocked layer with the Move or Scale tool.
+      if (!n.locked && (tool() === 'move' || tool() === 'scale')) {
+        place(box, f.cx, f.cy, f.w, f.h, f.angle);
+        const showEdges = f.w >= EDGE_MIN && f.h >= EDGE_MIN;
+        for (const [edge, z] of Object.entries(edges)) {
+          z.hidden = !showEdges; if (!showEdges) continue;
+          const vertical = edge === 'n' || edge === 's';
+          Object.assign(z.style, vertical
+            ? {left: EDGE_INSET + 'px', width: f.w - 2 * EDGE_INSET + 'px', top: (edge === 'n' ? -EDGE : f.h - EDGE) + 'px', height: 2 * EDGE + 'px'}
+            : {top: EDGE_INSET + 'px', height: f.h - 2 * EDGE_INSET + 'px', left: (edge === 'w' ? -EDGE : f.w - EDGE) + 'px', width: 2 * EDGE + 'px'});
+          // The cursor follows the edge normal on screen (CSS cursors cannot rotate).
+          const normal = (vertical ? 0 : 90) + f.angle, step = ((Math.round(normal / 45) % 4) + 4) % 4;
+          z.style.cursor = EDGE_CURSORS[step];
+        }
+        for (const [corner, z] of Object.entries(zones)) {
+          z.style.left = (corner.includes('e') ? f.w : -ZONE) + 'px';
+          z.style.top = (corner.includes('s') ? f.h : -ZONE) + 'px';
+        }
+        box.hidden = false;
+      }
+      // Label, chip and badge: the node's frame turned by k·90° so the chrome angle stays within (−45°, 45°].
+      const angle = chromeAngle(f.angle), quarter = ((Math.round((f.angle - angle) / 90) % 4) + 4) % 4, swap = quarter % 2 === 1;
+      place(textBox, f.cx, f.cy, swap ? f.h : f.w, swap ? f.w : f.h, angle);
+      if (name) textBox.append(name);
+      textBox.append(chip);
+      if (badge) textBox.append(badge);
+      textBox.hidden = false;
+    }
+
+    // ---------- Add to chat (⊕) ----------
+    function addToChat() {
+      const ids = [...sel()]; if (!ids.length) return;
+      const ws = window.agentWorkspace;
+      ws?.openChat?.();
+      const pageId = ed.page().id;
+      for (const id of ids) { const n = find(id); if (n) ws?.addMention?.({id, label: (n.name || '').trim() || String(n.text || '').trim().slice(0, 40) || n.type, pageId, type: n.type}); }
+      window.dispatchEvent(new CustomEvent('bd:add-context', {detail: {ids}}));
+      requestAnimationFrame(() => document.getElementById('project-prompt')?.focus());
+    }
+
+    // ---------- Gestures ----------
+    function begin() {
+      busy = true; workspace.classList.add('transforming');
+      overlay.dataset.measuring = ''; ctx.drawGuides([]); ctx.showHover?.(null);
+    }
+    function end() { busy = false; workspace.classList.remove('transforming'); ed.render(); }
+
+    function startRotate(e, id) {
+      const n = find(id); if (!n || n.locked) return;
+      const el = elementOf(id); if (!el) return;
+      const r = el.getBoundingClientRect(), c = {x: r.left + r.width / 2, y: r.top + r.height / 2};
+      const a0 = Math.atan2(e.clientY - c.y, e.clientX - c.x), r0 = Number(n.rotation) || 0, g = gesture();
+      begin();
+      track(e, ev => {
+        let deg = r0 + (Math.atan2(ev.clientY - c.y, ev.clientX - c.x) - a0) * 180 / Math.PI;
+        if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+        const next = normalize(deg);
+        if (next === (Number(n.rotation) || 0)) return;
+        g.commit(); n.rotation = next; unbindKeys(n, ['rotation']);
+        ed.render();
+      }, end);
+    }
+
+    // Corner (nw/ne/sw/se) or edge (n/e/s/w) resize. Shift keeps the aspect ratio, Alt resizes from the centre, and
+    // the Scale tool scales the layer and its content proportionally.
+    function startResize(e, id, handle) {
+      const n = find(id); if (!n || n.locked) return;
+      const total = totalRotation(n), scaling = tool() === 'scale';
+      const s = {x: n.x, y: n.y, w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, start = {x: e.clientX, y: e.clientY}, g = gesture();
+      const hx = handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0, hy = handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0;
+      const content = scaling ? [...ed.descendants(id)].map(find).filter(Boolean).map(d => ({d, x: d.x, y: d.y, w: d.w, h: d.h, fontSize: d.fontSize, radius: d.radius, gap: d.gap, padding: d.padding, strokeWidth: d.strokeWidth})) : [];
+      begin();
+      track(e, ev => {
+        g.commit();
+        const dx = (ev.clientX - start.x) / cam.zoom, dy = (ev.clientY - start.y) / cam.zoom, angle = total * Math.PI / 180;
+        const localX = dx * Math.cos(angle) + dy * Math.sin(angle), localY = -dx * Math.sin(angle) + dy * Math.cos(angle);
+        const sx = hx * (n.flipX ? -1 : 1), sy = hy * (n.flipY ? -1 : 1), centered = ev.altKey ? 2 : 1; // handles flip with the layer
+        let w = hx ? Math.max(MIN_SIZE, s.w + sx * localX * centered) : s.w, h = hy ? Math.max(MIN_SIZE, s.h + sy * localY * centered) : s.h;
+        if (ev.shiftKey || scaling) {
+          const f = hx && hy ? diagonalFactor(s.w, s.h, w, h) : hx ? w / s.w : h / s.h, min = Math.max(MIN_SIZE / s.w, MIN_SIZE / s.h);
+          const k = Math.max(min, f); w = s.w * k; h = s.h * k;
+        }
+        const dw = w - s.w, dh = h - s.h, a = (Number(n.rotation) || 0) * Math.PI / 180, parent = find(n.parentId);
+        n.w = r2(w); n.h = r2(h);
+        // A dragged size replaces a variable-bound W/H: keep the new value, drop the binding (undo restores both).
+        unbindKeys(n, [w !== s.w && 'w', h !== s.h && 'h']);
+        // A dragged size is Fixed (Hug / Fill / Auto / Calculate end); a Relative (%) size keeps its mode and scales.
+        if (w !== s.w && n.wMode && n.wMode !== 'fixed') { n.wMode = 'fixed'; delete n.wCalc; }
+        if (h !== s.h && n.hMode && n.hMode !== 'fixed') { n.hMode = 'fixed'; delete n.hCalc; }
+        if (s.wPct !== undefined && s.w) n.wPct = r2(s.wPct * w / s.w);
+        if (s.hPct !== undefined && s.h) n.hPct = r2(s.hPct * h / s.h);
+        if (!isFlow(parent)) {
+          // The opposite edge or corner stays put; an axis without a dragged side (or Alt) grows around the centre.
+          const ax = ev.altKey ? 0 : sx, ay = ev.altKey ? 0 : sy;
+          n.x = r2(s.x + (ax * dw * Math.cos(a) - ay * dh * Math.sin(a) - dw) / 2);
+          n.y = r2(s.y + (ax * dw * Math.sin(a) + ay * dh * Math.cos(a) - dh) / 2);
+        }
+        if (scaling) {
+          const f = w / s.w;
+          for (const c of content) {
+            if (c.d.id !== id) { c.d.x = c.x * f; c.d.y = c.y * f; c.d.w = Math.max(1, c.w * f); c.d.h = Math.max(1, c.h * f); }
+            c.d.fontSize = Math.min(200, Math.max(8, c.fontSize * f)); c.d.radius = c.radius * f; c.d.gap = c.gap * f; c.d.padding = c.padding * f; c.d.strokeWidth = c.strokeWidth * f;
+            if (f !== 1) unbindKeys(c.d, [c.d.id !== id && 'w', c.d.id !== id && 'h', 'fontSize', 'radius', 'gap', 'padding', 'strokeWidth']);
+          }
+        }
+        ed.render();
+      }, end);
+    }
+
+    // Pointer-down hook for the canvas: returns true when the press belongs to the selection chrome.
+    function pointerDown(e) {
+      if (e.target.closest?.('#selection-chat-chip')) return true; // the click runs the chip's action
+      const zone = e.target.closest?.('#canvas-overlay .rotate-zone, #canvas-overlay .resize-edge');
+      if (!zone) return false;
+      const id = [...sel()][0]; if (!id || sel().size !== 1) return false;
+      if (zone.classList.contains('rotate-zone')) startRotate(e, id); else startResize(e, id, zone.dataset.edge);
+      return true;
+    }
+
+    return {draw, startResize, startRotate, pointerDown, addToChat, busy: () => busy};
+  }
+
+  window.BetterSelectionChrome = {install, normalize, chromeAngle, diagonalFactor};
+})();
