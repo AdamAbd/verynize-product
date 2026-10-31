@@ -85,3 +85,26 @@ Menu style in Wonder: 176 px wide, 25 px row pitch, 4 px inset, radius ≈ 12, b
 - the zoom stop table, Space-pan and wheel/pinch zoom (V1/V2);
 - what each paste mode and each Copy as option actually puts on the clipboard (K2);
 - unframe and delete (K3).
+
+## Status after the fix pass (2026-10-31)
+
+Five slices were implemented in parallel and merged on `feat/canvas-parity`. After-fix proof is in `verynize/after/<id>.png` and is paired against Wonder in `pairs-after/`. Each slice was captured on its own branch before the merge, so a shot may show another slice's area still in its old state; for example, the TR2 shot still shows the old toolbar.
+
+| Area | Status | Proof |
+|---|---|---|
+| CM1–CM10 context menus | **closed**: Radix menu per target, with Copy as / Select layer / Arrange / Layout submenus, Show/Unlock labels, Hide label (`labelHidden`, validated and round-tripped), label menu, layer and page row menus, Paste listed but disabled. Set as file thumbnail and Use as mask are omitted: Verynize has no thumbnail picker and no layer masks. | [frame](pairs-after/CM2-frame.png), [empty](pairs-after/CM1-empty.png), [row](pairs-after/CM7-row.png) |
+| K2 / TR6 clipboard | **closed**: Paste here, Paste to replace ⌘⇧R, Paste over selection ⌘⇧V, Copy link, Copy prompt ⌘⇧⌥C. ⌘D offsets right by width + 40. Copies get the next free name ("Frame 3"). | [paste here](pairs-after/K2-paste-here.png), [duplicate](pairs-after/K2-duplicate.png) |
+| TR1 / TR2 / T4 / S4 transform | **closed**: rotate zones (Shift snaps to 15°), edge resize, proportional Scale, `W x H` badge, ⊕ add-to-chat chip, one union box around a multi-selection. | [rotate](pairs-after/TR2-rotate.png), [chrome](pairs-after/S4-frame.png), [scale](pairs-after/T4-scale.png) |
+| T1 / T5 / T6 / K1 / TX1 | **closed**: Wonder's 6-tool toolbar, Help menu, zoom menu, shortcut drawer, ⌘K command palette (a focused terminal keeps ⌘K), empty Hug text in Inter 12. | [help](pairs-after/T5-help.png), [shortcuts](pairs-after/K1-shortcuts.png), [text](pairs-after/TX1-click.png) |
+| TR4 / TR5 / TR8 / L1 / L2 | **closed**: blue guides and distance chips, tick layout marks, Wonder tooltip strings, inline page rename, page drag-reorder. | [guide](pairs-after/TR4-guide.png), [distances](pairs-after/TR5-alt-parent.png), [page rename](pairs-after/L2-rename.png) |
+
+Validation on the merged branch:
+- `build:ui`, `lint:ui`, `typecheck:ui` and `check` are clean.
+- `npm test` passes every suite except `tests/desktop-onboarding.mjs`. That test fails the same way on `staging` and comes from this machine. `tests/desktop-workspaces.mjs` passes when run separately.
+- `eval/run-fidelity.mjs`: 30/30.
+
+Integration fixes made during the merge:
+- A right-click on the new resize and rotate zones opens the layer menu.
+- The palette ranks results by label, so "select all" picks Select all.
+- A focused terminal keeps ⌘K.
+- `labelHidden` round-trips through the codec.
