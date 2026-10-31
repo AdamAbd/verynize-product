@@ -6,8 +6,8 @@ import {
   createRoute,
   createRouter,
   useLocation,
+  type AnyRouter,
   type NavigateOptions,
-  type ParsedLocation,
   type RouterHistory,
 } from "@tanstack/react-router";
 import type { SectionId } from "@/islands/settings/api";
@@ -25,6 +25,14 @@ import "@/lib/bridge";
 // applyOpen/applyClose, applyCodeMode) and nothing else.
 // Cloud fragments (#room=<id>&token=<capability>, #public=<id>) are never routes and never move into
 // the query string: every shell navigation keeps them unless clearRoomHash() drops them.
+//
+// One router owns navigation per page:
+// - Standalone (desktop app://verynize, file://, a static web/ server): this module creates the router, its history and
+//   the route components below.
+// - Hosted (the web app, web-start/): TanStack Start registers window.verynizeShellHost before booting the legacy
+//   editor. This module then creates no history and no router: it uses Start's router and history, navigate() goes
+//   through Start's router, and Start's route components (web-start/src/routes/_editor/*) apply their location with
+//   window.shellNavigation.applyLocation. Requests, settings history and the cloud fragment rules are the same.
 
 export type ViewPath = "/" | "/editor" | "/code";
 type Shell = { view: ViewPath; settings: SectionId | null };
@@ -50,6 +58,17 @@ const isSection = (value: unknown): value is SectionId => SECTIONS.includes(valu
 const VIEWS: readonly string[] = ["/", "/editor", "/code"];
 const isView = (value: unknown): value is ViewPath => VIEWS.includes(value as string);
 const isSettingsPath = (path: string) => path === "/settings" || path.startsWith("/settings/");
+
+/** Registered by the Start app (web-start/src/legacy/shell-host.ts) before the legacy editor boots. */
+type ShellHost = {
+  /** Start's router: the only router and history on the page. */
+  router: AnyRouter;
+  /** window.history.state as the page was loaded, before Start's history keyed the entry. */
+  initialState: unknown;
+};
+const host = (window as unknown as { verynizeShellHost?: ShellHost }).verynizeShellHost;
+/** Whether Start's router owns navigation (the web app). Desktop and file:// run standalone. */
+export const hosted = !!host;
 
 /* ---------- Legacy appliers (DOM + body classes only; they never touch history) ---------- */
 
@@ -131,15 +150,18 @@ function preserveCloudFragment(history: RouterHistory) {
 
 // A file URL cannot push /editor and its fragment belongs to cloud invitations: memory history, starting on the
 // legacy startup view (editor). Desktop (app://verynize) and the web own the real path.
-const fileProtocol = location.protocol === "file:";
-if (!fileProtocol && location.pathname === "/index.html") {
+// Hosted, Start's server already redirects /index.html and its history is the page's history.
+const fileProtocol = !host && location.protocol === "file:";
+if (!host && !fileProtocol && location.pathname === "/index.html") {
   window.history.replaceState(window.history.state, "", `/${location.search}${location.hash}`);
 }
 // The entry's own state, before createBrowserHistory gives a state-less entry a fresh key.
-const rawStartState = window.history.state as EntryState | null;
-const history = fileProtocol
-  ? createMemoryHistory({ initialEntries: [shown().view] })
-  : createBrowserHistory();
+const rawStartState = (host ? host.initialState : window.history.state) as EntryState | null;
+const history: RouterHistory = host
+  ? host.router.history
+  : fileProtocol
+    ? createMemoryHistory({ initialEntries: [shown().view] })
+    : createBrowserHistory();
 // Memory history never owns the address bar, so the real fragment is already untouched there.
 const dropFragment = fileProtocol
   ? () => window.history.replaceState(window.history.state, "", location.pathname + location.search)
@@ -313,37 +335,48 @@ history.subscribe(({ location, action }) => {
   lastAction = action.type;
 });
 
+/** The area a route stands for: a view, or the settings overlay (any /settings path). */
+export type ShellArea = ViewPath | "/settings";
+type RenderedLocation = { pathname: string; state: unknown };
+const ownsPath = (area: ShellArea, path: string) =>
+  area === "/settings" ? isSettingsPath(path) : path === area;
+
 /**
- * Applies the rendered location. Skipped when it is not the current history entry (a request already committed and
- * applied a newer one, which the router renders next, or settings is closing through history.back()), and when it
- * is not this route's path: a leaving route component renders the next location once before it unmounts.
+ * Applies a location rendered by the route of `area` (this module's route components standalone, Start's route
+ * components hosted). Skipped when it is not the current history entry (a request already committed and applied a
+ * newer one, which the router renders next, or settings is closing through history.back()), and when it is not that
+ * area's path: a leaving route component renders the next location once before it unmounts.
  */
-function useApplyLocation(
-  owns: (path: string) => boolean,
-  apply: (location: ParsedLocation) => void,
-) {
-  const location = useLocation();
+export function applyLocation(area: ShellArea, location: RenderedLocation) {
   const key = (location.state as EntryState).__TSR_key;
-  useLayoutEffect(() => {
-    if (closing || key !== entryState().__TSR_key || !owns(location.pathname)) return;
-    apply(location);
-    // Every push/replace gets a new entry key, so the key identifies the location.
-  }, [key]); // oxlint-disable-line react-hooks/exhaustive-deps
+  if (closing || key !== entryState().__TSR_key || !ownsPath(area, location.pathname)) return false;
+  if (area === "/settings") applySettingsLocation(location);
+  else applyShell({ view: area, settings: null });
+  return true;
 }
 
-function viewRoute(view: ViewPath) {
-  return function ViewRoute() {
-    useApplyLocation(
-      (path) => path === view,
-      () => applyShell({ view, settings: null }),
-    );
+/** Applies the current history entry (hosted: Start's routes rendered it before this bundle ran). */
+export function applyCurrentLocation() {
+  const { pathname } = history.location;
+  const area = isView(pathname) ? pathname : isSettingsPath(pathname) ? "/settings" : null;
+  return area ? applyLocation(area, history.location) : false;
+}
+
+function areaRoute(area: ShellArea) {
+  return function AreaRoute() {
+    const location = useLocation();
+    const key = (location.state as EntryState).__TSR_key;
+    useLayoutEffect(() => {
+      applyLocation(area, location);
+      // Every push/replace gets a new entry key, so the key identifies the location.
+    }, [key]); // oxlint-disable-line react-hooks/exhaustive-deps
     return null;
   };
 }
 
 // The section comes from the location, not useParams(): a route component can render the next location once with
 // the previous match's params.
-function applySettingsLocation(location: ParsedLocation) {
+function applySettingsLocation(location: RenderedLocation) {
   const state = location.state as EntryState;
   const section = location.pathname.slice("/settings/".length);
   const wanted = isSection(section) ? section : DEFAULT_SECTION;
@@ -363,34 +396,27 @@ function applySettingsLocation(location: ParsedLocation) {
     commit(`/settings/${wanted}`, "replace", { ...settingsStateOf(state), ...record });
 }
 
-const root = createRootRoute();
-const home = createRoute({ getParentRoute: () => root, path: "/", component: viewRoute("/") });
-const editor = createRoute({
-  getParentRoute: () => root,
-  path: "/editor",
-  component: viewRoute("/editor"),
-});
-const code = createRoute({
-  getParentRoute: () => root,
-  path: "/code",
-  component: viewRoute("/code"),
-});
-const settings = createRoute({
-  getParentRoute: () => root,
-  path: "/settings",
-  component: function SettingsRoute() {
-    useApplyLocation(isSettingsPath, applySettingsLocation);
-    return null;
-  },
-});
-const settingsSectionRoute = createRoute({
-  getParentRoute: () => root,
-  path: "/settings/$section",
-  component: function SettingsSectionRoute() {
-    useApplyLocation(isSettingsPath, applySettingsLocation);
-    return null;
-  },
-});
+// The standalone route tree. Hosted, Start's file routes (web-start/src/routes/_editor/) have the same paths and
+// apply the same areas.
+function createShellRouter() {
+  const root = createRootRoute();
+  const route = <const Path extends string>(path: Path, area: ShellArea) =>
+    createRoute({ getParentRoute: () => root, path, component: areaRoute(area) });
+  return createRouter({
+    routeTree: root.addChildren([
+      route("/", "/"),
+      route("/editor", "/editor"),
+      route("/code", "/code"),
+      route("/settings", "/settings"),
+      route("/settings/$section", "/settings"),
+    ]),
+    history,
+    scrollRestoration: false,
+    defaultHashScrollIntoView: false,
+    defaultNotFoundComponent: () => null,
+  });
+}
+type ShellRouter = ReturnType<typeof createShellRouter>;
 
 /* ---------- Startup ---------- */
 
@@ -423,23 +449,21 @@ if (queued.length) {
     commit(pathOf(next), "replace", next.settings ? { settingsUnder: next.view } : {});
 }
 
-export const shellRouter = createRouter({
-  routeTree: root.addChildren([home, editor, code, settings, settingsSectionRoute]),
-  history,
-  scrollRestoration: false,
-  defaultHashScrollIntoView: false,
-  defaultNotFoundComponent: () => null,
-});
+/**
+ * The page's router. Hosted, this is Start's router (same public paths), so app code, Back/Forward and Start's own
+ * navigation go through one router and one history.
+ */
+export const shellRouter: ShellRouter = host ? (host.router as ShellRouter) : createShellRouter();
 
 declare module "@tanstack/react-router" {
   interface Register {
-    router: typeof shellRouter;
+    router: ShellRouter;
   }
 }
 
 /**
  * The one entry point for shell navigation from app code. Search is kept, scroll is left alone, and
- * the cloud fragment is kept by the history wrapper above.
+ * the cloud fragment is kept by the history wrapper above (hosted, it wraps Start's history).
  */
 export function navigate(options: NavigateOptions) {
   return shellRouter.navigate({ search: true, resetScroll: false, ...options });
@@ -453,8 +477,9 @@ declare global {
       navigate: typeof navigate;
       request: typeof request;
       clearRoomHash: typeof clearRoomHash;
+      applyLocation: typeof applyLocation;
     };
   }
 }
 window.shellRouter = shellRouter;
-window.shellNavigation = { navigate, request, clearRoomHash };
+window.shellNavigation = { navigate, request, clearRoomHash, applyLocation };

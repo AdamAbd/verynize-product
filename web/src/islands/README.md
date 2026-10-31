@@ -75,7 +75,11 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
   view — `/` (`files-view`), `/editor`, `/code` (`code-mode`), `/settings/<section>` (`settings-open`). Never toggle
   those three body classes yourself: navigate with `navigate()` or call the legacy request APIs
   (`fileLibrary.showHome/showEditor`, `appSettings.open/close/select`, `agentWorkspace.setCodeMode`), which update the
-  URL and apply the view synchronously. The `apply*` functions on those objects are for the router only.
+  URL and apply the view synchronously. The `apply*` functions on those objects are for the router only. One router
+  owns navigation per page: standalone (desktop, `file://`) the shell router creates its own history and routes; in
+  the web app it runs hosted on TanStack Start's router (`window.verynizeShellHost`, `web-start/README.md` "One
+  router"), `window.shellRouter` is Start's router and Start's routes apply the area via
+  `window.shellNavigation.applyLocation(area, location)`. Never create another router or browser history in an island.
 - **Code mode**: `body.code-mode` (toggle with `window.agentWorkspace.setCodeMode(on)`, which navigates to `/code` or `/editor`; `openProject()` enters it, `#project-toggle`
   toggles it). Tests use `#code-add-repository` then `#project-open` / `#project-new` / `#project-clone`, `#code-new-chat`,
   `#code-new-quick-chat`, `[data-repository=<name>]`, `[data-chat-id=<id>]`, `#code-file-tree[data-root=<path>]

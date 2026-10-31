@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser, startProcess, freePort } from "./helpers/web-app.mjs";
+import { checkWebRouter } from "./helpers/web-router.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const state = await fs.mkdtemp(path.join(os.tmpdir(), "web-cloudflare-"));
@@ -42,11 +43,12 @@ async function check(mode) {
   });
   try {
     await checkApp(origin);
+    await checkWebRouter(browser, origin);
   } finally {
     await server.stop();
   }
   console.log(
-    `PASS web (Cloudflare ${mode}): client-only editor boot, rectangle added, shell routes, /api via worker, room WebSocket, web/src not served`,
+    `PASS web (Cloudflare ${mode}): client-only editor boot, rectangle added, shell routes, one router (clicks, Back/Forward, deep links, room fragment), /api via worker, room WebSocket, web/src not served`,
   );
 }
 
