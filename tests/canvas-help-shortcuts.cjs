@@ -78,7 +78,7 @@ const nodes = [
     // ---- T5: the `?` help menu.
     await p.locator('#bd-canvas-help').click();
     const help = await p.locator('#bd-help-menu [role=menuitem]').evaluateAll(list => list.map(i => [i.textContent.trim(), i.hasAttribute('data-disabled')]));
-    assert.deepEqual(help.map(h => h[0]), ['Docs', 'Keyboard shortcuts', 'Restart onboarding', 'Give feedback', 'Contact us', 'Discord community', 'Export diagnostic logs', "What's new in Verynize 0.15October 31", 'View all']);
+    assert.deepEqual(help.map(h => h[0]), ['Docs', 'Keyboard shortcuts', 'Restart onboarding', 'Give feedback', 'Contact us', 'Discord community', 'Export diagnostic logs', "Verynize 0.16October 31", 'View all']);
     assert.deepEqual(help.filter(h => h[1]).map(h => h[0]), [], 'every help item is enabled (placeholder URLs in help-links.ts)');
     assert.equal(await p.locator('#bd-help-menu').getByText("What's new", {exact: true}).count(), 1);
     // What's new lists placeholder entries (title over date, two-line 44px rows like Wonder T5-help) before View all.
@@ -120,10 +120,11 @@ const nodes = [
       const title = row.querySelector('[data-whats-new-title]'), date = row.querySelector('[data-whats-new-date]'), all = document.getElementById('help-whats-new');
       const font = el => [getComputedStyle(el).fontSize, getComputedStyle(el).color];
       const lineTop = el => +(el.getBoundingClientRect().top - rowTop).toFixed(2), lineH = el => el.getBoundingClientRect().height;
-      return {label: [text(label).left, getComputedStyle(label).fontSize], title: [text(title).left, ...font(title), lineTop(title), lineH(title)],
+      return {label: [text(label).left, getComputedStyle(label).fontSize, getComputedStyle(label).color], title: [text(title).left, ...font(title), lineTop(title), lineH(title)],
         date: [text(date).left, ...font(date), lineTop(date), lineH(date)], all: [text(all.querySelector('span')).left, getComputedStyle(all).fontSize, all.offsetHeight]};
     });
-    assert.deepEqual(news.label, [10, '12px'], "What's new label");
+    assert.deepEqual(news.label, [10, '12px', 'rgb(150, 150, 150)'], "What's new label: 12px #969696 (T5-help, R6-help-menu)");
+    assert.equal(await p.locator('#bd-help-menu [data-whats-new-title]').evaluate(e => e.scrollWidth <= e.clientWidth), true, 'the placeholder entry title is not truncated');
     assert.deepEqual(news.title, [12, '13px', 'rgb(232, 232, 232)', 5.5, 20], 'entry title: 13px, 12px in, line box 5.5px into the row');
     assert.deepEqual(news.date, [12, '12px', 'rgb(168, 168, 168)', 26.5, 12], 'entry date: 12px secondary grey below the title');
     assert.deepEqual(news.all, [12, '13px', 29], 'View all: 13px text in a 29px row');

@@ -133,7 +133,7 @@ export function HelpMenu() {
         </MenuGroup>
         <MenuSeparator />
         <MenuGroup>
-          <MenuLabel className="px-1.25">What&apos;s new</MenuLabel>
+          <MenuLabel className="px-1.25 text-menu-label">What&apos;s new</MenuLabel>
           {WHATS_NEW.map(({ id, title, date, url }) => (
             <MenuItem
               key={id}

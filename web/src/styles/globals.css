@@ -40,6 +40,7 @@
   --foreground-2: #d4d4d4;
   --foreground-3: #a8a8a8;
   --muted-foreground: #909090;
+  --menu-label: #969696; /* help menu "What's new" section label (Wonder T5-help, R6-help-menu: solid RGB 150) */
   --subtle-foreground: #707070;
 
   /* Brand */
@@ -76,6 +77,7 @@ html[data-ui-theme="light"] {
   --foreground-2: #2b2b2b;
   --foreground-3: #555555;
   --muted-foreground: #6b6b6b;
+  --menu-label: #6b6b6b;
   --subtle-foreground: #8a8a8a;
   --primary-text: #8f2fc0;
   --primary-tint: #f3e8fa;
@@ -110,6 +112,7 @@ html[data-ui-theme="light"] {
   --color-secondary-foreground: var(--foreground-2);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-menu-label: var(--menu-label);
   --color-subtle-foreground: var(--subtle-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--foreground);

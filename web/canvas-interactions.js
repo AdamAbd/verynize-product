@@ -750,7 +750,7 @@
     // Drag-move. Free layers follow the pointer through x/y (with snapping). Auto-layout children follow it as a
     // translated ghost while their slot stays open and their siblings stay put (Wonder R1-row-drag-slot,
     // R1-row-small-drag); the stack takes its new order on release. Dropping over another frame re-parents the layers
-    // into it (at the stack slot under the pointer when that frame is an auto layout); top-level frames stay top-level.
+    // into it (at the stack slot under the pointer when that frame is an auto layout); a top-level frame enters only a stack.
     // There is no "drop column": the tall translucent purple box in Wonder's TR7-out-during is a marquee. Its corner
     // starts in the empty gap left of the child (not on it), the child has not moved and the inspector shows Z Auto
     // (a real drag shows Z 9999, R1), and the sibling capture TR7-reorder-during ends with "2 nodes selected".
@@ -768,7 +768,7 @@
     function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
       const g = gesture(), start = {x: e.clientX, y: e.clientY};
-      let free = null, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null, deferred = false, cancelled = false;
+      let free = null, flowOnly = false, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null, deferred = false, cancelled = false;
       const onKey = ev => {
         if (ev.key !== 'Escape' || !deferred || cancelled) return;
         ev.preventDefault(); ev.stopImmediatePropagation();
@@ -789,8 +789,8 @@
         excluded = new Set(nodes.flatMap(n => [...ed.descendants(n.id)]));
         const parents = new Set(nodes.map(n => n.parentId || null));
         home = parents.size === 1 ? [...parents][0] : undefined;
-        // Artboards never get nested by a drag.
-        if (nodes.some(n => !n.parentId && n.type === 'frame')) excluded = null;
+        // A top-level frame enters a stack by a drag (Wonder R1-row-return-during) but never a free frame (unproven).
+        flowOnly = nodes.some(n => !n.parentId && n.type === 'frame');
         workspace.classList.add('moving'); showHover(null);
       };
       track(e, ev => {
@@ -798,7 +798,7 @@
         if (!free) { if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 3) return; begin(ev); }
         let dx = (ev.clientX - start.x) / cam.zoom, dy = (ev.clientY - start.y) / cam.zoom;
         if (ev.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
-        drop = dropTarget(ev, home, excluded, stacked);
+        drop = dropTarget(ev, home, excluded, stacked, flowOnly);
         let guides = [];
         if (box && !drop.parent && $('#snap')?.checked !== false && !ev.metaKey && !ev.ctrlKey) {
           const snapped = snapBox({...box, x: box.x + dx, y: box.y + dy}, targets);
@@ -838,8 +838,9 @@
     }
     // Where a drag lands. Stack children stay in their stack while the pointer is inside it; otherwise the deepest
     // frame under the pointer (outside the moving layers) takes them. `parent` is set only when that changes the
-    // parent ({id: ''} = the page); `index` is the stack slot for auto-layout targets.
-    function dropTarget(e, home, excluded, stacked) {
+    // parent ({id: ''} = the page); `index` is the stack slot for auto-layout targets. `flowOnly` (a top-level frame
+    // is moving) accepts only an auto-layout frame as the deepest frame under the pointer; elsewhere it stays put.
+    function dropTarget(e, home, excluded, stacked, flowOnly) {
       const p = screenToWorld(e.clientX, e.clientY), homeNode = home ? find(home) : null;
       let target = home;
       if (!excluded || home === undefined) return {};
@@ -849,6 +850,7 @@
           if (!canvas.contains(el) || !el.classList.contains('frame-layer') || excluded.has(el.dataset.id)) continue;
           const n = find(el.dataset.id); if (n && !n.locked && !n.hidden) { target = n.id; break; }
         }
+        if (flowOnly && !isFlow(find(target))) target = home;
       }
       const node = target ? find(target) : null, result = {};
       if (target !== home) result.parent = node || {id: ''};
@@ -905,7 +907,7 @@
       }
       ed.setSelection(new Set(nodes.map(n => n.id)));
     }
-    // Drop feedback: the receiving frame is outlined and, for a stack, a bar marks the slot.
+    // Drop feedback: the receiving frame is outlined and, for a stack, a bar marks the slot (3px solid #c468f7, R1-row-return-during).
     function drawDrop(drop) {
       const target = drop?.frame, b = target && screenBox(target);
       dropBox.hidden = !b; dropLine.hidden = true;
@@ -921,10 +923,10 @@
       dropLine.hidden = false;
       if (column) {
         const y = at && prev ? (prev.top + prev.height + at.top) / 2 : at ? at.top - 2 : prev ? prev.top + prev.height + 2 : b.top + b.height / 2;
-        placeBox(dropLine, {left: b.left + 4, top: y - 1, width: Math.max(0, b.width - 8), height: 2});
+        placeBox(dropLine, {left: b.left + 4, top: y - 1.5, width: Math.max(0, b.width - 8), height: 3});
       } else {
         const ref = at || prev, x = at && prev && Math.abs(prev.top - at.top) < 1 ? (prev.left + prev.width + at.left) / 2 : at ? at.left - 2 : prev ? prev.left + prev.width + 2 : b.left + b.width / 2;
-        placeBox(dropLine, {left: x - 1, top: ref ? ref.top : b.top + 4, width: 2, height: ref ? ref.height : Math.max(0, b.height - 8)});
+        placeBox(dropLine, {left: x - 1.5, top: ref ? ref.top : b.top + 4, width: 3, height: ref ? ref.height : Math.max(0, b.height - 8)});
       }
     }
 
