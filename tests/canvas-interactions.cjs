@@ -315,7 +315,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.deepEqual(await sizeMenu(), {items: ['Fixed', 'Relative', 'Fill', 'Calculate', 'Add min width', 'Add max width'], checked: ['Fixed']}, 'a rectangle in a flex row: Relative and Fill, no Hug or Auto');
     await page.locator('[role=menuitem][data-size-mode=fill]').click();
     assert.equal((await node('grow')).w, 400 - 20 - 10 - 100, 'Fill takes the remaining main-axis space');
-    assert.match(await page.locator('#selection-measure').textContent(), /270 Fill × 50/);
+    assert.match(await page.locator('#selection-measure').textContent(), /270 Fill x 50/);
     assert.equal((await page.locator('#layout-section [data-size-menu=w]').textContent()).trim(), 'Fill', 'the unit names the mode');
     await page.keyboard.press('Escape');
     await page.evaluate(() => window.design.setSelection(['stack']));
@@ -340,7 +340,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await typeW('50');
     assert.deepEqual([(await node('fixed')).wMode, (await node('fixed')).wPct], ['fixed', 50]);
     near(await widthOf('fixed'), 190, 0.5, 'relative width renders as a percentage');
-    assert.match(await page.locator('#selection-measure').textContent(), /^190 50% × 50/);
+    assert.match(await page.locator('#selection-measure').textContent(), /^190 50% x 50/);
     // Calculate: an expression of px and % terms; the unit becomes part of the value and the badge reads "Calc".
     await pickSize('w', 'calc');
     assert.deepEqual([(await node('fixed')).wMode, (await node('fixed')).wCalc, (await node('fixed')).wPct], ['calc', '190px', undefined]);
@@ -349,7 +349,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal((await node('fixed')).wCalc, '100% - 280px');
     near(await widthOf('fixed'), 100, 0.5, 'calc() resolves against the parent');
     assert.equal((await node('fixed')).w, 100, 'the measured width is read back');
-    assert.match(await page.locator('#selection-measure').textContent(), /^100 Calc × 50/);
+    assert.match(await page.locator('#selection-measure').textContent(), /^100 Calc x 50/);
     await typeW('12 apples');
     assert.equal((await node('fixed')).wCalc, '100% - 280px', 'an invalid expression is refused');
     await pickSize('w', 'fixed');

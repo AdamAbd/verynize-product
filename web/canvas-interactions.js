@@ -508,6 +508,7 @@
       if (e.target.closest('.frame-label')) return;
       if (space || tool === 'hand' || e.button === 1) { startPan(e); return; }
       if (e.button !== 0) return;
+      if (chrome.pointerDown(e)) return;
       const spacing = e.target.closest('#canvas-overlay .spacing-band');
       if (spacing) { startSpacing(e, spacingBands[Number(spacing.dataset.index)], Number(spacing.dataset.index)); return; }
       if (tool === 'eyedropper') { e.preventDefault(); const hex = colorAt(e.clientX, e.clientY); if (hex) { eyedropperRun++; applyPickedColor(hex); setTool('move'); } return; }
@@ -912,43 +913,10 @@
       for (const key of keys) if (key) delete node.bindings[key];
       if (!Object.keys(node.bindings).length) delete node.bindings;
     }
-    function startResize(e, id, corner) {
-      const n = find(id); if (!n || n.locked) return;
-      let total = Number(n.rotation) || 0, ancestor = n;
-      while (ancestor.parentId) { ancestor = find(ancestor.parentId); if (!ancestor) break; total += Number(ancestor.rotation) || 0; }
-      const s = {x: n.x, y: n.y, w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, start = {x: e.clientX, y: e.clientY}, g = gesture(), scaling = tool === 'scale';
-      const content = scaling ? [...ed.descendants(id)].map(find).filter(Boolean).map(d => ({d, x: d.x, y: d.y, w: d.w, h: d.h, fontSize: d.fontSize, radius: d.radius, gap: d.gap, padding: d.padding, strokeWidth: d.strokeWidth})) : [];
-      track(e, ev => {
-        g.commit();
-        const dx = (ev.clientX - start.x) / cam.zoom, dy = (ev.clientY - start.y) / cam.zoom, angle = total * Math.PI / 180;
-        const localX = dx * Math.cos(angle) + dy * Math.sin(angle), localY = -dx * Math.sin(angle) + dy * Math.cos(angle);
-        const sx = (corner.includes('e') ? 1 : -1) * (n.flipX ? -1 : 1), sy = (corner.includes('s') ? 1 : -1) * (n.flipY ? -1 : 1), centered = ev.altKey ? 2 : 1; // handles flip with the layer
-        let w = Math.max(10, s.w + sx * localX * centered), h = Math.max(10, s.h + sy * localY * centered);
-        if (ev.shiftKey || scaling) { const fx = w / s.w, fy = h / s.h, f = Math.abs(fx - 1) > Math.abs(fy - 1) ? fx : fy; w = Math.max(10, s.w * f); h = Math.max(10, s.h * f); }
-        const dw = w - s.w, dh = h - s.h, a = (Number(n.rotation) || 0) * Math.PI / 180, parent = find(n.parentId);
-        n.w = w; n.h = h;
-        // A dragged size replaces a variable-bound W/H: keep the new value, drop the binding (undo restores both).
-        unbindKeys(n, [w !== s.w && 'w', h !== s.h && 'h']);
-        // A dragged size is Fixed (Hug / Fill / Auto / Calculate end); a Relative (%) size keeps its mode and scales.
-        if (n.wMode && n.wMode !== 'fixed') { n.wMode = 'fixed'; delete n.wCalc; }
-        if (n.hMode && n.hMode !== 'fixed') { n.hMode = 'fixed'; delete n.hCalc; }
-        if (s.wPct !== undefined && s.w) n.wPct = Math.round(s.wPct * w / s.w * 100) / 100;
-        if (s.hPct !== undefined && s.h) n.hPct = Math.round(s.hPct * h / s.h * 100) / 100;
-        if (!isFlow(parent)) {
-          if (ev.altKey) { n.x = s.x - dw / 2; n.y = s.y - dh / 2; }
-          else { n.x = s.x + (sx * dw * Math.cos(a) - sy * dh * Math.sin(a) - dw) / 2; n.y = s.y + (sx * dw * Math.sin(a) + sy * dh * Math.cos(a) - dh) / 2; }
-        }
-        if (scaling) {
-          const f = w / s.w;
-          for (const c of content) {
-            if (c.d.id !== id) { c.d.x = c.x * f; c.d.y = c.y * f; c.d.w = Math.max(1, c.w * f); c.d.h = Math.max(1, c.h * f); }
-            c.d.fontSize = clamp(c.fontSize * f, 8, 200); c.d.radius = c.radius * f; c.d.gap = c.gap * f; c.d.padding = c.padding * f; c.d.strokeWidth = c.strokeWidth * f;
-            if (f !== 1) unbindKeys(c.d, [c.d.id !== id && 'w', c.d.id !== id && 'h', 'fontSize', 'radius', 'gap', 'padding', 'strokeWidth']);
-          }
-        }
-        ed.render();
-      });
-    }
+    // Resize, rotate and the selection chrome (label, badge, ⊕ chip, multi-selection box) live in selection-chrome.js.
+    const chrome = window.BetterSelectionChrome.install({ed, cam, wrap, overlay, workspace, find, sel, track, gesture, isFlow, unbindKeys, elementOf, worldRect, drawGuides, showHover, getTool: () => tool});
+    const baseMeasurement = ed.updateMeasurement; ed.updateMeasurement = () => { baseMeasurement(); chrome.draw(); };
+    function startResize(e, id, corner) { chrome.startResize(e, id, corner); }
 
     function startMarquee(e, scope = null, onClick) {
       const additive = e.shiftKey, base = additive ? new Set(sel()) : new Set();
@@ -1015,6 +983,7 @@
       if (e.altKey) measureTo(e); else if (overlay.dataset.measuring) { overlay.dataset.measuring = ''; drawGuides([]); }
     });
     function measureTo(e) {
+      if (chrome.busy()) return; // no distance guides during a resize or rotate gesture
       const a = union(topSelected().map(n => worldRect(n.id)));
       if (!a) return;
       const el = e.target.closest?.('#canvas .layer');
@@ -1038,8 +1007,8 @@
     function drawFrameLabels() {
       frameLabels.replaceChildren();
       for (const n of ed.nodes().filter(n => !n.parentId && n.type === 'frame' && !n.hidden && !n.preview)) {
-        const r = worldRect(n.id); if (!r || sel().has(n.id)) continue;
-        const label = document.createElement('span'); label.className = 'frame-label'; label.textContent = n.name; label.dataset.id = n.id;
+        const r = worldRect(n.id); if (!r || (sel().has(n.id) && sel().size === 1)) continue;
+        const label = document.createElement('span'); label.className = 'frame-label' + (sel().has(n.id) ? ' selected' : ''); label.textContent = n.name; label.dataset.id = n.id;
         label.style.left = toScreenX(r.x) + 'px'; label.style.top = toScreenY(r.y) - 18 + 'px';
         label.onpointerdown = e => { if (e.button !== 0 || space || tool === 'hand') return; e.stopPropagation(); select(e.shiftKey ? [...sel(), n.id] : [n.id]); if (!e.shiftKey) startMove(e); };
         frameLabels.append(label);
@@ -1606,7 +1575,7 @@
         if (saved) setCamera(saved.x, saved.y, saved.zoom); else requestAnimationFrame(() => fit(true));
       }
       for (const id of drilled) if (!find(id)) drilled.delete(id);
-      drawFrameLabels(); drawClippedSelection();
+      drawFrameLabels(); drawClippedSelection(); chrome.draw();
       refreshHover(true);
     }
     applyCamera();
