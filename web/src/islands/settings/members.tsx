@@ -2,24 +2,28 @@
 // the default room access of plain members, invitations addressed to you, and leaving or deleting
 // a team. Data comes from the Better Auth organization plugin (cloud/auth.js) through
 // window.cloudAccount; room access follows these roles on the server (cloud/orgs.js).
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MailIcon, PlusIcon, SearchIcon, UsersIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
   authRequest,
   canManage,
   cloudAccount,
+  fullOrganizationQuery,
   isPersonal,
   memberRoomRole,
   openSignIn,
   organizationsChanged,
+  organizationsQuery,
   roleNames,
   useActiveOrganization,
   useOrganizations,
-  type FullOrganization,
+  userInvitationsQuery,
   type MemberRoomRole,
   type OrganizationInvitation,
 } from "@/lib/cloud-account";
+import { accountScope, queryKeys, SIGNED_OUT, type AccountScope } from "@/lib/query/keys";
 import { cn } from "@/lib/utils";
 import {
   Card,
@@ -74,29 +78,31 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 }
 
 /** Invitations sent to the signed-in email, from any organization. */
-function IncomingInvitations({ onAccepted }: { onAccepted(id: string): void }) {
-  const [invitations, setInvitations] = useState<OrganizationInvitation[]>([]);
-  const reload = useCallback(() => {
-    authRequest<OrganizationInvitation[]>("/organization/list-user-invitations").then(
-      (list) => setInvitations(list.filter((i) => i.status === "pending")),
-      () => setInvitations([]),
-    );
-  }, []);
-  useEffect(reload, [reload]);
-  if (!invitations.length) return null;
-  const answer = async (invitation: OrganizationInvitation, accept: boolean) => {
-    try {
-      await authRequest(`/organization/${accept ? "accept" : "reject"}-invitation`, {
+function IncomingInvitations({
+  scope,
+  onAccepted,
+}: {
+  scope: AccountScope;
+  onAccepted(id: string): void;
+}) {
+  const client = useQueryClient();
+  // A failed load lists nothing, as before.
+  const { data: invitations = [] } = useQuery(userInvitationsQuery(scope));
+  const answer = useMutation({
+    mutationFn: ({ invitation, accept }: { invitation: OrganizationInvitation; accept: boolean }) =>
+      authRequest(`/organization/${accept ? "accept" : "reject"}-invitation`, {
         invitationId: invitation.id,
-      });
+      }),
+    onSuccess: async (_result, { invitation, accept }) => {
+      // The joined workspace must be listed before it becomes the active one.
       await organizationsChanged();
       if (accept) onAccepted(invitation.organizationId);
       toast(accept ? `Joined ${invitation.organizationName}` : "Invitation declined");
-    } catch (error) {
-      toast(errorText(error));
-    }
-    reload();
-  };
+    },
+    onError: (error) => toast(errorText(error)),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.invitations(scope) }),
+  });
+  if (!invitations.length) return null;
   return (
     <Section id="members-incoming" title="Invitations for you">
       <Card>
@@ -107,13 +113,16 @@ function IncomingInvitations({ onAccepted }: { onAccepted(id: string): void }) {
             description={`Join as ${roleLabel(invitation.role || "member")}`}
             icon={<MailIcon className="mt-0.5 size-4 text-muted-foreground" />}
           >
-            <SettingsButton variant="ghost" onClick={() => void answer(invitation, false)}>
+            <SettingsButton
+              variant="ghost"
+              onClick={() => answer.mutate({ invitation, accept: false })}
+            >
               Decline
             </SettingsButton>
             <SettingsButton
               variant="primary"
               data-accept-invitation={invitation.id}
-              onClick={() => void answer(invitation, true)}
+              onClick={() => answer.mutate({ invitation, accept: true })}
             >
               Accept
             </SettingsButton>
@@ -124,33 +133,34 @@ function IncomingInvitations({ onAccepted }: { onAccepted(id: string): void }) {
   );
 }
 
+type MembersAction = {
+  run(): Promise<unknown>;
+  /** Toast shown on success. */
+  done?: string;
+  /** Refresh what the action changed. */
+  refresh(): Promise<unknown>;
+};
+
 export function MembersPage() {
-  const { account, organizations, reload: reloadOrganizations } = useOrganizations();
+  const { account, organizations } = useOrganizations();
+  const scope = accountScope(account);
   const activeId = useActiveOrganization();
   const active = organizations.find((org) => org.id === activeId) ?? organizations[0] ?? null;
-  const [loaded, setFull] = useState<FullOrganization | null>(null);
-  // Never show the previous workspace's members while the active one loads.
-  const full = loaded && loaded.id === active?.id ? loaded : null;
+  // Keyed by workspace: never shows the previous workspace's members while the active one loads.
+  const organizationQuery = useQuery({
+    ...fullOrganizationQuery(scope ?? SIGNED_OUT, active?.id ?? ""),
+    enabled: !!scope && !!active,
+  });
+  const full = scope && active ? (organizationQuery.data ?? null) : null;
   const [query, setQuery] = useState("");
   const [inviting, setInviting] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
-
-  const load = useCallback(async () => {
-    if (!active) return setFull(null);
-    try {
-      setFull(
-        await cloudAccount()!.request<FullOrganization>(
-          `/api/auth/organization/get-full-organization?organizationId=${encodeURIComponent(active.id)}`,
-        ),
-      );
-    } catch (error) {
-      toast(errorText(error));
-    }
-  }, [active]);
+  const client = useQueryClient();
+  const loadError = organizationQuery.error;
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (loadError) toast(errorText(loadError));
+  }, [loadError]);
 
   const me = full?.members.find((m) => m.user.email === account?.account.email) ?? null;
   const manager = canManage(me?.role);
@@ -164,19 +174,37 @@ export function MembersPage() {
   }, [full, query]);
   const pending = (full?.invitations ?? []).filter((i) => i.status === "pending");
 
-  const act = async (task: () => Promise<unknown>, done?: string) => {
-    try {
-      await task();
+  const action = useMutation({
+    mutationFn: ({ run }: MembersAction) => run(),
+    onSuccess: (_result, { done }) => {
       if (done) toast(done);
-    } catch (error) {
-      toast(errorText(error));
-    }
-    await load();
+    },
+    onError: (error) => toast(errorText(error)),
+    // Success or not, show the server's current state.
+    onSettled: (_result, _error, { refresh }) => refresh(),
+  });
+  const refreshMembers = () =>
+    scope && active
+      ? client.invalidateQueries({ queryKey: queryKeys.organization(scope, active.id) })
+      : Promise.resolve();
+  /** Run an action on the active workspace; by default its members are refreshed afterwards. */
+  const act = (
+    run: () => Promise<unknown>,
+    done?: string,
+    refresh: () => Promise<unknown> = refreshMembers,
+  ) => action.mutate({ run, done, refresh });
+  /** After leaving or deleting `id`: refresh the list; once it is gone, forget its members. */
+  const forget = (id: string) => async () => {
+    await organizationsChanged();
+    if (!scope) return;
+    const listed = client.getQueryData(organizationsQuery(scope).queryKey);
+    if (listed && !listed.some((org) => org.id === id))
+      client.removeQueries({ queryKey: queryKeys.organization(scope, id) });
   };
   const invite = (event: FormEvent) => {
     event.preventDefault();
     if (!active || !email.trim()) return;
-    void act(async () => {
+    act(async () => {
       await authRequest("/organization/invite-member", {
         email: email.trim(),
         role,
@@ -224,12 +252,12 @@ export function MembersPage() {
             : "Loading workspaces…"
         }
       />
-      <IncomingInvitations
-        onAccepted={(id) => {
-          cloudAccount()?.setActiveOrganization(id);
-          void reloadOrganizations();
-        }}
-      />
+      {scope ? (
+        <IncomingInvitations
+          scope={scope}
+          onAccepted={(id) => cloudAccount()?.setActiveOrganization(id)}
+        />
+      ) : null}
       <Section id="members-overview" title="Members overview">
         <div className="flex divide-x divide-card-border rounded-2xl border border-card-border bg-card">
           <Stat label="Total members" value={full?.members.length ?? "–"} />
@@ -343,17 +371,19 @@ export function MembersPage() {
                       aria-label={`Role of ${member.user.email}`}
                       data-org-member-role={member.user.email}
                       value={roleNames(member.role)[0]}
-                      onChange={(e) =>
-                        void act(
+                      onChange={(e) => {
+                        // Read now: the mutation runs after React has reset this controlled select.
+                        const next = e.target.value;
+                        act(
                           () =>
                             authRequest("/organization/update-member-role", {
                               organizationId: active!.id,
                               memberId: member.id,
-                              role: e.target.value,
+                              role: next,
                             }),
                           "Role updated",
-                        )
-                      }
+                        );
+                      }}
                     >
                       {owner ? <option value="owner">Owner</option> : null}
                       <option value="admin">Admin</option>
@@ -377,7 +407,7 @@ export function MembersPage() {
                       onClick={() => {
                         if (!window.confirm(`Remove ${member.user.email} from ${active!.name}?`))
                           return;
-                        void act(
+                        act(
                           () =>
                             authRequest("/organization/remove-member", {
                               organizationId: active!.id,
@@ -412,7 +442,7 @@ export function MembersPage() {
                   variant="ghost"
                   data-cancel-invitation={invitation.email}
                   onClick={() =>
-                    void act(
+                    act(
                       () =>
                         authRequest("/organization/cancel-invitation", {
                           invitationId: invitation.id,
@@ -441,15 +471,19 @@ export function MembersPage() {
                 id="members-room-role"
                 disabled={!manager}
                 value={memberRoomRole(active)}
-                onChange={(e) =>
-                  void act(async () => {
-                    await authRequest("/organization/update", {
-                      organizationId: active.id,
-                      data: { metadata: { roomRole: e.target.value } },
-                    });
-                    await organizationsChanged();
-                  }, "Default access updated")
-                }
+                onChange={(e) => {
+                  const roomRole = e.target.value;
+                  act(
+                    () =>
+                      authRequest("/organization/update", {
+                        organizationId: active.id,
+                        data: { metadata: { roomRole } },
+                      }),
+                    "Default access updated",
+                    // The room role lives in the listed workspace's metadata.
+                    () => Promise.all([organizationsChanged(), refreshMembers()]),
+                  );
+                }}
               >
                 {(Object.keys(ROOM_ROLE_LABEL) as MemberRoomRole[]).map((value) => (
                   <option key={value} value={value}>
@@ -473,10 +507,11 @@ export function MembersPage() {
                 id="members-leave"
                 onClick={() => {
                   if (!window.confirm(`Leave ${active.name}?`)) return;
-                  void act(async () => {
-                    await authRequest("/organization/leave", { organizationId: active.id });
-                    await organizationsChanged();
-                  }, `You left ${active.name}`);
+                  act(
+                    () => authRequest("/organization/leave", { organizationId: active.id }),
+                    `You left ${active.name}`,
+                    forget(active.id),
+                  );
                 }}
               >
                 Leave
@@ -492,10 +527,11 @@ export function MembersPage() {
                   className={cn("text-destructive")}
                   onClick={() => {
                     if (!window.confirm(`Delete ${active.name}? This cannot be undone.`)) return;
-                    void act(async () => {
-                      await authRequest("/organization/delete", { organizationId: active.id });
-                      await organizationsChanged();
-                    }, `${active.name} deleted`);
+                    act(
+                      () => authRequest("/organization/delete", { organizationId: active.id }),
+                      `${active.name} deleted`,
+                      forget(active.id),
+                    );
                   }}
                 >
                   Delete
