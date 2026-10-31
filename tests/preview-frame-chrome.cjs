@@ -221,7 +221,7 @@ const freePort = () => new Promise(resolve => { const s = net.createServer(); s.
     await shot('PF1-running');
     await page.evaluate(id => window.design.setSelection([id]), pid);
     // PP2: Stop asks previewEdits first; refusing keeps the app running.
-    await page.evaluate(() => { window.__asked = 0; window.previewEdits = {confirmBeforeStop: async () => { window.__asked++; return window.__allowStop === true; }}; });
+    await page.evaluate(() => { window.__asked = 0; window.previewEdits = {...window.previewEdits, confirmBeforeStop: async () => { window.__asked++; return window.__allowStop === true; }}; });
     await page.locator(`${pf} [data-pf=toggle]`).click();
     await page.waitForFunction(() => window.__asked === 1);
     await new Promise(resolve => setTimeout(resolve, 300));
