@@ -15,6 +15,8 @@ export type LibraryFile = {
   cloud?: CloudLink;
   /** Set on rooms listed from the server that have no file on this device yet. */
   room?: CloudRoom;
+  /** The stored document no longer loads (web/document-safety.js): kept and listed, opening it explains why. */
+  invalid?: { error: string; count: number };
 };
 export type CloudLink = {
   server: string;

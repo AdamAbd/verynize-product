@@ -4,12 +4,16 @@
 //
 // validateDocument(d)              strict, never mutates, throws Error on the first problem. What a file on
 //                                  disk, an agent edit or a cloud room snapshot must satisfy.
-// normalizeDocument(d, defaults)   the canvas' repairs before validation (mutates d): fills every layer with
+// normalizeDocument(d, defaults[, repairs])
+//                                  the canvas' repairs before validation (mutates d): fills every layer with
 //                                  the editor defaults, defaults the document/page names, the token map and
 //                                  the active page, and coerces values the canvas already rendered as their
-//                                  default (numeric or unknown font weights, unknown animated palettes).
+//                                  default (numeric or unknown font weights, unknown animated palettes). With a
+//                                  `repairs` array (loading, never editing) it also repairs limits older
+//                                  documents may break and records each change as {path, before, after}.
 // resolveAliases(d)                copies each alias' resolved value into the aliased variable (in place).
-// prepareDocument(d, defaults)     normalize + validate + resolve aliases: what the canvas loads.
+// prepareDocument(d, defaults[, repairs])  normalize + validate + resolve aliases: what the canvas loads.
+// documentProblems(d)              every validation problem as [{path, message}] (validateDocument stops at one).
 //
 // Rules apply to a key when it is present. The canvas fills defaults first, so for it the optional keys
 // below are effectively required; headless documents may omit them. Byte-size limits are storage policy
@@ -532,39 +536,168 @@
     return document;
   }
 
-  function normalizeDocument(document, defaults) {
-    if (!document || typeof document !== "object" || !Array.isArray(document.pages))
-      return document;
-    if (typeof document.name !== "string" || !document.name.trim()) document.name = "Untitled";
-    if (!plainObject(document.tokens)) document.tokens = {};
-    for (const page of document.pages) {
-      if (!page || typeof page !== "object" || !Array.isArray(page.nodes)) continue;
-      if (typeof page.name !== "string" || !page.name.trim()) page.name = "Page";
-      for (const n of page.nodes) {
-        if (!n || typeof n !== "object") continue;
-        Object.assign(n, { ...defaults, ...n });
-        if (typeof n.name !== "string" || !n.name.trim()) n.name = TYPE_NAMES[n.type] || "Layer";
-        // The canvas renders a font weight it does not know, and an unknown animated palette, as the default.
-        if (typeof n.fontWeight === "number" && FONT_WEIGHT.test(String(n.fontWeight)))
-          n.fontWeight = String(n.fontWeight);
-        else if (typeof n.fontWeight !== "string" || !FONT_WEIGHT.test(n.fontWeight))
-          n.fontWeight = "400";
-        if (!ANIMATED.includes(n.animated)) n.animated = "";
+  // Load-time repairs (normalizeDocument with a `repairs` array): documents saved before the shared schema may
+  // break limits the canvas did not enforce. These repairs keep everything else intact and are each recorded as
+  // {path, before, after}; ids and token names are never rewritten (other files, rooms and chats refer to them).
+  const MAX_COORDINATE = 1e6,
+    MAX_NAME = 200,
+    MAX_STRING = 4000;
+  /** At most `max` UTF-16 units, without splitting a surrogate pair. */
+  function truncate(value, max) {
+    const cut = value.slice(0, max);
+    return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+  }
+  /** The value as a report shows it: long strings are shortened. */
+  const shown = (value) =>
+    typeof value === "string" && value.length > 120
+      ? `${value.slice(0, 80)}… (${value.length} characters)`
+      : value;
+  function repairName(owner, path, fallback, record) {
+    const before = owner.name;
+    if (typeof before === "string" && before.length > MAX_NAME)
+      owner.name = truncate(before, MAX_NAME);
+    if (typeof owner.name !== "string" || !owner.name.trim()) owner.name = fallback;
+    if (owner.name !== before) record(path + ".name", before, owner.name);
+  }
+  function repairNode(n, defaults, path, record, lossy) {
+    if (lossy) {
+      for (const key of ["x", "y", "w", "h"]) {
+        const value = n[key];
+        if (Number.isFinite(value) && Math.abs(value) > MAX_COORDINATE) {
+          n[key] = Math.sign(value) * MAX_COORDINATE;
+          record(`${path}.${key}`, value, n[key]);
+        }
+      }
+      // Free-form CSS values cut mid-way would not parse, so an over-long value goes back to the editor default.
+      for (const key of STRING_KEYS) {
+        const value = n[key];
+        if (value === undefined || key === "animated") continue;
+        if (typeof value === "string" && value.length <= MAX_STRING) continue;
+        if (typeof value !== "string" && !own(defaults, key)) continue;
+        if (own(defaults, key)) n[key] = defaults[key];
+        else delete n[key];
+        record(`${path}.${key}`, value, n[key]);
       }
     }
-    if (!document.pages.some((p) => p && p.id === document.activePage) && document.pages[0])
+    if (lossy || typeof n.name !== "string" || !n.name.trim())
+      repairName(n, path, TYPE_NAMES[n.type] || "Layer", record);
+    // The canvas renders a font weight it does not know, and an unknown animated palette, as the default (a
+    // missing value is filled, not repaired).
+    if (typeof n.fontWeight === "number" && FONT_WEIGHT.test(String(n.fontWeight)))
+      n.fontWeight = String(n.fontWeight);
+    else if (typeof n.fontWeight !== "string" || !FONT_WEIGHT.test(n.fontWeight)) {
+      if (n.fontWeight !== undefined) record(path + ".fontWeight", n.fontWeight, "400");
+      n.fontWeight = "400";
+    }
+    if (!ANIMATED.includes(n.animated)) {
+      if (n.animated !== undefined) record(path + ".animated", n.animated, "");
+      n.animated = "";
+    }
+  }
+
+  /** Fills editor defaults and repairs what the canvas renders the same either way (blank names, unknown font
+   * weights and palettes, a dangling active page). With a `repairs` array it also applies the load-time repairs
+   * (coordinates clamped to ±1e6, names cut to 200 characters, over-long or mistyped style strings reset to the
+   * default) and records every change in it as {path, before, after}. Mutates and returns the document. */
+  function normalizeDocument(document, defaults, repairs) {
+    if (!document || typeof document !== "object" || !Array.isArray(document.pages))
+      return document;
+    const lossy = Array.isArray(repairs),
+      record = (path, before, after) => {
+        if (lossy) repairs.push({ path, before: shown(before), after: shown(after) });
+      };
+    if (lossy || typeof document.name !== "string" || !document.name.trim())
+      repairName(document, "document", "Untitled", record);
+    if (!plainObject(document.tokens)) document.tokens = {};
+    document.pages.forEach((page, i) => {
+      if (!page || typeof page !== "object" || !Array.isArray(page.nodes)) return;
+      if (lossy || typeof page.name !== "string" || !page.name.trim())
+        repairName(page, `pages[${i}]`, "Page", record);
+      page.nodes.forEach((n, j) => {
+        if (!n || typeof n !== "object") return;
+        Object.assign(n, { ...defaults, ...n });
+        repairNode(n, defaults || {}, `pages[${i}].nodes[${j}]`, record, lossy);
+      });
+    });
+    if (!document.pages.some((p) => p && p.id === document.activePage) && document.pages[0]) {
+      if (document.activePage !== undefined)
+        record("activePage", document.activePage, document.pages[0].id);
       document.activePage = document.pages[0].id;
+    }
     return document;
   }
 
-  const prepareDocument = (document, defaults) =>
-    resolveAliases(validateDocument(normalizeDocument(document, defaults)));
+  /** normalize (+ load-time repairs when `repairs` is given) → validate → resolve aliases: what the canvas loads. */
+  const prepareDocument = (document, defaults, repairs) =>
+    resolveAliases(validateDocument(normalizeDocument(document, defaults, repairs)));
+
+  /** Every problem validateDocument would report, not only the first: [{path, message}], at most `limit`. Document
+   * and page rules are checked once, each layer on its own, so the count is what a user would have to fix. */
+  function documentProblems(document, limit = 1000) {
+    const problems = [],
+      add = (path, error) => {
+        if (problems.length < limit)
+          problems.push({ path, message: String(error?.message || error) });
+      };
+    const pages = document && Array.isArray(document.pages) ? document.pages : null;
+    try {
+      validateDocument(
+        pages
+          ? {
+              ...document,
+              pages: pages.map((p) => (p && typeof p === "object" ? { ...p, nodes: [] } : p)),
+            }
+          : document,
+      );
+    } catch (error) {
+      add("document", error);
+    }
+    if (!pages) return problems;
+    const ids = new Set(pages.map((p) => p?.id));
+    let total = 0;
+    pages.forEach((page, i) => {
+      if (!page || !Array.isArray(page.nodes)) return;
+      total += page.nodes.length;
+      const byId = new Map();
+      page.nodes.forEach((node, j) => {
+        const path = `pages[${i}].nodes[${j}]`;
+        try {
+          if (!node || typeof node !== "object") throw new Error("Invalid node");
+          requireString(node.id, "Node id");
+          if (ids.has(node.id)) throw new Error("Duplicate id");
+          ids.add(node.id);
+          byId.set(node.id, node);
+          validateNode(node);
+        } catch (error) {
+          add(path, error);
+        }
+      });
+      page.nodes.forEach((node, j) => {
+        if (!node || typeof node !== "object") return;
+        const chain = new Set([node.id]);
+        for (let parent = node.parentId; parent; parent = byId.get(parent)?.parentId) {
+          const p = byId.get(parent);
+          if (chain.has(parent) || !p || p.type !== "frame") {
+            add(
+              `pages[${i}].nodes[${j}].parentId`,
+              "Parent must reference a frame on the same page",
+            );
+            break;
+          }
+          chain.add(parent);
+        }
+      });
+    });
+    if (total > 10000) add("pages", `Maximum 10000 nodes (${total})`);
+    return problems;
+  }
 
   root.VerynizeDocument = {
     validateDocument,
     normalizeDocument,
     resolveAliases,
     prepareDocument,
+    documentProblems,
     validateAliases,
     isRoomAssetUrl,
     checkVariableValue,
