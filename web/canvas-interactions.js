@@ -672,7 +672,11 @@
       s.el.removeAttribute('contenteditable'); delete s.el.dataset.textEditing;
       for (const k of ['user-select', '-webkit-user-select', 'cursor']) s.el.style.removeProperty(k);
       if (document.activeElement === s.el) s.el.blur();
-      const n = find(s.id);
+      const n = find(s.id), draft = draftText?.id === s.id ? draftText : null;
+      if (draft) draftText = null;
+      // Deleting everything in the editor can leave a lone line break behind: that is still no content.
+      if (n && !/[^\n]/.test(text) && (commit || draft)) { removeText(n, !draft); return; }
+      if (n && draft) { commitDraftText(n, s.el, text, runsFrom(styles), draft.before); return; }
       if (commit && n) {
         const runs = runsFrom(styles);
         if (text !== String(n.text || '') || JSON.stringify(runs) !== JSON.stringify(runsFrom(charStylesOf(n)))) {
@@ -680,6 +684,49 @@
         }
       }
       ed.render(); // back to the canonical layer DOM (run spans, selection handles)
+    }
+    // ---------- Text tool (Wonder TX1) ----------
+    // A click creates an empty layer named "Text" that hugs its content (Inter Regular 12, line height auto, letter
+    // spacing 0); a drag creates a fixed box of the gesture size. The ink is black, or white over a dark background.
+    // The new layer enters the undo history only once it has text (one step that removes it again); editing that
+    // ends with no text removes it. Any text layer emptied in the editor is removed as one undo step.
+    let draftText = null;
+    function inkAt(clientX, clientY) {
+      for (const el of document.elementsFromPoint(clientX, clientY)) {
+        if (el.closest('#canvas .layer')?.dataset.designType === 'text') continue;
+        const value = getComputedStyle(el).backgroundColor, c = (value.match(/[\d.]+/g) || []).map(Number);
+        if (c.length < 3 || (c.length > 3 ? c[3] : 1) < 0.5) continue;
+        const scale = value.startsWith('color(') ? 1 : 255;
+        return (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / scale < 0.5 ? '#ffffff' : '#000000';
+      }
+      return '#000000';
+    }
+    function createText(r, click, parent, clientX, clientY) {
+      const before = ed.snapshot();
+      let x = r.x, y = r.y;
+      if (parent) { const pr = worldRect(parent.id); if (pr) { x = r.x - pr.x - (parent.strokeWidth || 0); y = r.y - pr.y - (parent.strokeWidth || 0); } }
+      const n = {...ed.defaults, id: ed.uid(), type: 'text', name: 'Text', text: '', textRuns: [], parentId: parent?.id || null,
+        x: Math.round(x), y: Math.round(y), w: click ? 1 : Math.max(1, Math.round(r.w)), h: click ? 14.5 : Math.max(1, Math.round(r.h)),
+        color: inkAt(clientX, clientY), fontFamily: 'Inter', fontWeight: '400', fontSize: 12, lineHeight: 'auto', letterSpacing: 0, radius: 0,
+        ...(click ? {wMode: 'hug', hMode: 'hug'} : {wMode: 'fixed', hMode: 'fixed'})};
+      ed.nodes().push(n); ed.setSelection([n.id]); ed.render();
+      draftText = {id: n.id, before};
+      editText();
+    }
+    function commitDraftText(n, el, text, runs, before) {
+      Object.assign(n, {text, textRuns: runs});
+      // Hug axes store the measured size so geometry readers (badge, agents, export) see the real box.
+      const round = v => Math.max(1, Math.round(v * 100) / 100);
+      if (n.wMode === 'hug' && el.offsetWidth) n.w = round(el.offsetWidth);
+      if (n.hMode === 'hug' && el.offsetHeight) n.h = round(el.offsetHeight);
+      ed.pushHistory(before); ed.render();
+    }
+    function removeText(n, recordUndo) {
+      const before = recordUndo ? ed.snapshot() : null, list = ed.nodes(), index = list.indexOf(n);
+      if (index >= 0) list.splice(index, 1);
+      ed.setSelection([...sel()].filter(id => id !== n.id));
+      if (before) ed.pushHistory(before);
+      ed.render();
     }
     // A render while editing (collaboration, autosave, inspector) rebuilds the layer: keep the live editor in place.
     function keepTextEditor() {
@@ -990,6 +1037,7 @@
       track(e, ev => { last = screenToWorld(ev.clientX, ev.clientY); square = ev.shiftKey; showMarquee(rectFor(last, square), 'draw'); }, () => {
         marqueeBox.hidden = true;
         let r = rectFor(last, square);
+        if (kind === 'text') { setTool('move'); createText(r, r.w * cam.zoom < 3 && r.h * cam.zoom < 3, parent, e.clientX, e.clientY); return; }
         if (r.w * cam.zoom < 3 && r.h * cam.zoom < 3) {
           const size = {frame: [100, 100], rectangle: [200, 150], ellipse: [200, 200], text: [240, 60], shader: [480, 300]}[kind];
           r = {x: p0.x, y: p0.y, w: size[0], h: size[1]};
@@ -999,10 +1047,8 @@
         if (parent) { const pr = worldRect(parent.id); if (pr) { x = r.x - pr.x - (parent.strokeWidth || 0); y = r.y - pr.y - (parent.strokeWidth || 0); } }
         const extra = {x: Math.round(x), y: Math.round(y), w: Math.round(r.w), h: Math.round(r.h), parentId: parent?.id || null};
         if (kind === 'shader') Object.assign(extra, {name: 'Aurora shader', color: '#a58bdd'});
-        if (kind === 'text') extra.fontSize = 24;
         setTool('move');
         if (kind === 'ellipse') insertEllipse(extra); else ed.add(kind, extra);
-        if (kind === 'text') editText();
       });
     }
 
@@ -1426,6 +1472,8 @@
       {id: 'view.zoomIn', label: 'Zoom in', section: 'View', keys: ['mod+=', 'mod+shift+=', 'mod+plus'], run: () => stepZoom(1)},
       {id: 'view.zoomOut', label: 'Zoom out', section: 'View', keys: ['mod+-'], run: () => stepZoom(-1)},
       {id: 'view.zoom100', label: 'Zoom to 100%', section: 'View', keys: ['mod+0', 'shift+0'], run: () => zoomCenter(1)},
+      {id: 'view.zoom50', label: 'Zoom to 50%', section: 'View', keys: [], run: () => zoomCenter(0.5)},
+      {id: 'view.zoom200', label: 'Zoom to 200%', section: 'View', keys: [], run: () => zoomCenter(2)},
       {id: 'view.fit', label: 'Zoom to fit', section: 'View', keys: ['shift+1'], run: () => fit()},
       {id: 'view.selection', label: 'Zoom to selection', section: 'View', keys: ['shift+2'], run: zoomToSelection},
       {id: 'transform.frame', label: 'Frame selection', section: 'Transform', keys: ['mod+g', 'mod+alt+g'], when: needsSelection, run: frameSelection},
