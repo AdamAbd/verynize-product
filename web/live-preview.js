@@ -142,12 +142,8 @@
     controls.back.onclick = async () => { activate(entry); try { await window.desktop.previewNavigate({direction:'back'}); } catch (error) { controls.message.textContent=error.message; } };
     controls.forward.onclick = async () => { activate(entry); try { await window.desktop.previewNavigate({direction:'forward'}); } catch (error) { controls.message.textContent=error.message; } };
     controls['live-url'].onkeydown = event => { if (event.key === 'Enter' && entry.url) { try { navigate(entry, new URL(event.target.value, entry.url).href); } catch (error) { controls.message.textContent = error.message; } } };
-    controls['live-expand'].onclick = () => {
-      const expanded = controls['live-expand'].getAttribute('aria-pressed') !== 'true';
-      controls['live-expand'].setAttribute('aria-pressed', String(expanded));
-      if (expanded) { entry.view = window.design.getView(); window.design.setSelection([node.id]); const rect = document.getElementById('canvas-wrap').getBoundingClientRect(); const zoom = Math.min((rect.width - 100) / node.w, (rect.height - 140) / node.h, 2); window.design.setCamera(50 - node.x * zoom, 60 - node.y * zoom, zoom); }
-      else if (entry.view) window.design.setView(entry.view);
-    };
+    // Expand opens the preview in its own app tab (window.previewTab, chrome island); the frame stays on the canvas.
+    controls['live-expand'].onclick = () => { activate(entry); window.previewTab?.open(entry.node.id); };
     const form = el.querySelector('form');
     controls.inspect.onclick = async () => { try { activate(entry); const result = await window.desktop.previewInspect({selector: form.elements.selector.value}); form.elements.text.disabled=result.text===null; for (const key of ['text','color','backgroundColor','fontSize']) form.elements[key].value = key === 'text' ? result.text || '' : result.styles?.[key] || ''; } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
     form.onsubmit = async event => { event.preventDefault(); try { activate(entry); const styles = {}; for (const key of ['color','backgroundColor','fontSize']) if (form.elements[key].value) styles[key] = form.elements[key].value; await window.desktop.previewEdit({selector: form.elements.selector.value, ...(form.elements.text.disabled?{}:{text: form.elements.text.value}), styles}); form.querySelector('[role=status]').textContent = 'Applied to the running page.'; } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
