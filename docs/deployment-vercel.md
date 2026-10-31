@@ -119,9 +119,30 @@ Durable Objects give each room one instance, one thread and storage that commits
 
 A local cluster for manual testing: start `redis-server`, then several `npm run start:vercel-local` with the same `REDIS_URL`, `DATABASE_URL=file:/abs/path/verynize.db`, `DATA_DIR` and the secrets, and different `PORT`s. `MAX_DURATION_MS` simulates the function limit.
 
-## Replacing the static serving with TanStack Start
+## Replacing the static serving with TanStack Start (Nitro spike)
 
-The web app is served here as plain files with an SPA fallback (`scripts/vercel-build.mjs`, the last rewrite in `vercel.json`). When the TanStack Start app replaces `web/`, its Nitro `vercel` preset writes a Build Output API directory (`.vercel/output`: static files plus its own server function). Then `buildCommand`/`outputDirectory` and the SPA rewrite go away, and the backend keeps working one of two ways:
+Production still serves the web app as plain files with an SPA fallback (`scripts/vercel-build.mjs`, the last rewrite in `vercel.json`). A spike on 2026-11-01 built the TanStack Start app with Nitro's `vercel` preset (`npm run build:web:nitro:vercel`, `vite.nitro.config.ts`). It never deployed anything. Details and the Node half are in [web-start/README.md](../web-start/README.md#nitro-spike-nodevercel).
 
-- as a separate Vercel project (for example `api.example.com`) with this `vercel.json` minus the static parts. Clients already take the server origin from configuration (`info.server` in `web/cloud-panel.js`); or
-- in the same output, as a Nitro catch-all server route for the backend paths that calls `createHandler(...).fetch(request)` from `cloud/platform/vercel/handler.js`. WebSocket upgrades must then reach `upgradeWebSocket` without Nitro's own WebSocket layer in the way; verify this on a preview deployment before switching.
+**Version.** `nitro` is pinned to exactly `3.0.261029-rc`, a Nitro 3 release candidate. It is not `nitropack` (Nitro 2).
+
+**What the preset produces** (checked by `tests/web-nitro.mjs`):
+
+- `.vercel/output/static` contains the `web/` allowlist (no `web/src`, no `index.html`) and Start's chunks.
+- `.vercel/output/functions/__server.func` holds the Start server. Its config is `launcherType: Nodejs`, `supportsResponseStreaming: true` and `runtime: nodejs24.x`, the last taken from the build machine's Node.
+- `config.json` routes, in order: the `/assets/**` cache headers, then one CDN rewrite per backend pattern (`/api`, `/u`, `/apps`, `/account`, `/passkey`, `/passkey.js` → `VERYNIZE_BACKEND_URL` + same path), then `{"handle":"filesystem"}`, then `/(.*)` → `/__server`. Backend paths, `/api/ai/*` included, never reach Start or the filesystem. `/editor`, `/code`, `/settings/*` and unknown paths reach Start, which renders the shell or a 404.
+
+**How it composes with `api/server.mjs`: it does not, in one project.** Nitro writes the whole deployment as a Build Output API directory. That output has no `api/server` function. Nitro reads `vercel.json` only for `bunVersion`. Its rewrites, `functions` (`maxDuration`, `includeFiles`) and the zero-config `api/` directory belong to Vercel's own build of the project. I found no Vercel documentation saying they are merged into a prebuilt `.vercel/output`, so they have to be treated as absent. Three ways forward:
+
+1. **Separate backend project (what the spike implements).** The existing project (this `vercel.json` with `api/server.mjs`) becomes the backend origin. The Start project rewrites backend paths to it at the CDN, with no function invocation. `VERYNIZE_BACKEND_URL` must be set at build time, because the rewrites are written into `config.json`. Unverified: whether Vercel's external rewrites carry WebSocket upgrades. If they do not, room sockets must connect to the backend origin directly. `web/cloud-panel.js` takes the server origin from `info.server`, so that would mean configuring the web app with the backend origin. `PUBLIC_URL` on the backend must then be the origin users see.
+2. **Backend inside Nitro's function.** A Nitro handler for backend paths that calls `createHandler(...).fetch` from `cloud/platform/vercel/handler.js`, without `features.websocket`, so that `upgradeWebSocket` from `@vercel/functions` sees the request context. Not attempted. Nitro would bundle `cloud/`, and `cloud/platform/vercel/env.js` finds `cloud/migrations` via `import.meta.url`. The other runtime files listed in `includeFiles` (`web/cloud-ops.js`, `web/shaders.js`, iconify JSON, Tailwind CSS) are read from disk, and `@libsql/client` is native. Each would need Nitro server assets or tracing first. `vercel.functionRules` could then give backend paths their own function with `maxDuration: 300`.
+3. **Hand-written Build Output.** Add `functions/api/server.func` and routes (`vercel.config.routes` is merged ahead of Nitro's). This needs a bundle of `api/server.mjs` equivalent to Vercel's Node builder. Not attempted. Vercel's Build Output `services` (a web plus an api service) may be the supported form of this and should be checked first.
+
+**WebSocket constraints on Vercel (unchanged by Nitro).** WebSockets on Vercel Functions are in public beta and need Fluid compute. A connection ends when its function reaches the maximum duration: `maxDuration` is 300 s in `vercel.json` for `api/server.mjs`. Nitro's `__server.func` gets the Vercel default unless `vercel.functions.maxDuration` is set. Rooms already reconnect and resend (Limits above). Pick one owner for the handshake. Today that is `api/server.mjs` through `upgradeWebSocket`. Enabling Nitro's `features.websocket` on the same function would put crossws' Vercel adapter in front of it.
+
+**What still needs a real Vercel preview** (not possible locally, not done):
+
+- whether the platform deploys a prebuilt `.vercel/output` from this repository while `vercel.json` exists (its `buildCommand`/`outputDirectory` point at the static build, so a preview needs a separate project, overridden build settings, or `vercel build && vercel deploy --prebuilt`);
+- whether external CDN rewrites proxy WebSocket upgrades, keep streaming responses unbuffered, propagate aborts and pass several `Set-Cookie` headers. Locally, only `config.json` was inspected;
+- the cold start and duration limits of `__server.func`, and the native-binary caveat when building on macOS (option 2 or 3).
+
+**Recommendation: do not adopt the `vercel` preset yet.** Keep `vercel.json` + `api/server.mjs` + `scripts/vercel-build.mjs` as the deployment. Revisit after a preview proves option 1's WebSocket path, or after option 2 or 3 is implemented and previewed. Rollback is trivial because nothing in production uses the preset: delete `.vercel/output` locally. The spike files are listed in the web-start README.
