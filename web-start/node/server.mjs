@@ -107,6 +107,10 @@ export async function createWebServer({ dist, backend, log = () => {} }) {
     }
     const headers = { ...req.headers, host: backendURL.host };
     for (const name of HOP_BY_HOP) delete headers[name];
+    // The public origin, for a backend that trusts this proxy (TRUST_PROXY): same-origin checks such as the model
+    // API's (/api/ai/*) compare the browser's Origin with it. An outer proxy's values are kept.
+    if (req.headers.host) headers["x-forwarded-host"] ??= req.headers.host;
+    headers["x-forwarded-proto"] ??= req.socket.encrypted ? "https" : "http";
     const forwarded = req.socket.remoteAddress;
     if (forwarded)
       headers["x-forwarded-for"] = headers["x-forwarded-for"]
