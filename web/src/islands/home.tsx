@@ -22,8 +22,12 @@ const TAKEN = [
 
 function container() {
   const home = document.getElementById("file-home") as HTMLElement;
+  // The breadcrumb only renders inside a folder, so it must not hold back the UI-ready signal.
   for (const id of TAKEN)
-    takeOver(id, { park: id !== "library-files" && id !== "folder-breadcrumb" });
+    takeOver(id, {
+      park: id !== "library-files" && id !== "folder-breadcrumb",
+      deferred: id === "folder-breadcrumb",
+    });
   // Legacy filter buttons stay in the hidden filter bar; free `[data-filter]` for the island's buttons.
   home.querySelectorAll<HTMLElement>(".home-filterbar [data-filter]").forEach((button) => {
     button.dataset.legacyFilter = button.dataset.filter;
