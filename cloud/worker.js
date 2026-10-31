@@ -35,6 +35,7 @@ import { profilePage, missingApp } from "./pages.js";
 import { passkeyPage, passkeyScript } from "./passkey-page.js";
 import { verifiedPage, resetPasswordPage, resetPasswordScript } from "./account-pages.js";
 import * as profiles from "./profiles.js";
+import { handleRoomAssets } from "./assets.js";
 
 export { DesignRoom } from "./rooms.js";
 export { AccountDirectory } from "./accounts.js";
@@ -47,6 +48,8 @@ const ROOM_ROUTE = new RegExp(
 const APP_ROUTE = new RegExp(
   `^/api/apps/(${UUID})(/versions(?:/(\\d+)(/finalize|/files/(.+))?)?|/activate|/publish)?$`,
 );
+// Room assets (cloud/assets.js).
+const ASSET_ROUTE = new RegExp(`^/api/rooms/(${UUID})/assets(?:/(${UUID}))?$`);
 const SERVE_ROUTE =
   /^\/apps\/([a-z0-9][a-z0-9-]{2,29})\/([a-z0-9][a-z0-9-]{0,62})(?:@(\d+))?(\/.*)?$/;
 
@@ -393,6 +396,25 @@ async function handleRooms(request, env, url) {
     return env.ROOMS.getByName(publicMatch[1]).fetch(
       new Request(`https://room/public?nonce=${publicMatch[2]}`),
     );
+  // ---- Room assets (cloud/assets.js): R2 images referenced by URL from room documents. ----
+  const assetMatch = url.pathname.match(ASSET_ROUTE);
+  if (assetMatch) {
+    const [, assetRoom, assetId] = assetMatch;
+    // The caller's room role, computed by the room exactly as for /access.
+    const access = async () => {
+      const account = await accountOf(env, request, url);
+      const orgRole = account?.authUser
+        ? await orgRoomRole(env, assetRoom, account.authUser.id)
+        : null;
+      const asGet = new Request(request.url, { method: "GET", headers: request.headers });
+      const checked = await env.ROOMS.getByName(assetRoom).fetch(
+        roomRequest(new URL("https://room/access"), asGet, account, undefined, orgRole),
+      );
+      return { role: checked.ok ? (await checked.json()).role : null, account };
+    };
+    return handleRoomAssets(request, env, url, assetRoom, assetId || null, access);
+  }
+  // ---- end room assets ----
   const match = url.pathname.match(ROOM_ROUTE);
   if (!match) return null;
   const roomId = match[1],
@@ -591,6 +613,11 @@ export default {
     try {
       // The directory moved to D1: copy the AccountDirectory data once, before it is read.
       if (/^\/(api|u|apps)\//.test(url.pathname)) await profiles.migrateDirectory(env);
+      if (url.pathname === "/api/mcp") {
+        // Hosted MCP (cloud/mcp.js). Loaded on first use: it bundles the design engine.
+        const { handleMcp } = await import("./mcp.js");
+        return await handleMcp(request, env, url, { accountOf, limited });
+      }
       if (url.pathname.startsWith("/api/")) {
         const response =
           (await handleAuth(request, env, url)) ||

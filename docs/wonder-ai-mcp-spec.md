@@ -333,6 +333,10 @@ All tools take `pageId`. Ids are short ids, unique per page: `<root>.<abc>`. Add
 
 Keep `apply_operations` (revision-checked batches) as the low-level escape hatch.
 
+### Hosted MCP (implemented): server-side edits of shared rooms
+
+Wonder's hosted server edits the shared document on the server and open tabs follow through collaborative sync (§1.3). Verynize's equivalent is `POST /api/mcp` on the collaboration Worker (`cloud/mcp.js`, documented in `cloud/README.md` › Hosted MCP). It serves the shared tool table of `integrations/design-tools.mjs` (31 of its tools; screenshots, `ask_agent`, `import_html`, `export_document`, preferences and shell tools are absent) over the account's cloud rooms, authenticated by a Verynize session bearer token. Edits become server-sequenced room operations (`DesignRoom.agentApply`) that open editors receive as ordinary `ops` messages; results report `headless: true`. Differences from Wonder: no OAuth (clients send `Authorization: Bearer <token>`), no argument streaming, no screenshots, and rooms are addressed by id instead of file/branch.
+
 ### P1: per-turn context and chat runtime
 
 3. **Turn-context block.** `web/app.js` adds a context prefix to every prompt: the document name and path, the pinned pageId, the selection short ids, and the paths of any pasted images. Save pasted images to `userData/agent-attachments/<chat>/` and send their paths. The content itself stays behind tools, as in Wonder.

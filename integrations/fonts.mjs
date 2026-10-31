@@ -8,7 +8,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const require = createRequire(import.meta.url);
 export const FONTSOURCE_API = 'https://api.fontsource.org/v1/fonts/';
 const MAX_FONT_BYTES = 2 * 1024 * 1024;
 const MAX_EMBED_BYTES = 12 * 1024 * 1024; // render.cjs caps HTML at 20 MB
@@ -119,7 +118,7 @@ export async function resolveFontFamily(family, { fetch, cacheDir = defaultFontC
 
 const nearestWeight = (weights, w) => [...weights].sort((a, b) => Math.abs(a - w) - Math.abs(b - w) || b - a)[0];
 const interFile = (weight, style) => {
-  const dir = path.join(path.dirname(require.resolve('@fontsource/inter/package.json')), 'files');
+  const dir = path.join(path.dirname(createRequire(import.meta.url).resolve('@fontsource/inter/package.json')), 'files');
   return path.join(dir, `inter-latin-${weight}-${style}.woff2`);
 };
 const cachedFile = (cacheDir, id, weight, style, subset) => path.join(cacheDir, 'files', `${id}-${subset}-${weight}-${style}.woff2`);
