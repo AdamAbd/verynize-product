@@ -1,10 +1,22 @@
-# Cloudflare deployment
+# Deployment
 
-The application now uses a Worker with SQLite Durable Objects, a room-creation rate limiter, and static web assets. `cloudflare.config.ts` declares the entrypoint and bindings. No Wrangler configuration is used. To run the same backend on your own server or in Docker instead, see [self-hosting.md](self-hosting.md); on Vercel, see [deployment-vercel.md](deployment-vercel.md).
+Verynize's browser app and collaboration backend can run on three targets. The desktop app is packaged separately (`npm run package:mac`) and talks to whichever backend the user enters in **Share & collaborate**.
+
+| Target                  | Web app                                                                         | Backend                                    | Rooms (single writer per room)           | Guide                                        |
+| ----------------------- | ------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------- | -------------------------------------------- |
+| Cloudflare (production) | TanStack Start on Workers                                                       | `cloud/worker.js`                          | SQLite Durable Objects                   | this page                                    |
+| VPS / Docker            | Start Node build (`npm run start:web:node`) or the backend's own static serving | `npm run start:server` (`server/node.mjs`) | in-process actor per room, `node:sqlite` | [self-hosting.md](self-hosting.md)           |
+| Vercel                  | static `web/` (Start/Nitro output can replace it later)                         | `api/server.mjs` Node function             | Redis lease + fencing, libSQL storage    | [deployment-vercel.md](deployment-vercel.md) |
+
+All three run the same backend code through the runtime-neutral interfaces in `cloud/platform/` (see `cloud/platform/README.md`), and the same cloud test scenarios: `npm run test:cloud` (workerd), `npm run test:cloud:node`, `npm run test:cloud:vercel` (needs a local `redis-server`).
+
+## Cloudflare
+
+The application uses a Worker with SQLite Durable Objects, a room-creation rate limiter, and static web assets. `cloudflare.config.ts` declares the entrypoint and bindings. No Wrangler configuration is used. To run the same backend on your own server or in Docker instead, see [self-hosting.md](self-hosting.md); on Vercel, see [deployment-vercel.md](deployment-vercel.md).
 
 The browser app is a TanStack Start app in `web-start/` (see `web-start/README.md`). `vite.config.ts` builds it with the Cloudflare Vite plugin. The Worker entry `web-start/src/server.cloudflare.ts` sends the backend paths (`/api/*`, `/u/*`, `/apps/*`, `/passkey`, `/passkey.js`, `/account/*`) and WebSocket upgrades to `cloud/worker.js`. It re-exports the Durable Object classes, so the Worker name, bindings and Durable Object data are unchanged. Start serves the editor routes as a client-only shell that boots `web/index.html`'s markup and scripts. Static assets are Start's client build plus the files of `web/`, except `web/src`, `web/index.html` and the desktop-only migration page. `npm run build` builds `web/dist/ui.js` first.
 
-### Node
+### Start web app on Node
 
 `npm run build:web:node` builds the same app into `dist/web-node` (self-contained, no `node_modules` needed at runtime). `npm run start:web:node` serves it (`PORT`, default 3000; `HOST`, default 127.0.0.1). It forwards the backend paths and their WebSocket upgrades to `VERYNIZE_BACKEND_URL`, for example `http://127.0.0.1:8787` for the Node backend. Without it, those paths answer 502. TLS, compression and process supervision are left to the hosting environment.
 
@@ -19,7 +31,7 @@ npm run deploy:check
 npm run deploy
 ```
 
-`deploy:check` builds and validates without uploading. `deploy` requires a configured Cloudflare account and creates the declared bindings. The final dry run validates the asset bundle, `ROOMS` SQLite Durable Object, and `ROOM_CREATION` rate-limit binding.
+`deploy:check` builds and validates without uploading. `deploy` requires a configured Cloudflare account and creates the declared bindings. The dry run validates the asset bundle and every declared binding: the `ROOMS`, `ACCOUNTS` and `APPS` SQLite Durable Objects, the `DB` D1 database, the `ASSETS_BUCKET` R2 bucket, the `EMAIL` send-email binding, and the `ROOM_CREATION`, `AUTH_LIMIT` and `MCP_LIMIT` rate limiters.
 
 ## Accounts database (D1) and auth secret
 
@@ -72,15 +84,15 @@ Local simulation does not prove delivery to a real inbox.
 
 ## Sharing
 
-After deployment, enter the deployed origin in **Share & collaborate**. Private invites store room/token in the URL fragment; REST calls authenticate with bearer tokens. WebSocket upgrade uses a token query parameter. Treat invites as editing credentials. Public URLs address frozen snapshots and do not confer edit access. Unpublish revokes the public snapshot.
+After deployment, enter the deployed origin in **Share & collaborate**. Private invites keep the room id and capability token in the URL fragment (`#room=…&token=…`), which browsers never send to the server; the web router preserves it on every navigation and it must never move into the query string. REST calls authenticate with bearer tokens; the WebSocket upgrade carries the token as a query parameter because browsers can't set headers there. Treat invites as credentials for their role (viewer, commenter, editor, owner). Public URLs address frozen snapshots and do not confer edit access; unpublishing revokes the public snapshot, and publishing again rotates the public link.
 
-Collaboration persists revision-checked document snapshots. It does not perform CRDT merging: concurrent edits require the user's choice, preserving local work until that choice. Rooms support up to 32 connections and roughly 2 MB documents. Local/native documents can be larger; large embedded images may exceed cloud limits.
+Edits are merged on the server as per-property operations (hybrid-logical-clock last-writer-wins, range-merged text, cycle-safe moves; see cloud/README.md, "Merging"), so concurrent edits combine without asking the user. Legacy revision-checked snapshot writes still work. Rooms accept up to 32 WebSocket connections and JSON bodies up to 2 MB; local/native documents can be larger, and large embedded images should go through room assets (R2) instead.
 
-This is capability sharing, not an account identity or public creator profile system. Tokens cannot yet be rotated/recovered. The native room-creation limiter permits 10 creations per client IP per minute; broader production quotas/account controls remain future work. Cloud hosting does not grant browser access to desktop project files or CLI agents.
+Accounts (Better Auth: email + password, plus passkeys), organizations with member roles, and creator profiles live in D1. Owners can issue and revoke role-limited invite links and rotate all links at once (`POST /api/rooms/:id/tokens/rotate`); sockets on a revoked link are closed. Rate limits: 10 room creations and 10 auth attempts per client per minute, 240 hosted-MCP calls per minute. Cloud hosting does not grant browser access to desktop project files or CLI agents; those stay desktop-only.
 
 ## Evidence
 
-Context7 resolved Cloudflare's official Workers SDK and cf documentation; configuration was verified against the installed cf types and dry-run output. Local Miniflare/workerd tests verified authorization, room isolation, restart persistence, conflicts, publication/unpublish and rate limiting. Two Electron clients verified actual REST/WebSocket CORS, joining, cursors, synchronization, reconnect and conflict resolution.
+Context7 resolved Cloudflare's official Workers SDK and cf documentation; configuration was verified against the installed cf types and dry-run output. Local Miniflare/workerd tests verify authorization, room isolation, operation merging (concurrent edits, duplicate batches, restart-persistent stamps), restart persistence, publication/unpublish, accounts and organizations, room assets, hosted MCP, email and rate limiting; the same scenarios run on the Node and Vercel runtimes. Two Electron clients verify REST/WebSocket CORS, joining, cursors, synchronization and reconnect. `npm run test:web` checks the Start app in Cloudflare dev, preview and the Node build.
 
 - [Cloud service implementation and API](../cloud/README.md)
 - [Cloudflare project configuration](https://developers.cloudflare.com/cf/projects/cloudflare-config/)
