@@ -186,7 +186,7 @@
       const total = totalRotation(n), scaling = tool() === 'scale';
       const s = {x: n.x, y: n.y, w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, start = {x: e.clientX, y: e.clientY}, g = gesture();
       const hx = handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0, hy = handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0;
-      const content = scaling ? [...ed.descendants(id)].map(find).filter(Boolean).map(d => ({d, x: d.x, y: d.y, w: d.w, h: d.h, fontSize: d.fontSize, radius: d.radius, gap: d.gap, padding: d.padding, strokeWidth: d.strokeWidth})) : [];
+      const content = scaling ? scaleContent(id) : [];
       begin();
       track(e, ev => {
         g.commit();
@@ -213,16 +213,46 @@
           n.x = r2(s.x + (ax * dw * Math.cos(a) - ay * dh * Math.sin(a) - dw) / 2);
           n.y = r2(s.y + (ax * dw * Math.sin(a) + ay * dh * Math.cos(a) - dh) / 2);
         }
-        if (scaling) {
-          const f = w / s.w;
-          for (const c of content) {
-            if (c.d.id !== id) { c.d.x = c.x * f; c.d.y = c.y * f; c.d.w = Math.max(1, c.w * f); c.d.h = Math.max(1, c.h * f); }
-            c.d.fontSize = Math.min(200, Math.max(8, c.fontSize * f)); c.d.radius = c.radius * f; c.d.gap = c.gap * f; c.d.padding = c.padding * f; c.d.strokeWidth = c.strokeWidth * f;
-            if (f !== 1) unbindKeys(c.d, [c.d.id !== id && 'w', c.d.id !== id && 'h', 'fontSize', 'radius', 'gap', 'padding', 'strokeWidth']);
-          }
-        }
+        if (scaling) applyContentScale(content, id, w / s.w);
         ed.render();
       }, end);
+    }
+
+    // The Scale tool's content snapshot: the layer and its descendants with the values a proportional scale changes.
+    function scaleContent(id) {
+      return [...ed.descendants(id)].map(find).filter(Boolean).map(d => ({d, x: d.x, y: d.y, w: d.w, h: d.h, fontSize: d.fontSize, radius: d.radius, gap: d.gap, padding: d.padding, strokeWidth: d.strokeWidth}));
+    }
+    // Scale the snapshot by f from its original values: children move and resize with the layer; type size, radius,
+    // gap, padding and border width scale everywhere (values a layer doesn't set stay unset). Scaled values drop their
+    // variable bindings.
+    function applyContentScale(content, id, f) {
+      const by = v => typeof v === 'number' ? v * f : v;
+      for (const c of content) {
+        if (c.d.id !== id) { c.d.x = by(c.x); c.d.y = by(c.y); c.d.w = Math.max(1, c.w * f); c.d.h = Math.max(1, c.h * f); }
+        if (typeof c.fontSize === 'number') c.d.fontSize = Math.min(200, Math.max(8, c.fontSize * f));
+        c.d.radius = by(c.radius); c.d.gap = by(c.gap); c.d.padding = by(c.padding); c.d.strokeWidth = by(c.strokeWidth);
+        if (f !== 1) unbindKeys(c.d, [c.d.id !== id && 'w', c.d.id !== id && 'h', 'fontSize', 'radius', 'gap', 'padding', 'strokeWidth']);
+      }
+    }
+
+    // Scale a layer by a factor from the inspector's Scale section (Wonder T4-scale-retry: W, H and %), the same way
+    // the Scale tool does: proportional, children and type included, the top-left corner fixed. One undo step.
+    function scaleBy(id, factor) {
+      const n = find(id), k0 = Number(factor);
+      if (!n || n.locked || !(k0 > 0) || !Number.isFinite(k0) || !(n.w > 0) || !(n.h > 0)) return false;
+      const k = Math.max(k0, MIN_SIZE / n.w, MIN_SIZE / n.h);
+      if (Math.abs(k - 1) < 1e-9) return false;
+      const s = {w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, content = scaleContent(id);
+      gesture().commit();
+      n.w = r2(s.w * k); n.h = r2(s.h * k);
+      unbindKeys(n, ['w', 'h']);
+      if (n.wMode && n.wMode !== 'fixed') { n.wMode = 'fixed'; delete n.wCalc; }
+      if (n.hMode && n.hMode !== 'fixed') { n.hMode = 'fixed'; delete n.hCalc; }
+      if (s.wPct !== undefined) n.wPct = r2(s.wPct * k);
+      if (s.hPct !== undefined) n.hPct = r2(s.hPct * k);
+      applyContentScale(content, id, k);
+      ed.render();
+      return true;
     }
 
     // Pointer-down hook for the canvas: returns true when the press belongs to the selection chrome.
@@ -236,7 +266,7 @@
       return true;
     }
 
-    return {draw, startResize, startRotate, pointerDown, addToChat, busy: () => busy};
+    return {draw, startResize, startRotate, scaleBy, pointerDown, addToChat, busy: () => busy};
   }
 
   window.BetterSelectionChrome = {install, normalize, chromeAngle, diagonalFactor};

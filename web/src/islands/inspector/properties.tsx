@@ -1,9 +1,36 @@
 // Properties sections (design/wonder 22, 25, 43, 45–46, 55–56).
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, ChevronDown, Expand, Eye, RotateCcw, Scan, Check } from "lucide-react";
+import {
+  AlignHorizontalDistributeCenter,
+  AlignVerticalDistributeCenter,
+  ChevronDown,
+  Expand,
+  Eye,
+  RotateCcw,
+  Scan,
+  Check,
+} from "lucide-react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
 import { activePage, type DesignDocument } from "@/lib/bridge";
-import { AbsolutePositionIcon, AlignBottomBarsIcon, AlignCenterXBarsIcon, AlignLeftBarsIcon, AlignMiddleYBarsIcon, AlignRightBarsIcon, AlignTopBarsIcon, AngleIcon, ClosedEyeIcon, CornerBottomLeftIcon, CornerBottomRightIcon, CornerTopLeftIcon, CornerTopRightIcon, FlipHorizontalIcon, FlipVerticalIcon, OpacityIcon, RotateRightIcon } from "@/components/icons";
+import {
+  AbsolutePositionIcon,
+  AlignBottomBarsIcon,
+  AlignCenterXBarsIcon,
+  AlignLeftBarsIcon,
+  AlignMiddleYBarsIcon,
+  AlignRightBarsIcon,
+  AlignTopBarsIcon,
+  AngleIcon,
+  ClosedEyeIcon,
+  CornerBottomLeftIcon,
+  CornerBottomRightIcon,
+  CornerTopLeftIcon,
+  CornerTopRightIcon,
+  FlipHorizontalIcon,
+  FlipVerticalIcon,
+  OpacityIcon,
+  RotateRightIcon,
+} from "@/components/icons";
 import { cn } from "@/lib/utils";
 import {
   Affix,
@@ -24,17 +51,10 @@ import { BindableField } from "./bind";
 import { CORNER_KEYS } from "./vars";
 import { ExportSection } from "./export-section";
 import { FramePresetsSection, useCanvasTool } from "./frame-presets";
+import { ScaleSection } from "./scale";
 import { FillTools, PaintStack, hasPaintRows } from "./paints";
 import { parseColor, toHex } from "./color";
-import {
-  fmt,
-  hexLabel,
-  pageNodes,
-  parseHex,
-  patchNodes,
-  setField,
-  type Node,
-} from "./model";
+import { fmt, hexLabel, pageNodes, parseHex, patchNodes, setField, type Node } from "./model";
 import { TypographySection } from "./typography";
 import { SelectionColorsSection } from "./selection-colors";
 import {
@@ -178,8 +198,10 @@ function toggleAbsolute(doc: DesignDocument, selection: string[], on: boolean) {
       patch.y = round2(el.offsetTop + parentEl.clientTop);
     }
     // Fill only means something inside the flow; keep the rendered size instead.
-    if (n.wMode === "fill") Object.assign(patch, { wMode: undefined, w: el ? el.offsetWidth : n.w });
-    if (n.hMode === "fill") Object.assign(patch, { hMode: undefined, h: el ? el.offsetHeight : n.h });
+    if (n.wMode === "fill")
+      Object.assign(patch, { wMode: undefined, w: el ? el.offsetWidth : n.w });
+    if (n.hMode === "fill")
+      Object.assign(patch, { hMode: undefined, h: el ? el.offsetHeight : n.h });
     return patch;
   });
 }
@@ -193,7 +215,12 @@ function fitToContent(doc: DesignDocument, frame: Node) {
   const kids = pageNodes(doc).filter((n) => n.parentId === frame.id && !n.hidden);
   if (!kids.length) return;
   if (isFlowFrame(frame)) {
-    patchNodes([frame.id], () => ({ wMode: "hug", hMode: "hug", wPct: undefined, hPct: undefined }));
+    patchNodes([frame.id], () => ({
+      wMode: "hug",
+      hMode: "hug",
+      wPct: undefined,
+      hPct: undefined,
+    }));
     return;
   }
   const el = canvasLayer(frame.id);
@@ -254,7 +281,8 @@ function PositionSection({ doc, node, selection }: Props) {
       if (event.code !== "KeyF" || !event.shiftKey || !event.altKey || event.repeat) return;
       if (!(navigator.platform.includes("Mac") ? event.metaKey : event.ctrlKey)) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest?.("input, textarea, select, [contenteditable=true]") || !fit.current) return;
+      if (target?.closest?.("input, textarea, select, [contenteditable=true]") || !fit.current)
+        return;
       event.preventDefault();
       event.stopImmediatePropagation();
       fit.current();
@@ -383,6 +411,8 @@ function PositionSection({ doc, node, selection }: Props) {
           onCommit={set("rotation")}
           prefix={<IconAffix icon={AngleIcon} />}
           suffix="°"
+          // Wonder TR2: "-47.19" fits the 80px column; tabular figures would overflow it into "-47.…".
+          inputClassName="normal-nums"
         />
       </div>
       <div className="grid grid-cols-3 gap-2">
@@ -913,7 +943,11 @@ function PageSection({ doc }: { doc: DesignDocument }) {
               className="flex size-4 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
               onClick={() => setOpen(!open)}
             >
-              <Swatch color={color} checker={hidden} className="size-4 rounded-sm ring-swatch-ring" />
+              <Swatch
+                color={color}
+                checker={hidden}
+                className="size-4 rounded-sm ring-swatch-ring"
+              />
             </button>
             <Field
               label="Page hex colour"
@@ -975,7 +1009,6 @@ function useOptional(nodeId: string | undefined, hasValue: boolean) {
   return [open, setOpen] as const;
 }
 
-
 /**
  * Wonder has no Layer section (properties-audit A8). Its actions live elsewhere: rename in the layer tree, parent
  * by dragging in the layer tree (or Frame / Unframe selection), and Scale ½× / 2×, Duplicate and Delete in the canvas
@@ -1021,68 +1054,75 @@ export function PropertiesBody({
   const shadowsMixed = many && mixedShadows(doc, selection);
   const filtersMixed = many && mixedFilters(doc, selection);
   // Wonder D1: the armed Frame tool with nothing selected offers frame presets in place of the Page section.
-  const framePresets = useCanvasTool() === "frame" && !node;
+  const tool = useCanvasTool();
+  const framePresets = tool === "frame" && !node;
+  // Wonder T4-scale-retry: the armed Scale tool with one layer selected shows only the Scale section. The other
+  // sections stay mounted but hidden (legacy render() writes into the Fill section's #shader-settings).
+  const scaling = tool === "scale" && !!node && !many;
   return (
     <>
-      {node ? <PositionSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <LayoutSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <AppearanceSection doc={doc} node={node} selection={selection} /> : null}
-      {node?.type === "text" ? (
-        <TypographySection
-          key={"typography-" + node.id}
-          doc={doc}
-          node={node}
-          selection={selection}
-        />
-      ) : null}
-      {/* Mixed fills across a multi-selection: one "Click to replace" well (the Fill section stays mounted, hidden). */}
-      {node && fillsMixed ? (
-        <MixedSection
-          id="fill-mixed-section"
-          title={node.type === "text" ? "Text Fill" : "Background Fill"}
-          label="Click to replace background fills"
-          onReplace={() => replaceFills(node, selection)}
-        />
-      ) : null}
-      <FillSection doc={doc} node={fillsMixed ? undefined : node} selection={selection} />
-      {node?.type === "text" && !fillsMixed ? (
-        <TextBackgroundFillSection doc={doc} node={node} selection={selection} />
-      ) : null}
-      {node ? <BorderSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <OutlineSection doc={doc} node={node} selection={selection} /> : null}
-      {node && shadowsMixed ? (
-        <MixedSection
-          id="shadow-mixed-section"
-          title="Shadow"
-          label="Click to replace box shadows"
-          onReplace={() => replaceList(node, selection, "shadows")}
-        />
-      ) : node ? (
-        <ShadowSection key={"shadow-" + node.id} doc={doc} node={node} selection={selection} />
-      ) : null}
-      {node && filtersMixed ? (
-        <MixedSection
-          id="filter-mixed-section"
-          title="Filters"
-          label="Click to replace filters"
-          onReplace={() => replaceList(node, selection, "filters")}
-          bodyClassName="pt-0.25 pb-2.5"
-        >
-          <SelectionFilters doc={doc} selection={selection} />
-        </MixedSection>
-      ) : node ? (
-        <>
-          <FilterSection doc={doc} node={node} selection={selection} />
-          <SelectionFilters doc={doc} selection={selection} standalone />
-        </>
-      ) : null}
-      {node ? (
-        <MaskSection key={"mask-" + node.id} doc={doc} node={node} selection={selection} />
-      ) : null}
-      {node ? <SelectionColorsSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <ExportSection doc={doc} node={node} selection={selection} /> : null}
-      {framePresets ? <FramePresetsSection /> : null}
-      {!node && !framePresets ? <PageSection doc={doc} /> : null}
+      {scaling ? <ScaleSection key={"scale-" + node.id} node={node} /> : null}
+      <div className={scaling ? "hidden" : "contents"}>
+        {node ? <PositionSection doc={doc} node={node} selection={selection} /> : null}
+        {node ? <LayoutSection doc={doc} node={node} selection={selection} /> : null}
+        {node ? <AppearanceSection doc={doc} node={node} selection={selection} /> : null}
+        {node?.type === "text" ? (
+          <TypographySection
+            key={"typography-" + node.id}
+            doc={doc}
+            node={node}
+            selection={selection}
+          />
+        ) : null}
+        {/* Mixed fills across a multi-selection: one "Click to replace" well (the Fill section stays mounted, hidden). */}
+        {node && fillsMixed ? (
+          <MixedSection
+            id="fill-mixed-section"
+            title={node.type === "text" ? "Text Fill" : "Background Fill"}
+            label="Click to replace background fills"
+            onReplace={() => replaceFills(node, selection)}
+          />
+        ) : null}
+        <FillSection doc={doc} node={fillsMixed ? undefined : node} selection={selection} />
+        {node?.type === "text" && !fillsMixed ? (
+          <TextBackgroundFillSection doc={doc} node={node} selection={selection} />
+        ) : null}
+        {node ? <BorderSection doc={doc} node={node} selection={selection} /> : null}
+        {node ? <OutlineSection doc={doc} node={node} selection={selection} /> : null}
+        {node && shadowsMixed ? (
+          <MixedSection
+            id="shadow-mixed-section"
+            title="Shadow"
+            label="Click to replace box shadows"
+            onReplace={() => replaceList(node, selection, "shadows")}
+          />
+        ) : node ? (
+          <ShadowSection key={"shadow-" + node.id} doc={doc} node={node} selection={selection} />
+        ) : null}
+        {node && filtersMixed ? (
+          <MixedSection
+            id="filter-mixed-section"
+            title="Filters"
+            label="Click to replace filters"
+            onReplace={() => replaceList(node, selection, "filters")}
+            bodyClassName="pt-0.25 pb-2.5"
+          >
+            <SelectionFilters doc={doc} selection={selection} />
+          </MixedSection>
+        ) : node ? (
+          <>
+            <FilterSection doc={doc} node={node} selection={selection} />
+            <SelectionFilters doc={doc} selection={selection} standalone />
+          </>
+        ) : null}
+        {node ? (
+          <MaskSection key={"mask-" + node.id} doc={doc} node={node} selection={selection} />
+        ) : null}
+        {node ? <SelectionColorsSection doc={doc} node={node} selection={selection} /> : null}
+        {node ? <ExportSection doc={doc} node={node} selection={selection} /> : null}
+        {framePresets ? <FramePresetsSection /> : null}
+        {!node && !framePresets ? <PageSection doc={doc} /> : null}
+      </div>
       <LayerCommands />
     </>
   );
