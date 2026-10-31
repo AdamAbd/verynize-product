@@ -10,10 +10,12 @@ import {
   LockOpenIcon,
   NavigationIcon,
   PencilIcon,
+  SparklesIcon,
   XIcon,
 } from "lucide-react";
 import { ClaudeMark, CodexMark, PlusIcon } from "@/components/icons";
 import { legacySet } from "@/lib/bridge";
+import { platform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { useAdopt } from "./adopt";
 import { useChatBehavior } from "./behavior";
@@ -49,7 +51,19 @@ import { commandEndingAt, commandFirst, moveCommandFirst, promptRuns } from "./c
 const PROMPT_CLASS =
   "relative m-0 block max-h-55 min-h-17 w-full resize-none rounded-none border-0 bg-transparent pt-2 pr-2.5 pb-1 pl-2.5 font-sans text-base leading-5.25 text-foreground shadow-none outline-hidden field-sizing-content placeholder:text-transparent focus:outline-hidden focus-visible:outline-hidden";
 
-const Mark = ({ agent }: { agent: string }) => (agent === "claude" ? <ClaudeMark /> : <CodexMark />);
+/** Web build: the chat runs on the cloud backend's model API (agent `openrouter`); Claude/Codex are desktop-only. */
+const WEB = platform.kind === "web";
+const MODEL_API = "openrouter";
+
+const Mark = ({ agent }: { agent: string }) =>
+  agent === "claude" ? (
+    <ClaudeMark />
+  ) : agent === MODEL_API ? (
+    <SparklesIcon className="size-3.5 text-muted-foreground" />
+  ) : (
+    <CodexMark />
+  );
+const agentLabel = (agent: string) => (agent === "claude" ? "Claude" : agent === MODEL_API ? "OpenRouter" : "Codex");
 
 const ACCESS = [
   { value: "ask", label: "Ask", title: "Ask", hint: "Asks before edits and commands.", Icon: HandIcon },
@@ -67,10 +81,12 @@ const AGENTS = [
 /* ---------- Model picker (30). Trigger is `.agent-config summary` (test contract). ---------- */
 function ModelMenu({ state, open, onOpenChange }: { state: ChatState; open: boolean; onOpenChange: (open: boolean) => void }) {
   const { agent, model, effort } = state.defaults;
-  const claude = useModels("claude", open && agentAvailable("claude"));
-  const codex = useModels("codex", open && agentAvailable("codex"));
-  const lists: Record<string, AgentModel[]> = { claude, codex };
-  const name = model ? (lists[agent]?.find((m) => m.id === model)?.name ?? model) : agent === "claude" ? "Claude" : "Codex";
+  const claude = useModels("claude", !WEB && open && agentAvailable("claude"));
+  const codex = useModels("codex", !WEB && open && agentAvailable("codex"));
+  const modelApi = useModels(MODEL_API, WEB && open && agentAvailable(MODEL_API));
+  const lists: Record<string, AgentModel[]> = { claude, codex, [MODEL_API]: modelApi };
+  const providers = WEB ? [{ id: MODEL_API, label: "OpenRouter" }] : AGENTS;
+  const name = model ? (lists[agent]?.find((m) => m.id === model)?.name ?? model) : agentLabel(agent);
   const choose = (next: Partial<ChatState["defaults"]>) => {
     const ws = workspace();
     if (ws) ws.setDefaults({ ...ws.getDefaults(), ...next });
@@ -96,15 +112,15 @@ function ModelMenu({ state, open, onOpenChange }: { state: ChatState; open: bool
         </ChatMenuTrigger>
       </div>
       <ChatMenuContent align="start" side="top" className="w-60">
-        {AGENTS.map((provider, i) => {
+        {providers.map((provider, i) => {
           const available = agentAvailable(provider.id);
           const list = lists[provider.id];
           return (
             <ChatMenuGroup key={provider.id}>
               {i > 0 && <ChatMenuSeparator />}
               <ChatMenuLabel className="justify-between">
-                {i === 0 ? "Agent model" : provider.label}
-                {!available && <span className="text-subtle-foreground">Not installed</span>}
+                {WEB ? "Model API" : i === 0 ? "Agent model" : provider.label}
+                {!available && <span className="text-subtle-foreground">{WEB ? "Not available" : "Not installed"}</span>}
               </ChatMenuLabel>
               <ChatMenuItem
                 disabled={!available}
@@ -129,6 +145,8 @@ function ModelMenu({ state, open, onOpenChange }: { state: ChatState; open: bool
             </ChatMenuGroup>
           );
         })}
+        {/* The model API takes the server's model list only (VERYNIZE_AI_MODELS): no free-text id, no effort. */}
+        <div className={cn("contents", WEB && "hidden")}>
         <ChatMenuSeparator />
         {/* Free-text model id: the legacy #agent-model input (datalist + change handler) adopted here. */}
         <div
@@ -156,6 +174,7 @@ function ModelMenu({ state, open, onOpenChange }: { state: ChatState; open: bool
             </ChatMenuRadioGroup>
           </ChatMenuSubContent>
         </ChatMenuSub>
+        </div>
       </ChatMenuContent>
     </ChatMenu>
   );
@@ -393,7 +412,8 @@ export function Composer({ state }: { state: ChatState }) {
 
   const ws = workspace();
   const mentions = state.mentions ?? [];
-  const canDrop = !!ws?.attachImages;
+  // Dropped images are saved by the desktop main process; the web chat takes text only.
+  const canDrop = !WEB && !!ws?.attachImages;
   const hasFiles = (event: DragEvent) => canDrop && [...event.dataTransfer.types].includes("Files");
   // The secondary button sends the follow-up the other way from the default (same as ⌘↵).
   const otherWay = followUp === "steer" ? "queue" : "steer";
@@ -446,7 +466,7 @@ export function Composer({ state }: { state: ChatState }) {
         </div>
       )}
       <MentionPopover />
-      <SlashCommands state={state} />
+      {!WEB && <SlashCommands state={state} />}
       <WorkingDirectories state={state} />
       {(state.attachments.length > 0 || mentions.length > 0) && (
         <div className={cn(hook.mentions, "flex flex-wrap gap-1.5 px-2 pt-2 pb-1.5")}>
@@ -493,15 +513,16 @@ export function Composer({ state }: { state: ChatState }) {
         )}
       </div>
       <div className="flex h-7.5 items-center gap-0.5 px-1.5 pb-1.5">
-        <AttachMenu state={state} />
+        {/* Desktop-only: attachments from disk, agent tools/MCP status, account usage, autonomy (own capability). */}
+        {!WEB && <AttachMenu state={state} />}
         <ModelMenu state={state} open={modelOpen} onOpenChange={setModelOpen} />
         <AccessMenu access={state.defaults.access} />
         <StylePicker />
         <span className="flex-1" />
         <WorksWith state={state} />
         <AutonomyPopover state={state} />
-        <ToolsPopover state={state} />
-        <UsageRing state={state} />
+        {!WEB && <ToolsPopover state={state} />}
+        {!WEB && <UsageRing state={state} />}
         {canSendOther && (
           <button
             type="button"

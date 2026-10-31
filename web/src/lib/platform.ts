@@ -3,6 +3,7 @@
 // (same object). The import below registers it when the page did not load web/platform.js first (an island built
 // alone, another host page); it never replaces an existing one.
 import "../../platform.js";
+import type { AgentService } from "./agent-service";
 import type { DesktopApi } from "./desktop-api";
 
 export type { DesktopApi } from "./desktop-api";
@@ -34,6 +35,20 @@ export const CAPABILITIES = [
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
+/**
+ * The chat agent transport registry (web/platform.js `agents`). Not a desktop capability: the React bundle provides the
+ * service (web/src/lib/agent-transport.ts), IPC on the desktop and the model API (/api/ai/*) on the web.
+ */
+export type AgentRegistry = {
+  provide(service: AgentService | null): () => void;
+  service(): AgentService | null;
+  /** A service is registered and can start a turn now. */
+  ready(): boolean;
+  /** Tell subscribers that the service's readiness changed. */
+  changed(): void;
+  subscribe(listener: () => void): () => void;
+};
+
 export type Platform = {
   readonly kind: "desktop" | "web";
   /** `window.desktop` (desktop/preload.cjs), null in the plain web build. */
@@ -42,6 +57,7 @@ export type Platform = {
   can(capability: Capability): boolean;
   /** Preload methods behind each capability (dotted paths). */
   readonly CAPABILITY_METHODS: Readonly<Record<Capability, readonly string[]>>;
+  readonly agents: AgentRegistry;
 };
 
 declare global {
