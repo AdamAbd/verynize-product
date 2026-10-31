@@ -1,6 +1,6 @@
 // `?` help menu at the bottom-left of the canvas (Wonder T5-help): Docs ↗, Keyboard shortcuts, Restart onboarding,
 // Give feedback, Contact us ↗, Discord community ↗, Export diagnostic logs | What's new. Items without a Verynize
-// mechanism or URL (see help-links.ts) stay listed but disabled; Wonder's own news entries are not reproduced.
+// mechanism use placeholder URLs for now (see help-links.ts); Wonder's own news entries are not reproduced.
 import { useState, type ComponentType } from "react";
 import {
   ArrowUpRight,
@@ -50,7 +50,7 @@ const ITEMS: Item[] = [
     icon: Undo2,
     action: () => window.dispatchEvent(new Event("bd:open-onboarding")),
   },
-  { id: "help-feedback", label: "Give feedback", icon: MessageSquare, action: null },
+  { id: "help-feedback", label: "Give feedback", icon: MessageSquare, action: link(HELP_LINKS.feedback) },
   {
     id: "help-contact",
     label: "Contact us",
@@ -65,7 +65,12 @@ const ITEMS: Item[] = [
     external: true,
     action: link(HELP_LINKS.discord),
   },
-  { id: "help-diagnostics", label: "Export diagnostic logs", icon: Download, action: null },
+  {
+    id: "help-diagnostics",
+    label: "Export diagnostic logs",
+    icon: Download,
+    action: link(HELP_LINKS.diagnostics),
+  },
 ];
 
 const row = "h-7.25 gap-2.5 px-2";

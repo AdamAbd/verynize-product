@@ -73,7 +73,7 @@ const nodes = [
     await p.locator('#bd-canvas-help').click();
     const help = await p.locator('#bd-help-menu [role=menuitem]').evaluateAll(list => list.map(i => [i.textContent.trim(), i.hasAttribute('data-disabled')]));
     assert.deepEqual(help.map(h => h[0]), ['Docs', 'Keyboard shortcuts', 'Restart onboarding', 'Give feedback', 'Contact us', 'Discord community', 'Export diagnostic logs', 'View all']);
-    assert.deepEqual(help.filter(h => !h[1]).map(h => h[0]), ['Keyboard shortcuts', 'Restart onboarding'], 'items without a target are disabled');
+    assert.deepEqual(help.filter(h => h[1]).map(h => h[0]), [], 'every help item is enabled (placeholder URLs in help-links.ts)');
     assert.equal(await p.locator('#bd-help-menu').getByText("What's new").count(), 1);
     await p.locator('#help-onboarding').click();
     await p.locator('#onboarding').waitFor();
