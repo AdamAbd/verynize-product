@@ -857,3 +857,41 @@ These are behaviours the agents chose. Each one needs a Wonder capture to confir
 - **Grid-mode Layout header**: the wrap toggle switches between Auto rows (children wrap into new rows) and a fixed row count; the grid icon opens the track editor (C2/C4).
 - **Page eye** hides the page background in the editor without forgetting the colour (`page.backgroundHidden: true`, validated in `web/app.js` and `integrations/design-store.mjs`). Reset page colour moved inside the field and shows on hover (C8).
 - **Active alignment cell box** is treated as a hover state: Wonder's own C3-flex-controls shows the active cell without it (C3).
+
+## 9. Follow-up pass: Wonder captures for the open gaps and assumptions (2026-10-31)
+
+Both sides were captured again for every item in §8 "Top remaining gaps" and "Assumptions", plus two new user reports (D1, D2). Wonder was captured by a Codex computer-use agent in the scratch file "Sunbird" (method as in §1). Verynize was captured by Claude with `verynize/capture.cjs --new-only`. No app source was changed.
+
+- Wonder: [wonder/notes-2026-10-31.md](wonder/notes-2026-10-31.md), [manifest](wonder/manifest-2026-10-31.json) (SHA-256 per PNG), [measurements](wonder/measurements-2026-10-31.json).
+- Verynize: [verynize/notes-2026-10-31.md](verynize/notes-2026-10-31.md) (source `file:line` and fix sketch per id), [metrics.json](verynize/metrics.json).
+- Pairs: `pairs/D*`, `pairs/G*`, `pairs/H*`. For G4 and H9 use only the `*-verified` pairs; the unverified Wonder G4 series is excluded (see the Wonder notes).
+
+### Verdicts
+
+| Id | Wonder (proof) | Verynize now | Verdict |
+|---|---|---|---|
+| D1 | Frame tool creates nothing. Properties shows "Frame" with 7 collapsible categories (Phone, Tablet, Desktop, Presentation, Smartwatch, Paper, Social media; 26 presets, exact list in the Wonder notes). Preset → named, selected frame, centred. Click → 100×100. Drag → gesture size. [pair](pairs/D1-collapsed.png), [w phone](wonder/D1-phone.png), [w social](wonder/D1-social.png), [pair click](pairs/D1-click-created.png) | Toolbar button inserts a 500×360 frame at once. The F key turns the tool on but shows a floating preset popover (4 groups, 13 presets); click makes 400×300. | **Gap, P1** |
+| D2 | New frames: radius 0, opacity 100 %, white fill, Clip content on. [pair](pairs/D2-click.png), [w corner zoom](wonder/D2-corner-zoom.png) | Radius 12 on every frame (`web/app.js:3`, `add()` never overrides). Fill and clip match. | **Gap, P1** |
+| G1 (B5) | Typing in W or gap shows a variable suggestion list; ↓ + Enter binds, Esc dismisses. Empty Min/Max rows offer the list immediately. [pair](pairs/G1-width-suggestions.png), [w min](wonder/G1-min-width.png) | No list; Enter on a name errors and reverts. | **Gap, P1** (padding/radius unverified on Wonder) |
+| G2 (A7) | Styled menus. Scale: 0.5x, 1x, 2x, 3x, 4x · 720p, 1080p, 1440p, 2160p · 512w, 512h. Format: PNG, JPG, WebP, PDF, Code. Section 136 px. [pair scale](pairs/G2-scale-menu.png), [pair format](pairs/G2-format-menu.png) | Native selects. | **Gap, P2** (option lists already match) |
+| G3 (A2) | The split swatch = left half opaque colour, right half the colour with its alpha over a checkerboard. Shown only when alpha < 100 %; same for fill and border. No colour modes exist. [w tight](wonder/G3-swatch-tight.png), [w shared](wonder/G3-fill-border-shared.png) | Same rule (`controls.tsx:519-525`). | **Resolved: matches** |
+| G4 (C3) | Bars 6/10/6 px long, 2 px thick, aligned to the selected cell, in both directions. | Same lengths; edge cells differ by 1–3 px. | **Gap, P2** (edge padding only) |
+| G5 (C4) | One outline per track, with a count overlay. The grid icon opens "Grid settings": Columns/Rows, per-track "Fill" / "1 fr", and "Rows are added to fit content". [pair](pairs/G5-four-two.png), [pair editor](pairs/G5-track-editor.png) | Per-column outlines; editor is two number fields. | **Gap, P2** (per-track sizing needs a schema change) |
+| G6 (A1/A4) | Gradient types Linear / Radial / Conic with stop rows. Bound shadow colour stays a chip inside the editor. [w](wonder/G6-type-menu.png), [w](wonder/G6-conic.png), [w](wonder/G6-shadow-bound.png) | Captured in `verynize/G6-*`. | Compare side by side; no blocking difference recorded |
+| H1 (C1) | Tooltip "Resize to fill ⌘⇧⌥F". The parent shrinks and moves around its child. [pair](pairs/H1-tooltip.png), [w after](wonder/H1-parent-after.png) | Labelled "Resize to fit content". The behaviour matches. | **Label wrong** |
+| H2 (A9) | Target selects the layers using that colour. [w](wonder/H2-target-after.png) | Same. | **Confirmed** |
+| H3 (A9) | Clicking a mixed well unifies the selection. Which layer supplies the value was not proven; filters were not testable. [w](wonder/H3-fill-replaced.png) | Copies the primary layer's value. | **Partly confirmed** |
+| H4 (A2) | `+` in All mode → Top + Right, then Bottom, then Left; then disabled. [pair](pairs/H4-plus-all.png) | Splits into all four at once; disabled at four. | **Gap, P2** (split order) |
+| H5 (B4) | Nested child: Left/Right and Top/Bottom only; no Scale. Top-level constraints are dimmed. [w](wonder/H5-horizontal-menu.png) | Scale is only shown when a layer already uses it. | **Confirmed** |
+| H6 (A1) | Wavy square = toggle "Shader mode"; the fill becomes shader presets and parameters. [pair](pairs/H6-tooltip.png), [w](wonder/H6-open-confirmed.png) | "Animated fill" popover. | **Assumption wrong, P1** |
+| H7 (C2/C4) | Arrow icon = "Automatic positioning"; it does not replace the row count. Grid icon = "Grid settings". [pair](pairs/H7-wrap-tooltip.png) | Wrap pins the row count. | **Assumption wrong, P2** |
+| H8 (C8) | Eye toggles page alpha 100 ↔ 0; the canvas shows a checkerboard and the hex is kept. No Reset control found. [pair](pairs/H8-eye-hidden.png) | Flag set, nothing visible changes, the field still says 100 %. | **Gap, P2** |
+| H9 (C3) | Cell box only on hover; active bars without a box. [pair](pairs/H9-hover-verified.png) | Same. | **Confirmed** |
+
+### Fix list from this pass
+
+1. **D1**: make the toolbar Frame button arm the tool (no auto insert). With the tool on and nothing selected, show the 7-category "Frame" preset list in Properties instead of the floating popover. Add the missing presets. Click creates 100×100. `tests/canvas-page.cjs` and `tests/canvas-advanced.cjs` rely on the instant insert and must change.
+2. **D2**: frames default to `radius: 0` in `add()` (`web/app.js`). The headless side already uses 0.
+3. **H6**: replace the "Animated fill" popover with a Shader-mode toggle.
+4. **G1**: type-to-bind suggestion list for numeric fields and the Min/Max rows.
+5. **H1** label, **H7** semantics, **H8** alpha/checkerboard, **H4** split order, **G2** styled menus, **G4** edge padding, **G5** track editor.
