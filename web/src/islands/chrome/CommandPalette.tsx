@@ -98,6 +98,24 @@ export function CommandPalette() {
   return open ? <Palette /> : null;
 }
 
+/**
+ * Rank by the command's label first: a label that starts with the query beats one that contains it, which beats a
+ * match that only hits the command id. Every query word must appear, so "select all" never ranks "Paste over selection"
+ * (cmdk's default fuzzy score does) above "Select all".
+ */
+function scoreCommand(value: string, search: string) {
+  const query = search.trim().toLowerCase();
+  if (!query) return 1;
+  const text = value.toLowerCase();
+  const label = text.slice(0, text.lastIndexOf(" "));
+  if (label.startsWith(query)) return 1;
+  if (label.includes(query)) return 0.8;
+  const words = query.split(/\s+/);
+  if (words.every((word) => label.includes(word))) return 0.6;
+  if (words.every((word) => text.includes(word))) return 0.3;
+  return 0;
+}
+
 function Palette() {
   const commands = useMemo(paletteCommands, []);
   const sections = useMemo(() => [...new Set(commands.map((c) => c.section))], [commands]);
@@ -116,7 +134,7 @@ function Palette() {
         >
           <Dialog.Title className="sr-only">Command palette</Dialog.Title>
           <Dialog.Description className="sr-only">Search for a command to run</Dialog.Description>
-          <Command>
+          <Command filter={scoreCommand}>
             <CommandInput placeholder="Search commands…" />
             <CommandList>
               <CommandEmpty>No commands found</CommandEmpty>
