@@ -7,9 +7,13 @@
 // - CM3-text-menu: M without Hide label. CM5-multi-verified: no Copy link to selection, Use as mask after Layout.
 // - CM6-hidden / CM6-locked: Show / Unlock follow the layer state. CM7-row: M without Select layer and its separator.
 // - CM9-label: the frame menu. CM10: the paste family stays listed.
+// - P4 (notes-2026-10-31-b): "Set as file thumbnail" is the last row after a separator in every layer menu (frame,
+//   nested frame, text, multi-selection, layer row: CM2/CM3/CM5/CM7/P4 captures). Choosing it toasts "Thumbnail
+//   updated" and the label stays the same. Only a single frame was exercised in Wonder; for a multi-selection
+//   Verynize uses the first selected layer (unproven).
 //
-// Not rendered, because Verynize has no mechanism for them yet: "Set as file thumbnail" (file cards always draw the
-// active page, there is no chosen thumbnail) and "Use as mask" (masks are CSS mask images, not layers).
+// Not rendered, because Verynize has no mechanism for it yet: "Use as mask" (masks are CSS mask images, not layers).
+import { toast } from "sonner";
 import { toggleBodyClass } from "../chrome/hooks";
 import { design, activePage, type LayerNode } from "@/lib/bridge";
 
@@ -86,6 +90,13 @@ export function addContext(ids: string[]) {
     const mention = workspace.searchElements?.(id).find((m) => m.id === id);
     if (mention) workspace.addMention(mention);
   }
+  return true;
+}
+
+/** Store the layer as the file's thumbnail (`document.thumbnailNodeId`, one undo step) and toast like Wonder. */
+export function setFileThumbnail(id: string) {
+  if (!design().setThumbnail(id)) return false;
+  toast.success("Thumbnail updated", { id: "file-thumbnail" });
   return true;
 }
 
@@ -238,6 +249,14 @@ export function layerMenu(surface: "canvas" | "row", under: string[] = []): Entr
           commandItem(have, "transform.frame", "Frame selection", "⌘G"),
           commandItem(have, "transform.autoLayout", "Add auto layout", "⇧A"),
         ],
+      },
+    ],
+    [
+      {
+        type: "item",
+        command: "menu.setThumbnail",
+        label: "Set as file thumbnail",
+        run: () => setFileThumbnail(selected[0].id),
       },
     ],
   ]);

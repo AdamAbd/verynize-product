@@ -43,6 +43,8 @@ export type DesignApi = {
   setIcons(icons: DesignIcon[]): boolean;
   /** Patch the active page (validated, one undo step); `undefined` values remove the key. */
   updatePage(patch: Partial<Omit<DesignPage, "id" | "nodes">>): boolean;
+  /** Set (or with an empty id clear) the file's thumbnail layer, `document.thumbnailNodeId` (validated, one undo step). */
+  setThumbnail(id: string): boolean;
   setActivePage(id: string): void;
   canUndo(): boolean;
   canRedo(): boolean;
