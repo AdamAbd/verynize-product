@@ -1,8 +1,11 @@
 // Shader fill library (behaviour modelled on design/wonder/2026-10-30/30–31): a searchable preset picker,
 // the four colours of a parametric preset (each bindable to a Colors variable) and a "Shader settings" popover
 // with six sliders. The catalog, defaults and rendering live in web/shaders.js (window.BetterShaders).
+// Shader layers use it in their "Shader Fill"; any other layer gets the same controls in Shader mode (Wonder H6,
+// `shaderFill`): a preset dropdown with a settings button beside it, then the preset's colours.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, Search, SlidersHorizontal, X } from "lucide-react";
+import { Check, ChevronDown, Search, SlidersHorizontal, X } from "lucide-react";
+import { SlidersIcon } from "@/components/icons";
 import type { DesignDocument } from "@/lib/bridge";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -60,10 +63,13 @@ const SLIDERS: { key: ShaderParamKey | "speed"; label: string; max: number; step
   { key: "grain", label: "Grain Strength", max: 100, step: 1 },
 ];
 
-/** Choosing a preset loads its defaults: stored colours/sliders are cleared, parametric presets set their speed. */
+/**
+ * Choosing a preset loads its defaults: stored colours/sliders are cleared, parametric presets set their speed.
+ * A layer in Shader mode keeps its type (only its fill changes); any other layer becomes a shader layer.
+ */
 export function applyShaderPreset(selection: string[], preset: ShaderPreset) {
-  patchNodes(selection, () => ({
-    type: "shader",
+  patchNodes(selection, (n) => ({
+    ...(n.shaderFill && n.type !== "shader" ? {} : { type: "shader" }),
     shaderPreset: preset.id,
     shaderColors: undefined,
     shaderParams: undefined,
@@ -236,11 +242,30 @@ function ParamSlider({
   );
 }
 
-function ShaderOptions({ selection, values }: { selection: string[]; values: Resolved }) {
+function ShaderOptions({
+  selection,
+  values,
+  compact,
+}: {
+  selection: string[];
+  values: Resolved;
+  /** Shader mode: an icon button beside the preset dropdown (Wonder H6) instead of the labelled button. */
+  compact?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen} modal={false}>
       <PopoverAnchor asChild>
+        {compact ? (
+          <IconButton
+            icon={SlidersIcon}
+            label="Shader settings"
+            id="shader-options-open"
+            aria-expanded={open}
+            active={open}
+            onClick={() => setOpen(!open)}
+          />
+        ) : (
         <button
           type="button"
           id="shader-options-open"
@@ -251,6 +276,7 @@ function ShaderOptions({ selection, values }: { selection: string[]; values: Res
           <SlidersHorizontal className="size-3.5 text-muted-foreground" aria-hidden />
           Shader settings
         </button>
+        )}
       </PopoverAnchor>
       <PopoverContent
         id="shader-options"
@@ -301,40 +327,84 @@ function ShaderOptions({ selection, values }: { selection: string[]; values: Res
 /* ---------- Colours of a parametric preset ---------- */
 type ShaderProps = { doc: DesignDocument; node: Node; selection: string[] };
 
-export function ShaderParameters({ doc, node, selection }: ShaderProps) {
-  const lib = library();
-  if (!lib || node.type !== "shader" || !isParam(node.shaderPreset)) return null;
-  const values = lib.resolve(node, doc.tokens);
+function ShaderColorRows({ doc, node, selection, values }: ShaderProps & { values: Resolved }) {
   const stored = (node as ShaderNode).shaderColors ?? {};
   const write = (role: ShaderRole, holder: { color: string; token?: string }) =>
     patchNodes(selection, (n) => ({
       shaderColors: { ...(n as ShaderNode).shaderColors, [role]: holder },
     }));
+  return COLOR_ROWS.map(([role, label]) => (
+    <Caption key={role} label={label}>
+      <div className="flex items-center gap-2" data-shader-color-row={role}>
+        <EffectColorField
+          name={"shader-" + role}
+          label={label}
+          value={stored[role]?.color ?? values.colors[role]}
+          tokens={doc.tokens}
+          token={stored[role]?.token}
+          onToken={(name) =>
+            write(
+              role,
+              name
+                ? { color: doc.tokens?.[name] ?? values.colors[role], token: name }
+                : { color: values.colors[role] },
+            )
+          }
+          onCommit={(color) => write(role, { color })}
+        />
+      </div>
+    </Caption>
+  ));
+}
+
+export function ShaderParameters({ doc, node, selection }: ShaderProps) {
+  const lib = library();
+  if (!lib || node.type !== "shader" || !isParam(node.shaderPreset)) return null;
+  const values = lib.resolve(node, doc.tokens);
   return (
     <div id="shader-parameters" className={cn("flex flex-col gap-2")}>
-      {COLOR_ROWS.map(([role, label]) => (
-        <Caption key={role} label={label}>
-          <div className="flex items-center gap-2" data-shader-color-row={role}>
-            <EffectColorField
-              name={"shader-" + role}
-              label={label}
-              value={stored[role]?.color ?? values.colors[role]}
-              tokens={doc.tokens}
-              token={stored[role]?.token}
-              onToken={(name) =>
-                write(
-                  role,
-                  name
-                    ? { color: doc.tokens?.[name] ?? values.colors[role], token: name }
-                    : { color: values.colors[role] },
-                )
-              }
-              onCommit={(color) => write(role, { color })}
-            />
-          </div>
-        </Caption>
-      ))}
+      <ShaderColorRows doc={doc} node={node} selection={selection} values={values} />
       <ShaderOptions selection={selection} values={values} />
+    </div>
+  );
+}
+
+/* ---------- Shader mode (Wonder H6) ---------- */
+/** The first parametric preset: what Shader mode starts with on a layer that never chose a preset. */
+export const defaultFillPreset = () => shaderPresets().find((p) => p.kind === "param");
+
+/**
+ * Shader mode body (wonder/H6-open-confirmed): a preset dropdown (x 12–232) with the settings button at x 256,
+ * then the preset's colour rows, which replace the paint rows. Classic presets take the fill colour, so their
+ * paint stack stays below (FillSection).
+ */
+export function ShaderFill({ doc, node, selection }: ShaderProps) {
+  const [picker, setPicker] = useState(false);
+  const lib = library();
+  if (!lib || node.type === "shader" || !node.shaderFill) return null;
+  const values = lib.resolve(node, doc.tokens);
+  return (
+    <div id="shader-fill" className="flex flex-col gap-2" data-shader-fill={node.shaderPreset}>
+      <div className="flex items-center gap-3">
+        <ShaderPicker node={node} selection={selection} open={picker} onOpenChange={setPicker}>
+          <button
+            type="button"
+            id="shader-fill-preset"
+            aria-label="Shader preset"
+            aria-haspopup="listbox"
+            aria-expanded={picker}
+            className="flex h-6 min-w-0 flex-1 items-center justify-between gap-2 rounded-md bg-input px-2 text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={() => setPicker(!picker)}
+          >
+            <span className="truncate">{shaderPresetName(node.shaderPreset)}</span>
+            <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+          </button>
+        </ShaderPicker>
+        <ShaderOptions selection={selection} values={values} compact />
+      </div>
+      {values.kind === "param" ? (
+        <ShaderColorRows doc={doc} node={node} selection={selection} values={values} />
+      ) : null}
     </div>
   );
 }

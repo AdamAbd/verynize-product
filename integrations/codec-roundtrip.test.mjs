@@ -264,6 +264,14 @@ function buildSink() {
     outlineHidden: true,
   });
   Object.assign(by("Second"), { variantClasses: "md:p-8 hover:opacity-90 dark:bg-black" });
+  // Shader mode (Wonder H6): a frame paints its fill with a shader preset; the paint stack stays as the fallback.
+  Object.assign(by("Second"), {
+    shaderFill: true,
+    shaderPreset: "ripple-pool-2",
+    shaderSpeed: 2,
+    shaderColors: { center: { color: "#ff0000" }, ripple: { color: "#22d3ee", token: "glow" } },
+    shaderParams: { density: 60 },
+  });
   reflow(page, null, [], doc);
   return validateDocument(doc);
 }
