@@ -15,7 +15,13 @@ type ViewProps = {
   handlers: FileActionHandlers;
 };
 
-const open = (file: LibraryFile) => openEntry(file, (id) => library().open(id));
+// A file that cannot open reports itself in a notice (web/document-safety.js); nothing else to do with the error.
+const open = (file: LibraryFile) =>
+  openEntry(file, (id) =>
+    library()
+      .open(id)
+      .catch(() => undefined),
+  );
 /** Cloud-backed files and listed rooms: room id hook, workspace (or "Shared") and role. */
 const roomAttrs = (file: LibraryFile) =>
   file.cloud
@@ -24,6 +30,10 @@ const roomAttrs = (file: LibraryFile) =>
         "data-cloud": file.cloud.detached ? "detached" : "linked",
       }
     : {};
+const invalidAttrs = (file: LibraryFile) => (file.invalid ? { "data-invalid": "true" } : {});
+function InvalidBadge({ file }: { file: LibraryFile }) {
+  return file.invalid ? <Badge className="ml-1">Can’t open</Badge> : null;
+}
 const placeOf = (file: LibraryFile) =>
   file.room ? (file.room.organizationName ?? "Shared with you") : file.cloud ? "Cloud" : "Personal";
 function CloudBadges({ file }: { file: LibraryFile }) {
@@ -70,6 +80,7 @@ export function FileGrid({ files, folders, shownFolders, allFiles, owner, handle
               key={file.id}
               data-file-id={file.id}
               {...roomAttrs(file)}
+              {...invalidAttrs(file)}
               className={cn(
                 hook("file-card"),
                 "group relative flex h-59 min-w-0 flex-col overflow-hidden rounded-lg border border-card-border bg-card",
@@ -100,6 +111,7 @@ export function FileGrid({ files, folders, shownFolders, allFiles, owner, handle
                     <span className="truncate">{placeOf(file)}</span>
                     <CloudBadges file={file} />
                     {file.publication && <Badge className="ml-1">Public</Badge>}
+                    <InvalidBadge file={file} />
                   </span>
                 </span>
               </button>
@@ -157,6 +169,7 @@ export function FileList({ files, folders, shownFolders, allFiles, handlers }: V
             key={file.id}
             data-file-id={file.id}
             {...roomAttrs(file)}
+            {...invalidAttrs(file)}
             className={cn(hook("file-card"), "group relative -mx-2 rounded-lg px-2 hover:bg-muted")}
           >
             <button
@@ -184,6 +197,7 @@ export function FileList({ files, folders, shownFolders, allFiles, handlers }: V
                   {file.publication ? "Public" : file.cloud ? "Cloud" : "Private"}
                 </span>
                 <CloudBadges file={file} />
+                <InvalidBadge file={file} />
               </span>
               <span />
               <span className="text-sm text-foreground-2">{relativeDay(file.updated)}</span>

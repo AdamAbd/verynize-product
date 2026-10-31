@@ -247,7 +247,7 @@
     return;
   }
   // Former project-dialog actions, now in the Code workspace menus (repository row, Start preview menu) and the app menu.
-  const openDesign=action(async()=>{const result=await api.designOpen();if(result){if(window.fileLibrary?.openNative)await window.fileLibrary.openNative(result);else {await window.documentLifecycle?.prepareSwitch({preserveNative:true});window.design.setDocument(result.document);}status('Opened '+result.path);}});
+  const openDesign=action(async()=>{const result=await api.designOpen().catch(error=>{window.documentSafety.reportOpenFailure({error,source:'native',name:'Design file',kept:'The file was not changed.'});throw error});if(result){if(window.fileLibrary?.openNative)await window.fileLibrary.openNative(result);else {await window.documentLifecycle?.prepareSwitch({preserveNative:true});window.design.setDocument(result.document);}status('Opened '+result.path);}});
   const saveDesign=async saveAs=>{const fileId=window.fileLibrary?.currentId;const result=await api.designSave({document:window.design.getDocument(),saveAs});if(result&&!result.detached&&fileId===window.fileLibrary?.currentId){window.fileLibrary?.setNativePath?.(result.path);status('Saved '+result.path+' · MCP can edit this file');}};
   document.getElementById('save-project').onclick=action(()=>saveDesign(false));
   document.getElementById('open-project').onclick=openDesign;
