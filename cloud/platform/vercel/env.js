@@ -95,6 +95,7 @@ export function bindingsFromEnvironment(vars) {
     ROOM_CREATION: limit("ROOM_CREATION_LIMIT", 10),
     AUTH_LIMIT: limit("AUTH_LIMIT", 10),
     MCP_LIMIT: limit("MCP_LIMIT", 240),
+    AI_LIMIT: limit("AI_LIMIT", 20),
     ROOMS: { type: "durable-object", exportName: "DesignRoom" },
     ACCOUNTS: { type: "durable-object", exportName: "AccountDirectory" },
     APPS: { type: "durable-object", exportName: "PublishedApp" },
@@ -109,6 +110,12 @@ export function bindingsFromEnvironment(vars) {
     "EMAIL_FROM",
     "EMAIL_WEBHOOK_URL",
     "EMAIL_WEBHOOK_TOKEN",
+    // Model API runtime (cloud/ai.js): off without OPENROUTER_API_KEY.
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+    "VERYNIZE_AI_MODELS",
+    "VERYNIZE_AI_MAX_TURNS",
+    "VERYNIZE_AI_MAX_TOOL_CALLS",
   ])
     if (vars[name]) bindings[name] = text(vars[name]);
   // Function instances share no disk: blobs live in S3-compatible storage (R2, S3, B2, MinIO).

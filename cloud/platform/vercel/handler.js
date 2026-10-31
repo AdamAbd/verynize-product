@@ -24,6 +24,8 @@ export function restorePath(url, original) {
  * @param {object} options.env the bindings (env.js)
  * @param {Promise<void>} options.ready resolves once Redis, libSQL and migrations are ready
  * @param {Function} options.upgradeWebSocket from @vercel/functions
+ * @param {Function} [options.waitUntil] from @vercel/functions: keeps work (a model API run whose
+ *   client disconnected, cloud/ai.js) going after the response; passed to the Worker as ctx
  * @param {string} [options.clientIpHeader] header the platform sets to the client address
  * @param {string} [options.publicUrl] fixed origin for request URLs (PUBLIC_URL)
  */
@@ -32,11 +34,13 @@ export function createHandler({
   env,
   ready,
   upgradeWebSocket,
+  waitUntil,
   clientIpHeader = "x-real-ip",
   publicUrl,
 }) {
   const fixedOrigin = publicUrl ? new URL(publicUrl).origin : null;
   const ipHeader = clientIpHeader.toLowerCase();
+  const ctx = waitUntil ? { waitUntil } : undefined;
 
   /** The router reads the client address from CF-Connecting-IP; only the platform's is kept. */
   function normalize(request) {
@@ -62,11 +66,11 @@ export function createHandler({
       await ready;
       const request = normalize(incoming);
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket")
-        return worker.fetch(request, env);
+        return worker.fetch(request, env, ctx);
       const upgrade = { socket: null };
       let response;
       try {
-        response = await pendingUpgrade.run(upgrade, () => worker.fetch(request, env));
+        response = await pendingUpgrade.run(upgrade, () => worker.fetch(request, env, ctx));
       } catch (error) {
         upgrade.socket?.abandon();
         throw error;

@@ -295,6 +295,15 @@ export class DesignRoom extends DurableObject {
   }
 
   /**
+   * The caller's current role (null without access) and the title, without the document: the
+   * model API runtime (cloud/ai.js) re-checks it before every tool call of a run.
+   */
+  agentRole({ accountId, orgRole } = {}) {
+    const role = this.row() ? this.memberRole(accountId, orgRole) || null : null;
+    return { role, title: role ? this.title() : null };
+  }
+
+  /**
    * Hosted MCP write (cloud/mcp.js): a server-originated batch, computed by the Worker as a diff
    * from `baseRevision`, applied with the caller's role and broadcast to live sockets as `ops`.
    * A newer revision returns {conflict:true} so the caller recomputes its edit.
