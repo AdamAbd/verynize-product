@@ -51,7 +51,12 @@ The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; isla
   trigger button must have class `app-menu-trigger` (tests click `.app-menu-trigger:visible` then a command id such as
   `#rectangle`, `#undo`, `#save-project`, `#shell-settings`, `#rename-page`, `#import-tokens`, `#icon-kind`).
   Commands must stay reachable by those ids inside the opened menu.
-- **Code mode**: `body.code-mode` (toggle with `window.agentWorkspace.setCodeMode(on)`; `openProject()` enters it, `#project-toggle`
+- **Shell routes** (`web/src/lib/router/shell-router.ts`, docs/spikes/tanstack-router.md): the URL owns the top-level
+  view — `/` (`files-view`), `/editor`, `/code` (`code-mode`), `/settings/<section>` (`settings-open`). Never toggle
+  those three body classes yourself: navigate with `navigate()` or call the legacy request APIs
+  (`fileLibrary.showHome/showEditor`, `appSettings.open/close/select`, `agentWorkspace.setCodeMode`), which update the
+  URL and apply the view synchronously. The `apply*` functions on those objects are for the router only.
+- **Code mode**: `body.code-mode` (toggle with `window.agentWorkspace.setCodeMode(on)`, which navigates to `/code` or `/editor`; `openProject()` enters it, `#project-toggle`
   toggles it). Tests use `#code-add-repository` then `#project-open` / `#project-new` / `#project-clone`, `#code-new-chat`,
   `#code-new-quick-chat`, `[data-repository=<name>]`, `[data-chat-id=<id>]`, `#code-file-tree[data-root=<path>]
   [data-path=<file>]`, `#code-file-filter`, `#code-editor`, `#code-editor-save`, `#code-start-preview`, `#code-panel-toggle`,
