@@ -1053,6 +1053,7 @@
       const copies = ed.nodes().filter(n => all.has(n.id)).map(n => ({...structuredClone(n), id: mapping.get(n.id), parentId: mapping.get(n.parentId) || n.parentId, x: n.x + (all.has(n.parentId) ? 0 : offset), y: n.y + (all.has(n.parentId) ? 0 : offset)}));
       ed.nodes().push(...copies);
       const result = ids.map(id => mapping.get(id));
+      hooks.duplicated?.(result);
       ed.setSelection(new Set(result));
       return result;
     }
@@ -1464,7 +1465,7 @@
     }
     const keyIndex = new Map();
     for (const c of commands) for (const k of c.keys) keyIndex.set(k, c);
-    function runCommand(id) { const c = commands.find(x => x.id === id); if (!c || (c.when && !c.when())) return false; c.run(); return true; }
+    function runCommand(id, arg) { const c = commands.find(x => x.id === id); if (!c || (c.when && !c.when())) return false; c.run(arg); return true; }
     const shortcutText = k => k.replace('mod+', /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+').replace('alt+', '⌥').replace('shift+', '⇧').replace('ctrl+', '⌃').toUpperCase();
 
     document.addEventListener('keydown', e => {
@@ -1610,6 +1611,17 @@
     }
     applyCamera();
 
+    // ---------- Extensions (web/clipboard-commands.js): more commands on the same registry and shortcuts ----------
+    const hooks = {};
+    // Adds a command, or merges fields into an existing one (same id); the shortcut index is rebuilt.
+    function register(command) {
+      const existing = commands.find(c => c.id === command.id);
+      if (existing) Object.assign(existing, command); else commands.push({keys: [], ...command});
+      keyIndex.clear(); for (const c of commands) for (const k of c.keys) keyIndex.set(k, c);
+    }
+    const context = {ed, find, sel, selectedNodes, topSelected, worldRect, union, placeInView, isFlow, inStack, footer, writeSystemClipboard, register, hooks, getClipboard: () => clipboard, paste: (data, options) => paste(data, options)};
+    for (const extend of extensions) extend(context);
+
     return {
       beforeRender, afterRender, setConstraints, constraintsOf: id => { const n = find(id); return n && anchorable(n) ? NS().constraintsOf(n) : null; }, reveal, setTool, getTool: () => tool, insertFramePreset, framePresets: () => FRAME_PRESETS.map(([category, presets]) => ({category, presets: presets.map(([name, w, h]) => ({name, w, h}))})), fit, zoomToSelection, stepZoom, zoomAt, zoomCenter, setCamera, screenToWorld, worldRect, placeInView,
       // scrollLeft/scrollTop stay non-negative for older readers; x/y carry the exact camera offset.
@@ -1621,5 +1633,6 @@
       getDrilled: () => [...drilled],
     };
   }
-  window.BetterCanvas = {install, ZOOM_STOPS, FRAME_PRESETS};
+  const extensions = [];
+  window.BetterCanvas = {install, ZOOM_STOPS, FRAME_PRESETS, extend: fn => extensions.push(fn)};
 })();

@@ -52,7 +52,7 @@ export type DesignApi = {
   setTool(tool: string): void;
   getTool(): string;
   commands(): { id: string; label?: string }[];
-  runCommand(id: string): void;
+  runCommand(id: string, arg?: unknown): boolean;
   /** Constraints of a positioned layer ({h, v}: start/end/stretch/center/scale), or null when it has none. */
   getConstraints?(id: string): { h: string; v: string } | null;
   /** Change constraints without moving the layers (one undo step). */
