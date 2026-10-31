@@ -10,14 +10,26 @@ import { Menu, MenuContent } from "./parts";
 import { previewMenu, selectedPreview } from "./preview-menu";
 import "./context-menu.css";
 
-type Detail = { x: number; y: number; point: Point | null; target: string | null; under: string[] };
+type Detail = {
+  x: number;
+  y: number;
+  point: Point | null;
+  target: string | null;
+  under: string[];
+  /** Opened on an artboard label (Wonder CM9-label: no Select layer). */
+  label?: boolean;
+};
 
 /** Re-renders with the document and selection, so labels such as Show / Unlock stay current. */
-function LayerEntries({ under }: { under: string[] }) {
+function LayerEntries({ under, label }: { under: string[]; label: boolean }) {
   useDesign();
   useSelection();
   const preview = selectedPreview();
-  return <MenuEntries entries={preview ? previewMenu(preview, under) : layerMenu("canvas", under)} />;
+  return (
+    <MenuEntries
+      entries={preview ? previewMenu(preview, under) : layerMenu(label ? "label" : "canvas", under)}
+    />
+  );
 }
 
 export function CanvasContextMenu() {
@@ -59,7 +71,7 @@ export function CanvasContextMenu() {
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
           {state.target ? (
-            <LayerEntries under={state.under} />
+            <LayerEntries under={state.under} label={!!state.label} />
           ) : (
             <MenuEntries entries={emptyCanvasMenu(state.point)} />
           )}

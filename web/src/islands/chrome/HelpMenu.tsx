@@ -1,6 +1,7 @@
 // `?` help menu at the bottom-left of the canvas (Wonder T5-help): Docs ↗, Keyboard shortcuts, Restart onboarding,
 // Give feedback, Contact us ↗, Discord community ↗, Export diagnostic logs | What's new. Items without a Verynize
-// mechanism use placeholder URLs for now (see help-links.ts); Wonder's own news entries are not reproduced.
+// mechanism use placeholder URLs for now (see help-links.ts). What's new lists placeholder entries (title over a
+// date, 44px rows like Wonder's "Wonder Capture / August 18") before View all.
 import { useState, type ComponentType } from "react";
 import {
   ArrowUpRight,
@@ -12,7 +13,7 @@ import {
   MessagesSquare,
   Undo2,
 } from "lucide-react";
-import { HELP_LINKS, openExternal } from "./help-links";
+import { HELP_LINKS, WHATS_NEW, openExternal } from "./help-links";
 import {
   MenuContent,
   MenuGroup,
@@ -50,7 +51,12 @@ const ITEMS: Item[] = [
     icon: Undo2,
     action: () => window.dispatchEvent(new Event("bd:open-onboarding")),
   },
-  { id: "help-feedback", label: "Give feedback", icon: MessageSquare, action: link(HELP_LINKS.feedback) },
+  {
+    id: "help-feedback",
+    label: "Give feedback",
+    icon: MessageSquare,
+    action: link(HELP_LINKS.feedback),
+  },
   {
     id: "help-contact",
     label: "Contact us",
@@ -118,6 +124,20 @@ export function HelpMenu() {
         <MenuSeparator />
         <MenuGroup>
           <MenuLabel className="px-2">What&apos;s new</MenuLabel>
+          {WHATS_NEW.map(({ id, title, date, url }) => (
+            <MenuItem
+              key={id}
+              data-whats-new={id}
+              className="h-11 gap-2.5 px-2"
+              onSelect={() => openExternal(url)}
+            >
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate">{title}</span>
+                <span className="truncate text-foreground-3">{date}</span>
+              </span>
+              <ArrowUpRight className="ml-auto size-3 text-muted-foreground" />
+            </MenuItem>
+          ))}
           <MenuItem
             id="help-whats-new"
             className={row}

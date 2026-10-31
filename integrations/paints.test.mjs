@@ -422,6 +422,16 @@ test("code export: Tailwind component without editor bookkeeping, CSS classes fr
   );
   assert.doesNotMatch(jsx, /data-node-id|data-component-x/);
   assert.match(jsx, /data-fills=/);
+  assert.doesNotMatch(jsx, /Made with Verynize|box-sizing/, "the plain export has no clipboard header");
+  // The clipboard form (Copy as code / Copy prompt, Wonder P1-copy-code.txt): header comment, then the reset.
+  const snippet = tailwindCode(d, "p", ["label"], "Label", {
+    snippet: { links: ["verynize://node/doc/p/abc"], date: "Oct 31, 2026" },
+  });
+  assert.match(
+    snippet,
+    /^\/\*\*\n \* Made with Verynize\n \* verynize:\/\/node\/doc\/p\/abc\n \* Oct 31, 2026\n \*\/\n/,
+  );
+  assert.match(snippet, /<>\n {6}<style>\{"\* \{ box-sizing: border-box; \}"\}<\/style>\n/);
   const html = exportHTML(validateDocument(d), "p");
   const out = cssCode(html, d.tokens);
   assert.match(out, /<style>\n:root \{\n  --brand: #172033;\n  --glow: #456099;\n\}\n/);

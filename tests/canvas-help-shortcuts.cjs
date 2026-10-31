@@ -65,16 +65,26 @@ const nodes = [
     assert.equal(parseInt(await p.locator('#zoom-reset').textContent()), 50, '#zoom-reset keeps the percentage');
     // Snap and saved views stay reachable (hidden proxies, palette, `+` menu).
     assert.equal(await p.locator('#snap').isChecked(), true);
+    // Toolbar toggle: the on-screen layout stays highlighted while the view reads "Design · edited" (Wonder T1, T3,
+    // T4, V3); the open views menu moves the highlight to `+` (T2-plus).
+    assert.equal(await p.locator('#layout-design').getAttribute('aria-pressed'), 'true');
+    assert.equal(await p.locator('#layout-details').getAttribute('aria-pressed'), 'false');
     await p.locator('#bd-view-menu-button').click();
     await p.getByRole('menuitem', {name: 'Save current view'}).waitFor();
+    assert.equal(await p.locator('#layout-design').getAttribute('aria-pressed'), 'false', 'the + takes the highlight while open');
     await p.keyboard.press('Escape');
+    await p.waitForFunction(() => document.querySelector('#layout-design')?.getAttribute('aria-pressed') === 'true');
 
     // ---- T5: the `?` help menu.
     await p.locator('#bd-canvas-help').click();
     const help = await p.locator('#bd-help-menu [role=menuitem]').evaluateAll(list => list.map(i => [i.textContent.trim(), i.hasAttribute('data-disabled')]));
-    assert.deepEqual(help.map(h => h[0]), ['Docs', 'Keyboard shortcuts', 'Restart onboarding', 'Give feedback', 'Contact us', 'Discord community', 'Export diagnostic logs', 'View all']);
+    assert.deepEqual(help.map(h => h[0]), ['Docs', 'Keyboard shortcuts', 'Restart onboarding', 'Give feedback', 'Contact us', 'Discord community', 'Export diagnostic logs', "What's new in Verynize 0.15October 31", 'View all']);
     assert.deepEqual(help.filter(h => h[1]).map(h => h[0]), [], 'every help item is enabled (placeholder URLs in help-links.ts)');
-    assert.equal(await p.locator('#bd-help-menu').getByText("What's new").count(), 1);
+    assert.equal(await p.locator('#bd-help-menu').getByText("What's new", {exact: true}).count(), 1);
+    // What's new lists placeholder entries (title over date, two-line 44px rows like Wonder T5-help) before View all.
+    const entry = p.locator('#bd-help-menu [data-whats-new]');
+    assert.equal(await entry.count(), 1);
+    assert.equal(await entry.evaluate(el => el.offsetHeight), 44);
     await p.locator('#help-onboarding').click();
     await p.locator('#onboarding').waitFor();
     await p.evaluate(() => { localStorage.setItem('verynize.onboarding', 'done'); });
@@ -121,6 +131,56 @@ const nodes = [
     await p.locator('[data-command-id="app.shortcuts"]').click();
     await p.locator('#shortcuts-drawer').waitFor();
     await p.locator('#shortcuts-drawer [aria-label="Close keyboard shortcuts"]').click();
+    await p.locator('#shortcuts-drawer').waitFor({state: 'detached'});
+
+    // ---- P2: Wonder's palette geometry, empty state (Recent, Application), sections, highlight, ↓, Esc.
+    await p.evaluate(() => window.design.setSelection(['dark']));
+    await p.keyboard.press('Meta+KeyK');
+    const palette = p.locator('[data-command-palette]');
+    await palette.waitFor();
+    const paletteInput = p.locator('[data-command-palette] [cmdk-input]');
+    assert.deepEqual(await palette.boundingBox(), {x: 384, y: 122, width: 672, height: 480}, 'Wonder: x384 y122 672 × 480');
+    assert.equal(await paletteInput.getAttribute('placeholder'), 'Jump to or find anything...');
+    assert.equal((await p.locator('[data-palette-input]').boundingBox()).height, 44, 'input strip 44px');
+    assert.equal((await p.locator('[data-palette-footer]').boundingBox()).height, 38, 'footer 38px');
+    assert.equal((await p.locator('[data-palette-footer]').innerText()).replace(/\s+/g, ''), 'Navigate↓↑Open↵CloseEsc');
+    assert.equal(await palette.evaluate(el => getComputedStyle(el).borderTopLeftRadius), '16px');
+    assert.equal(await palette.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(24, 24, 24)');
+    const paletteSections = () => p.locator('[data-command-palette] [data-palette-section]:not([hidden])').evaluateAll(els => els.map(el => [el.dataset.paletteSection, [...el.querySelectorAll('[cmdk-item]:not([hidden])')].map(i => i.dataset.commandId)]));
+    const activeRow = () => p.locator('[data-command-palette] [cmdk-item][data-selected=true]').getAttribute('data-command-id');
+    assert.deepEqual(await paletteSections(), [['Recent', ['app.shortcuts', 'select.all']], ['Application', ['app.shortcuts', 'app.tour', 'app.feedback']]], 'Recent, then Application');
+    assert.equal(await activeRow(), 'app.shortcuts', 'first row active');
+    const firstRow = p.locator('[data-command-palette] [cmdk-item]').first();
+    assert.equal((await firstRow.boundingBox()).height, 32, 'rows are 32px');
+    assert.deepEqual(await firstRow.evaluate(el => { const r = el.getBoundingClientRect(); return [r.x, r.width, getComputedStyle(el).backgroundColor, getComputedStyle(el).borderTopLeftRadius]; }), [392, 656, 'rgb(41, 41, 41)', '8px'], 'active row x392 w656, rgb(41,41,41), radius 8');
+    // Typed one key at a time (as a user does): the list must not keep an earlier query's scroll offset.
+    await paletteInput.fill('');
+    await paletteInput.pressSequentially('select', {delay: 40});
+    await p.waitForTimeout(100);
+    assert.ok(await p.evaluate(() => { const list = document.querySelector('[data-command-palette] [cmdk-list]'), row = list.querySelector('[cmdk-item][data-selected=true]'), a = list.getBoundingClientRect(), b = row.getBoundingClientRect(); return b.top >= a.top && b.bottom <= a.bottom; }), 'the active row stays visible while typing');
+    let listed = await paletteSections();
+    assert.deepEqual(listed.slice(0, 2).map(s => s[0]), ['Edit', 'Selection'], 'Wonder P2-select: Edit, then Selection');
+    assert.deepEqual(listed[0][1].slice(0, 2), ['select.all', 'clipboard.pasteOverSelection']);
+    assert.ok(listed.some(([title, ids]) => title === 'Workspace' && ids.includes('layout.details')), 'toolbar views match "select"');
+    assert.equal(await activeRow(), 'select.all');
+    assert.equal(await p.locator('[data-command-id="select.all"] .text-foreground-2').first().innerText(), 'Select', 'the match is highlighted');
+    assert.equal((await p.locator('[data-command-id="select.all"] kbd').allInnerTexts()).join(''), '⌘A', 'keycaps');
+    await p.keyboard.press('ArrowDown');
+    assert.equal(await activeRow(), 'clipboard.pasteOverSelection', 'Wonder P2-keyboard-focused');
+    await paletteInput.fill('dark');
+    listed = await paletteSections();
+    assert.deepEqual(listed[0], ['Layers', ['layer:dark']], 'layers come first');
+    await p.locator('[data-command-palette] [aria-label="Clear search"]').click();
+    assert.equal(await paletteInput.inputValue(), '');
+    await p.keyboard.press('Escape');
+    await palette.waitFor({state: 'detached'});
+    assert.deepEqual(await p.evaluate(() => window.design.getSelection()), ['dark'], 'Esc keeps the selection');
+    await p.keyboard.press('Meta+KeyK');
+    await paletteInput.fill('light');
+    await p.keyboard.press('Enter');
+    await palette.waitFor({state: 'detached'});
+    await p.waitForFunction(() => window.design.getSelection()[0] === 'light');
+    console.log('PASS ⌘K palette: 672 × 480, Recent, sections, highlight, keyboard');
     // Files stays reachable from the title bar Search button.
     await p.locator('#shell-search').click();
     await p.waitForFunction(() => document.body.classList.contains('files-view'));
