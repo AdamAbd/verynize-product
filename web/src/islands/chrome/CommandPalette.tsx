@@ -73,8 +73,12 @@ function paletteCommands(): PaletteCommand[] {
   return [...appCommands(), ...registry];
 }
 
-/** Whether ⌘K belongs to the palette here: the code workspace terminal and the Files home keep their own ⌘K. */
-function paletteKeyAllowed() {
+/**
+ * Whether ⌘K belongs to the palette here: the code workspace, any focused terminal (⌘K clears it) and the Files home
+ * keep their own ⌘K.
+ */
+function paletteKeyAllowed(target: EventTarget | null) {
+  if (target instanceof Element && target.closest(".xterm")) return false;
   const body = document.body.classList;
   return !["code-mode", "files-view", "settings-open", "onboarding-open"].some((c) =>
     body.contains(c),
@@ -86,7 +90,7 @@ export function CommandPalette() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = /Mac/.test(navigator.platform) ? e.metaKey : e.ctrlKey;
-      if (!mod || e.altKey || e.shiftKey || e.code !== "KeyK" || !paletteKeyAllowed()) return;
+      if (!mod || e.altKey || e.shiftKey || e.code !== "KeyK" || !paletteKeyAllowed(e.target)) return;
       // Capture phase: runs before wonder-shell's window ⌘K (Files search) and stops it.
       e.preventDefault();
       e.stopImmediatePropagation();
