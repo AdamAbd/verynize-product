@@ -46,20 +46,31 @@ export function MenuItem({
     <Menu.Item
       className={cn(
         row,
-        destructive && "text-destructive data-[disabled]:text-destructive/50",
+        // Wonder R3-delete-hover: a disabled destructive row (Delete on the only page) is a solid muted red,
+        // label and glyph alike, rgb(132,69,68).
+        destructive && "text-destructive data-[disabled]:text-context-menu-destructive-disabled",
         className,
       )}
       {...props}
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {shortcut ? <MenuShortcut>{shortcut}</MenuShortcut> : null}
+      {shortcut ? (
+        <MenuShortcut muted={destructive && props.disabled}>{shortcut}</MenuShortcut>
+      ) : null}
     </Menu.Item>
   );
 }
 
-export function MenuShortcut({ children }: { children: ReactNode }) {
+export function MenuShortcut({ children, muted }: { children: ReactNode; muted?: boolean }) {
   return (
-    <span className="ml-auto flex shrink-0 items-center text-xs text-foreground-3">{children}</span>
+    <span
+      className={cn(
+        "ml-auto flex shrink-0 items-center text-xs",
+        muted ? "text-context-menu-destructive-disabled" : "text-foreground-3",
+      )}
+    >
+      {children}
+    </span>
   );
 }
 

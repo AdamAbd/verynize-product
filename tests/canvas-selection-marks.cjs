@@ -1,5 +1,6 @@
 // Wonder selection marks: hidden-layer outline (CM6-hidden), constraint guides and no name label on nested layers
-// (S2, CM3-text-menu), hover without child outlines (S1-hover-final), whole-number Alt distances (TR5) and caret-only
+// (S2, CM3-text-menu), hover without child outlines (S1-hover-final), whole-number Alt distances (TR5), stack-child
+// drags that follow the pointer with no drop column (R1, TR7) and caret-only
 // text editing (TX1-click, TX1-drag).
 const {_electron} = require('@playwright/test');
 const assert = require('node:assert/strict');
@@ -136,6 +137,45 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.deepEqual(distances, ['36'], 'a 36.4 px gap reads 36');
     await page.mouse.move(5, 5);
 
+    // ---- R1 / TR7: a dragged auto-layout child follows the pointer; there is no drop column ----
+    // Wonder R1 fixture: a row (padding 20, gap 20) of 100×60, 100×120 and 100×90 frames.
+    const row = () => [frame('row', 0, 0, 380, 160, {layout: 'flex', direction: 'row', gap: 20, padding: 20, wMode: 'hug', hMode: 'hug'}),
+      frame('k1', 0, 0, 100, 60, {parentId: 'row'}), frame('k2', 0, 0, 100, 120, {parentId: 'row'}), frame('k3', 0, 0, 100, 90, {parentId: 'row'})];
+    const kidsOf = () => page.evaluate(() => window.design.getDocument().pages[0].nodes.filter(n => n.parentId === 'row').map(n => n.id));
+    const worldBox = id => page.evaluate(id => {
+      const r = document.querySelector(`#canvas [data-id=${id}]`).getBoundingClientRect(), w = document.querySelector('#canvas-wrap').getBoundingClientRect(), c = window.design.getCamera();
+      return {x: Math.round((r.x - w.x - c.x) / c.zoom), y: Math.round((r.y - w.y - c.y) / c.zoom), w: Math.round(r.width / c.zoom), h: Math.round(r.height / c.zoom)};
+    }, id);
+    async function held(from, to, during) {
+      const a = await screen(...from), b = await screen(...to);
+      await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, {steps: 8});
+      const seen = await during(); await page.mouse.up(); return seen;
+    }
+    await seed(row()); await select(['k2']);
+    // R1-row-drag-slot: dragged 120 right, the child is drawn over the last slot; its own slot stays open.
+    const slot = await held([170, 80], [290, 80], async () => ({k1: await worldBox('k1'), k2: await worldBox('k2'), k3: await worldBox('k3'),
+      kids: await kidsOf(), column: await page.locator('#canvas-overlay .drop-column').count(), parent: await shown('#canvas-overlay .drop-target')}));
+    assert.deepEqual(slot.k2, {x: 260, y: 20, w: 100, h: 120}, 'the child follows the pointer');
+    assert.deepEqual([slot.k1, slot.k3], [{x: 20, y: 20, w: 100, h: 60}, {x: 260, y: 20, w: 100, h: 90}], 'siblings keep their slots during the drag');
+    assert.deepEqual(slot.kids, ['k1', 'k2', 'k3'], 'no live reorder');
+    assert.equal(slot.column, 0, 'no drop column');
+    assert.equal(slot.parent, true, 'the parent is outlined');
+    assert.deepEqual(await kidsOf(), ['k1', 'k2', 'k3'], 'released short of the last child\'s centre, it settles back into its slot');
+    await held([170, 80], [330, 80], async () => {});
+    assert.deepEqual(await kidsOf(), ['k1', 'k3', 'k2'], 'released past it, it settles into the last slot');
+    assert.equal(await page.locator('#canvas [data-id=k2]').evaluate(e => e.style.translate), '', 'the drag offset clears');
+    // R1-row-drag-far: dragged out below the row, the child follows the pointer and lands on the page there.
+    await seed(row()); await select(['k2']);
+    const far = await held([170, 80], [220, 330], () => worldBox('k2'));
+    assert.deepEqual(far, {x: 190, y: 270, w: 100, h: 120}, 'the child follows the pointer out of the row');
+    const out = await page.evaluate(() => window.design.getDocument().pages[0].nodes.find(n => n.id === 'k2'));
+    assert.deepEqual([out.parentId || null, out.x, out.y], [null, 190, 270], 'released outside, it is a top-level layer where it was drawn');
+    // TR7-out-during's "column" is a marquee: a press in the gap between two children draws the marquee box.
+    await seed(row()); await select(['k2']);
+    const marquee = await held([130, 100], [190, 380], async () => ({box: await shown('#canvas-overlay .marquee'), k2: await worldBox('k2')}));
+    assert.equal(marquee.box, true, 'dragging from the gap draws a marquee');
+    assert.deepEqual(marquee.k2, {x: 140, y: 20, w: 100, h: 120}, 'no child moves');
+
     // ---- TX1: a text being typed shows only its caret (in its ink colour) ----
     await seed([frame('board', 0, 0, 400, 300)]);
     let p = await screen(59, 160);
@@ -158,7 +198,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal(await page.locator('#canvas .layer.selected').evaluate(e => getComputedStyle(e).outlineStyle), 'solid', 'and the selection ring');
 
     assert.deepEqual(errors, []);
-    console.log('PASS canvas selection marks: hidden-layer outline, nested constraint guides without labels, single clipped ring, hover outline + label only, whole-number Alt distances, caret-only text editing');
+    console.log('PASS canvas selection marks: hidden-layer outline, nested constraint guides without labels, single clipped ring, hover outline + label only, whole-number Alt distances, stack drag follows the pointer without a drop column, caret-only text editing');
   } finally {
     await app.close();
     await fs.rm(dir, {recursive: true, force: true});

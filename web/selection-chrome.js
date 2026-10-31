@@ -70,6 +70,10 @@
 #canvas-overlay .selection-union>.union-handle[data-corner=ne]{right:-4.5px;top:-4.5px}
 #canvas-overlay .selection-union>.union-handle[data-corner=sw]{left:-4.5px;bottom:-4.5px}
 #canvas-overlay .selection-union>.union-handle[data-corner=se]{right:-4.5px;bottom:-4.5px}
+#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle{pointer-events:auto;touch-action:none}
+#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle::after{content:'';position:absolute;inset:-4px}
+#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle[data-corner=nw],#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle[data-corner=se]{cursor:nwse-resize}
+#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle[data-corner=ne],#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle[data-corner=sw]{cursor:nesw-resize}
 #canvas[data-multi-select] .layer>.handle,#canvas-overlay[data-multi-select] .clipped-selection .handle{display:none!important}
 #canvas-overlay .frame-label.selected{color:${SELECT}}
 .transforming #canvas-overlay #selection-chat-chip,.moving #canvas-overlay #selection-chat-chip{visibility:hidden}
@@ -309,22 +313,65 @@
       }
     }
 
-    // Scale a layer by a factor from the inspector's Scale section (Wonder T4-scale-retry: W, H and %), the same way
-    // the Scale tool does: proportional, children and type included, the top-left corner fixed. One undo step.
-    function scaleBy(id, factor) {
-      const n = find(id), k0 = Number(factor);
-      if (!n || n.locked || !(k0 > 0) || !Number.isFinite(k0) || !(n.w > 0) || !(n.h > 0)) return false;
-      const k = Math.max(k0, MIN_SIZE / n.w, MIN_SIZE / n.h);
+    // Proportional scale of several layers (Wonder R2-multi-scale-after: a 240×120 union of 100×60 and 100×120 frames
+    // dragged to 360×180 gives 150×90 and 150×180 frames, the 40 px gap becoming 60): each layer scales with its
+    // content, and a free layer's offset from `anchor` (a world point) scales too. Without an anchor (or inside an auto
+    // layout) a layer keeps its own x/y — its top-left stays put.
+    function scaleSnapshot(ids) {
+      return ids.map(find).filter(n => n && !n.locked && n.w > 0 && n.h > 0)
+        .map(n => ({n, s: {x: n.x, y: n.y, w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, r: ctx.worldRect(n.id), flow: isFlow(find(n.parentId)), content: scaleContent(n.id)}));
+    }
+    function minFactor(snaps) { return Math.max(0, ...snaps.map(({s}) => Math.max(MIN_SIZE / s.w, MIN_SIZE / s.h))); }
+    function applyScale(snaps, k, anchor) {
+      for (const {n, s, r, flow, content} of snaps) {
+        n.w = r2(s.w * k); n.h = r2(s.h * k);
+        unbindKeys(n, ['w', 'h']);
+        if (n.wMode && n.wMode !== 'fixed') { n.wMode = 'fixed'; delete n.wCalc; }
+        if (n.hMode && n.hMode !== 'fixed') { n.hMode = 'fixed'; delete n.hCalc; }
+        if (s.wPct !== undefined) n.wPct = r2(s.wPct * k);
+        if (s.hPct !== undefined) n.hPct = r2(s.hPct * k);
+        if (anchor && r && !flow) { n.x = r2(s.x + (r.x - anchor.x) * (k - 1)); n.y = r2(s.y + (r.y - anchor.y) * (k - 1)); }
+        applyContentScale(content, n.id, k);
+      }
+    }
+    // Top-level members of a set of ids (a selected layer inside another selected layer scales with it).
+    function topOf(ids) {
+      const set = new Set(ids);
+      return ids.filter(id => { for (let p = find(id)?.parentId; p; p = find(p)?.parentId) if (set.has(p)) return false; return true; });
+    }
+    function unionOf(snaps) {
+      const rects = snaps.map(x => x.r).filter(Boolean); if (!rects.length) return null;
+      const x = Math.min(...rects.map(r => r.x)), y = Math.min(...rects.map(r => r.y));
+      return {x, y, w: Math.max(...rects.map(r => r.x + r.w)) - x, h: Math.max(...rects.map(r => r.y + r.h)) - y};
+    }
+
+    // Scale the selection's union from a corner with the Scale tool (Wonder R2): the opposite corner stays put and
+    // the factor is the drag projected on the union's diagonal, as for a single layer. One undo step.
+    function startUnionScale(e, corner) {
+      const snaps = scaleSnapshot(topOf([...sel()].filter(id => !find(id)?.hidden))), u = unionOf(snaps);
+      if (!snaps.length || !u || !(u.w > 0) || !(u.h > 0)) return;
+      const hx = corner.includes('e') ? 1 : -1, hy = corner.includes('s') ? 1 : -1;
+      const anchor = {x: hx > 0 ? u.x : u.x + u.w, y: hy > 0 ? u.y : u.y + u.h}, start = {x: e.clientX, y: e.clientY}, g = gesture(), min = minFactor(snaps);
+      begin();
+      track(e, ev => {
+        const dx = (ev.clientX - start.x) / cam.zoom, dy = (ev.clientY - start.y) / cam.zoom;
+        const k = Math.max(min, diagonalFactor(u.w, u.h, Math.max(1, u.w + hx * dx), Math.max(1, u.h + hy * dy)));
+        g.commit(); applyScale(snaps, k, anchor);
+        ed.render();
+      }, end);
+    }
+
+    // Scale layers by a factor from the inspector's Scale section (Wonder T4-scale-retry / R2: W, H and %), the way
+    // the Scale tool does: proportional, children and type included. One layer keeps its top-left; several scale
+    // about their union's top-left. One undo step.
+    function scaleBy(ids, factor) {
+      const snaps = scaleSnapshot(topOf([].concat(ids || []))), k0 = Number(factor);
+      if (!snaps.length || !(k0 > 0) || !Number.isFinite(k0)) return false;
+      const k = Math.max(k0, minFactor(snaps));
       if (Math.abs(k - 1) < 1e-9) return false;
-      const s = {w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, content = scaleContent(id);
+      const u = snaps.length > 1 ? unionOf(snaps) : null;
       gesture().commit();
-      n.w = r2(s.w * k); n.h = r2(s.h * k);
-      unbindKeys(n, ['w', 'h']);
-      if (n.wMode && n.wMode !== 'fixed') { n.wMode = 'fixed'; delete n.wCalc; }
-      if (n.hMode && n.hMode !== 'fixed') { n.hMode = 'fixed'; delete n.hCalc; }
-      if (s.wPct !== undefined) n.wPct = r2(s.wPct * k);
-      if (s.hPct !== undefined) n.hPct = r2(s.hPct * k);
-      applyContentScale(content, id, k);
+      applyScale(snaps, k, u && {x: u.x, y: u.y});
       ed.render();
       return true;
     }
@@ -333,6 +380,9 @@
     function pointerDown(e) {
       if (e.button !== 0) return false; // right-click opens the layer menu instead
       if (e.target.closest?.('#selection-chat-chip')) return true; // the click runs the chip's action
+      // Wonder R2-multi-scale-before: with the Scale tool the union's corners scale the whole selection.
+      const handle = tool() === 'scale' && sel().size > 1 && e.target.closest?.('#canvas-overlay .selection-union > .union-handle');
+      if (handle) { startUnionScale(e, handle.dataset.corner); return true; }
       const zone = e.target.closest?.('#canvas-overlay .rotate-zone, #canvas-overlay .resize-edge');
       if (!zone) return false;
       const id = [...sel()][0]; if (!id || sel().size !== 1) return false;
