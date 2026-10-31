@@ -15,6 +15,7 @@ dist/
 secrets*.json
 .cloudflare/
 .wrangler/
+.vercel/
 
 # Node server state (server/node.mjs default DATA_DIR)
 /data/

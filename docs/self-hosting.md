@@ -52,7 +52,7 @@ Rate limits match `cloudflare.config.ts` (10 room creations and 10 sign-in attem
 
 ## Operations
 
-- **One process per `DATA_DIR`.** Rooms are single-writer actors held in memory; two processes on the same files would both accept writes. Scale vertically, or see "Notes for a multi-instance target" in `cloud/platform/README.md`.
+- **One process per `DATA_DIR`.** Rooms are single-writer actors held in memory; two processes on the same files would both accept writes. Scale vertically, or use the multi-instance runtime ([deployment-vercel.md](deployment-vercel.md): libSQL, Redis and S3 instead of local files).
 - **TLS** terminates at your reverse proxy (Caddy, nginx). Forward WebSocket upgrades on `/api/rooms/*/socket` and keep idle timeouts above a minute.
 - **Logs** carry the path of failed requests and error messages only; tokens, sessions and query strings are not logged. Do not enable access logs with full URLs in the proxy: socket tokens travel as query parameters.
 - **Shutdown** (`SIGTERM`/`SIGINT`) commits every actor, closes room sockets with 1001 (clients reconnect) and closes the databases.
