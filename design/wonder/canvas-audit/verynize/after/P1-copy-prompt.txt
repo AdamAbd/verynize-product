@@ -5,7 +5,7 @@ Design to implement (each link ends in the Verynize page id and the element id: 
   Read each element through the Verynize MCP server: get_element_code with that pageId and element id (omit document to read the design open in Verynize), and get_design_context for its tokens and fonts.
   (If you don't have the Verynize MCP installed yet, see "Run and configure" in docs/figcraft-reference.md of the Verynize repository: with the app open, connect to the url and token in ~/Library/Application Support/Verynize/mcp.json.)
 
-Inline snapshot (fallback, captured at 2026-10-31T05:39:18.534Z):
+Inline snapshot (fallback, captured at 2026-10-31T10:07:40.497Z):
 ```tsx
 /**
  * Made with Verynize
@@ -22,7 +22,7 @@ export default function Frame() {
       <style>{"* { box-sizing: border-box; }"}</style>
       <div data-node-label="Frame" data-canvas-x="56" data-canvas-y="-153" className="layout-free w-[420px] h-[391.18px] bg-white overflow-hidden" data-vn='{"gap":16,"padding":16}'>
         <div data-node-label="Frame" className="absolute left-[49px] top-[40px] layout-free w-[100px] h-[80px] bg-white overflow-hidden" data-vn='{"gap":16,"padding":16}'></div>
-        <p data-node-label="Canvas au" className="absolute left-[59px] top-[160px] text-black text-xs leading-[1.15] font-['Inter']">Canvas au</p>
+        <p data-node-label="Canvas au" className="absolute left-[59px] top-[160px] text-black text-xs leading-[normal] font-['Inter']">Canvas au</p>
       </div>
     </>
   );
