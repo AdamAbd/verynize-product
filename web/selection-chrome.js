@@ -21,8 +21,19 @@
   const NAME_OFFSET = 20; // label line box (18 px) sits just above the box
   const CHIP_SIZE = 12, CHIP_INSET = 4, CHIP_RISE = 14; // ⊕: 12 px circle, right edge 4 px inside the box, centre 14 px above
   const MIN_SIZE = 10;
-  const SELECT = '#c468f7'; // Wonder's selection purple (CM6-hidden outline, S2 guides)
+  // Wonder's selection purple #c468f7 and badge #a245d3 (S4-frame-ready), tokens in canvas.css.
+  const SELECT = 'var(--canvas-select,#c468f7)', BADGE = 'var(--canvas-select-badge,#a245d3)';
   const r2 = v => Math.round(v * 100) / 100;
+  // Accumulated rotation of a node and its ancestors (degrees).
+  function totalRotation(n, find) { let total = Number(n.rotation) || 0, a = n; while (a.parentId) { a = find(a.parentId); if (!a) break; total += Number(a.rotation) || 0; } return total; }
+  // A layer's screen frame relative to the canvas viewport: centre, unrotated size and on-screen angle. The selection
+  // chrome and the hover outline (Wonder S1-hover-final: the outline turns with a rotated frame) are placed from it.
+  function frameOf(el, n, find, zoom, viewport) {
+    if (!el || !n) return null;
+    const r = el.getBoundingClientRect(); if (!r.width && !r.height) return null;
+    return {cx: r.left - viewport.left + r.width / 2, cy: r.top - viewport.top + r.height / 2, w: el.offsetWidth * zoom, h: el.offsetHeight * zoom, angle: totalRotation(n, find)};
+  }
+  const placeFrame = (el, f) => Object.assign(el.style, {left: f.cx - f.w / 2 + 'px', top: f.cy - f.h / 2 + 'px', width: f.w + 'px', height: f.h + 'px', transform: f.angle ? `rotate(${f.angle}deg)` : ''});
   // Rotation in degrees, rounded to 0.01 and normalised to (−180, 180].
   function normalize(deg) { const r = ((r2(deg) + 180) % 360 + 360) % 360 - 180; return r === -180 ? 180 : r2(r) || 0; }
   // The chrome turns with the node by a multiple of 90° so that its own angle stays within (−45, 45].
@@ -48,23 +59,23 @@
 #canvas-overlay .resize-edge,#canvas-overlay .rotate-zone{position:absolute;pointer-events:auto;touch-action:none}
 #canvas-overlay .rotate-zone{width:${ZONE}px;height:${ZONE}px;cursor:${ROTATE_CURSOR}}
 #canvas-overlay #selection-name{position:absolute!important;left:0!important;top:${-NAME_OFFSET}px!important;transform:none!important;max-width:none}
-#canvas-overlay #selection-measure{position:absolute!important;left:50%!important;top:calc(100% + ${BADGE_GAP}px)!important;transform:translateX(-50%)!important;height:22px;box-sizing:border-box;padding:0 6px!important;font:12px/22px Inter,system-ui,sans-serif!important;border-radius:4px!important;background:#a245d3!important;color:#fff!important;white-space:nowrap;pointer-events:none;font-feature-settings:'calt' 0!important}
-#canvas-overlay #selection-chat-chip{position:absolute;right:${CHIP_INSET}px;top:${-CHIP_RISE - CHIP_SIZE / 2}px;width:${CHIP_SIZE}px;height:${CHIP_SIZE}px;box-sizing:border-box;margin:0;padding:0;border:1px solid var(--shell-accent,#b93cdb);border-radius:50%;background:transparent;color:var(--shell-accent,#b93cdb);pointer-events:auto;cursor:pointer;display:flex;align-items:center;justify-content:center}
+#canvas-overlay #selection-measure{position:absolute!important;left:50%!important;top:calc(100% + ${BADGE_GAP}px)!important;transform:translateX(-50%)!important;height:22px;box-sizing:border-box;padding:0 6px!important;font:12px/22px Inter,system-ui,sans-serif!important;border-radius:4px!important;background:${BADGE}!important;color:#fff!important;white-space:nowrap;pointer-events:none;font-feature-settings:'calt' 0!important}
+#canvas-overlay #selection-chat-chip{position:absolute;right:${CHIP_INSET}px;top:${-CHIP_RISE - CHIP_SIZE / 2}px;width:${CHIP_SIZE}px;height:${CHIP_SIZE}px;box-sizing:border-box;margin:0;padding:0;border:1px solid ${SELECT};border-radius:50%;background:transparent;color:${SELECT};pointer-events:auto;cursor:pointer;display:flex;align-items:center;justify-content:center}
 #canvas-overlay #selection-chat-chip::before,#canvas-overlay #selection-chat-chip::after{content:'';position:absolute;left:50%;top:50%;width:6px;height:1px;background:currentColor;transform:translate(-50%,-50%)}
 #canvas-overlay #selection-chat-chip::after{transform:translate(-50%,-50%) rotate(90deg)}
-#canvas-overlay #selection-chat-chip:hover{background:color-mix(in srgb,var(--shell-accent,#b93cdb) 20%,transparent)}
-#canvas-overlay .selection-union{position:absolute;box-sizing:border-box;border:1px solid var(--shell-accent,#b93cdb)}
-#canvas-overlay .selection-union>.union-handle{position:absolute;width:8px;height:8px;box-sizing:border-box;background:#fff;border:1px solid var(--shell-accent,#b93cdb)}
+#canvas-overlay #selection-chat-chip:hover{background:color-mix(in srgb,${SELECT} 20%,transparent)}
+#canvas-overlay .selection-union{position:absolute;box-sizing:border-box;outline:1px solid ${SELECT};outline-offset:-.5px}
+#canvas-overlay .selection-union>.union-handle{position:absolute;width:9px;height:9px;box-sizing:border-box;background:#fff;border:1px solid ${SELECT}}
 #canvas-overlay .selection-union>.union-handle[data-corner=nw]{left:-4.5px;top:-4.5px}
 #canvas-overlay .selection-union>.union-handle[data-corner=ne]{right:-4.5px;top:-4.5px}
 #canvas-overlay .selection-union>.union-handle[data-corner=sw]{left:-4.5px;bottom:-4.5px}
 #canvas-overlay .selection-union>.union-handle[data-corner=se]{right:-4.5px;bottom:-4.5px}
 #canvas[data-multi-select] .layer>.handle,#canvas-overlay[data-multi-select] .clipped-selection .handle{display:none!important}
-#canvas-overlay .frame-label.selected{color:var(--shell-accent,#b93cdb)}
+#canvas-overlay .frame-label.selected{color:${SELECT}}
 .transforming #canvas-overlay #selection-chat-chip,.moving #canvas-overlay #selection-chat-chip{visibility:hidden}
 .panning #canvas-overlay .resize-edge,.panning #canvas-overlay .rotate-zone,.space-pan #canvas-overlay .resize-edge,.space-pan #canvas-overlay .rotate-zone{pointer-events:none}
 #canvas-overlay #selection-chat-chip[hidden],#canvas-overlay #selection-name[hidden],#canvas-overlay #selection-measure[hidden]{display:none!important}
-#canvas-overlay .hidden-outline{position:absolute;box-sizing:border-box;border:1px solid ${SELECT};transform-origin:50% 50%}
+#canvas-overlay .hidden-outline{position:absolute;box-sizing:border-box;outline:1px solid ${SELECT};outline-offset:-.5px;transform-origin:50% 50%}
 #canvas-overlay .constraint-guides{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 #canvas-overlay .constraint-guide{stroke:${SELECT};stroke-opacity:.75;stroke-width:1;stroke-dasharray:2.5 2;shape-rendering:crispEdges}
 .moving #canvas-overlay .constraint-guides,.transforming #canvas-overlay .constraint-guides{display:none}
@@ -98,14 +109,9 @@
     let busy = false;
     const tool = () => ctx.getTool();
 
-    const totalRotation = n => { let total = Number(n.rotation) || 0, a = n; while (a.parentId) { a = find(a.parentId); if (!a) break; total += Number(a.rotation) || 0; } return total; };
     const viewport = () => wrap.getBoundingClientRect();
-    function screenFrame(n) {
-      const el = elementOf(n.id); if (!el) return null;
-      const r = el.getBoundingClientRect(), v = viewport(); if (!r.width && !r.height) return null;
-      return {cx: r.left - v.left + r.width / 2, cy: r.top - v.top + r.height / 2, w: el.offsetWidth * cam.zoom, h: el.offsetHeight * cam.zoom, angle: totalRotation(n)};
-    }
-    const place = (el, cx, cy, w, h, angle) => Object.assign(el.style, {left: cx - w / 2 + 'px', top: cy - h / 2 + 'px', width: w + 'px', height: h + 'px', transform: angle ? `rotate(${angle}deg)` : ''});
+    const screenFrame = n => frameOf(elementOf(n.id), n, find, cam.zoom, viewport());
+    const place = (el, cx, cy, w, h, angle) => placeFrame(el, {cx, cy, w, h, angle});
     function topSelected() {
       const list = ed.nodes().filter(n => sel().has(n.id));
       return list.filter(n => !list.some(o => o.id !== n.id && ed.descendants(o.id).has(n.id)));
@@ -129,7 +135,7 @@
     function drawConstraintGuides(n) {
       guides.replaceChildren();
       const parent = n.parentId && find(n.parentId);
-      if (!parent || parent.hidden || (isFlow(parent) && n.position !== 'absolute') || totalRotation(n) % 360) return;
+      if (!parent || parent.hidden || (isFlow(parent) && n.position !== 'absolute') || totalRotation(n, find) % 360) return;
       const childEl = elementOf(n.id), parentEl = elementOf(parent.id); if (!childEl || !parentEl) return;
       const v = viewport(), c = childEl.getBoundingClientRect(), p = parentEl.getBoundingClientRect();
       if (!c.width && !c.height) return;
@@ -251,7 +257,7 @@
     // the Scale tool scales the layer and its content proportionally.
     function startResize(e, id, handle) {
       const n = find(id); if (!n || n.locked) return;
-      const total = totalRotation(n), scaling = tool() === 'scale';
+      const total = totalRotation(n, find), scaling = tool() === 'scale';
       const s = {x: n.x, y: n.y, w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, start = {x: e.clientX, y: e.clientY}, g = gesture();
       const hx = handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0, hy = handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0;
       const content = scaling ? scaleContent(id) : [];
@@ -337,5 +343,5 @@
     return {draw, startResize, startRotate, scaleBy, pointerDown, addToChat, busy: () => busy};
   }
 
-  window.BetterSelectionChrome = {install, normalize, chromeAngle, diagonalFactor};
+  window.BetterSelectionChrome = {install, normalize, chromeAngle, diagonalFactor, frameOf, placeFrame};
 })();

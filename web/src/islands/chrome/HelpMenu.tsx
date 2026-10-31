@@ -79,7 +79,9 @@ const ITEMS: Item[] = [
   },
 ];
 
-const row = "h-7.25 gap-2.5 px-2";
+// Wonder R6-help-menu: 180px menu, 13px text starting 34px in (12px icon, 9px gap), cut with an ellipsis at 112px
+// beside the ↗ icon ("Discord commu…") and at 128px without it ("Export diagnostic l…").
+const row = "h-7.25 gap-2.25 px-2 text-sm";
 
 export function HelpMenu() {
   const [open, setOpen] = useState(false);
@@ -115,8 +117,13 @@ export function HelpMenu() {
               disabled={!action}
               onSelect={() => action?.()}
             >
-              <Icon />
-              <span className="truncate">{label}</span>
+              <Icon className="size-3" />
+              <span
+                data-help-label=""
+                className={external ? "max-w-28 truncate" : "max-w-32 truncate"}
+              >
+                {label}
+              </span>
               {external ? <ArrowUpRight className="ml-auto size-3 text-muted-foreground" /> : null}
             </MenuItem>
           ))}
