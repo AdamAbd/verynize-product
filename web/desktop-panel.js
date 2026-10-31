@@ -203,7 +203,9 @@
   const openChat=()=>{setCodeMode(false);dock.append(agentSection);document.body.classList.add('agent-chat-open');requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));};
   // Code mode: a full-window workspace (web/src/islands/code) hosts the chat section in its center column.
   let codeHost=null;
-  const setCodeMode=on=>{const body=document.body.classList;if(body.contains('code-mode')===!!on)return;body.toggle('code-mode',!!on);if(on&&codeHost)codeHost.append(agentSection);else if(!on)dock.append(agentSection);try{localStorage.setItem('verynize-code-mode',on?'1':'0')}catch{}requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));notify();};
+  // setCodeMode requests /code or /editor (web/shell-request.js); the shell router applies it with applyCodeMode.
+  const setCodeMode=on=>{if(document.body.classList.contains('code-mode')===!!on)return;window.shellRequest({view:on?'/code':'/editor'},()=>applyCodeMode(on));};
+  const applyCodeMode=on=>{const body=document.body.classList;if(body.contains('code-mode')===!!on)return;body.toggle('code-mode',!!on);if(on&&codeHost)codeHost.append(agentSection);else if(!on)dock.append(agentSection);try{localStorage.setItem('verynize-code-mode',on?'1':'0')}catch{}requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));notify();};
   const openProject=()=>setCodeMode(true);
   const attachCodeHost=el=>{codeHost=el;if(el&&document.body.classList.contains('code-mode'))el.append(agentSection);else if(!el)dock.append(agentSection);};
   const queueView=q=>q.map(t=>({id:t.id,text:t.displayPrompt||t.prompt,...(t.images.length?{images:t.images.map(i=>i.name)}:{}),...(t.mentions?.length?{mentions:t.mentions}:{}),at:t.at}));
@@ -220,7 +222,7 @@
     switchProject:(key,name,options={})=>{if(typeof key!=='string'||!key)throw Error('Invalid project');projectName=key==='unattached'?'':String(name||key.split(/[\\/]/).pop());$('project-name').textContent=projectName||'No repository';if(key===projectKey&&conversations.length){const next=conversations.find(c=>c.id===options.select);if(next)switchTo(next);else{renderHistory();activate();}return;}loadChats(key,options);},
     chatSummaries,removeChat,rootOf:()=>rootOf(conversation),initialSelection:()=>initialSelection,setStatus:text=>status(text),
     setOpenFile:file=>{openFile=file&&typeof file.path==='string'?{path:file.path,text:String(file.text||'')}:null;},
-    attachCodeHost,setCodeMode,
+    attachCodeHost,setCodeMode,applyCodeMode,
     actions:{openDesign:()=>openDesign(),saveDesign:()=>action(()=>saveDesign(false))(),saveDesignAs:()=>action(()=>saveDesign(true))(),gitStatus:()=>gitStatus(),createWorktree:()=>createWorktree(),livePreview:()=>livePreview(),captureApp:()=>captureApp(),exportPDF:()=>exportPDF()},
     selectChat:id=>{const next=conversations.find(c=>c.id===id);if(!next)return false;switchTo(next);return true;},
     forkAt:index=>forkAt(index),
