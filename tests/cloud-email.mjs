@@ -65,7 +65,7 @@ let mf;
 try {
   const options = await cloudOptions(path.join(dir, "state"));
   const env = options.workers[0].config.env;
-  if (RUNTIME === "node") {
+  if (RUNTIME !== "workerd") {
     const smtp = await smtpListener("mada@gayaloo.app");
     try {
       env.EMAIL_PROVIDER = { type: "text", value: "smtp" };
@@ -94,7 +94,7 @@ try {
       assert.equal(response.status, 503, await response.text());
       assert.equal(smtp.messages.length, 1);
       console.log(
-        "cloud email (node): SMTP sending, sender rejection and missing transport passed",
+        `cloud email (${RUNTIME}): SMTP sending, sender rejection and missing transport passed`,
       );
     } finally {
       smtp.close();

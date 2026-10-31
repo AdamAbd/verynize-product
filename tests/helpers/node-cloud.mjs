@@ -18,7 +18,7 @@ const RUNTIME = pathToFileURL(path.join(root, "cloud/platform/node/runtime.js"))
 export const CURRENT_WORKER = { mainModule: "cloud/worker.js", modules: null };
 
 /** Miniflare binding descriptions -> Node binding descriptions (cloud/platform/node/env.js). */
-function nodeBindings(env) {
+export function nodeBindings(env) {
   const bindings = {};
   for (const [name, binding] of Object.entries(env || {})) {
     if (typeof binding === "string") bindings[name] = { type: "text", value: binding };
@@ -31,7 +31,7 @@ function nodeBindings(env) {
 }
 
 /** A fixture Worker written for workerd, loaded on Node with the Node DurableObject base. */
-async function writeModules(manifest) {
+export async function writeModules(manifest) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-node-worker-"));
   for (const [name, module] of Object.entries(manifest.modules)) {
     const source = module.contents.replace(/(["'])cloudflare:workers\1/g, JSON.stringify(RUNTIME));
@@ -85,6 +85,70 @@ class TestSocket extends EventTarget {
       this.#ws.close(code, reason);
     } catch {}
   }
+}
+
+/**
+ * Miniflare's dispatchFetch against a server at `origin`: the input URL's own origin is what the
+ * Worker sees (x-forwarded-host/proto); redirects are followed through `again`.
+ */
+export async function dispatch(origin, input, init, again) {
+  const url = new URL(input instanceof Request ? input.url : input);
+  const headers = new Headers(
+    init.headers || (input instanceof Request ? input.headers : undefined),
+  );
+  headers.set("x-forwarded-host", url.host);
+  headers.set("x-forwarded-proto", url.protocol.slice(0, -1));
+  const target = new URL(url.pathname + url.search, origin);
+  if (headers.get("upgrade")?.toLowerCase() === "websocket") return socketTo(target, headers);
+  const body = init.body ?? (input instanceof Request ? input.body : undefined);
+  const response = await fetch(target, {
+    method: init.method || (input instanceof Request ? input.method : "GET"),
+    headers,
+    body,
+    duplex: body instanceof ReadableStream ? "half" : undefined,
+    redirect: "manual",
+  });
+  const location = response.headers.get("location");
+  if (
+    init.redirect !== "manual" &&
+    location &&
+    [301, 302, 303, 307, 308].includes(response.status)
+  ) {
+    await response.body?.cancel();
+    return again(new URL(location, url).href, { headers: init.headers });
+  }
+  return response;
+}
+
+function socketTo(target, headers) {
+  const forwarded = {};
+  for (const [name, value] of headers)
+    if (!/^(upgrade|connection|sec-websocket-.*)$/i.test(name)) forwarded[name] = value;
+  target.protocol = target.protocol === "https:" ? "wss:" : "ws:";
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(target, { headers: forwarded });
+    const socket = new TestSocket(ws);
+    ws.once("upgrade", () =>
+      resolve({ status: 101, ok: false, headers: new Headers(), webSocket: socket }),
+    );
+    ws.once("unexpected-response", (_request, response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        const responseHeaders = new Headers();
+        for (const [name, value] of Object.entries(response.headers))
+          if (typeof value === "string") responseHeaders.set(name, value);
+        resolve(
+          new Response(Buffer.concat(chunks), {
+            status: response.statusCode,
+            headers: responseHeaders,
+          }),
+        );
+        ws.terminate();
+      });
+    });
+    ws.once("error", reject);
+  });
 }
 
 export class NodeCloud {
@@ -146,63 +210,7 @@ export class NodeCloud {
   /** Same contract as Miniflare: the URL's own origin is what the Worker sees. */
   async dispatchFetch(input, init = {}) {
     await this.ready;
-    const url = new URL(input instanceof Request ? input.url : input);
-    const headers = new Headers(
-      init.headers || (input instanceof Request ? input.headers : undefined),
-    );
-    headers.set("x-forwarded-host", url.host);
-    headers.set("x-forwarded-proto", url.protocol.slice(0, -1));
-    const target = new URL(url.pathname + url.search, this.#origin);
-    if (headers.get("upgrade")?.toLowerCase() === "websocket") return this.#socket(target, headers);
-    const body = init.body ?? (input instanceof Request ? input.body : undefined);
-    const response = await fetch(target, {
-      method: init.method || (input instanceof Request ? input.method : "GET"),
-      headers,
-      body,
-      duplex: body instanceof ReadableStream ? "half" : undefined,
-      redirect: "manual",
-    });
-    const location = response.headers.get("location");
-    if (
-      init.redirect !== "manual" &&
-      location &&
-      [301, 302, 303, 307, 308].includes(response.status)
-    ) {
-      await response.body?.cancel();
-      return this.dispatchFetch(new URL(location, url).href, { headers: init.headers });
-    }
-    return response;
-  }
-
-  #socket(target, headers) {
-    const forwarded = {};
-    for (const [name, value] of headers)
-      if (!/^(upgrade|connection|sec-websocket-.*)$/i.test(name)) forwarded[name] = value;
-    target.protocol = target.protocol === "https:" ? "wss:" : "ws:";
-    return new Promise((resolve, reject) => {
-      const ws = new WebSocket(target, { headers: forwarded });
-      const socket = new TestSocket(ws);
-      ws.once("upgrade", () =>
-        resolve({ status: 101, ok: false, headers: new Headers(), webSocket: socket }),
-      );
-      ws.once("unexpected-response", (_request, response) => {
-        const chunks = [];
-        response.on("data", (chunk) => chunks.push(chunk));
-        response.on("end", () => {
-          const responseHeaders = new Headers();
-          for (const [name, value] of Object.entries(response.headers))
-            if (typeof value === "string") responseHeaders.set(name, value);
-          resolve(
-            new Response(Buffer.concat(chunks), {
-              status: response.statusCode,
-              headers: responseHeaders,
-            }),
-          );
-          ws.terminate();
-        });
-      });
-      ws.once("error", reject);
-    });
+    return dispatch(this.#origin, input, init, (...args) => this.dispatchFetch(...args));
   }
 
   async getD1Database(name) {
