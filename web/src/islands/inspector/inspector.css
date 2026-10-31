@@ -39,6 +39,11 @@
   background: var(--input);
 }
 
+/* Type-to-bind list (type-bind.tsx, properties audit G1): exactly as wide as the field it hangs under. */
+[data-type-bind] {
+  width: var(--radix-popper-anchor-width);
+}
+
 /* Properties audit bug 7 / WP-13: no focus ring on inspector buttons after a pointer click. Radix hands focus back to
    a menu or popover trigger on close, and Chrome then matches :focus-visible (the menu items were focused by script),
    so the ring lingered on `+`, the blend drop and the header tools. Keyboard users keep the ring:

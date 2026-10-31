@@ -419,6 +419,7 @@ function SizeField({
       field={axis}
       label={label}
       prefix={<Affix>{axis.toUpperCase()}</Affix>}
+      typeBind="typing"
     >
       {(bind) => (
         <Field
@@ -547,6 +548,7 @@ function LimitRows({
               label={l.label}
               prefix={<IconAffix icon={icon} />}
               className="col-span-2"
+              typeBind="empty"
             >
               {(bind) => (
                 <Field
@@ -797,6 +799,7 @@ function GapField({
         field="gap"
         label={label}
         prefix={<IconAffix icon={icon} />}
+        typeBind="typing"
       >
         {(suffix) => (
           <Field
