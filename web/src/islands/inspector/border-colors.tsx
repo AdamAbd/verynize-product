@@ -1,7 +1,8 @@
 // Border section (Wonder A2, design/wonder/properties-audit): one "All" border entry, or up to four side entries
 // (Top / Right / Bottom / Left), each with width, side selector, eye, `−` and its own colour row. Header tools:
-// Sliders (Solid / Dashed / Dotted), Sides (split into four entries / collapse back to All) and `+` (add a side;
-// disabled once all four exist). Every action is one document edit and one undo step.
+// Sliders (Solid / Dashed / Dotted), Sides (split into four entries / collapse back to All) and `+`. In All mode `+`
+// splits into Top and Right (both keep the All values); each further `+` adds the next missing side (Bottom, then
+// Left), and it is disabled once all four exist (Wonder H4). Every action is one document edit and one undo step.
 //
 // Document model (rendering in web/node-style.js):
 //   All:   strokeWidth (+ optional width binding), strokeColor / strokeToken, strokeHidden.
@@ -11,7 +12,7 @@ import { Eye } from "lucide-react";
 import { BorderSidesIcon, ClosedEyeIcon, RemoveIcon, StrokeWeightIcon } from "@/components/icons";
 import type { DesignDocument } from "@/lib/bridge";
 import { BindableField } from "./bind";
-import { Field, IconAffix, IconButton, NativeSelect, OptionalSection } from "./controls";
+import { Field, IconAffix, IconButton, NativeSelect, OptionalSection, type IconType } from "./controls";
 import { EffectColorField, LineStyleMenu } from "./effects";
 import { fmt, patchNodes, setField, type Node } from "./model";
 
@@ -122,6 +123,19 @@ function uniformPatch(value: number, color: SideColor, hidden: boolean) {
   };
 }
 
+/** The Sides tool glyph: Wonder draws the sides in use solid and the others dotted until all four exist. */
+const sidesIcons = new Map<string, IconType>();
+function sidesIcon(present: boolean[] | null): IconType {
+  if (!present) return BorderSidesIcon;
+  const key = present.map(Number).join("");
+  let icon = sidesIcons.get(key);
+  if (!icon) {
+    const Icon: IconType = (props) => <BorderSidesIcon {...props} sides={present} />;
+    sidesIcons.set(key, (icon = Icon));
+  }
+  return icon;
+}
+
 const firstSide = (widths: number[]) => Math.max(0, widths.findIndex((value) => value > 0));
 
 export function BorderSection({ doc, node, selection }: Props) {
@@ -152,8 +166,13 @@ export function BorderSection({ doc, node, selection }: Props) {
         ...BORDER_DEFAULT,
         ...withoutWidthBinding(current),
       }));
-    // All covers every side, so `+` splits it; with sides, it adds the first missing side like the first one.
-    if (!sides) return split();
+    // All covers every side, so `+` splits it into Top + Right (Wonder H4-plus-all); Bottom and Left have no
+    // entry and draw nothing. With sides, it adds the first missing side like the first one.
+    if (!sides)
+      return edit((state, current) => {
+        state.widths = state.widths.map((value, i) => (i < 2 ? value : 0));
+        return sidesPatch(current, state);
+      });
     edit((state, current) => {
       const missing = state.widths.findIndex((value) => !(value > 0));
       if (missing < 0) return {};
@@ -342,7 +361,7 @@ export function BorderSection({ doc, node, selection }: Props) {
             }
           />
           <IconButton
-            icon={BorderSidesIcon}
+            icon={sidesIcon(sides && !full ? widths.map((value) => value > 0) : null)}
             label="Independent border sides"
             active={sides}
             aria-pressed={sides}
