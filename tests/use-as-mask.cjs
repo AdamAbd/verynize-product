@@ -287,6 +287,8 @@ const path = require("node:path");
     assert.equal(all[at].masks, undefined);
     assert.deepEqual(await selection(), [shape.id]);
     assert.equal(shape.radius, 0);
+    assert.equal(shape.clipContent, true, "the detached Frame clips its content (P5-detached-layer-inspector)");
+    assert.equal(await page.getByRole("checkbox", { name: "Clip content" }).isChecked(), true);
     const detached = await box(shape.id);
     near(
       await pixel(detached.x + 20, detached.y + 20),

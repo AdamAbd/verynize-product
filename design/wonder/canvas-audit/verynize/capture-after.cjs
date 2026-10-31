@@ -27,7 +27,8 @@ const wantAny = (...prefixes) => !only.length || prefixes.some((x) => only.some(
 const WHITE = "#ffffff";
 const frame = (id, name, x, y, w, h, extra = {}) => ({ id, name, type: "frame", x, y, w, h, color: WHITE, radius: 0, layout: "free", clipContent: true, ...extra });
 const shaderFrame = (id, name, x, y, preset, extra = {}) => frame(id, name, x, y, 120, 120, { shaderFill: true, shaderPreset: preset, shaderSpeed: 0.4, color: "#f08a3c", ...extra });
-const text = (id, name, x, y, value, extra = {}) => ({ id, name, type: "text", x, y, w: 59.39, h: 14.5, text: value, fontFamily: "Inter", fontWeight: "400", fontSize: 12, color: "#000000", radius: 0, wMode: "hug", hMode: "hug", ...extra });
+// Text drawn with the Text tool, like Wonder's "Canvas au": Inter Regular 12, line height Auto (CM3, TX1-click).
+const text = (id, name, x, y, value, extra = {}) => ({ id, name, type: "text", x, y, w: 59.39, h: 14.5, text: value, fontFamily: "Inter", fontWeight: "400", fontSize: 12, lineHeight: "auto", color: "#000000", radius: 0, wMode: "hug", hMode: "hug", ...extra });
 
 // Stage 1: the first Frame Wonder drew (F drag 300×270, X65 Y−153).
 const SINGLE = [frame("f1", "Frame", 65, -153, 300, 270)];
