@@ -379,6 +379,8 @@ async function ensureSandbox() {
     await wait(300);
 
     /* ---------- PM3 Edit ---------- */
+    // The selector form was replaced by the DOM Edit mode (web/preview-edit.js); its proof is capture-edit.cjs.
+    if (await page.locator(".canvas-preview .preview-edit").count()) {
     await select(id);
     await page.locator("#preview-edit").click();
     await page.locator(".preview-edit:visible").waitFor();
@@ -406,12 +408,16 @@ async function ensureSandbox() {
     // Source file untouched (edits are transient DOM changes).
     metrics["PM3-undone.png"].sourceUntouched = !(await fs.readFile(path.join(repo.activeRoot, "index.html"), "utf8")).includes("Edited in Verynize");
 
+    } else log("PM3: legacy edit form gone; run capture-edit.cjs for the Edit mode");
+
     /* ---------- PM4 Capture (whole viewport) and the region picker ---------- */
     await page.locator("#preview-navigate").click();
     await select(id);
     await wait(200);
     const before = await page.evaluate(() => window.design.getDocument().pages.flatMap((p) => p.nodes).length);
     await page.locator("#live-capture").click();
+    // Capture is a mode now: ⌘Return captures the whole viewport.
+    if (await page.locator("#live-capture[aria-pressed=true]").count()) await page.keyboard.press("Meta+Enter");
     await wait(60);
     await snap("PM4-capture.png");
     await page.waitForFunction((n) => window.design.getDocument().pages.flatMap((p) => p.nodes).length > n, before, { timeout: 20000 });
