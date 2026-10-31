@@ -50,7 +50,7 @@ export type FilterType =
   | "saturate"
   | "sepia";
 export type Filter = { type: FilterType; value: number; backdrop?: boolean; hidden?: boolean };
-export type MaskType = "linear" | "radial" | "conic" | "image" | "custom";
+export type MaskType = "linear" | "radial" | "conic" | "image" | "custom" | "shape";
 export type Mask = {
   type: MaskType;
   rotation?: number;
@@ -61,6 +61,8 @@ export type Mask = {
   src?: string;
   /** Custom mask: a CSS gradient. */
   css?: string;
+  /** Shape mask ("Use as mask"): inset(T% R% B% L%) of the layer's box. */
+  shape?: string;
   mode?: "auto" | "alpha" | "luminance";
   repeat?: string;
   x?: number;
