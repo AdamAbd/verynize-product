@@ -256,6 +256,45 @@ async function write(file, text) {
     await page.locator('#project-prompt').press('Escape');
     await page.evaluate(() => window.agentWorkspace.setDefaults({ agent: 'codex' }));
 
+    // 9. Design style picker (style-picker.tsx): "Auto" by default, lists window.desktop.designStylesList(), the pick is
+    // sent as the run's designStyle (the runtime adds it to the turn context), and /style opens the picker.
+    const catalog = await page.evaluate(async () => (typeof window.desktop?.designStylesList === 'function' ? await window.desktop.designStylesList() : null));
+    if (!catalog?.length) {
+      assert.equal(await page.locator('#chat-style-picker').count(), 0, 'without a style catalog the picker stays hidden');
+      assert.equal(await page.evaluate(() => window.chatDesignStyle?.get()), '', 'and no style is sent');
+      console.log('design style picker: skipped (this desktop build has no designStylesList)');
+    } else {
+      const picker = page.locator('#chat-style-picker');
+      await picker.waitFor();
+      assert.equal(await picker.getAttribute('data-style-id'), '', 'Auto by default');
+      assert.match(await picker.getAttribute('aria-label'), /Design style: Auto/);
+      await picker.click();
+      const rows = page.locator('#chat-style-menu [data-style-id]');
+      await rows.nth(1).waitFor();
+      assert.equal(await rows.count(), catalog.length + 1, 'Auto plus every catalog style');
+      await shot('chat-style-menu');
+      const choice = catalog.find(style => style.id === 'neo-brutalism') ?? catalog[0];
+      await page.locator(`#chat-style-menu [data-style-id="${choice.id}"]`).click();
+      await page.waitForFunction(id => document.getElementById('chat-style-picker')?.dataset.styleId === id, choice.id);
+      assert.ok((await picker.innerText()).includes(choice.name), 'the chip shows the chosen style');
+      assert.equal(await page.evaluate(() => window.chatDesignStyle.get()), choice.id);
+      const done = await page.evaluate(() => window.agentWorkspace.getUsage().completed);
+      await page.locator('#project-prompt').fill('Restyle the hero');
+      await page.locator('#project-prompt').press('Enter');
+      await completed(done + 1);
+      assert.ok(JSON.stringify((await turns()).at(-1).params).includes(choice.id), 'the turn carries the chosen design style');
+      // /style opens the picker from the keyboard; Enter on Auto clears the choice.
+      await page.locator('#project-prompt').pressSequentially('/sty');
+      await page.locator('[data-command="style"][data-selected=true]').waitFor();
+      await page.locator('#project-prompt').press('Enter');
+      await page.locator('#chat-style-menu').waitFor();
+      await page.locator('#chat-style-menu [data-style-id=""]').focus();
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => document.getElementById('chat-style-picker')?.dataset.styleId === '');
+      assert.equal(await page.evaluate(() => window.chatDesignStyle.get()), '');
+      assert.equal(await page.locator('#project-prompt').inputValue(), '', 'the /style command leaves no text behind');
+    }
+
     console.log('Chat composer + menu and slash commands passed');
   } finally {
     await app.close();

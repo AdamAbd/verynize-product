@@ -859,8 +859,19 @@ function AssistantMessage({
   );
 }
 
-/** Empty chat (34, 35): logo + prompt, with the workspace's suggestions as cards that fill the composer. */
-function EmptyState({ suggestions }: { suggestions: { title: string; prompt: string }[] }) {
+type Suggestion = NonNullable<ChatState["suggestions"]>[number];
+const SHOWN_SUGGESTIONS = 4;
+/** A window of consecutive starter briefs, rotated per conversation (stable for a chat, varied across chats). */
+function pickSuggestions(suggestions: Suggestion[], seed: string | null): Suggestion[] {
+  if (suggestions.length <= SHOWN_SUGGESTIONS) return suggestions;
+  let hash = 0;
+  for (const char of seed ?? "") hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  const start = hash % suggestions.length;
+  return Array.from({ length: SHOWN_SUGGESTIONS }, (_, i) => suggestions[(start + i) % suggestions.length]);
+}
+
+/** Empty chat (34, 35): logo + prompt, with a few of the workspace's starter briefs as cards that fill the composer. */
+function EmptyState({ suggestions, seed }: { suggestions: Suggestion[]; seed: string | null }) {
   const fill = (prompt: string) => {
     const el = document.getElementById("project-prompt") as HTMLTextAreaElement | null;
     if (!el) return;
@@ -874,8 +885,8 @@ function EmptyState({ suggestions }: { suggestions: { title: string; prompt: str
       <p className="text-base leading-5.25 font-medium text-foreground">What would you like to work on?</p>
       {suggestions.length > 0 && (
         <ul aria-label="Suggestions" className="m-0 mt-3 grid w-full max-w-100 list-none grid-cols-2 gap-1.5 p-0">
-          {suggestions.slice(0, 4).map((item) => (
-            <li key={item.title} className="flex">
+          {pickSuggestions(suggestions, seed).map((item) => (
+            <li key={item.title} data-suggestion={item.title} className="flex">
               <ChatSuggestionButton hook={hook.suggestion} title={item.prompt} onClick={() => fill(item.prompt)} className="w-full">
                 <span className="w-full truncate text-sm text-foreground-2">{item.title}</span>
                 <span className="line-clamp-2 text-xs leading-4 text-muted-foreground">{item.prompt}</span>
@@ -944,7 +955,7 @@ export function Transcript({ state }: { state: ChatState }) {
       <div ref={sessionSlot} className="contents" />
       {/* `--chat-column` is set by hosts with a centered column (Code workspace, 770px); unset in the dock. */}
       {state.messages.length === 0 ? (
-        <EmptyState suggestions={state.suggestions ?? []} />
+        <EmptyState suggestions={state.suggestions ?? []} seed={state.conversationId} />
       ) : (
         <div className="mx-auto flex w-full max-w-(--chat-column) flex-col gap-5">
           {state.messages.map((message, index) =>

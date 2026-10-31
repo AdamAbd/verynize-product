@@ -78,8 +78,8 @@ export type ChatState = {
   mentions?: ChatMention[];
   /** Saved composer draft per conversation. */
   draft?: string;
-  /** Empty-state suggestions. */
-  suggestions?: { title: string; prompt: string }[];
+  /** Empty-state starter briefs (`style`: the design style catalog slug the brief is written for). */
+  suggestions?: { title: string; prompt: string; style?: string }[];
   /** Folder the current chat works in (its worktree, else the repository root); null for quick chats. */
   chatRoot?: string | null;
   /** Root the main process confirmed as active (files, git, dev server); undefined while switching. */
