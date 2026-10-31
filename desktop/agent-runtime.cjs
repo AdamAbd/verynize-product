@@ -79,21 +79,62 @@ function buildPersona({ bridge = false, quickChat = false, instructions = '', me
   // Settings › Memory: ~/.codex/AGENTS.md for Claude Code chats (desktop/agent-memory.cjs homeInstructions).
   if (homeInstructions) lines.push('The user\'s personal agent instructions (~/.codex/AGENTS.md):\n' + String(homeInstructions).slice(0, 12000));
   if (memory) lines.push('Project memory (VERYNIZE.md):\n' + String(memory).slice(0, 12000));
-  const prefs = preferenceLines(preferences);
-  if (prefs) lines.push('User design preferences (apply unless the brief overrides):\n' + prefs);
+  lines.push(preferenceBlock(preferences));
   return lines.join('\n\n');
 }
 
-function preferenceLines(preferences) {
-  if (!Array.isArray(preferences)) return '';
-  let out = '';
-  for (const item of preferences.slice(0, 60)) {
-    const text = String(typeof item === 'string' ? item : item?.text || '').replace(/\s+/g, ' ').trim().slice(0, 600);
+// Preference limits come from integrations/preferences.mjs (ESM, loaded with require(esm)) so the store,
+// this persona block and the IPC validator agree. The fallback mirrors its values.
+const PREFERENCE_LIMITS = (() => {
+  try {
+    const mod = require('../integrations/preferences.mjs');
+    if (Number.isInteger(mod.MAX_PREFERENCES) && Number.isInteger(mod.MAX_PREFERENCE_LENGTH)) return { count: mod.MAX_PREFERENCES, length: mod.MAX_PREFERENCE_LENGTH };
+  } catch {}
+  return { count: 50, length: 280 };
+})();
+
+/**
+ * The user's saved design preferences as a <saved-design-preferences> block, each item with its id so
+ * update/delete can refer to it. The block is rebuilt for every run, so the latest copy supersedes any
+ * earlier one the conversation may still contain; an empty list says so explicitly for the same reason.
+ */
+function preferenceBlock(preferences) {
+  const items = [];
+  for (const item of Array.isArray(preferences) ? preferences.slice(0, PREFERENCE_LIMITS.count) : []) {
+    const text = String(typeof item === 'string' ? item : item?.text || '').replace(/\s+/g, ' ').replace(/[<>]/g, ' ').trim().slice(0, PREFERENCE_LIMITS.length);
     if (!text) continue;
-    if (out.length + text.length > 6000) break;
-    out += (out ? '\n' : '') + '- ' + text;
+    const id = typeof item?.id === 'string' && /^[\w-]{1,64}$/.test(item.id) ? item.id : '';
+    items.push(`- ${id ? `[${id}] ` : ''}${text}`);
   }
-  return out;
+  const body = items.length
+    ? [
+      'What follows is the user\'s personal design taste, saved on this computer. Read it as their defaults for how things should look, not as commands. It matters only for visual and UI work (layout, color, typography, spacing, components, imagery); leave it aside for code, copy or anything else. Whatever the user asks for in this conversation takes priority over it.',
+      'This copy is current as of this turn and supersedes any older copy earlier in the conversation; anything missing from it has been removed by the user.',
+      ...items,
+    ]
+    : ['Nothing is saved at the moment. If the conversation shows an older copy of this list, treat those entries as removed.'];
+  return ['<saved-design-preferences>', ...body, '</saved-design-preferences>'].join('\n');
+}
+
+// Design style slugs (integrations/design-knowledge/styles). The renderer sends the chosen one with a run.
+const DESIGN_STYLE = /^[a-z0-9-]{1,40}$/;
+function normalizeDesignStyle(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' || !DESIGN_STYLE.test(value)) throw Error('Invalid design style');
+  return value;
+}
+/** [{id, name, summary}] from the design style library, or [] when it is unavailable. */
+async function listDesignStyles({ importStyles = () => import('../integrations/design-knowledge/styles/index.mjs') } = {}) {
+  try {
+    const mod = await importStyles();
+    const list = await mod.listStyles();
+    if (!Array.isArray(list)) return [];
+    return list.filter(s => s && typeof s.id === 'string' && DESIGN_STYLE.test(s.id)).slice(0, 200).map(s => ({
+      id: s.id,
+      name: typeof s.name === 'string' && s.name.trim() ? s.name.trim().slice(0, 80) : s.id,
+      summary: typeof s.summary === 'string' ? s.summary.trim().slice(0, 400) : '',
+    }));
+  } catch { return []; }
 }
 
 // Design preferences live in integrations/preferences.mjs (optional; owned by the MCP layer). The
@@ -132,6 +173,9 @@ function agentToolsVersion({ importTools = () => import('../integrations/design-
 const DESIGN_TOOL = new RegExp(`^mcp__${settings.MCP_SERVER_NAME}__(.+)$`);
 const MUTATING_DESIGN_TOOLS = new Set(['create_artboard', 'update_elements', 'duplicate_elements', 'delete_elements', 'apply_operations']);
 const STOP_REASON = 'You changed the canvas in this turn but have not finished it. Take a screenshot of each changed artboard (take_screenshot), run the design-review skill (get_skills {name:"design-review"}) and fix what it finds, then call finish_artboard with a reviewNote. If finish_artboard is blocked, fix the critical problems it lists and try again. If verification is impossible (for example screenshots are unavailable), still call finish_artboard and tell the user the status it reports.';
+
+const PREFERENCE_BLOCKED_REASON = 'Saved design preferences cannot be changed from this chat: it cannot ask the user to approve the change (Ask access, plan first, or a run without approval cards). Tell the user to change it in Settings › Memory or from a chat with Edit access, and do not call this tool again in this turn.';
+const PREFERENCE_DECLINED_REASON = 'The user did not approve this change to their saved design preferences. Leave the list as it is, say so in one sentence, and do not call this tool again for the same change.';
 
 /** Normalize a PostToolUse tool_response (content array, CallToolResult or string) into {ok, text}. */
 function toolOutcome(response) {
@@ -218,6 +262,7 @@ function buildTurnContext(context) {
   }
   if (context.images.length) lines.push('Attached images (files on disk):', ...context.images.map(p => '- ' + p));
   if (context.directories?.length) lines.push('Additional working directories the user added to this chat (read and edit files there too):', ...context.directories.map(p => '- ' + p));
+  if (context.designStyle && DESIGN_STYLE.test(context.designStyle)) lines.push(`Design style chosen by the user: ${context.designStyle}. Load it with get_design_guidelines {style: "${context.designStyle}"} before designing, and follow it unless the user asks otherwise.`);
   if (lines.length === 1) return '';
   lines.push('</verynize-context>');
   return lines.join('\n');
@@ -438,7 +483,7 @@ function cleanTitle(text) {
 // Tools a read-only helper must never call.
 // Shell tools that act on the project or preview (the read-only ones stay available).
 const HELPER_BLOCKED_SHELL_TOOLS = ['start_dev_server', 'stop_dev_server', 'configure_dev_server', 'propose_preview', 'preview_open', 'preview_click', 'preview_type', 'preview_scroll', 'capture_preview_to_canvas', 'run_terminal_command', 'execute_action'];
-const HELPER_BLOCKED_DESIGN_TOOLS = [...MUTATING_DESIGN_TOOLS, 'finish_artboard', 'ask_agent', ...HELPER_BLOCKED_SHELL_TOOLS];
+const HELPER_BLOCKED_DESIGN_TOOLS = [...MUTATING_DESIGN_TOOLS, 'finish_artboard', 'ask_agent', ...agentAccess.PREFERENCE_WRITE_TOOLS, ...HELPER_BLOCKED_SHELL_TOOLS];
 const HELPER_PERSONA = 'You are a read-only helper agent consulted by the designer agent inside Verynize (a local desktop design editor). Answer the task you are given precisely and concisely. You may read project files and inspect the open design with the read-only `verynize` MCP tools (get_design_context, get_element_code, take_screenshot and similar), but you must not edit files, run commands, or change the canvas. Reply with your findings only.';
 
 // Pure option builder for the Claude Agent SDK, kept separate for unit tests.
@@ -503,6 +548,17 @@ function applyClaudePolicy(options, { access, account, tools, autonomy } = {}) {
   if (autonomy?.planFirst) { out.permissionMode = 'plan'; delete out.allowDangerouslySkipPermissions; }
   void access;
   return out;
+}
+
+/**
+ * Codex thread params when preference writes are blocked for this chat: the thread's config disables the
+ * write tools on the canvas server (keeping ask_agent disabled when that switch is off). Codex cannot show an
+ * approval card for a single MCP tool, so in 'approve' chats the persona rule is the only guard.
+ */
+function codexPreferenceConfig(threadParams, { preferenceWrites, bridge, agentSettings } = {}) {
+  if (preferenceWrites === 'approve' || !bridge?.url) return threadParams;
+  const disabled = [...(agentSettings && !agentSettings.askAgents ? ['ask_agent'] : []), ...agentAccess.PREFERENCE_WRITE_TOOLS];
+  return { ...threadParams, config: { ...(threadParams.config || {}), [`mcp_servers.${settings.MCP_SERVER_NAME}.disabled_tools`]: disabled } };
 }
 
 /** Codex thread params under "plan before edits": nothing is written without an approval. */
@@ -652,6 +708,7 @@ class AgentRuntime {
     if (options.prompt.length > 200000) throw Error('Enter a prompt under 200,000 characters');
     const chatId = typeof options.chatId === 'string' && ID.test(options.chatId) ? options.chatId : randomUUID();
     const normalized = settings.normalizeOptions(settings.withDefaults(options.agent, options));
+    const designStyle = normalizeDesignStyle(options.designStyle);
     if (this.active() >= MAX_RUNS) throw Error('Three agents are already running');
     if ([...this.runs.values()].some(r => r.chatId === chatId)) throw Error('This chat already has a running task');
     this.pendingStarts++;
@@ -669,10 +726,14 @@ class AgentRuntime {
       const account = await this.profiles.resolve(options.agent, { id: typeof options.account === 'string' ? options.account : undefined, chatId });
       const autonomy = options.autonomy && typeof options.autonomy === 'object' ? agentAutonomy.normalizeAutonomy(options.autonomy) : await this.autonomy.get(chatId);
       const tools = await this.toolConfig.forRun(options.agent, { projects: [cwd, project?.repositoryRoot] }).catch(() => ({ servers: [], permissions: [] }));
-      const persona = [buildPersona({ bridge: !!bridge, quickChat, instructions: typeof options.instructions === 'string' ? options.instructions : '', memory, preferences, homeInstructions: homeText }), agentAccess.accessPersonaLines(agentSettings), shared, autonomy.planFirst ? agentAutonomy.PLAN_FIRST_PERSONA : ''].filter(Boolean).join('\n\n');
-      const rawContext = options.context && typeof options.context === 'object' ? { ...options.context } : Array.isArray(options.mentions) ? {} : null;
+      // Design preference writes: approval card (Claude SDK) or persona rule (Codex app-server), refused where nobody can approve.
+      const interactive = options.agent === 'claude' ? !!(await this.loadClaudeSdk().then(sdk => typeof sdk?.query === 'function').catch(() => false)) : !!(found && await this.supportsAppServer(found.path));
+      const preferenceWrites = agentAccess.preferenceWritePolicy({ access: normalized.access, planFirst: autonomy.planFirst, interactive });
+      const persona = [buildPersona({ bridge: !!bridge, quickChat, instructions: typeof options.instructions === 'string' ? options.instructions : '', memory, preferences, homeInstructions: homeText }), agentAccess.accessPersonaLines(agentSettings, { preferenceWrites }), shared, autonomy.planFirst ? agentAutonomy.PLAN_FIRST_PERSONA : ''].filter(Boolean).join('\n\n');
+      const rawContext = options.context && typeof options.context === 'object' ? { ...options.context } : Array.isArray(options.mentions) || designStyle ? {} : null;
       if (rawContext && Array.isArray(options.mentions)) rawContext.mentions = options.mentions;
       const context = normalizeContext(rawContext, this.attachmentRoot);
+      if (context && designStyle) context.designStyle = designStyle;
       const directories = await normalizeDirectories(options.directories, cwd);
       if (directories.length && context) context.directories = directories;
       let prompt = options.prompt;
@@ -683,7 +744,7 @@ class AgentRuntime {
       const fork = normalizeFork(options.fork);
       const sessionId = seed || fork ? '' : normalized.sessionId;
       const run = { id: randomUUID(), chatId, agent: options.agent, cwd, projectKey: project?.root || 'unattached', stopped: false, done: false, sessionId: sessionId || null, cancel: () => {}, computerUse: options.agent === 'codex' && agentSettings.codexComputerUse, autonomy, toolRules: tools.permissions, account: { id: account.id, name: account.name }, codexSlot: account.system ? 'system' : account.id, steps: 0 };
-      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt, directories, executable: found?.path || null, quickChat, agentSettings, memoryDir, account, tools, autonomy };
+      const params = { ...normalized, sessionId, seed, fork, run, cwd, persona, bridge, context, prompt, directories, executable: found?.path || null, quickChat, agentSettings, memoryDir, account, tools, autonomy, preferenceWrites };
       // Settings › Agents (desktop/agent-behavior.cjs): Claude response style + commit credit, Codex personality.
       const behavior = this.getBehavior ? await Promise.resolve().then(() => this.getBehavior()).catch(() => null) : null;
       if (behavior) { params.claudeSettings = agentBehavior.claudeSettingsFor(behavior); params.codexPersonality = agentBehavior.codexPersonalityFor(behavior); }
@@ -740,15 +801,16 @@ class AgentRuntime {
   }
 
   // --- permissions -----------------------------------------------------------------------------
-  async askPermission(run, toolName, input, signal, { toolCallId, canAlwaysAllow = true } = {}) {
+  /** `requireUser`: only the user can allow this call (no autonomy/Settings › Tools allow defaults, no saved "always allow" rule); denials still apply. */
+  async askPermission(run, toolName, input, signal, { toolCallId, canAlwaysAllow = true, requireUser = false } = {}) {
     if (run.helper) return false; // read-only helpers never get extra permissions
     // Chat autonomy first (denied patterns win), then Settings › Tools permission defaults.
     const auto = agentAutonomy.autonomyDecision(run.autonomy, toolName, input) || (() => { const d = toolConfig.decisionFor(run.toolRules || [], toolName); return d && d !== 'ask' ? { decision: d, reason: `${toolName}: ${d === 'allow' ? 'allowed' : 'denied'} by default in Settings › Tools` } : null; })();
-    if (auto) {
+    if (auto && !(requireUser && auto.decision === 'allow')) {
       if (!run.done) this.emit(run, { type: 'policy', decision: auto.decision, toolName, title: toolTitle(toolName, input || {}), text: auto.reason, ...(toolCallId ? { toolCallId } : {}) });
       return auto.decision === 'allow';
     }
-    if (await this.allowRules.matches(run.projectKey || 'unattached', toolName, input).catch(() => false)) return true;
+    if (!requireUser && await this.allowRules.matches(run.projectKey || 'unattached', toolName, input).catch(() => false)) return true;
     if (signal?.aborted || run.done) return false;
     const requestId = randomUUID();
     const always = canAlwaysAllow && !!allowRuleFor(toolName, input);
@@ -923,7 +985,11 @@ class AgentRuntime {
     return 'claude-sdk';
   }
 
-  /** SDK hooks for a chat: the canvas turn guard, plus the "create files and pages" approval gate when that switch is off. */
+  /**
+   * SDK hooks for a chat: the canvas turn guard, the design preference write gate (every save/update/delete
+   * waits for the user's approval card, and is refused outright where params.preferenceWrites is 'blocked'),
+   * plus the "create files and pages" approval gate when that switch is off.
+   */
   claudeHooks(run, params) {
     const hooks = params.bridge?.url ? designHooks(createDesignTurnGuard()) : {};
     if (params.agentSettings && !params.agentSettings.createFiles && params.access !== 'full') {
@@ -931,6 +997,17 @@ class AgentRuntime {
         if (!(await agentAccess.claudeCreatesSomething(input.tool_name, input.tool_input || {}, { mcpServerName: settings.MCP_SERVER_NAME, cwd: params.cwd }))) return {};
         const allow = await this.askPermission(run, input.tool_name, input.tool_input || {}, opts.signal, { toolCallId: toolUseID, canAlwaysAllow: false });
         return allow ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } } : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'The user did not allow creating this in Verynize. Ask before creating new files, folders or pages.' } };
+      }] }];
+    }
+    // After the createFiles gate, so existing hook positions stay stable.
+    if (params.bridge?.url) {
+      const server = settings.MCP_SERVER_NAME;
+      hooks.PreToolUse = [...(hooks.PreToolUse || []), { matcher: `^mcp__${server}__(${agentAccess.PREFERENCE_WRITE_TOOLS.join('|')})$`, hooks: [async (input = {}, toolUseID, opts = {}) => {
+        if (!agentAccess.isPreferenceWrite(input.tool_name, { mcpServerName: server })) return {};
+        const deny = reason => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } });
+        if (params.preferenceWrites !== 'approve' || run.helper) return deny(PREFERENCE_BLOCKED_REASON);
+        const allow = await this.askPermission(run, input.tool_name, input.tool_input || {}, opts.signal, { toolCallId: toolUseID, canAlwaysAllow: false, requireUser: true });
+        return allow ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } } : deny(PREFERENCE_DECLINED_REASON);
       }] }];
     }
     return Object.keys(hooks).length ? { hooks } : {};
@@ -952,7 +1029,7 @@ class AgentRuntime {
     const handle = this.startFallback(params.executable, 'claude', composePrompt(params.prompt, params.context, params.seed), params.cwd, event => {
       if (event.type === 'done') { run.stopped = run.stopped || event.stopped; this.finish(run, { code: event.code }); return; }
       const { id: _id, ...rest } = event; this.forward(run, rest);
-    }, { model: params.model, access: params.access, effort: params.effort, sessionId: params.sessionId, structured: true, appendSystemPrompt: params.persona, bridge: params.bridge, id: run.id, claudeSettings: params.claudeSettings, ...(params.agentSettings ? (({ env, cliArgs }) => ({ env: { ...env, ...(params.account?.env || {}) }, extraArgs: cliArgs }))(agentAccess.claudeAccessOptions(params.agentSettings)) : { env: params.account?.env || {} }) });
+    }, { model: params.model, access: params.access, effort: params.effort, sessionId: params.sessionId, structured: true, appendSystemPrompt: params.persona, bridge: params.bridge, id: run.id, claudeSettings: params.claudeSettings, ...(params.agentSettings ? (({ env, cliArgs }) => ({ env: { ...env, ...(params.account?.env || {}) }, extraArgs: cliArgs }))(agentAccess.claudeAccessOptions(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, blockPreferenceWrites: true })) : { env: params.account?.env || {} }) });
     run.cancel = () => { run.stopped = true; handle.cancel(); };
     return 'claude-cli';
   }
@@ -1048,8 +1125,10 @@ class AgentRuntime {
     const { run } = params;
     const extra = toolConfig.codexServerArgs(params.tools?.servers || []);
     if (extra.skipped.length) this.emit(run, { type: 'status', text: `Skipped MCP server ${extra.skipped.join(', ')}: an environment variable name clashes with another server.` });
+    // Server-wide args stay the same for every chat on this account (one app-server serves them all); the per-chat
+    // preference write block goes into the thread's config instead (codexPreferenceConfig).
     const server = await this.codexServer(params.executable, params.bridge, [...(params.agentSettings ? agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) : []), ...extra.args], { slot: run.codexSlot || 'system', extraEnv: { ...(params.account?.env || {}), ...extra.env } });
-    const threadParams = applyCodexPlanFirst(codexThreadParams(params), params.autonomy);
+    const threadParams = codexPreferenceConfig(applyCodexPlanFirst(codexThreadParams(params), params.autonomy), params);
     let thread;
     if (params.fork) {
       try { thread = (await server.rpc.request('thread/fork', { threadId: params.fork.sessionId, lastTurnId: params.fork.at, ...threadParams, excludeTurns: true })).thread; }
@@ -1094,7 +1173,7 @@ class AgentRuntime {
     const handle = this.startFallback(params.executable, 'codex', prompt, params.cwd, event => {
       if (event.type === 'done') { run.stopped = run.stopped || event.stopped; this.finish(run, { code: event.code }); return; }
       const { id: _id, ...rest } = event; this.forward(run, rest);
-    }, { model: params.model, access: params.access, effort: params.effort, structured: true, bridge: params.bridge, id: run.id, codexPersonality: params.codexPersonality, env: { ...(params.account?.env || {}), ...toolConfig.codexServerArgs(params.tools?.servers || []).env }, extraArgs: [...(params.agentSettings ? agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) : []), ...toolConfig.codexServerArgs(params.tools?.servers || []).args] });
+    }, { model: params.model, access: params.access, effort: params.effort, structured: true, bridge: params.bridge, id: run.id, codexPersonality: params.codexPersonality, env: { ...(params.account?.env || {}), ...toolConfig.codexServerArgs(params.tools?.servers || []).env }, extraArgs: [...(params.agentSettings ? agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url, blockPreferenceWrites: params.preferenceWrites !== 'approve' }) : []), ...toolConfig.codexServerArgs(params.tools?.servers || []).args] });
     run.cancel = () => { run.stopped = true; handle.cancel(); };
     return 'codex-exec';
   }
@@ -1374,12 +1453,14 @@ function registerAgentRuntime(handle, win, { userData, getProject, resolveProjec
   handle('designPreferencesSave', async text => (await preferenceStore()).save(validPreference(text)));
   handle('designPreferencesUpdate', async (id, text) => (await preferenceStore()).update(validPreferenceId(id), validPreference(text)));
   handle('designPreferencesRemove', async id => (await preferenceStore()).remove(validPreferenceId(id)));
+  handle('designStylesList', () => listDesignStyles());
   onWindowClosed(win, () => runtime.close());
   return runtime;
 }
 function validPreference(text) {
-  if (typeof text !== 'string' || !text.trim() || text.length > 2000) throw Error('Enter a preference under 2,000 characters');
-  return text.trim();
+  const value = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '';
+  if (!value || value.length > PREFERENCE_LIMITS.length) throw Error(`Enter a preference of at most ${PREFERENCE_LIMITS.length} characters`);
+  return value;
 }
 function validPreferenceId(id) {
   if (typeof id !== 'string' || !id || id.length > 200) throw Error('Invalid preference');
@@ -1413,5 +1494,6 @@ async function claudeContent(text, images = []) {
 module.exports = {
   AgentRuntime, registerAgentRuntime, buildPersona, createDesignTurnGuard, designHooks, toolOutcome, STOP_REASON, buildTurnContext, normalizeContext, composePrompt, buildSeedBlock, claudeQueryOptions, codexThreadParams, JsonRpcChild, defaultBridge,
   claudeQuestions, claudeAnswerInput, codexQuestions, codexAnswers, normalizeAnswers, allowRuleFor, ruleMatches, AllowRules, heuristicTitle, cleanTitle, agentToolsVersion, preferenceStore, MAX_RUNS,
-  normalizeFork, buildReviewTask, applyClaudePolicy, applyCodexPlanFirst,
+  normalizeFork, buildReviewTask, applyClaudePolicy, applyCodexPlanFirst, codexPreferenceConfig,
+  preferenceBlock, PREFERENCE_LIMITS, validPreference, normalizeDesignStyle, listDesignStyles, PREFERENCE_BLOCKED_REASON, PREFERENCE_DECLINED_REASON,
 };

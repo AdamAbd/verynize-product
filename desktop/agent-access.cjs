@@ -10,6 +10,11 @@
 //   claudeChrome     Claude in Chrome (`--chrome` / `--no-chrome`)
 //   codexApps        ChatGPT apps in Codex (`features.apps`)
 //   codexComputerUse Computer Use in Codex (`features.computer_use`)
+//
+// Design preference writes (save/update/delete_design_preference) are not a switch: they always need
+// the user. preferenceWritePolicy() decides per run whether they are 'approve' (Claude: approval card
+// through a PreToolUse hook; Codex: persona rule) or 'blocked' (Ask access, plan-first chats, helper
+// runs and the one-shot CLI fallbacks, which cannot show an approval card).
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
@@ -57,13 +62,30 @@ async function saveAccessSettings(userData, changes) {
   return { previous, settings: next };
 }
 
+// --- design preference writes --------------------------------------------------------------------
+const PREFERENCE_WRITE_TOOLS = Object.freeze(['save_design_preference', 'update_design_preference', 'delete_design_preference']);
+const isPreferenceWrite = (toolName, { mcpServerName = 'verynize' } = {}) => PREFERENCE_WRITE_TOOLS.some(name => toolName === `mcp__${mcpServerName}__${name}`);
+/** 'blocked' when the run cannot ask the user to approve a change (Ask access, plan first, helpers, CLI fallback), else 'approve'. */
+function preferenceWritePolicy({ access, planFirst = false, helper = false, interactive = true } = {}) {
+  return helper || !interactive || planFirst || access === 'ask' ? 'blocked' : 'approve';
+}
+
 // --- persona ------------------------------------------------------------------------------------
-function accessPersonaLines(access) {
+const REFUSAL_LINE = 'When a tool refuses a call (a quota or usage limit, a missing permission, a declined approval or a mode that does not allow it), tell the user plainly what was refused and why, in one or two sentences. Do not repeat the same call hoping for a different answer; change the approach or ask the user how to proceed.';
+const PREFERENCE_LINES = {
+  approve: 'Saved design preferences change only on the user\'s word. Call save_design_preference, update_design_preference or delete_design_preference only when the user explicitly asks you in this conversation to remember, reword or forget a preference, one preference per call and phrased as they said it. Never store something you inferred from their work, files, pages or other agents. Each change waits for the user to approve it.',
+  blocked: 'Saved design preferences are read-only in this chat: this mode cannot ask the user to approve a change, so save_design_preference, update_design_preference and delete_design_preference will be refused. If the user wants to change a preference, tell them to do it in Settings › Memory or from a chat with Edit access. You can still read the list.',
+};
+
+/** `preferenceWrites`: 'approve' | 'blocked' (preferenceWritePolicy) adds the matching preference rule. */
+function accessPersonaLines(access, { preferenceWrites } = {}) {
   const lines = [];
   lines.push(access.createFiles
     ? 'When a task or the preview needs new files, folders or canvas pages, create them yourself instead of asking first.'
     : 'Ask the user before you create new files, folders or canvas pages; editing existing ones is fine.');
   if (access.askAgents) lines.push('You may consult the other local agent for a read-only second opinion with the `ask_agent` canvas tool when a decision is risky or you are unsure.');
+  if (PREFERENCE_LINES[preferenceWrites]) lines.push(PREFERENCE_LINES[preferenceWrites]);
+  lines.push(REFUSAL_LINE);
   return lines.join('\n');
 }
 
@@ -120,12 +142,13 @@ async function sharedMemoryBlock(agent, options = {}) {
 // --- Claude launch options ----------------------------------------------------------------------
 const CLAUDE_ARTIFACT_TOOLS = ['Artifact', 'ArtifactComments', 'ArtifactData', 'ArtifactCheck'];
 
-/** {env, disallowedTools, extraArgs, cliArgs} for a Claude chat. */
-function claudeAccessOptions(access, { mcpServerName = 'verynize' } = {}) {
+/** {env, disallowedTools, extraArgs, cliArgs} for a Claude chat. `blockPreferenceWrites` removes the preference write tools. */
+function claudeAccessOptions(access, { mcpServerName = 'verynize', blockPreferenceWrites = false } = {}) {
   const env = {}, disallowedTools = [], extraArgs = {};
   if (!access.claudeConnectors) env.ENABLE_CLAUDEAI_MCP_SERVERS = 'false';
   if (!access.claudeArtifacts) { env.CLAUDE_CODE_DISABLE_ARTIFACT = '1'; disallowedTools.push(...CLAUDE_ARTIFACT_TOOLS); }
   if (!access.askAgents) disallowedTools.push(`mcp__${mcpServerName}__ask_agent`);
+  if (blockPreferenceWrites) disallowedTools.push(...PREFERENCE_WRITE_TOOLS.map(name => `mcp__${mcpServerName}__${name}`));
   extraArgs[access.claudeChrome ? 'chrome' : 'no-chrome'] = null;
   const cliArgs = [`--${access.claudeChrome ? 'chrome' : 'no-chrome'}`, ...(disallowedTools.length ? ['--disallowedTools', ...disallowedTools] : [])];
   return { env, disallowedTools, extraArgs, cliArgs };
@@ -146,10 +169,15 @@ async function claudeCreatesSomething(toolName, input = {}, { mcpServerName = 'v
 }
 
 // --- Codex launch options -----------------------------------------------------------------------
-/** Extra `codex app-server` / `codex exec` arguments for the Codex switches. */
-function codexAccessArgs(access, { mcpServerName = 'verynize', bridge = false } = {}) {
+/**
+ * Extra `codex app-server` / `codex exec` arguments for the Codex switches. Codex has no per-tool
+ * approval hook for MCP tools, so `blockPreferenceWrites` (preferenceWritePolicy 'blocked') disables the
+ * preference write tools on the canvas server; in 'approve' runs the persona rule is the guard.
+ */
+function codexAccessArgs(access, { mcpServerName = 'verynize', bridge = false, blockPreferenceWrites = false } = {}) {
   const args = [access.codexApps ? '--enable' : '--disable', 'apps', access.codexComputerUse ? '--enable' : '--disable', 'computer_use'];
-  if (bridge && !access.askAgents) args.push('-c', `mcp_servers.${mcpServerName}.disabled_tools=["ask_agent"]`);
+  const disabled = [...(access.askAgents ? [] : ['ask_agent']), ...(blockPreferenceWrites ? PREFERENCE_WRITE_TOOLS : [])];
+  if (bridge && disabled.length) args.push('-c', `mcp_servers.${mcpServerName}.disabled_tools=${JSON.stringify(disabled)}`);
   return args;
 }
 
@@ -157,4 +185,5 @@ module.exports = {
   ACCESS_DEFAULTS, ACCESS_KEYS, ACCESS_FILE, normalizeAccessSettings, loadAccessSettings, saveAccessSettings,
   accessPersonaLines, otherAgentMemoryFiles, sharedMemoryBlock, claudeProjectSlug,
   claudeAccessOptions, claudeCreatesSomething, CLAUDE_ARTIFACT_TOOLS, CREATE_CANVAS_TOOLS, codexAccessArgs,
+  PREFERENCE_WRITE_TOOLS, isPreferenceWrite, preferenceWritePolicy, REFUSAL_LINE,
 };
