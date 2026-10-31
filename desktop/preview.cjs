@@ -339,6 +339,15 @@ function createPreviewAutomation(parent){
  async function clickAt(pane,point,clickCount=1){
   await editor('window.livePreview.reveal();window.livePreview.navigateMode()');
   const x=pane.rect.x+point.x*pane.scaleX,y=pane.rect.y+point.y*pane.scaleY;
+  // A freshly loaded cross-origin preview frame can drop the first input until the browser can hit-test
+  // it, so hover until the frame reports a trusted pointermove (bounded) before pressing.
+  const frame=previewFrame(parent);
+  const armed=await run(frame,()=>{window.__verynizeHover=false;addEventListener('pointermove',e=>{if(e.isTrusted)window.__verynizeHover=true},{capture:true});return true}).catch(()=>false);
+  if(armed)for(let i=0,deadline=Date.now()+1500;Date.now()<deadline;i++){
+   if(!await trusted([['Input.dispatchMouseEvent',{type:'mouseMoved',x:x+(i%2?0.5:0),y}]]))break;
+   if(await run(frame,()=>window.__verynizeHover===true).catch(()=>false))break;
+   await sleep(50);
+  }
   const steps=[['Input.dispatchMouseEvent',{type:'mouseMoved',x,y}]];
   for(let i=1;i<=clickCount;i++)steps.push(['Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',buttons:1,clickCount:i}],['Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',buttons:0,clickCount:i}]);
   const ok=await trusted(steps);

@@ -11,13 +11,16 @@ const os = require("node:os");
   try {
     const page = await app.firstWindow();
     await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
-    const originalURL = page.url();
-    assert.equal(new URL(originalURL).protocol, "file:");
+    // Desktop serves the renderer from app://verynize, so routes own the real URL path.
+    assert.equal(await page.evaluate(() => location.origin), "app://verynize");
+    const ipcWorks = () =>
+      page.evaluate(() => window.desktop.onboardingState().then((s) => s.skip === true));
     const documentBefore = await page.evaluate(() => window.design.getDocument());
     const expectView = async (path) => {
       await page.waitForFunction(
         (path) =>
           window.shellRouter.state.location.pathname === path &&
+          location.pathname === path &&
           document.body.classList.contains("files-view") === (path === "/"),
         path,
       );
@@ -42,7 +45,8 @@ const os = require("node:os");
       window.fileLibrary.showEditor();
     });
     assert.equal(await page.evaluate(() => window.shellRouter.history.length), length);
-    assert.equal(page.url(), originalURL);
+    assert.equal(new URL(page.url()).pathname, "/editor");
+    assert.ok(await ipcWorks(), "IPC after route changes");
     assert.deepEqual(await page.evaluate(() => window.design.getDocument()), documentBefore);
     for (const hash of ["#room=router-test&token=a%2Fb%3D", "#public=router-test"]) {
       await page.evaluate((hash) => {
@@ -50,12 +54,31 @@ const os = require("node:os");
         window.fileLibrary.showHome();
       }, hash);
       await expectView("/");
-      await page.evaluate(() => window.shellRouter.navigate({ to: "/editor" }));
+      // The legacy flow carries the hash along; router navigations must opt in with hash: true.
+      await page.evaluate(() => window.fileLibrary.showEditor());
       await expectView("/editor");
       assert.equal(new URL(page.url()).hash, hash);
+      await page.evaluate(() => window.shellRouter.navigate({ to: "/", hash: true }));
+      await expectView("/");
+      assert.equal(new URL(page.url()).hash, hash);
     }
+    // A reload on a route lands on the same view, with IPC still trusted.
+    await page.evaluate(() => {
+      location.hash = "";
+      window.fileLibrary.showHome();
+    });
+    await expectView("/");
+    await page.reload();
+    await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
+    await expectView("/");
+    await page.evaluate(() => window.shellRouter.navigate({ to: "/editor" }));
+    await expectView("/editor");
+    await page.reload();
+    await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
+    await expectView("/editor");
+    assert.ok(await ipcWorks(), "IPC after reloading /editor");
     console.log(
-      "PASS shell router: file memory history, route/view sync, Back/Forward, Escape, deduplication, document and cloud hash preservation",
+      "PASS shell router: app:// browser history, URL path sync, reload on routes, route/view sync, Back/Forward, Escape, deduplication, document and cloud hash preservation",
     );
   } finally {
     await app.close();
