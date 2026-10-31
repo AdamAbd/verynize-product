@@ -1,13 +1,25 @@
-import { useEffect, useState } from "react";
-import { PlayIcon, XIcon, ChevronRightIcon } from "lucide-react";
+// Chat side of the Preview: the agent setup request ("Set up the Preview"), the review card for a proposal in
+// ask/edit access, the transcript card of a proposal saved by auto/full access, the first-run intro card
+// (PS1), the Code workspace "Your app is running" card (PS6), the Preview settings host and ⌘⌥P.
+import { useEffect, useState, type ReactNode } from "react";
+import { ChevronDownIcon, PlayIcon, XIcon, ChevronRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { desktop, errorMessage, type PreviewProposal } from "../code/api";
 import { formatCommand, parsePreviewCommand } from "../code/preview-command";
-import { workspace, type ChatState } from "./store";
+import { PreviewSettingsHost } from "../code/preview-settings";
+import { announce, goToPreview, openInTab, startPreview, usePreview } from "../code/preview-state";
+import { PreviewGlyph } from "../code/topbar";
+import { ChatActionButton, ChatIconButton } from "./controls";
+import { ChatTip } from "./tip";
+import { workspace, type ChatPart, type ChatState } from "./store";
 
 type CanvasPreview = {ensure(options: {root: string; name?: string; chatId?: string; url?: string}): unknown; show(url: string, options?: {root: string; name?: string; chatId?: string}): void};
 const preview = () => (window as unknown as {livePreview?: CanvasPreview}).livePreview;
+
+const INTRO_KEY = "verynize.preview-intro";
+let introUsed = false; // a Start this session hides the intro until the next launch
+const runningDismissed = new Set<string>();
 
 export function PreviewSetup({state}: {state: ChatState}) {
   const [proposal, setProposal] = useState<PreviewProposal | null>(null);
@@ -21,13 +33,110 @@ export function PreviewSetup({state}: {state: ChatState}) {
     const setup = () => {
       if (!state.activeRoot) return;
       workspace()?.openChat();
-      workspace()?.attachText?.("preview", "Preview setup", `Inspect this repository's stack, package manager, install/setup requirements, development command and listening port. Use the project's actual tools (npm, Yarn, pnpm, Bun, Python or another runtime); never assume Vite+ is installed. For plain HTML without a package manifest, use an available Python interpreter with -u -m http.server and --bind 127.0.0.1; setup can be omitted. Use the propose_preview tool to propose Setup, Run and Port for my review. Do not start or configure the preview until I accept the proposal. Pass chatId ${JSON.stringify(state.conversationId)} and a short app name. The project root is ${JSON.stringify(state.activeRoot)}.`);
+      workspace()?.attachText?.("preview", "Preview setup", `Inspect this repository's stack, package manager, install/setup requirements, development command and listening port. Use the project's actual tools (npm, Yarn, pnpm, Bun, Python or another runtime); never assume Vite+ is installed. For plain HTML without a package manifest, use an available Python interpreter with -u -m http.server and --bind 127.0.0.1; setup can be omitted. Use the propose_preview tool with Setup, Run and Port: in ask or edit access it becomes a card for my review, in auto or full access it is saved directly. Never start the server or the preview yourself; I start it with Start preview. Pass chatId ${JSON.stringify(state.conversationId)} and a short app name. The project root is ${JSON.stringify(state.activeRoot)}.`);
       workspace()?.queueMessage?.("Set up the Preview");
     };
     window.addEventListener("bd:setup-preview", setup);
     return () => { alive = false; clearInterval(timer); window.removeEventListener("bd:setup-preview", setup); };
   }, [state.activeRoot, state.conversationId]);
-  return proposal ? <ProposalCard key={proposal.id} proposal={proposal} state={state} onDismiss={() => setProposal(null)} /> : null;
+  // ⌘⌥P: Open in a tab (the tab itself belongs to window.previewTab).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !event.metaKey || !event.altKey || event.shiftKey || event.ctrlKey || event.code !== "KeyP") return;
+      const current = workspace()?.getState();
+      if (!current?.activeRoot) return;
+      event.preventDefault();
+      openInTab(current);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return <>
+    <PreviewSettingsHost state={state} />
+    {proposal ? <ProposalCard key={proposal.id} proposal={proposal} state={state} onDismiss={() => setProposal(null)} /> : <PreviewNotice state={state} />}
+  </>;
+}
+
+/** Above the composer: the first-run intro on the canvas (PS1) or "Your app is running" in Code mode (PS6). */
+function PreviewNotice({state}: {state: ChatState}) {
+  const root = state.activeRoot;
+  const {phase} = usePreview(root);
+  const [, rerender] = useState(0);
+  const dismissedIntro = localStorage.getItem(INTRO_KEY) === "dismissed";
+  if (!root) return null;
+  if (state.codeMode) {
+    if (phase !== "running" || runningDismissed.has(root)) return null;
+    return <NoticeCard
+      id="preview-running-card"
+      glyph={<PreviewGlyph phase="running" />}
+      title="Your app is running"
+      description="Open the Preview on the canvas next to this chat."
+      action="Show preview"
+      closeLabel="Dismiss"
+      onAction={() => goToPreview(state)}
+      onClose={() => { runningDismissed.add(root); rerender(n => n + 1); }}
+    />;
+  }
+  if (dismissedIntro || introUsed || phase !== "idle" || state.busy) return null;
+  return <NoticeCard
+    id="preview-intro"
+    glyph={<PlayIcon className="size-3.5 shrink-0 fill-current text-muted-foreground" />}
+    title="Preview your app on the canvas"
+    description="See your changes live, next to this chat."
+    action="Start preview"
+    closeLabel="Don’t show this again"
+    onAction={() => { introUsed = true; rerender(n => n + 1); void startPreview(state); }}
+    onClose={() => { localStorage.setItem(INTRO_KEY, "dismissed"); rerender(n => n + 1); }}
+  />;
+}
+
+function NoticeCard({id, glyph, title, description, action, closeLabel, onAction, onClose}: {id: string; glyph: ReactNode; title: string; description: string; action: string; closeLabel: string; onAction(): void; onClose(): void}) {
+  return <section id={id} aria-label={title} className="mx-4 mb-2 flex shrink-0 flex-col gap-3 rounded-2xl border border-card-border bg-card pt-3 pr-2 pb-2 pl-4">
+    <div className="flex items-start gap-2">
+      <span className="flex h-5 w-3.5 shrink-0 items-center justify-center">{glyph}</span>
+      <div className="min-w-0 flex-1">
+        <h3 className="text-sm leading-5 text-foreground-2">{title}</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      </div>
+      <ChatTip label={closeLabel}>
+        <ChatIconButton aria-label={closeLabel} onClick={onClose} size="sm"><XIcon className="size-3.5" /></ChatIconButton>
+      </ChatTip>
+    </div>
+    <ChatActionButton type="button" variant="secondary" id={`${id}-action`} onClick={onAction} className="self-end">{action}</ChatActionButton>
+  </section>;
+}
+
+/** propose_preview results saved by auto/full access: `{saved: true, savedBy, command, …}`. */
+export function savedPreview(part: ChatPart): {savedBy: string; command: string[]; setup?: string[]} | null {
+  if (part.kind !== "tool" || !/propose_preview$/i.test(part.name ?? "") || !part.result) return null;
+  const read = (value: unknown): unknown => {
+    if (typeof value === "string") { try { return read(JSON.parse(value)); } catch { return null; } }
+    if (Array.isArray(value)) return read(value.find(item => item && typeof item === "object" && "text" in item)?.text);
+    if (value && typeof value === "object" && "content" in value && Array.isArray((value as {content: unknown}).content)) return read((value as {content: unknown[]}).content);
+    return value;
+  };
+  const data = read(part.result) as {saved?: boolean; savedBy?: string; command?: unknown; setup?: unknown} | null;
+  if (!data?.saved || typeof data.savedBy !== "string" || !Array.isArray(data.command)) return null;
+  return {savedBy: data.savedBy, command: data.command.map(String), ...(Array.isArray(data.setup) ? {setup: data.setup.map(String)} : {})};
+}
+
+/** Transcript card: "▶ Preview setup  Saved by auto mode ⌄" → the command and where to change it (PS2). */
+export function PreviewSavedCard({part}: {part: ChatPart}) {
+  const saved = savedPreview(part);
+  if (!saved) return null;
+  return <details data-preview-saved className="group/saved m-0 flex flex-col">
+    <summary className="flex h-6 list-none items-center gap-2 self-start rounded-md text-base outline-none focus-visible:ring-1 focus-visible:ring-ring">
+      <PlayIcon className="size-3.5 fill-current text-muted-foreground" />
+      <span className="text-foreground-2">Preview setup</span>
+      <span className="text-muted-foreground">{saved.savedBy === "full" ? "Saved by full access" : "Saved by auto mode"}</span>
+      <ChevronDownIcon className="size-3 -rotate-90 text-muted-foreground transition-transform group-open/saved:rotate-0" />
+    </summary>
+    <div className="mt-1 flex flex-col gap-1 pl-5.5 text-base text-muted-foreground">
+      {saved.setup && <span className="break-words">{formatCommand(saved.setup)}</span>}
+      <span className="break-words text-foreground-3">{formatCommand(saved.command)}</span>
+      <span>You can change it in Preview settings.</span>
+    </div>
+  </details>;
 }
 
 function ProposalCard({proposal, state, onDismiss}: {proposal: PreviewProposal; state: ChatState; onDismiss(): void}) {
@@ -72,8 +181,9 @@ function ProposalCard({proposal, state, onDismiss}: {proposal: PreviewProposal; 
       if (status.url && status.state === "running") preview()?.show(status.url, details);
       setSaved(true);
       await api.dismissProposal({root:proposal.root, saved:true});
+      announce(proposal.root);
     } catch (e) { setError(errorMessage(e)); window.dispatchEvent(new CustomEvent("bd:preview-setup-state", {detail:{root:proposal.root,state:"failed",message:errorMessage(e)}})); }
-    finally { setPhase(""); }
+    finally { setPhase(""); announce(proposal.root); }
   };
   if (saved) return <div className="mx-3 mb-3 flex items-center gap-2 text-sm text-muted-foreground"><PlayIcon className="size-4" />Preview setup <span>Saved</span><ChevronRightIcon className="size-3" /></div>;
   return <section id="preview-proposal" className="mx-3 mb-3 rounded-xl border border-card-border bg-settings p-4" aria-label="Proposed Preview configuration">

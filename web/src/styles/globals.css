@@ -332,6 +332,14 @@ html[data-ui-theme="light"] {
   --color-file-modified: #d8a03c;
   --color-file-deleted: #f85149;
   /* </code-tokens> */
+  /* <preview-header-tokens> */
+  /* Preview settings modal and header split menu (design/wonder/preview-audit/wonder X1-settings, PS2-edit, X5). */
+  --spacing-preview-settings: 992px; /* modal width */
+  --spacing-preview-settings-height: 640px; /* modal height */
+  --spacing-preview-settings-nav: 192px; /* repository settings navigation */
+  --radius-preview-settings: 16px;
+  --color-preview-running: #9fecb1; /* running dot next to the pause glyph (X5) */
+  /* </preview-header-tokens> */
 }
 
 /*

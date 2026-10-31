@@ -166,9 +166,9 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     await page.locator('#code-configure-preview').click();
     await page.locator('#preview-run-command').waitFor();
     await page.getByRole('button', {name: 'Save', exact: true}).click();
-    await page.getByRole('status').filter({hasText: 'Enter a run command.'}).waitFor();
+    await page.getByRole('status').filter({hasText: 'Enter a start command.'}).waitFor();
     await page.locator('#preview-run-command').fill('npm run dev');
-    await page.locator('#preview-port').fill('5173');
+    await page.locator('#preview-opens-at').fill('5173');
     await page.getByRole('button', {name: 'Save', exact: true}).click();
     await page.locator('#preview-run-command').waitFor({state: 'hidden'});
     const previewConfig = await page.evaluate(() => window.desktop.devServer.status());
@@ -176,12 +176,13 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     assert.equal(previewConfig.config.url, 'http://localhost:5173/');
     assert.equal((await page.evaluate(() => window.desktop.devServer.status())).root, first.chatRoot);
 
-    // A real MCP proposal remains pending until the user accepts its inline card.
+    // A real MCP proposal in edit access remains pending until the user accepts its inline card (auto access saves it
+    // directly: tests/preview-header.cjs).
     const {Client} = await import('@modelcontextprotocol/sdk/client/index.js');
     const {StreamableHTTPClientTransport} = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
     const bridgeInfo = JSON.parse(await fs.readFile(path.join(root, 'profile', 'mcp.json'), 'utf8'));
     const previewClient = new Client({name:'preview-proposal-test',version:'1'});
-    await previewClient.connect(new StreamableHTTPClientTransport(new URL(bridgeInfo.url), {requestInit:{headers:{Authorization:`Bearer ${bridgeInfo.token}`, 'x-verynize-access':'full'}}}));
+    await previewClient.connect(new StreamableHTTPClientTransport(new URL(bridgeInfo.url), {requestInit:{headers:{Authorization:`Bearer ${bridgeInfo.token}`, 'x-verynize-access':'edit'}}}));
     try {
       const result = await previewClient.callTool({name:'propose_preview',arguments:{command:['node','-e','process.exit(7)'],port:5173,chatId:first.conversationId,name:'Fixture'}});
       assert.ok(!result.isError, JSON.stringify(result));
