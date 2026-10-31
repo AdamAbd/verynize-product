@@ -227,6 +227,7 @@
 
     // Pointer-down hook for the canvas: returns true when the press belongs to the selection chrome.
     function pointerDown(e) {
+      if (e.button !== 0) return false; // right-click opens the layer menu instead
       if (e.target.closest?.('#selection-chat-chip')) return true; // the click runs the chip's action
       const zone = e.target.closest?.('#canvas-overlay .rotate-zone, #canvas-overlay .resize-edge');
       if (!zone) return false;

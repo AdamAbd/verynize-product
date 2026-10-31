@@ -1539,10 +1539,10 @@
     wrap.addEventListener('contextmenu', e => {
       if (textEdit?.el.contains(e.target)) return;
       e.preventDefault(); closeMenu();
-      const label = e.target.closest('.frame-label'), el = e.target.closest('#canvas .layer');
+      const label = e.target.closest('.frame-label'), el = e.target.closest('#canvas .layer'), chrome = sel().size === 1 && e.target.closest('#canvas-overlay .rotate-zone, #canvas-overlay .resize-edge, #selection-chat-chip') ? [...sel()][0] : null;
       const under = [...canvas.querySelectorAll('.layer[data-id]')].filter(l => { const r = l.getBoundingClientRect(); return r.width && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; }).map(l => l.dataset.id).reverse();
       const locked = under.find(id => find(id)?.locked), above = locked && (!el || under.indexOf(locked) < under.indexOf(el.dataset.id));
-      const target = label ? label.dataset.id : above ? locked : el ? clickTarget(el.dataset.id) : null;
+      const target = chrome || (label ? label.dataset.id : above ? locked : el ? clickTarget(el.dataset.id) : null);
       if (target && !sel().has(target)) select([target]);
       window.dispatchEvent(new CustomEvent('bd:canvas-menu', {detail: {x: e.clientX, y: e.clientY, point: screenToWorld(e.clientX, e.clientY), target, under}}));
     });
