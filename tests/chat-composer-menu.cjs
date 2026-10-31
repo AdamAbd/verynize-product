@@ -8,6 +8,7 @@
 // Claude + Codex sources), a Codex custom prompt expanded and sent, and the /add-dir built-in.
 // CHAT_MENU_SHOT=/dir saves screenshots of the menu, submenus and command list.
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -51,6 +52,7 @@ async function write(file, text) {
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${profile}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await page.setViewportSize({ width: 1440, height: 870 });
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     const state = () => page.evaluate(() => window.agentWorkspace.getState());

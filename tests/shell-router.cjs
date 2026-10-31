@@ -1,4 +1,5 @@
 const { _electron: electron } = require("@playwright/test");
+const { waitForUiReady } = require("./helpers/ui-ready.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -10,6 +11,7 @@ const os = require("node:os");
   const app = await electron.launch({ env, args: [".", `--user-data-dir=${profile}`] });
   try {
     const page = await app.firstWindow();
+    await waitForUiReady(page);
     await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
     // Desktop serves the renderer from app://verynize, so routes own the real URL path.
     assert.equal(await page.evaluate(() => location.origin), "app://verynize");
@@ -69,11 +71,13 @@ const os = require("node:os");
     });
     await expectView("/");
     await page.reload();
+    await waitForUiReady(page);
     await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
     await expectView("/");
     await page.evaluate(() => window.shellRouter.navigate({ to: "/editor" }));
     await expectView("/editor");
     await page.reload();
+    await waitForUiReady(page);
     await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
     await expectView("/editor");
     assert.ok(await ipcWorks(), "IPC after reloading /editor");
