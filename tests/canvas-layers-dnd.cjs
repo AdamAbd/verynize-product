@@ -260,22 +260,45 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await undo();
     assert.equal((await node('k2')).parentId, 'row', 'the drop is one undo step');
     assert.deepEqual(await tree(nested), nested);
-    // R1-row-return-during: a free layer dragged over the row is listed inside it, at its slot, before release.
-    // (Top-level frames are never nested by a drag here, so the fixture moves a rectangle.)
+    // R1-row-return-during: a top-level frame dragged over the row is listed inside it, at its slot, before release,
+    // and the slot bar is Wonder's 3px solid #c468f7.
     await seed([frame('row', 0, 0, 380, 160, {layout: 'flex', direction: 'row', gap: 20, padding: 20, wMode: 'hug', hMode: 'hug'}),
-      frame('k1', 0, 0, 100, 60, {parentId: 'row'}), frame('k3', 0, 0, 100, 90, {parentId: 'row'}), rect('r', 100, 300, 100, 80)]);
+      frame('k1', 0, 0, 100, 60, {parentId: 'row'}), frame('k3', 0, 0, 100, 90, {parentId: 'row'}), frame('r', 100, 300, 100, 80)]);
     await page.evaluate(() => window.design.setSelection(['k1'])); await page.evaluate(() => window.design.setSelection(['r'])); // row expanded
     assert.deepEqual(await tree(['r:1', 'row:1', 'k3:2', 'k1:2']), ['r:1', 'row:1', 'k3:2', 'k1:2']);
     p = await atWorld(150, 340); await page.mouse.move(p.x, p.y); await page.mouse.down();
     p = await atWorld(125, 60); await page.mouse.move(p.x, p.y, {steps: 8});
     const entering = await tree(['row:1', 'k3:2', 'r:2', 'k1:2']);
     const heldParent = (await node('r')).parentId;
+    const bar = await page.locator('#canvas-overlay .drop-line').evaluate(e => ({hidden: e.hidden, w: e.getBoundingClientRect().width, color: getComputedStyle(e).backgroundColor}));
     await page.mouse.up();
     assert.deepEqual(entering, ['row:1', 'k3:2', 'r:2', 'k1:2'], 'entering the row, the tree lists it at the slot it will take');
     assert.equal(heldParent, null, 'still top-level in the document while held');
-    assert.equal((await node('r')).parentId, 'row', 'released, it joins the row');
+    assert.deepEqual(bar, {hidden: false, w: 3, color: 'rgb(196, 104, 247)'}, 'the slot bar is 3px #c468f7');
+    assert.equal((await node('r')).parentId, 'row', 'released, the top-level frame joins the row');
+    assert.deepEqual(await siblings('row'), ['k1', 'r', 'k3'], 'at the slot under the pointer');
     await undo();
     assert.deepEqual(await tree(['r:1', 'row:1', 'k3:2', 'k1:2']), ['r:1', 'row:1', 'k3:2', 'k1:2'], 'one undo step');
+    assert.equal((await node('r')).parentId, null, 'undo returns it to the page');
+
+    // A top-level frame dropped on a free (non-stack) frame stays top-level: R1 proves stacks only.
+    await seed([frame('free', 0, 0, 300, 200), frame('r', 100, 300, 100, 80)]);
+    await page.evaluate(() => window.design.setSelection(['r']));
+    p = await atWorld(150, 340); await page.mouse.move(p.x, p.y); await page.mouse.down();
+    p = await atWorld(150, 100); await page.mouse.move(p.x, p.y, {steps: 8}); await page.mouse.up();
+    assert.equal((await node('r')).parentId, null, 'a top-level frame is not nested in a free frame');
+    assert.equal((await node('r')).y, 60, 'it just moves');
+
+    // Cycle safety: a top-level stack dragged over its own nested stack never goes inside it.
+    await seed([frame('outer', 0, 0, 400, 200, {layout: 'flex', direction: 'row', gap: 20, padding: 20}),
+      frame('inner', 0, 0, 200, 120, {parentId: 'outer', layout: 'flex', direction: 'row', gap: 10, padding: 10}),
+      frame('leaf', 0, 0, 50, 50, {parentId: 'inner'})]);
+    await page.evaluate(() => window.design.setSelection(['outer']));
+    p = await atWorld(380, 180); await page.mouse.move(p.x, p.y); await page.mouse.down();
+    p = await atWorld(420, 200); await page.mouse.move(p.x, p.y, {steps: 4});
+    p = await atWorld(450, 220); await page.mouse.move(p.x, p.y, {steps: 4}); await page.mouse.up();
+    assert.equal((await node('outer')).parentId, null, 'a frame never enters its own descendant');
+    assert.equal((await node('inner')).parentId, 'outer');
 
     assert.deepEqual(errors, [], 'no page errors');
     console.log('canvas layers dnd tests passed');
