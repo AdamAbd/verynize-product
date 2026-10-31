@@ -209,3 +209,22 @@ Still open:
 - The existing selection purple (#b93cdb) differs from Wonder's #c468f7. Only the new marks use Wonder's colour.
 - The Help menu doesn't truncate "Discord commu…" or "Export diagnostic l…".
 - Scale works on a single layer only.
+
+## Final pass (2026-10-31, evening): the last open items
+
+New Wonder evidence is R1–R7 in `wonder/notes-2026-10-31-c.md`. **All 103 after-shots were retaken from the final build.**
+
+| Open item | Result |
+|---|---|
+| TR7 drop column | **Resolved: there is no drop column in Wonder.** R1 shows the dragged child following the pointer. The "column" in TR7-out-during is a marquee rectangle: it starts in the gap, the inspector shows Z Auto, and the shot next to it reads "2 nodes selected". Verynize now matches R1: the child follows the pointer, the slot stays empty and siblings stay put. The drag hides the child's chrome; its name label shows only over the page. The target parent gets a 1px outline. The Layers panel previews the new hierarchy live, and the order changes on release (one undo step). A top-level frame can be dropped into a stack (R1-row-return-during). The stack drop line is 3px #c468f7. |
+| 1.5 px caret | **Fixed** with a custom caret (`web/text-caret.js`). It is a constant 1.5 px wide at every zoom; its height follows the line (14.5 → 58 px at 100 → 400 %, R7). It is black or white by background, blinks, and hides for a range or during IME composition. |
+| Rotated hover outline | **Fixed**: it turns with the frame and is 1px RGB(196,104,247) (R4). |
+| Selection purple | **Fixed**: all canvas selection chrome uses #c468f7. The outline is 1px across the edge, handles are 9×9 white with a 1px border, and the badge is #a245d3 (R5). Handles on a Clip content frame were cut to a quarter by the frame's own clip; they are now drawn over it whole (regression test in `canvas-selection-marks.cjs`). |
+| Help truncation | **Fixed**: the menu is 180px; labels stop at 112/128px ("Discord commu…", "Export diagnostic l…"). What's new uses Wonder's row sizes and the label grey #969696. The placeholder entry is "Verynize 0.16". |
+| Scale on a multi-selection | **Fixed**: the union scales about the opposite corner (240×120 → 360×180). The inspector reads the primary layer (150×90, 150 %). The % menu has Wonder's nine presets (0.25×–10×) (R2). |
+| CM8 Delete on a single page | **Matches**: disabled in Wonder too. The row now uses Wonder's muted red RGB(132,69,68) (R3). |
+
+Still not proven in Wonder, left as is:
+- Escape-cancel of a stack drag (added; Wonder not captured).
+- Multi-selection resize with the Move tool.
+- The Layers row position of an entering layer differs by one slot from R1-row-return-during; Verynize uses the slot release will use.

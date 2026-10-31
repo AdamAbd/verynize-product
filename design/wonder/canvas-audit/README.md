@@ -103,13 +103,15 @@ All slices are merged on `feat/canvas-parity`. **Every after-fix shot was retake
 
 ### Remaining differences
 
-A follow-up pass fixed most of them; see the end of [REVIEW.md](verynize/after/REVIEW.md). Still open:
-- the TR7 drop column's exact sizing;
-- Wonder's 1.5 px caret, which Chromium can't widen;
-- the hover outline on rotated frames;
-- the selection purple, #b93cdb in Verynize vs #c468f7 in Wonder;
-- Help item truncation;
-- Scale on a multi-selection;
-- CM8 Delete on a single page, left disabled because Wonder never showed that case.
+None that Wonder's evidence proves. The final pass (R1–R7, see the end of [REVIEW.md](verynize/after/REVIEW.md)) closed the last open items:
+- the drop column turned out to be a marquee;
+- custom 1.5 px caret;
+- rotated hover outline;
+- Wonder selection purple, with whole handles on Clip content frames;
+- Help truncation;
+- Scale on a multi-selection with nine presets;
+- muted single-page Delete.
+
+What is left is either an assumption where Wonder was not captured (listed in REVIEW.md) or a fixture difference.
 
 Validation is recorded in the PR (#12).

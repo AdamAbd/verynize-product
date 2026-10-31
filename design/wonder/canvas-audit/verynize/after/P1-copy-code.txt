@@ -13,7 +13,7 @@ export default function Frame() {
       <style>{"* { box-sizing: border-box; }"}</style>
       <div data-node-label="Frame" data-canvas-x="56" data-canvas-y="-153" className="layout-free w-[420px] h-[391.18px] bg-white overflow-hidden" data-vn='{"gap":16,"padding":16}'>
         <div data-node-label="Frame" className="absolute left-[49px] top-[40px] layout-free w-[100px] h-[80px] bg-white overflow-hidden" data-vn='{"gap":16,"padding":16}'></div>
-        <p data-node-label="Canvas au" className="absolute left-[59px] top-[160px] text-black text-xs leading-[1.15] font-['Inter']">Canvas au</p>
+        <p data-node-label="Canvas au" className="absolute left-[59px] top-[160px] text-black text-xs leading-[normal] font-['Inter']">Canvas au</p>
       </div>
     </>
   );
