@@ -50,7 +50,7 @@
         : "No API key saved.";
   }
   async function loadSettings() {
-    if (!window.desktop?.imageProvider) return;
+    if (!window.verynizePlatform.can("imageGeneration")) return;
     try {
       const settings = await window.desktop.imageProvider.get();
       $("image-provider").value = settings.provider;
@@ -210,7 +210,7 @@
     return `Image inserted (${result.width}×${result.height}${result.model ? ", " + result.model : ""})`;
   }
   $("generate-run").onclick = async () => {
-    if (!window.desktop) {
+    if (!window.verynizePlatform.can("imageGeneration")) {
       status("Open the desktop app to generate images.");
       return;
     }

@@ -3,6 +3,7 @@
 // user gesture) and the built-in list as a browser fallback. Web font previews are loaded on demand through
 // `desktop.fontFaces` (embedded @font-face CSS) into one <style> element.
 import { FONTS } from "./model";
+import { platform } from "@/lib/platform";
 
 export type FontEntry = {
   family: string;
@@ -11,13 +12,7 @@ export type FontEntry = {
   weights: number[];
   styles?: string[];
 };
-type DesktopFonts = {
-  fontCatalog?: () => Promise<{ fonts: FontEntry[]; source: string }>;
-  fontFaces?: (
-    families: { family: string; weights: number[]; styles: string[] }[],
-  ) => Promise<{ css: string }>;
-};
-const desktop = () => (window as unknown as { desktop?: DesktopFonts }).desktop;
+const desktop = () => platform.desktop;
 
 export const ALL_WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900];
 const FALLBACK: FontEntry[] = FONTS.map((family) => ({
