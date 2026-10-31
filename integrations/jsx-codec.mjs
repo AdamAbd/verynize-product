@@ -7,7 +7,7 @@ import { parseClasses as mapClasses, cssVarForToken, GENERIC_FAMILIES } from './
 import { paletteName, fontSizeName, fontSizeLineHeight, radiusName, shadowName, weightName, trackingName, leadingName, containerName } from './tailwind-engine.mjs';
 import { cssColorToHex } from './codec-css.mjs';
 import { effectsOf } from './node-style.mjs';
-import { parseCalc, BLOCK_ALIGN } from './node-style.mjs';
+import { parseCalc, BLOCK_ALIGN, trackWeight } from './node-style.mjs';
 import { paintAttrs } from './paints.mjs';
 import { shaderJsxAttrs } from './shaders.mjs';
 import { baselineTextStyle, TEXT_DEFAULTS } from './codec-text.mjs';
@@ -104,6 +104,11 @@ export const isFlexRow = parent => !!parent && parent.layout === 'flex' && paren
 // Node -> Tailwind classes
 
 /** Spacing value -> Tailwind suffix ("4", "0.5", "px", "[13px]"). */
+/** grid-cols-N / grid-rows-N, or an arbitrary list of Fill tracks when the fr weights differ. */
+const gridTrackClass = (axis, count, sizes) => {
+  const weights = Array.from({ length: count }, (_, i) => trackWeight(sizes, i));
+  return weights.every(w => w === 1) ? `grid-${axis}-${count}` : `grid-${axis}-[${weights.map(w => `minmax(0,${w}fr)`).join('_')}]`;
+};
 const space = px => { const v = Math.abs(Number(px)); if (v === 1) return 'px'; if (Number.isInteger(v) && v % 2 === 0) return String(v / 4); return `[${round(v)}px]`; };
 const signed = (prefix, px) => (Number(px) < 0 ? `-${prefix}-${space(px)}` : `${prefix}-${space(px)}`);
 const FRACTIONS = { 50: '1/2', 33.333: '1/3', 66.667: '2/3', 25: '1/4', 75: '3/4', 20: '1/5', 40: '2/5', 60: '3/5', 80: '4/5', 16.667: '1/6', 83.333: '5/6', 100: 'full' };
@@ -238,7 +243,7 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
   if (node.type === 'frame') {
     const layout = node.layout || 'free';
     if (layout === 'flex') { c.push('flex'); if (node.direction === 'column') c.push(node.reverse ? 'flex-col-reverse' : 'flex-col'); else if (node.reverse) c.push('flex-row-reverse'); if (node.flexWrap) c.push('flex-wrap'); }
-    else if (layout === 'grid') { c.push('grid', `grid-cols-${Math.max(1, Math.floor(node.columns) || 2)}`); if (Number(node.rows) >= 1) c.push(`grid-rows-${Math.floor(node.rows)}`); }
+    else if (layout === 'grid') { c.push('grid', gridTrackClass('cols', Math.max(1, Math.floor(node.columns) || 2), node.columnSizes)); if (Number(node.rows) >= 1) c.push(gridTrackClass('rows', Math.floor(node.rows), node.rowSizes)); }
     else if (layout === 'inline') c.push('inline-flow');
     else if (layout === 'free') c.push('layout-free');
     if (layout !== 'free') {

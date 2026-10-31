@@ -27,6 +27,12 @@ function maskLayersOf(value) {
 export const cssVarForToken = name => '--' + String(name).trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 export const SAFE_CSS = value => typeof value === 'string' && value.length <= 4000 && !/[;{}<>\\]/.test(value) && !/url\s*\(/i.test(value);
 const round = value => Math.round(Number(value) * 1000) / 1000;
+/** fr weights of a track list made only of Fill tracks (`minmax(0, Nfr)`), or null (1–100 tracks). */
+function frTracks(value) {
+  const tracks = splitTop(String(value).replace(/\s*,\s*/g, ','), ' ').filter(Boolean);
+  const weights = tracks.map(t => t.match(/^minmax\(0(?:px)?,(\d*\.?\d+)fr\)$/)).map(m => (m ? Number(m[1]) : NaN));
+  return weights.length >= 1 && weights.length <= 100 && weights.every(w => w > 0 && w <= 1000) ? weights.map(round) : null;
+}
 
 // Properties that have no static visual effect on a canvas (interaction, motion, a11y). Accepted
 // without a warning because nothing is lost.
@@ -176,11 +182,13 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
     const gx = out.props.gapX, gy = out.props.gapY;
     set('gap', gx !== undefined && gy !== undefined ? (gx === gy ? gx : Math.max(gx, gy)) : (gx ?? gy));
   }
-  // grid
+  // grid: equal tracks, or fr-weighted Fill tracks (`minmax(0, 2fr)` each, as the exporter writes them)
+  let weights;
   if ((d = take('grid-template-columns'))) {
     const rep = d.resolved.match(/^repeat\(\s*(\d+)\s*,\s*minmax\(\s*0(?:px)?\s*,\s*1fr\s*\)\s*\)$/);
     if (rep) set('columns', Math.max(1, Math.min(100, Number(rep[1]))));
     else if (d.resolved === 'none' || d.resolved === 'subgrid') ignore(d.cls, 'not supported');
+    else if ((weights = frTracks(d.resolved))) { set('columns', weights.length); if (weights.some(w => w !== 1)) set('columnSizes', weights); }
     else { const tracks = splitTop(d.resolved, ' ').length; set('columns', Math.max(1, Math.min(100, tracks))); ignore(d.cls, `custom grid tracks (${d.resolved}) are approximated as ${tracks} equal columns`); out.ignored.pop(); }
   }
   if ((d = take('grid-column'))) {
@@ -189,7 +197,9 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
   }
   if ((d = take('grid-template-rows'))) {
     const rep = d.resolved.match(/^repeat\(\s*(\d+)\s*,\s*minmax\(\s*0(?:px)?\s*,\s*1fr\s*\)\s*\)$/);
-    if (rep) set('rows', Math.max(1, Math.min(100, Number(rep[1])))); else ignore(d.cls, `grid-template-rows:${d.resolved} is not supported`);
+    if (rep) set('rows', Math.max(1, Math.min(100, Number(rep[1]))));
+    else if ((weights = frTracks(d.resolved))) { set('rows', weights.length); if (weights.some(w => w !== 1)) set('rowSizes', weights); }
+    else ignore(d.cls, `grid-template-rows:${d.resolved} is not supported`);
   }
   if ((d = take('grid-row'))) {
     const span = d.resolved.match(/^span (\d+) \/ span \1$/);

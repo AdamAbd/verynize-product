@@ -14,7 +14,8 @@
 //   block  CSS block flow (display: flow-root, so child margins never escape the frame; adjacent
 //          sibling margins collapse like CSS); gapY = space-y
 //   flex   flexbox with gap/gapX/gapY, wrap, grow/shrink/basis, align-self, auto margins
-//   grid   equal columns (optional equal rows) with col-span / row-span; justifyItems aligns cells
+//   grid   columns (optional explicit rows), equal or fr-weighted (columnSizes / rowSizes), with col-span /
+//          row-span; justifyItems aligns cells
 //   inline children are inline-block
 (function (root) {
   'use strict';
@@ -110,7 +111,19 @@
       if (n[mode] === 'calc' && n[calc] === undefined) return 'Invalid size expression';
     }
     if (n.type === 'frame' && n.justifyItems !== undefined && (typeof n.justifyItems !== 'string' || n.justifyItems.length > 40)) return 'Invalid node justifyItems';
+    // Grid track sizes (Grid settings: each track is "Fill · N fr"): fr weights per column / row, missing = 1.
+    for (const key of ['columnSizes', 'rowSizes'])
+      if (n[key] !== undefined && (n.type !== 'frame' || !Array.isArray(n[key]) || n[key].length > 100 || !n[key].every(v => isNum(v) && v > 0 && v <= 1000))) return 'Invalid grid track sizes';
+    // Grid "Automatic positioning" toggle (stored only while off).
+    if (n.autoPosition !== undefined && (n.type !== 'frame' || typeof n.autoPosition !== 'boolean')) return 'Invalid automatic positioning';
     return '';
+  }
+  /** fr weight of grid track `i` (Grid settings "Fill · N fr"); 1 when unset. */
+  const trackWeight = (sizes, i) => (Array.isArray(sizes) && isNum(sizes[i]) && sizes[i] > 0 ? Math.min(1000, sizes[i]) : 1);
+  /** grid-template-columns / -rows for `count` tracks: equal tracks stay `repeat(N, minmax(0, 1fr))`. */
+  function gridTracks(count, sizes) {
+    const weights = Array.from({length: count}, (_, i) => trackWeight(sizes, i));
+    return weights.every(w => w === 1) ? `repeat(${count}, minmax(0, 1fr))` : weights.map(w => `minmax(0, ${w}fr)`).join(' ');
   }
   function sizingMode(n, axis, parent) {
     const mode = n[axis === 'w' ? 'wMode' : 'hMode'] || 'fixed';
@@ -749,8 +762,8 @@
       }
       if (layout === 'flex') { set('flex-direction', (n.direction === 'column' ? 'column' : 'row') + (n.reverse === true ? '-reverse' : '')); if (n.flexWrap) set('flex-wrap', 'wrap'); }
       if (layout === 'grid') {
-        set('grid-template-columns', `repeat(${Math.max(1, Math.min(100, Math.floor(num(n.columns, 2)) || 2))}, minmax(0, 1fr))`);
-        if (num(n.rows) >= 1) set('grid-template-rows', `repeat(${Math.min(100, Math.floor(num(n.rows)))}, minmax(0, 1fr))`);
+        set('grid-template-columns', gridTracks(Math.max(1, Math.min(100, Math.floor(num(n.columns, 2)) || 2)), n.columnSizes));
+        if (num(n.rows) >= 1) set('grid-template-rows', gridTracks(Math.min(100, Math.floor(num(n.rows))), n.rowSizes));
         if (n.justifyItems !== undefined) set('justify-items', pick(n.justifyItems, ALIGN, 'stretch'));
       }
       // Block alignment: children narrower than the frame sit left / centre / right (justify-items in block flow).
@@ -939,5 +952,5 @@
 
   root.BetterNodeStyle = {nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss: safe, PALETTES, paintError, eachPaintColor, paintColor, fillsCss, svgPaintList, svgColorKey, recolorSvg, PAINT_TYPES, IMAGE_FITS, BLEND_MODES, FILTERS, SHADOW_TYPES, MASK_TYPES, MASK_MODES, MASK_REPEATS, MASK_COMPOSITES, OUTLINE_STYLES, effectsOf, validateEffects, typographyError, TEXT_ALIGN_VERTICAL, WHITE_SPACES, WORD_BREAKS, FONT_SMOOTHINGS};
   // Sizing modes (Relative / Auto / Calculate) and Block alignment.
-  Object.assign(root.BetterNodeStyle, {parseCalc, calcValue, calcCss, sizingError, SIZING_MODES, BLOCK_ALIGN});
+  Object.assign(root.BetterNodeStyle, {parseCalc, calcValue, calcCss, sizingError, SIZING_MODES, BLOCK_ALIGN, trackWeight, gridTracks});
 })(typeof globalThis !== 'undefined' ? globalThis : window);
