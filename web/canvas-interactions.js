@@ -11,11 +11,15 @@
   const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', eyedropper: 'eyedropper-tool', frame: 'add-frame', rectangle: 'rectangle', ellipse: 'add-ellipse', text: 'text', shader: 'add-shader'};
   const STYLE_KEYS = ['color', 'token', 'gradient', 'radius', 'ellipse', 'strokeWidth', 'strokeColor', 'shadow', 'opacity', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'textAlignVertical', 'textTransform', 'textDecoration', 'textWrap', 'whiteSpace', 'wordBreak', 'textIndent', 'fontSmoothing', 'truncate', 'mask', 'animated', 'clipContent'];
   const CLIP_MARKER = 'verynize/nodes';
+  // Wonder's frame tool presets (Properties panel with the Frame tool on and nothing selected): [category, [[name, w, h]]].
   const FRAME_PRESETS = [
-    ['Smartphone', [['iPhone 17', 402, 874], ['iPhone 18 Pro', 402, 874], ['iPhone Air', 420, 912], ['iPhone 18 Pro Max', 440, 956]]],
+    ['Phone', [['iPhone 17', 402, 874], ['iPhone 18 Pro', 402, 874], ['iPhone Air', 420, 912], ['iPhone 18 Pro Max', 440, 956], ['iPhone Duo Folded', 466, 678], ['iPhone Duo Open', 626, 890]]],
     ['Tablet', [['iPad Air 11"', 820, 1180], ['iPad Mini 8.3"', 744, 1133]]],
     ['Desktop', [['MacBook Air', 1280, 832], ['MacBook Pro 14"', 1512, 982], ['MacBook Pro 16"', 1728, 1117], ['Desktop', 1920, 1080], ['TV', 3840, 2160]]],
     ['Presentation', [['Slide 16:9', 1920, 1080], ['Slide 4:3', 1024, 768]]],
+    ['Smartwatch', [['Series 10 42mm', 198, 242], ['Series 10 46mm', 220, 268]]],
+    ['Paper', [['A4', 794, 1123], ['A5', 559, 794], ['A6', 397, 559]]],
+    ['Social media', [['OpenGraph', 1200, 630], ['X Post', 1200, 675], ['X Header', 1500, 500], ['Instagram Post', 1080, 1080], ['Instagram Story', 1080, 1920], ['LinkedIn Banner', 1584, 396]]],
   ];
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   const IS_MAC = /Mac/.test(navigator.platform);
@@ -313,7 +317,7 @@
     const intersects = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
     workspace.addEventListener('wheel', e => {
-      if (e.target.closest('#canvas-toolbar, .canvas-title, #frame-presets, #canvas-menu, dialog')) return;
+      if (e.target.closest('#canvas-toolbar, .canvas-title, #canvas-menu, dialog')) return;
       e.preventDefault();
       let dx = e.deltaX, dy = e.deltaY;
       if (e.deltaMode === 1) { dx *= 16; dy *= 16; } else if (e.deltaMode === 2) { dx *= viewport().width; dy *= viewport().height; }
@@ -364,7 +368,6 @@
       tool = TOOL_BUTTONS[next] ? next : 'move';
       workspace.dataset.tool = tool;
       for (const [name, id] of Object.entries(TOOL_BUTTONS)) document.getElementById(id)?.classList.toggle('tool-active', name === tool);
-      const presets = $('#frame-presets'); if (presets) presets.hidden = tool !== 'frame';
       if (tool === 'eyedropper' && previous !== 'eyedropper') openEyedropper();
     }
     // Legacy command buttons for the tools added here; the chrome island takes their ids over (toolbar / app menu).
@@ -372,6 +375,16 @@
       if (document.getElementById(id)) continue;
       const b = document.createElement('button'); b.type = 'button'; b.id = id; b.hidden = true; b.textContent = label; b.setAttribute('aria-label', label); b.onclick = run;
       document.body.append(b); // not in the legacy toolbar: wonder-shell.js rebuilds that one
+    }
+    // A frame preset (Properties panel, Frame tool): a top-level frame of that size, named after it, centred in view and zoomed to.
+    function insertFramePreset(name) {
+      const preset = FRAME_PRESETS.flatMap(([, presets]) => presets).find(([n]) => n === name);
+      if (!preset) return null;
+      const [, w, h] = preset, p = placeInView(w, h);
+      setTool('move');
+      ed.add('frame', {name, x: p.x, y: p.y, w, h, parentId: null});
+      zoomToSelection();
+      return [...sel()][0] || null;
     }
     function insertEllipse(extra = {}) { ed.add('rectangle', {name: 'Ellipse', ellipse: true, w: 200, h: 200, radius: 0, ...extra}); }
 
@@ -978,7 +991,7 @@
         marqueeBox.hidden = true;
         let r = rectFor(last, square);
         if (r.w * cam.zoom < 3 && r.h * cam.zoom < 3) {
-          const size = {frame: [400, 300], rectangle: [200, 150], ellipse: [200, 200], text: [240, 60], shader: [480, 300]}[kind];
+          const size = {frame: [100, 100], rectangle: [200, 150], ellipse: [200, 200], text: [240, 60], shader: [480, 300]}[kind];
           r = {x: p0.x, y: p0.y, w: size[0], h: size[1]};
         }
         r.w = Math.max(10, r.w); r.h = Math.max(10, r.h);
@@ -1388,6 +1401,8 @@
       {id: 'tool.ellipse', label: 'Ellipse', section: 'Tools', keys: ['o'], run: () => setTool('ellipse')},
       {id: 'tool.eyedropper', label: 'Eyedropper', section: 'Tools', keys: ['i', 'ctrl+c'], run: () => setTool(tool === 'eyedropper' ? 'move' : 'eyedropper')},
       {id: 'tool.image', label: 'Image', section: 'Tools', keys: [], run: () => setTool('image')},
+      // The toolbar Frame button arms the tool (Wonder); this keeps the one-step insert reachable.
+      {id: 'insert.frame', label: 'Insert frame', section: 'Tools', keys: [], run: () => ed.add('frame')},
       {id: 'edit.undo', label: 'Undo', section: 'Edit', keys: ['mod+z'], run: () => $('#undo')?.click()},
       {id: 'edit.redo', label: 'Redo', section: 'Edit', keys: ['mod+shift+z', 'mod+y'], run: () => $('#redo')?.click()},
       {id: 'edit.copy', label: 'Copy', section: 'Edit', keys: ['mod+c'], when: needsSelection, run: copy},
@@ -1513,21 +1528,9 @@
         scale.onclick = () => setTool(tool === 'scale' ? 'move' : 'scale'); select.after(scale);
       }
       for (const [id, key] of [['add-frame', 'F'], ['rectangle', 'R'], ['add-ellipse', 'O'], ['text', 'T'], ['add-shader', 'S']]) { const b = document.getElementById(id); if (b && !b.title.includes('(')) b.title += ` (${key} to draw)`; }
-      if (!document.getElementById('frame-presets')) {
-        const panel = document.createElement('div'); panel.id = 'frame-presets'; panel.hidden = true; panel.setAttribute('aria-label', 'Frame presets');
-        const hint = document.createElement('p'); hint.textContent = 'Drag on the canvas to draw a frame, or choose a size'; panel.append(hint);
-        for (const [group, presets] of FRAME_PRESETS) {
-          const heading = document.createElement('strong'); heading.textContent = group; panel.append(heading);
-          for (const [name, w, h] of presets) {
-            const b = document.createElement('button'); b.type = 'button'; b.dataset.preset = name;
-            const label = document.createElement('span'); label.textContent = name; const size = document.createElement('small'); size.textContent = `${w} × ${h}`;
-            b.append(label, size);
-            b.onclick = () => { const p = placeInView(w, h); setTool('move'); ed.add('frame', {name, x: p.x, y: p.y, w, h, parentId: null}); zoomToSelection(); };
-            panel.append(b);
-          }
-        }
-        workspace.append(panel);
-      }
+      // Frame arms the tool like Hand; its presets live in the Properties panel (inspector island).
+      const frame = document.getElementById('add-frame');
+      if (frame) frame.onclick = () => setTool(tool === 'frame' ? 'move' : 'frame');
       setTool(tool);
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireToolbar); else queueMicrotask(wireToolbar);
@@ -1608,7 +1611,7 @@
     applyCamera();
 
     return {
-      beforeRender, afterRender, setConstraints, constraintsOf: id => { const n = find(id); return n && anchorable(n) ? NS().constraintsOf(n) : null; }, reveal, setTool, getTool: () => tool, fit, zoomToSelection, stepZoom, zoomAt, zoomCenter, setCamera, screenToWorld, worldRect, placeInView,
+      beforeRender, afterRender, setConstraints, constraintsOf: id => { const n = find(id); return n && anchorable(n) ? NS().constraintsOf(n) : null; }, reveal, setTool, getTool: () => tool, insertFramePreset, framePresets: () => FRAME_PRESETS.map(([category, presets]) => ({category, presets: presets.map(([name, w, h]) => ({name, w, h}))})), fit, zoomToSelection, stepZoom, zoomAt, zoomCenter, setCamera, screenToWorld, worldRect, placeInView,
       // scrollLeft/scrollTop stay non-negative for older readers; x/y carry the exact camera offset.
       getView: () => ({zoom: cam.zoom, scrollLeft: clamp(Math.round(-cam.x), 0, 1e7) || 0, scrollTop: clamp(Math.round(-cam.y), 0, 1e7) || 0, page: ed.page().id, x: cam.x || 0, y: cam.y || 0}),
       applyView: view => setCamera(Number.isFinite(view.x) ? view.x : -(Number(view.scrollLeft) || 0), Number.isFinite(view.y) ? view.y : -(Number(view.scrollTop) || 0), Number(view.zoom) || 1),

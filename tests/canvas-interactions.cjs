@@ -85,13 +85,35 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
 
     // ---- 2. Tools: draw-to-create, parenting, presets ----
     await seed([{id: 'board', name: 'Board', type: 'frame', x: 0, y: 0, w: 400, h: 300, color: '#ffffff', layout: 'free'}]);
+    // D1: the toolbar Frame button arms the tool like F; neither creates a layer.
+    await page.locator('#add-frame').click(); assert.equal(await page.evaluate(() => window.design.getTool()), 'frame', 'toolbar Frame arms the tool');
+    assert.equal((await nodesOf()).length, 1, 'arming the frame tool creates no layer');
+    await page.locator('#add-frame').click(); assert.equal(await page.evaluate(() => window.design.getTool()), 'move', 'toolbar Frame toggles the tool off');
     await page.keyboard.press('f'); assert.equal(await page.evaluate(() => window.design.getTool()), 'frame');
-    assert.equal(await page.locator('#frame-presets').isVisible(), true, 'frame presets are offered');
+    assert.equal((await nodesOf()).length, 1, 'F creates no layer');
+    // With nothing selected, Properties lists Wonder's seven preset categories (collapsed) instead of the Page section.
+    assert.equal(await page.locator('#frame-presets-section').isVisible(), true, 'frame presets are offered in Properties');
+    assert.equal(await page.locator('#frame-presets-section h3').textContent(), 'Frame');
+    assert.equal(await page.locator('#page-section').count(), 0, 'the Page section gives way to the presets');
+    assert.deepEqual(await page.locator('#frame-presets-section [data-frame-category]').allTextContents(), ['Phone', 'Tablet', 'Desktop', 'Presentation', 'Smartwatch', 'Paper', 'Social media']);
+    assert.equal(await page.locator('#frame-presets-section [data-preset]').count(), 0, 'categories start collapsed');
+    for (const category of ['Phone', 'Tablet', 'Desktop', 'Presentation', 'Smartwatch', 'Paper', 'Social media']) await page.locator(`[data-frame-category="${category}"]`).click();
+    assert.equal(await page.locator('#frame-presets-section [data-preset]').count(), 26, 'all 26 Wonder presets');
+    assert.equal(await page.locator('[data-preset="iPhone Duo Open"]').textContent(), 'iPhone Duo Open626 × 890');
+    assert.equal(await page.locator('[data-preset="LinkedIn Banner"]').textContent(), 'LinkedIn Banner1584 × 396');
+    assert.equal(await page.locator('[data-preset="Series 10 46mm"]').textContent(), 'Series 10 46mm220 × 268');
+    assert.equal(await page.locator('[data-preset="A4"]').textContent(), 'A4794 × 1123');
+    await page.locator('[data-frame-category="Tablet"]').click();
+    assert.equal(await page.locator('[data-preset^="iPad"]').count(), 0, 'a category collapses again');
+    assert.equal(await page.locator('#frame-presets').count(), 0, 'no floating preset popover');
+    assert.equal((await nodesOf()).length, 1, 'browsing presets creates no layer');
     await drag([500, 20], [700, 170]);
     let list = await nodesOf(), drawn = list.at(-1);
     assert.equal(drawn.type, 'frame'); near(drawn.x, 500); near(drawn.y, 20); near(drawn.w, 200); near(drawn.h, 150);
     assert.equal(drawn.parentId, null);
     assert.equal(drawn.clipContent, true, 'a drawn frame clips its content');
+    assert.equal(drawn.radius, 0, 'D2: a drawn frame has square corners'); assert.equal(drawn.color, '#ffffff');
+    assert.equal(await page.locator('#frame-presets-section').count(), 0, 'presets leave Properties once the tool is off');
     assert.equal(await page.evaluate(() => window.design.getTool()), 'move', 'tool returns to move after drawing');
     await page.keyboard.press('r'); await drag([50, 60], [150, 120]);
     drawn = (await nodesOf()).at(-1);
@@ -99,8 +121,23 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.keyboard.press('t'); await click(520, 400);
     drawn = (await nodesOf()).at(-1); assert.equal(drawn.type, 'text'); near(drawn.x, 520); near(drawn.y, 400);
     await page.evaluate(() => document.activeElement?.blur());
-    await page.keyboard.press('f'); await page.locator('#frame-presets [data-preset="iPhone 17"]').click();
+    // A single click with the frame tool makes a 100×100 "Frame" at the click point (Wonder D1).
+    await page.keyboard.press('Escape'); await page.keyboard.press('f'); await click(720, 220);
+    drawn = (await nodesOf()).at(-1);
+    assert.equal(drawn.type, 'frame'); assert.equal(drawn.name, 'Frame'); near(drawn.x, 720); near(drawn.y, 220);
+    assert.equal(drawn.w, 100); assert.equal(drawn.h, 100); assert.equal(drawn.radius, 0, 'D2: a clicked frame has square corners');
+    assert.deepEqual(await selection(), [drawn.id]); assert.equal(await page.evaluate(() => window.design.getTool()), 'move');
+    // A preset row creates a selected, top-level frame named after the preset, centred in the viewport.
+    await page.keyboard.press('Escape'); await page.keyboard.press('f');
+    await page.locator('[data-frame-category="Phone"]').click(); await page.locator('[data-preset="iPhone 17"]').click();
     drawn = (await nodesOf()).at(-1); assert.equal(drawn.w, 402); assert.equal(drawn.h, 874); assert.equal(drawn.name, 'iPhone 17');
+    assert.equal(drawn.parentId, null); assert.equal(drawn.radius, 0, 'D2: a preset frame has square corners'); assert.equal(drawn.clipContent, true);
+    assert.deepEqual(await selection(), [drawn.id]); assert.equal(await page.evaluate(() => window.design.getTool()), 'move');
+    const presetBox = await page.locator(`#canvas [data-id="${drawn.id}"]`).boundingBox(), wrapBox = await page.locator('#canvas-wrap').boundingBox();
+    assert.ok(presetBox.x > wrapBox.x && presetBox.x + presetBox.width < wrapBox.x + wrapBox.width && presetBox.y >= wrapBox.y - 1 && presetBox.y + presetBox.height <= wrapBox.y + wrapBox.height + 1, 'the preset frame is zoomed into view');
+    // The one-step insert stays reachable as a command.
+    const countBefore = (await nodesOf()).length; await page.evaluate(() => window.design.runCommand('insert.frame'));
+    drawn = (await nodesOf()).at(-1); assert.equal((await nodesOf()).length, countBefore + 1); assert.equal(drawn.type, 'frame'); assert.equal(drawn.radius, 0);
 
     // ---- 3. Marquee, shift toggle, drill-in, keyboard navigation ----
     await seed([rect('m1', 0, 0), rect('m2', 150, 0), rect('m3', 300, 0),
