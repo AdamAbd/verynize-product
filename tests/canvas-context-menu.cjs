@@ -5,7 +5,7 @@ const {_electron} = require('@playwright/test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
-const FRAME_MENU = ['Add context', '|', 'Copy', 'Copy as', 'Copy link to selection', '|', 'Select layer', 'Paste', 'Paste to replace', 'Paste over selection', 'Duplicate', '|', 'Hide', 'Lock', 'Hide label', '|', 'Arrange', '|', 'Layout'];
+const FRAME_MENU = ['Add context', '|', 'Copy', 'Copy as', 'Copy link to selection', '|', 'Select layer', 'Paste', 'Paste to replace', 'Paste over selection', 'Duplicate', '|', 'Hide', 'Lock', 'Hide label', '|', 'Arrange', '|', 'Layout', '|', 'Set as file thumbnail'];
 const without = (list, ...drop) => list.filter(x => !drop.includes(x));
 
 (async () => {
