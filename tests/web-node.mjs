@@ -10,6 +10,7 @@ import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { createWebServer } from "../web-start/node/server.mjs";
 import { launchBrowser } from "./helpers/web-app.mjs";
+import { checkWebRouter } from "./helpers/web-router.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const dist = fileURLToPath(new URL("../dist/web-node", import.meta.url));
@@ -119,8 +120,10 @@ try {
   await page.locator("#rectangle").click();
   assert.equal(await page.locator("#canvas .layer").count(), before + 1);
   assert.deepEqual(errors, []);
+  await page.close();
+  await checkWebRouter(browser, origin);
   console.log(
-    "PASS web (Node build): /editor boots client-only, static web/ files without web/src, /api and room WebSocket forwarded to the backend",
+    "PASS web (Node build): /editor boots client-only, one router (clicks, Back/Forward, deep links, room fragment), static web/ files without web/src, /api and room WebSocket forwarded to the backend",
   );
 } finally {
   await browser?.close();

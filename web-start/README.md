@@ -27,6 +27,7 @@ server and `vp preview` at another directory (the tests use a temp directory).
 | `cloudflare.config.ts`               | Worker `verynize`, entry `web-start/src/server.cloudflare.ts`. Bindings unchanged.                                                                                                                                       |
 | `web-start/src/routes/`              | `__root.tsx` (document shell), `_editor.tsx` (pathless, `ssr: false`), `_editor/{index,editor,code,settings.index,settings.$section}.tsx`, `index[.]html.ts` (302 to `/`).                                               |
 | `web-start/src/legacy/boot.ts`       | Client-only boot of the desktop renderer page.                                                                                                                                                                           |
+| `web-start/src/legacy/shell-host.ts` | Registers Start's router as the shell router's host; `useShellArea` for the editor routes ("One router" below).                                                                                                          |
 | `web-start/src/server.cloudflare.ts` | Worker entry: backend paths to `cloud/worker.js`, everything else to Start; re-exports the Durable Objects.                                                                                                              |
 | `web-start/worker-paths.mjs`         | Backend-owned paths, shared by the Worker entry and the Node server.                                                                                                                                                     |
 | `web-start/build/legacy-web.mjs`     | Vite plugin: `virtual:verynize/legacy-shell` from `web/index.html`, and the `web/` static-file allowlist.                                                                                                                |
@@ -76,12 +77,46 @@ Alternatives considered:
 - `<ClientOnly>`: equivalent to `ssr: false` for a component that only runs an effect, but
   `ssr: false` also skips server loaders and states the intent at the route.
 
-Navigating between `/`, `/editor`, `/code` and `/settings/*` never remounts the layout. The legacy
-shell router (`web/src/lib/router/shell-router.ts`, inside `web/dist/ui.js`) still owns those views.
-Both routers use `@tanstack/history` browser histories on the same window. Each one wraps
-`history.pushState`/`replaceState`, and the wrappers chain, so Start's router follows the shell
-router's pushes and Back/Forward without acting on them. Start's scroll restoration is off. The
-`#room=…`/`#public=…` fragments stay client-side as before (`docs/spikes/tanstack-router.md`).
+Navigating between `/`, `/editor`, `/code` and `/settings/*` never remounts the layout.
+
+### One router
+
+Start's router is the only router and the only history on the page. The legacy shell router
+(`web/src/lib/router/shell-router.ts`, inside `web/dist/ui.js`) is the same source that runs
+standalone on desktop. On the web it runs hosted:
+
+1. `EditorHost` calls `installShellHost(router)` (`legacy/shell-host.ts`) before
+   `bootLegacyEditor()`. This sets `window.verynizeShellHost = { router, initialState }`, where
+   `initialState` is `history.state` as loaded, read before Start's history keys the entry (the
+   module is imported by `router.tsx`).
+2. When `ui.js` runs and finds the host, the shell router creates no history and no route tree.
+   `window.shellRouter` is Start's router, and `navigate()`, `window.shellNavigation` and the
+   legacy requests (`window.shellRequest`) write through Start's history. The cloud-fragment wrapper
+   wraps that history, so Start's own navigation keeps `#room=…`/`#public=…` as well.
+3. Start's route components name the area they stand for: `_editor/index.tsx` `/`, `editor.tsx`
+   `/editor`, `code.tsx` `/code`, `settings.index.tsx` and `settings.$section.tsx` `/settings`.
+   `useShellArea(area)` applies each rendered location (keyed by its history entry) through
+   `window.shellNavigation.applyLocation(area, location)`. The shell router keeps the rules that
+   need the legacy DOM: the view under settings (history state), settings closing through
+   `history.back()`, the pre-router request queue and section canonicalization.
+4. Locations rendered before `ui.js` ran find no `shellNavigation`; the router island applies the
+   current entry once when it mounts.
+
+There used to be two `@tanstack/history` browser histories here, each wrapping
+`history.pushState`/`replaceState`, with Start's router following the shell router through the
+chained wrappers. That is gone: there is one wrapper and one location. `tests/web-cloudflare.mjs`
+and `tests/web-node.mjs` check it with `tests/helpers/web-router.mjs` (UI clicks, app navigation
+and Back/Forward between every area, one entry per step, Start's location equal to the address bar,
+no editor remount, deep links, room fragment).
+
+Start's scroll restoration and hash scrolling are off. The `#room=…`/`#public=…` fragments stay
+client-side as before (`docs/spikes/tanstack-router.md`).
+
+Still legacy: the views themselves. The Files home, settings overlay and code workspace are legacy
+DOM plus React islands inside `ui.js`, switched by the legacy appliers (`fileLibrary.applyHome`,
+`appSettings.applyOpen`, `agentWorkspace.applyCodeMode`, …). Moving an area into a Start route
+component means rendering that island from the route instead of `ui.js`, which needs the island
+bundle split out of `ui.js` first; desktop keeps the standalone router either way.
 
 Unknown paths now return a server-rendered 404, where the old SPA fallback served the editor for
 any path. `/index.html` redirects to `/` with its query; browsers carry the fragment across the
