@@ -48,7 +48,7 @@ contextBridge.exposeInMainWorld('desktop',{
  designOpen:()=>call('designOpen'),designSave:options=>call('designSave',options),designReload:()=>call('designReload'),
  onDesignFileChanged:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('design:file-changed',listener);return()=>ipcRenderer.removeListener('design:file-changed',listener)},
  previewInput:options=>call('previewInput',options),
- previewOpenBrowser:()=>call('previewOpenBrowser'),
+ previewOpenBrowser:options=>call('previewOpenBrowser',options),previewLocation:options=>call('previewLocation',options),
  previewNavigate:options=>call('previewNavigate',options),
  previewInspect:options=>call('previewInspect',options),
  previewEdit:options=>call('previewEdit',options),
