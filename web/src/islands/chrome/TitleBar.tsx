@@ -60,7 +60,7 @@ export function TitleBar() {
         codeMode
           ? "border-transparent bg-transparent pl-0"
           : chatOpen
-            ? "border-divider bg-background pl-chat"
+            ? "border-divider bg-background pl-chat-dock"
             : chatSidebarOpen
               ? "border-divider bg-background pl-2"
               : "border-divider bg-background pl-traffic",

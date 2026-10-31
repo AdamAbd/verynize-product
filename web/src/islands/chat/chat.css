@@ -1,6 +1,6 @@
 /* Chat island: plain CSS for legacy DOM the island cannot render itself (see ../README.md). Tokens only. */
 
-/* Dock geometry (full height, 499px, left edge) is owned by the chrome island (chrome.css); the dock's top row
+/* Dock geometry (full height, --chat-dock-width, left edge) is owned by the chrome island (chrome.css); the dock's top row
    doubles as the window title bar there, so it is a drag region. */
 :root body #agent-chat-dock {
   padding: 0;
