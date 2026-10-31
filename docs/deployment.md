@@ -1,6 +1,6 @@
 # Cloudflare deployment
 
-The application now uses a Worker with SQLite Durable Objects, a room-creation rate limiter, and static web assets. `cloudflare.config.ts` declares the entrypoint and bindings. No Wrangler configuration is used. To run the same backend on your own server or in Docker instead, see [self-hosting.md](self-hosting.md).
+The application now uses a Worker with SQLite Durable Objects, a room-creation rate limiter, and static web assets. `cloudflare.config.ts` declares the entrypoint and bindings. No Wrangler configuration is used. To run the same backend on your own server or in Docker instead, see [self-hosting.md](self-hosting.md); on Vercel, see [deployment-vercel.md](deployment-vercel.md).
 
 The browser app is a TanStack Start app in `web-start/` (see `web-start/README.md`). `vite.config.ts` builds it with the Cloudflare Vite plugin. The Worker entry `web-start/src/server.cloudflare.ts` sends the backend paths (`/api/*`, `/u/*`, `/apps/*`, `/passkey`, `/passkey.js`, `/account/*`) and WebSocket upgrades to `cloud/worker.js`. It re-exports the Durable Object classes, so the Worker name, bindings and Durable Object data are unchanged. Start serves the editor routes as a client-only shell that boots `web/index.html`'s markup and scripts. Static assets are Start's client build plus the files of `web/`, except `web/src`, `web/index.html` and the desktop-only migration page. `npm run build` builds `web/dist/ui.js` first.
 
