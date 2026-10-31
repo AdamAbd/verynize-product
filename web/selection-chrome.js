@@ -6,6 +6,12 @@
 // - Gestures: invisible edge zones resize one axis (TR1), zones just outside each corner rotate around the centre
 //   (TR2), and corner/edge resize keeps Shift (aspect), Alt (from the centre) and the Scale tool (T4, proportional by
 //   the drag projected on the box diagonal).
+// - Wonder details measured from design/wonder/canvas-audit: a selected hidden layer keeps a 1px outline of its bounds
+//   and nothing else (CM6-hidden); a selected nested layer gets dashed guides to the parent edges it is constrained
+//   to and no name label (S2-classic, CM3-text-menu: #c468f7 at 75%, 1px, 2.5/2 dashes); a text layer being edited
+//   shows only its caret, plus the ⊕ chip for a fixed-size box (TX1-click, TX1-selection, TX1-drag).
+// - While a layer is dragged (`.moving`) it shows no outline, handles, size badge or chip, only its name label
+//   (R1-row-drag-slot, R1-row-drag-far, TR4-guide). Multi-selection drags keep their union box (not captured).
 // Everything here is screen-space DOM in #canvas-overlay; the canvas itself stays imperative.
 (() => {
   const ZONE = 18; // rotate zone size outside each corner (screen px)
@@ -17,7 +23,19 @@
   const NAME_OFFSET = 20; // label line box (18 px) sits just above the box
   const CHIP_SIZE = 12, CHIP_INSET = 4, CHIP_RISE = 14; // ⊕: 12 px circle, right edge 4 px inside the box, centre 14 px above
   const MIN_SIZE = 10;
+  // Wonder's selection purple #c468f7 and badge #a245d3 (S4-frame-ready), tokens in canvas.css.
+  const SELECT = 'var(--canvas-select,#c468f7)', BADGE = 'var(--canvas-select-badge,#a245d3)';
   const r2 = v => Math.round(v * 100) / 100;
+  // Accumulated rotation of a node and its ancestors (degrees).
+  function totalRotation(n, find) { let total = Number(n.rotation) || 0, a = n; while (a.parentId) { a = find(a.parentId); if (!a) break; total += Number(a.rotation) || 0; } return total; }
+  // A layer's screen frame relative to the canvas viewport: centre, unrotated size and on-screen angle. The selection
+  // chrome and the hover outline (Wonder S1-hover-final: the outline turns with a rotated frame) are placed from it.
+  function frameOf(el, n, find, zoom, viewport) {
+    if (!el || !n) return null;
+    const r = el.getBoundingClientRect(); if (!r.width && !r.height) return null;
+    return {cx: r.left - viewport.left + r.width / 2, cy: r.top - viewport.top + r.height / 2, w: el.offsetWidth * zoom, h: el.offsetHeight * zoom, angle: totalRotation(n, find)};
+  }
+  const placeFrame = (el, f) => Object.assign(el.style, {left: f.cx - f.w / 2 + 'px', top: f.cy - f.h / 2 + 'px', width: f.w + 'px', height: f.h + 'px', transform: f.angle ? `rotate(${f.angle}deg)` : ''});
   // Rotation in degrees, rounded to 0.01 and normalised to (−180, 180].
   function normalize(deg) { const r = ((r2(deg) + 180) % 360 + 360) % 360 - 180; return r === -180 ? 180 : r2(r) || 0; }
   // The chrome turns with the node by a multiple of 90° so that its own angle stays within (−45, 45].
@@ -43,21 +61,38 @@
 #canvas-overlay .resize-edge,#canvas-overlay .rotate-zone{position:absolute;pointer-events:auto;touch-action:none}
 #canvas-overlay .rotate-zone{width:${ZONE}px;height:${ZONE}px;cursor:${ROTATE_CURSOR}}
 #canvas-overlay #selection-name{position:absolute!important;left:0!important;top:${-NAME_OFFSET}px!important;transform:none!important;max-width:none}
-#canvas-overlay #selection-measure{position:absolute!important;left:50%!important;top:calc(100% + ${BADGE_GAP}px)!important;transform:translateX(-50%)!important;height:22px;box-sizing:border-box;padding:0 6px!important;font:12px/22px Inter,system-ui,sans-serif!important;border-radius:4px!important;background:#a245d3!important;color:#fff!important;white-space:nowrap;pointer-events:none;font-feature-settings:'calt' 0!important}
-#canvas-overlay #selection-chat-chip{position:absolute;right:${CHIP_INSET}px;top:${-CHIP_RISE - CHIP_SIZE / 2}px;width:${CHIP_SIZE}px;height:${CHIP_SIZE}px;box-sizing:border-box;margin:0;padding:0;border:1px solid var(--shell-accent,#b93cdb);border-radius:50%;background:transparent;color:var(--shell-accent,#b93cdb);pointer-events:auto;cursor:pointer;display:flex;align-items:center;justify-content:center}
+#canvas-overlay #selection-measure{position:absolute!important;left:50%!important;top:calc(100% + ${BADGE_GAP}px)!important;transform:translateX(-50%)!important;height:22px;box-sizing:border-box;padding:0 6px!important;font:12px/22px Inter,system-ui,sans-serif!important;border-radius:4px!important;background:${BADGE}!important;color:#fff!important;white-space:nowrap;pointer-events:none;font-feature-settings:'calt' 0!important}
+#canvas-overlay #selection-chat-chip{position:absolute;right:${CHIP_INSET}px;top:${-CHIP_RISE - CHIP_SIZE / 2}px;width:${CHIP_SIZE}px;height:${CHIP_SIZE}px;box-sizing:border-box;margin:0;padding:0;border:1px solid ${SELECT};border-radius:50%;background:transparent;color:${SELECT};pointer-events:auto;cursor:pointer;display:flex;align-items:center;justify-content:center}
 #canvas-overlay #selection-chat-chip::before,#canvas-overlay #selection-chat-chip::after{content:'';position:absolute;left:50%;top:50%;width:6px;height:1px;background:currentColor;transform:translate(-50%,-50%)}
 #canvas-overlay #selection-chat-chip::after{transform:translate(-50%,-50%) rotate(90deg)}
-#canvas-overlay #selection-chat-chip:hover{background:color-mix(in srgb,var(--shell-accent,#b93cdb) 20%,transparent)}
-#canvas-overlay .selection-union{position:absolute;box-sizing:border-box;border:1px solid var(--shell-accent,#b93cdb)}
-#canvas-overlay .selection-union>.union-handle{position:absolute;width:8px;height:8px;box-sizing:border-box;background:#fff;border:1px solid var(--shell-accent,#b93cdb)}
+#canvas-overlay #selection-chat-chip:hover{background:color-mix(in srgb,${SELECT} 20%,transparent)}
+#canvas-overlay .selection-union{position:absolute;box-sizing:border-box;outline:1px solid ${SELECT};outline-offset:-.5px}
+#canvas-overlay .selection-union>.union-handle{position:absolute;width:9px;height:9px;box-sizing:border-box;background:#fff;border:1px solid ${SELECT}}
 #canvas-overlay .selection-union>.union-handle[data-corner=nw]{left:-4.5px;top:-4.5px}
 #canvas-overlay .selection-union>.union-handle[data-corner=ne]{right:-4.5px;top:-4.5px}
 #canvas-overlay .selection-union>.union-handle[data-corner=sw]{left:-4.5px;bottom:-4.5px}
 #canvas-overlay .selection-union>.union-handle[data-corner=se]{right:-4.5px;bottom:-4.5px}
+#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle{pointer-events:auto;touch-action:none}
+#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle::after{content:'';position:absolute;inset:-4px}
+#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle[data-corner=nw],#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle[data-corner=se]{cursor:nwse-resize}
+#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle[data-corner=ne],#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle[data-corner=sw]{cursor:nesw-resize}
 #canvas[data-multi-select] .layer>.handle,#canvas-overlay[data-multi-select] .clipped-selection .handle{display:none!important}
-#canvas-overlay .frame-label.selected{color:var(--shell-accent,#b93cdb)}
+#canvas-overlay .frame-label.selected{color:${SELECT}}
 .transforming #canvas-overlay #selection-chat-chip,.moving #canvas-overlay #selection-chat-chip{visibility:hidden}
-.panning #canvas-overlay .resize-edge,.panning #canvas-overlay .rotate-zone,.space-pan #canvas-overlay .resize-edge,.space-pan #canvas-overlay .rotate-zone{pointer-events:none}`;
+.panning #canvas-overlay .resize-edge,.panning #canvas-overlay .rotate-zone,.space-pan #canvas-overlay .resize-edge,.space-pan #canvas-overlay .rotate-zone{pointer-events:none}
+#canvas-overlay #selection-chat-chip[hidden],#canvas-overlay #selection-name[hidden],#canvas-overlay #selection-measure[hidden]{display:none!important}
+#canvas-overlay .hidden-outline{position:absolute;box-sizing:border-box;outline:1px solid ${SELECT};outline-offset:-.5px;transform-origin:50% 50%}
+#canvas-overlay .constraint-guides{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+#canvas-overlay .constraint-guide{stroke:${SELECT};stroke-opacity:.75;stroke-width:1;stroke-dasharray:2.5 2;shape-rendering:crispEdges}
+.moving #canvas-overlay .constraint-guides,.transforming #canvas-overlay .constraint-guides{display:none}
+.moving #canvas:not([data-multi-select]) .layer.selected{outline:none!important}
+.moving #canvas:not([data-multi-select]) .layer.selected::after,.moving #canvas:not([data-multi-select]) .layer>.handle{display:none!important}
+.moving #canvas-overlay:not([data-multi-select]) #selection-measure{visibility:hidden!important}
+#canvas .layer.selected[data-text-editing]{outline:none!important}
+#canvas .layer.selected[data-text-editing]::after,#canvas .layer[data-text-editing]>.handle{display:none!important}
+#canvas-wrap:has(#canvas .layer[data-text-editing]) #canvas-overlay .clipped-selection{display:none}
+#canvas .layer.selected[data-clip-ring]:not([data-outline]){outline:none!important}
+#canvas .layer.selected[data-clip-ring]::after,#canvas .layer[data-clip-ring]>.handle{display:none!important}`;
 
   function install(ctx) {
     const {ed, cam, wrap, overlay, workspace, find, sel, track, gesture, isFlow, unbindKeys, elementOf} = ctx;
@@ -68,6 +103,8 @@
     const box = document.createElement('div'); box.className = 'sel-box'; // rotates exactly with the node: gesture zones
     const textBox = document.createElement('div'); textBox.className = 'sel-text-box'; // rotates by the chrome angle: label, chip, badge
     const union = document.createElement('div'); union.className = 'selection-union';
+    const hiddenOutline = document.createElement('div'); hiddenOutline.className = 'hidden-outline';
+    const guides = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); guides.setAttribute('class', 'constraint-guides');
     for (const corner of ['nw', 'ne', 'sw', 'se']) { const h = document.createElement('div'); h.className = 'union-handle'; h.dataset.corner = corner; union.append(h); }
     const chip = document.createElement('button'); chip.type = 'button'; chip.id = 'selection-chat-chip'; chip.title = 'Add to chat'; chip.setAttribute('aria-label', 'Add selection to chat');
     chip.addEventListener('click', e => { e.stopPropagation(); addToChat(); });
@@ -75,23 +112,54 @@
     for (const edge of ['n', 'e', 's', 'w']) { const z = document.createElement('div'); z.className = 'resize-edge'; z.dataset.edge = edge; edges[edge] = z; }
     for (const corner of ['nw', 'ne', 'sw', 'se']) { const z = document.createElement('div'); z.className = 'rotate-zone'; z.dataset.corner = corner; z.style.clipPath = notchedSquare(corner, ZONE, NOTCH); zones[corner] = z; }
     box.append(...Object.values(edges), ...Object.values(zones));
-    layer.append(union, box, textBox);
+    layer.append(guides, hiddenOutline, union, box, textBox);
     overlay.append(layer);
-    union.hidden = box.hidden = textBox.hidden = true;
+    union.hidden = box.hidden = textBox.hidden = hiddenOutline.hidden = true;
     let busy = false;
     const tool = () => ctx.getTool();
 
-    const totalRotation = n => { let total = Number(n.rotation) || 0, a = n; while (a.parentId) { a = find(a.parentId); if (!a) break; total += Number(a.rotation) || 0; } return total; };
     const viewport = () => wrap.getBoundingClientRect();
-    function screenFrame(n) {
-      const el = elementOf(n.id); if (!el) return null;
-      const r = el.getBoundingClientRect(), v = viewport(); if (!r.width && !r.height) return null;
-      return {cx: r.left - v.left + r.width / 2, cy: r.top - v.top + r.height / 2, w: el.offsetWidth * cam.zoom, h: el.offsetHeight * cam.zoom, angle: totalRotation(n)};
-    }
-    const place = (el, cx, cy, w, h, angle) => Object.assign(el.style, {left: cx - w / 2 + 'px', top: cy - h / 2 + 'px', width: w + 'px', height: h + 'px', transform: angle ? `rotate(${angle}deg)` : ''});
+    const screenFrame = n => frameOf(elementOf(n.id), n, find, cam.zoom, viewport());
+    const place = (el, cx, cy, w, h, angle) => placeFrame(el, {cx, cy, w, h, angle});
     function topSelected() {
       const list = ed.nodes().filter(n => sel().has(n.id));
       return list.filter(n => !list.some(o => o.id !== n.id && ed.descendants(o.id).has(n.id)));
+    }
+
+    // A hidden layer renders as display:none: lay it out for one synchronous measurement (never painted).
+    function hiddenFrame(n) {
+      const el = elementOf(n.id); if (!el) return null;
+      const NS = window.BetterNodeStyle, parent = n.parentId ? find(n.parentId) : null;
+      let display = 'block';
+      try { display = NS.nodeStyle({...n, hidden: false}, parent).box.find(([k]) => k === 'display')?.[1] || 'block'; } catch {}
+      const prev = {display: el.style.getPropertyValue('display'), visibility: el.style.getPropertyValue('visibility')};
+      el.style.setProperty('display', display); el.style.setProperty('visibility', 'hidden');
+      const f = screenFrame(n);
+      el.style.setProperty('display', prev.display || 'none');
+      if (prev.visibility) el.style.setProperty('visibility', prev.visibility); else el.style.removeProperty('visibility');
+      return f;
+    }
+    // Wonder S2: dashed lines from the selected child to the parent edges it is pinned to (Left/Top → left/top edge,
+    // Right/Bottom → right/bottom, Left & Right → both). Centre and Scale constraints draw none (not observed).
+    function drawConstraintGuides(n) {
+      guides.replaceChildren();
+      const parent = n.parentId && find(n.parentId);
+      if (!parent || parent.hidden || (isFlow(parent) && n.position !== 'absolute') || totalRotation(n, find) % 360) return;
+      const childEl = elementOf(n.id), parentEl = elementOf(parent.id); if (!childEl || !parentEl) return;
+      const v = viewport(), c = childEl.getBoundingClientRect(), p = parentEl.getBoundingClientRect();
+      if (!c.width && !c.height) return;
+      const cons = window.BetterNodeStyle?.constraintsOf?.(n) || {h: 'start', v: 'start'};
+      const cx = c.left + c.width / 2 - v.left, cy = c.top + c.height / 2 - v.top;
+      const line = (side, x1, y1, x2, y2) => {
+        if (Math.abs(x2 - x1) + Math.abs(y2 - y1) < 1) return;
+        const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        for (const [k, val] of Object.entries({x1, y1, x2, y2})) l.setAttribute(k, val);
+        l.setAttribute('class', 'constraint-guide'); l.dataset.side = side; guides.append(l);
+      };
+      if (cons.h === 'start' || cons.h === 'stretch') line('left', p.left - v.left, cy, c.left - v.left, cy);
+      if (cons.h === 'end' || cons.h === 'stretch') line('right', c.right - v.left, cy, p.right - v.left, cy);
+      if (cons.v === 'start' || cons.v === 'stretch') line('top', cx, p.top - v.top, cx, c.top - v.top);
+      if (cons.v === 'end' || cons.v === 'stretch') line('bottom', cx, c.bottom - v.top, cx, p.bottom - v.top);
     }
 
     // ---------- Drawing ----------
@@ -99,7 +167,9 @@
       const ids = [...sel()], multi = ids.length > 1;
       const name = document.getElementById('selection-name'), badge = document.getElementById('selection-measure');
       if (multi) { ed.canvas.dataset.multiSelect = ''; overlay.dataset.multiSelect = ''; } else { delete ed.canvas.dataset.multiSelect; delete overlay.dataset.multiSelect; }
-      union.hidden = box.hidden = textBox.hidden = true;
+      union.hidden = box.hidden = textBox.hidden = hiddenOutline.hidden = true;
+      guides.replaceChildren();
+      for (const el of ed.canvas.querySelectorAll('[data-clip-ring]')) delete el.dataset.clipRing;
       if (!ids.length || document.body.classList.contains('files-view')) return;
       if (multi) {
         const rects = topSelected().filter(n => !n.hidden).map(n => ctx.worldRect(n.id)).filter(Boolean);
@@ -111,11 +181,23 @@
         union.hidden = false;
         if (name) name.hidden = true;
         if (badge) { badge.hidden = false; badge.textContent = `${r2(w)} x ${r2(h)}`; union.append(badge); }
-        union.append(chip);
+        chip.hidden = false; union.append(chip);
         return;
       }
-      const n = find(ids[0]), f = n && !n.hidden && screenFrame(n);
+      const n = find(ids[0]);
+      if (!n) return;
+      // Wonder CM6-hidden: only the bounds, as an empty 1px outline (no handles, label, badge or chip).
+      if (n.hidden) {
+        const h = hiddenFrame(n); if (!h) return;
+        place(hiddenOutline, h.cx, h.cy, h.w, h.h, h.angle); hiddenOutline.hidden = false;
+        return;
+      }
+      const f = screenFrame(n);
       if (!f) return;
+      const nodeEl = elementOf(n.id), editing = !!nodeEl?.hasAttribute('data-text-editing');
+      // The clip-proof ring (canvas-interactions) replaces the layer's own outline: one 1.5px ring, not two.
+      if (nodeEl && overlay.querySelector('.clipped-selection .selection-ring')) nodeEl.dataset.clipRing = '';
+      if (!editing) drawConstraintGuides(n);
       // Gesture zones: only for an unlocked layer with the Move or Scale tool.
       if (!n.locked && (tool() === 'move' || tool() === 'scale')) {
         place(box, f.cx, f.cy, f.w, f.h, f.angle);
@@ -139,9 +221,13 @@
       // Label, chip and badge: the node's frame turned by k·90° so the chrome angle stays within (−45°, 45°].
       const angle = chromeAngle(f.angle), quarter = ((Math.round((f.angle - angle) / 90) % 4) + 4) % 4, swap = quarter % 2 === 1;
       place(textBox, f.cx, f.cy, swap ? f.h : f.w, swap ? f.w : f.h, angle);
-      if (name) textBox.append(name);
+      // Wonder S2 / CM3: no label on nested or text layers. A drag previewing a new parent labels by that parent
+      // (R1-row-drag-far: a stack child dragged onto the page shows its name, R1-row-return-during: one entering a stack not).
+      const preview = ctx.previewParent?.(n.id), parentId = preview === undefined ? n.parentId : preview;
+      if (name) { textBox.append(name); if (parentId || n.type === 'text' || editing) name.hidden = true; }
       textBox.append(chip);
-      if (badge) textBox.append(badge);
+      chip.hidden = editing && n.wMode !== 'fixed'; // TX1: a hugging text being typed shows only its caret
+      if (badge) { textBox.append(badge); if (editing) badge.hidden = true; }
       textBox.hidden = false;
     }
 
@@ -183,10 +269,10 @@
     // the Scale tool scales the layer and its content proportionally.
     function startResize(e, id, handle) {
       const n = find(id); if (!n || n.locked) return;
-      const total = totalRotation(n), scaling = tool() === 'scale';
+      const total = totalRotation(n, find), scaling = tool() === 'scale';
       const s = {x: n.x, y: n.y, w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, start = {x: e.clientX, y: e.clientY}, g = gesture();
       const hx = handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0, hy = handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0;
-      const content = scaling ? [...ed.descendants(id)].map(find).filter(Boolean).map(d => ({d, x: d.x, y: d.y, w: d.w, h: d.h, fontSize: d.fontSize, radius: d.radius, gap: d.gap, padding: d.padding, strokeWidth: d.strokeWidth})) : [];
+      const content = scaling ? scaleContent(id) : [];
       begin();
       track(e, ev => {
         g.commit();
@@ -213,22 +299,98 @@
           n.x = r2(s.x + (ax * dw * Math.cos(a) - ay * dh * Math.sin(a) - dw) / 2);
           n.y = r2(s.y + (ax * dw * Math.sin(a) + ay * dh * Math.cos(a) - dh) / 2);
         }
-        if (scaling) {
-          const f = w / s.w;
-          for (const c of content) {
-            if (c.d.id !== id) { c.d.x = c.x * f; c.d.y = c.y * f; c.d.w = Math.max(1, c.w * f); c.d.h = Math.max(1, c.h * f); }
-            c.d.fontSize = Math.min(200, Math.max(8, c.fontSize * f)); c.d.radius = c.radius * f; c.d.gap = c.gap * f; c.d.padding = c.padding * f; c.d.strokeWidth = c.strokeWidth * f;
-            if (f !== 1) unbindKeys(c.d, [c.d.id !== id && 'w', c.d.id !== id && 'h', 'fontSize', 'radius', 'gap', 'padding', 'strokeWidth']);
-          }
-        }
+        if (scaling) applyContentScale(content, id, w / s.w);
         ed.render();
       }, end);
+    }
+
+    // The Scale tool's content snapshot: the layer and its descendants with the values a proportional scale changes.
+    function scaleContent(id) {
+      return [...ed.descendants(id)].map(find).filter(Boolean).map(d => ({d, x: d.x, y: d.y, w: d.w, h: d.h, fontSize: d.fontSize, radius: d.radius, gap: d.gap, padding: d.padding, strokeWidth: d.strokeWidth}));
+    }
+    // Scale the snapshot by f from its original values: children move and resize with the layer; type size, radius,
+    // gap, padding and border width scale everywhere (values a layer doesn't set stay unset). Scaled values drop their
+    // variable bindings.
+    function applyContentScale(content, id, f) {
+      const by = v => typeof v === 'number' ? v * f : v;
+      for (const c of content) {
+        if (c.d.id !== id) { c.d.x = by(c.x); c.d.y = by(c.y); c.d.w = Math.max(1, c.w * f); c.d.h = Math.max(1, c.h * f); }
+        if (typeof c.fontSize === 'number') c.d.fontSize = Math.min(200, Math.max(8, c.fontSize * f));
+        c.d.radius = by(c.radius); c.d.gap = by(c.gap); c.d.padding = by(c.padding); c.d.strokeWidth = by(c.strokeWidth);
+        if (f !== 1) unbindKeys(c.d, [c.d.id !== id && 'w', c.d.id !== id && 'h', 'fontSize', 'radius', 'gap', 'padding', 'strokeWidth']);
+      }
+    }
+
+    // Proportional scale of several layers (Wonder R2-multi-scale-after: a 240×120 union of 100×60 and 100×120 frames
+    // dragged to 360×180 gives 150×90 and 150×180 frames, the 40 px gap becoming 60): each layer scales with its
+    // content, and a free layer's offset from `anchor` (a world point) scales too. Without an anchor (or inside an auto
+    // layout) a layer keeps its own x/y — its top-left stays put.
+    function scaleSnapshot(ids) {
+      return ids.map(find).filter(n => n && !n.locked && n.w > 0 && n.h > 0)
+        .map(n => ({n, s: {x: n.x, y: n.y, w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, r: ctx.worldRect(n.id), flow: isFlow(find(n.parentId)), content: scaleContent(n.id)}));
+    }
+    function minFactor(snaps) { return Math.max(0, ...snaps.map(({s}) => Math.max(MIN_SIZE / s.w, MIN_SIZE / s.h))); }
+    function applyScale(snaps, k, anchor) {
+      for (const {n, s, r, flow, content} of snaps) {
+        n.w = r2(s.w * k); n.h = r2(s.h * k);
+        unbindKeys(n, ['w', 'h']);
+        if (n.wMode && n.wMode !== 'fixed') { n.wMode = 'fixed'; delete n.wCalc; }
+        if (n.hMode && n.hMode !== 'fixed') { n.hMode = 'fixed'; delete n.hCalc; }
+        if (s.wPct !== undefined) n.wPct = r2(s.wPct * k);
+        if (s.hPct !== undefined) n.hPct = r2(s.hPct * k);
+        if (anchor && r && !flow) { n.x = r2(s.x + (r.x - anchor.x) * (k - 1)); n.y = r2(s.y + (r.y - anchor.y) * (k - 1)); }
+        applyContentScale(content, n.id, k);
+      }
+    }
+    // Top-level members of a set of ids (a selected layer inside another selected layer scales with it).
+    function topOf(ids) {
+      const set = new Set(ids);
+      return ids.filter(id => { for (let p = find(id)?.parentId; p; p = find(p)?.parentId) if (set.has(p)) return false; return true; });
+    }
+    function unionOf(snaps) {
+      const rects = snaps.map(x => x.r).filter(Boolean); if (!rects.length) return null;
+      const x = Math.min(...rects.map(r => r.x)), y = Math.min(...rects.map(r => r.y));
+      return {x, y, w: Math.max(...rects.map(r => r.x + r.w)) - x, h: Math.max(...rects.map(r => r.y + r.h)) - y};
+    }
+
+    // Scale the selection's union from a corner with the Scale tool (Wonder R2): the opposite corner stays put and
+    // the factor is the drag projected on the union's diagonal, as for a single layer. One undo step.
+    function startUnionScale(e, corner) {
+      const snaps = scaleSnapshot(topOf([...sel()].filter(id => !find(id)?.hidden))), u = unionOf(snaps);
+      if (!snaps.length || !u || !(u.w > 0) || !(u.h > 0)) return;
+      const hx = corner.includes('e') ? 1 : -1, hy = corner.includes('s') ? 1 : -1;
+      const anchor = {x: hx > 0 ? u.x : u.x + u.w, y: hy > 0 ? u.y : u.y + u.h}, start = {x: e.clientX, y: e.clientY}, g = gesture(), min = minFactor(snaps);
+      begin();
+      track(e, ev => {
+        const dx = (ev.clientX - start.x) / cam.zoom, dy = (ev.clientY - start.y) / cam.zoom;
+        const k = Math.max(min, diagonalFactor(u.w, u.h, Math.max(1, u.w + hx * dx), Math.max(1, u.h + hy * dy)));
+        g.commit(); applyScale(snaps, k, anchor);
+        ed.render();
+      }, end);
+    }
+
+    // Scale layers by a factor from the inspector's Scale section (Wonder T4-scale-retry / R2: W, H and %), the way
+    // the Scale tool does: proportional, children and type included. One layer keeps its top-left; several scale
+    // about their union's top-left. One undo step.
+    function scaleBy(ids, factor) {
+      const snaps = scaleSnapshot(topOf([].concat(ids || []))), k0 = Number(factor);
+      if (!snaps.length || !(k0 > 0) || !Number.isFinite(k0)) return false;
+      const k = Math.max(k0, minFactor(snaps));
+      if (Math.abs(k - 1) < 1e-9) return false;
+      const u = snaps.length > 1 ? unionOf(snaps) : null;
+      gesture().commit();
+      applyScale(snaps, k, u && {x: u.x, y: u.y});
+      ed.render();
+      return true;
     }
 
     // Pointer-down hook for the canvas: returns true when the press belongs to the selection chrome.
     function pointerDown(e) {
       if (e.button !== 0) return false; // right-click opens the layer menu instead
       if (e.target.closest?.('#selection-chat-chip')) return true; // the click runs the chip's action
+      // Wonder R2-multi-scale-before: with the Scale tool the union's corners scale the whole selection.
+      const handle = tool() === 'scale' && sel().size > 1 && e.target.closest?.('#canvas-overlay .selection-union > .union-handle');
+      if (handle) { startUnionScale(e, handle.dataset.corner); return true; }
       const zone = e.target.closest?.('#canvas-overlay .rotate-zone, #canvas-overlay .resize-edge');
       if (!zone) return false;
       const id = [...sel()][0]; if (!id || sel().size !== 1) return false;
@@ -236,8 +398,8 @@
       return true;
     }
 
-    return {draw, startResize, startRotate, pointerDown, addToChat, busy: () => busy};
+    return {draw, startResize, startRotate, scaleBy, pointerDown, addToChat, busy: () => busy};
   }
 
-  window.BetterSelectionChrome = {install, normalize, chromeAngle, diagonalFactor};
+  window.BetterSelectionChrome = {install, normalize, chromeAngle, diagonalFactor, frameOf, placeFrame};
 })();

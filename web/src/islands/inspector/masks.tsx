@@ -4,12 +4,16 @@
 // Exclude). "Detach mask as shape" turns a mask into a separate layer. Several masks stack as mask-image
 // layers (web/node-style.js). The free-form CSS mask field (`[name=mask]`) shows only for older documents that
 // still carry `node.mask`; new CSS masks use the Custom type (`[name=mask-<i>-css]`).
+// Shape masks (`type: "shape"`, made by "Use as mask", Wonder P5-mask-inspector) show as one row: frame icon, the
+// editable inset() field (`[name=mask-<i>-shape]`), Detach mask as shape, Remove mask (shape-mask.ts).
 import { useState } from "react";
 import {
   ChevronDown,
   Circle,
   CircleDot,
   Columns2,
+  CopyPlus,
+  Frame,
   Image as ImageIcon,
   Spline,
   SquareDashedBottom,
@@ -18,7 +22,7 @@ import { activePage } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { CheckField } from "./check-field";
-import { Affix, Caption, Field, NativeSelect, Segmented } from "./controls";
+import { Affix, Caption, Field, IconButton, NativeSelect, Segmented } from "./controls";
 import {
   ListSection,
   RowTools,
@@ -30,6 +34,8 @@ import {
   type MaskType,
 } from "./effects";
 import { notify } from "./legacy";
+import { RemoveIcon } from "@/components/icons";
+import { detachShapeMask, isShapeInset, removeMask } from "./shape-mask";
 import { fmt, setField, type Node } from "./model";
 
 const MASK_LABEL: Record<MaskType, string> = {
@@ -38,6 +44,7 @@ const MASK_LABEL: Record<MaskType, string> = {
   conic: "Conic",
   image: "Image",
   custom: "Custom",
+  shape: "Shape",
 };
 const MASK_ICON = {
   linear: Columns2,
@@ -45,6 +52,7 @@ const MASK_ICON = {
   conic: CircleDot,
   image: ImageIcon,
   custom: Spline,
+  shape: Frame,
 };
 const MODES = [
   { value: "auto", label: "Auto" },
@@ -203,17 +211,21 @@ export function MaskSection({ node, selection }: EffectProps) {
     >
       {hasBody ? (
         <>
-          {masks.map((mask, index) => (
-            <MaskRow
-              key={index}
-              index={index}
-              node={node}
-              mask={mask}
-              open={editing === index}
-              onOpenChange={(open) => setEditing(open ? index : null)}
-              edit={edit}
-            />
-          ))}
+          {masks.map((mask, index) =>
+            mask.type === "shape" ? (
+              <ShapeMaskRow key={index} index={index} node={node} mask={mask} edit={edit} />
+            ) : (
+              <MaskRow
+                key={index}
+                index={index}
+                node={node}
+                mask={mask}
+                open={editing === index}
+                onOpenChange={(open) => setEditing(open ? index : null)}
+                edit={edit}
+              />
+            ),
+          )}
           {node.mask ? (
             <Caption label="Custom mask (CSS)">
               <Field
@@ -228,6 +240,49 @@ export function MaskSection({ node, selection }: EffectProps) {
         </>
       ) : null}
     </ListSection>
+  );
+}
+
+/** Wonder P5-mask-inspector: [frame icon] [inset(…) field] [detach] [remove]. */
+function ShapeMaskRow({
+  index,
+  node,
+  mask,
+  edit,
+}: {
+  index: number;
+  node: Node;
+  mask: Mask;
+  edit: (fn: (list: Mask[]) => Mask[]) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2" data-mask-row={index} data-mask-type="shape">
+      <Frame className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <Field
+        name={`mask-${index}-shape`}
+        label="Mask shape"
+        className="min-w-0 flex-1"
+        value={mask.shape ?? ""}
+        onCommit={(raw) => {
+          const shape = raw.trim().replace(/\s+/g, " ");
+          if (!isShapeInset(shape))
+            return "Use inset() with percentages, such as inset(10% 10% 10% 10%)";
+          edit((list) => list.map((item, i) => (i === index ? { ...item, shape } : item)));
+        }}
+      />
+      <IconButton
+        icon={CopyPlus}
+        label="Detach mask as shape"
+        data-mask-detach={index}
+        onClick={() => detachShapeMask(node.id, index)}
+      />
+      <IconButton
+        icon={RemoveIcon}
+        label="Remove mask"
+        data-effect-tool="remove"
+        onClick={() => removeMask(node.id, index)}
+      />
+    </div>
   );
 }
 

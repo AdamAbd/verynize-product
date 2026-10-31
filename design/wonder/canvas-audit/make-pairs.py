@@ -19,11 +19,17 @@ PREFER = ("-verified", "-confirmed", "-ready", "-menu", "-retry", "-focused", "-
 EXCLUDED = {
     "CM1-empty.png", "CM2-frame.png", "S4-frame.png", "S4-frame-verified.png", "CM3-text.png", "CM5-multi.png",
     "S2-escape.png", "T4-scale.png", "TX1-selection.png", "V4-return.png", "L1-rename.png", "L2-renamed.png",
-    "TR2-rotate.png", "TR3-nudge.png", "T1-plus.png", "T1-shader.png", "T1-text.png", "T1-view-a.png", "T1-view-b.png",
+    "TR2-rotate.png", "TR3-nudge.png", "TR3-shift-nudge.png", "T1-plus.png", "T1-shader.png", "T1-text.png", "T1-view-a.png", "T1-view-b.png",
 }
 
 
+# Retakes whose name does not extend the original state name, and states that must not take a "-menu" sibling.
+ALIAS = {"TR3-shift-nudge.png": "TR3-shift-retry.png", "P5-mask-result.png": "P5-mask-result.png"}
+
+
 def wonder_for(left, name):
+    if name in ALIAS and (left / ALIAS[name]).exists():
+        return left / ALIAS[name]
     stem = name[:-4]
     for suffix in PREFER:
         if (left / f"{stem}{suffix}.png").exists() and f"{stem}{suffix}.png" not in EXCLUDED:
