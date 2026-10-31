@@ -137,6 +137,25 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.deepEqual([p.x, p.y, p.w, p.h], [world.x, world.y, 80, 60], 'frame hugs its only child');
     assert.deepEqual([c.x, c.y], [0, 0], 'child moved to the frame origin, same canvas position');
 
+    // Wonder H1-tooltip: the tool is "Resize to fill ⌘⇧⌥F" (custom tooltip, no native title) and the shortcut runs it.
+    const fitTool = section.locator('#position-fit-content');
+    assert.equal(await fitTool.getAttribute('aria-label'), 'Resize to fill');
+    assert.equal(await fitTool.getAttribute('title'), null, 'no native title tooltip');
+    await seed([{id: 'p', name: 'Parent', type: 'frame', x: 0, y: 0, w: 400, h: 300, color: '#ffffff', layout: 'free'},
+      {id: 'c', name: 'Child', type: 'rectangle', parentId: 'p', x: 30, y: 40, w: 80, h: 60, color: '#8844cc'}], ['p']);
+    await page.mouse.move(5, 5); // the click above closed the tooltip until the pointer leaves
+    await fitTool.hover();
+    const tip = page.getByRole('tooltip', {name: /Resize to fill/});
+    await tip.waitFor();
+    assert.match(await tip.textContent(), /Resize to fill\s*⌘⇧⌥F/);
+    await page.mouse.move(5, 5);
+    await page.locator('#canvas-wrap').focus().catch(() => {});
+    await page.evaluate(() => document.activeElement?.blur?.());
+    await page.keyboard.press('Meta+Shift+Alt+KeyF');
+    const p2 = await node('p');
+    assert.deepEqual([p2.x, p2.y, p2.w, p2.h], [30, 40, 80, 60], '⌘⇧⌥F resizes the frame to fill around its child');
+    assert.equal((await page.evaluate(() => window.design.getDocument().pages[0].nodes.find(n => n.id === 'c'))).x, 0);
+
     // Three layers: distribute replaces flip.
     await seed([{id: 'r1', name: 'r1', type: 'rectangle', x: 0, y: 0, w: 20, h: 20, color: '#ff0000'},
       {id: 'r2', name: 'r2', type: 'rectangle', x: 30, y: 0, w: 20, h: 20, color: '#00ff00'},
@@ -146,6 +165,6 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal((await node('r2')).x, 100, 'distribute horizontally');
 
     assert.deepEqual(errors, []);
-    console.log('PASS inspector position: absolute toggle (in place, enables constraints, back to flow), Left/Right menu, diagram + disabled colours, single-child align to parent, flip H/V, distribute for 3+, expand fits content, Z Auto');
+    console.log('PASS inspector position: absolute toggle (in place, enables constraints, back to flow), Left/Right menu, diagram + disabled colours, single-child align to parent, flip H/V, distribute for 3+, expand fits content ("Resize to fill ⌘⇧⌥F" tooltip + shortcut), Z Auto');
   } finally { await app.close(); await fs.rm(dir, {recursive: true, force: true}); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

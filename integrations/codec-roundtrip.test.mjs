@@ -225,7 +225,9 @@ function buildSink() {
     shaderColors: { center: { color: "#ff0000" }, edge: { color: "#00ff00", token: "glow" } },
     shaderParams: { size: 40, grain: 10 },
   });
-  Object.assign(by("Free"), { columns: 4, direction: "column", gap: 12, clipContent: true });
+  Object.assign(by("Free"), { columns: 4, direction: "column", gap: 12, clipContent: true, columnSizes: [2, 1, 1, 1] });
+  // Grid settings: fr-weighted Fill tracks and Automatic positioning off (G5 / H7).
+  Object.assign(by("Grid"), { columnSizes: [1, 2, 1], rowSizes: [1, 3], autoPosition: false });
   Object.assign(by("Grow"), {
     fontFamily: "Inter",
     bindings: { fontFamily: "font/body", fontWeight: "weight/strong" },

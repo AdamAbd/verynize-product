@@ -112,7 +112,7 @@ export function validateDocument(document) {
       if (node.svgColor !== undefined && (node.type !== 'image' || typeof node.src !== 'string' || !/^data:image\/svg\+xml;base64,/.test(node.src) || typeof node.svgColor !== 'string' || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(node.svgColor))) throw new Error('Invalid SVG color');
       if (node.svgColorToken !== undefined && (typeof node.svgColorToken !== 'string' || !VARIABLE_NAME.test(node.svgColorToken) || node.svgColor === undefined)) throw new Error('Invalid SVG color variable');
       validateBindings(node.bindings);
-      { const sz = sizingError(node); if (sz) throw new Error(sz); } // wMode/hMode (fixed|hug|fill|auto|calc) + wCalc/hCalc, shared with validate() in web/app.js
+      { const sz = sizingError(node); if (sz) throw new Error(sz); } // wMode/hMode (fixed|hug|fill|auto|calc) + wCalc/hCalc, grid columnSizes/rowSizes/autoPosition, shared with validate() in web/app.js
       { const fx = validateEffects(node); if (fx) throw new Error(fx); } // structured effects, shared with validate() in web/app.js
       { const se = shaderError(node); if (se) throw new Error(se); } // shader preset/colours/sliders, shared with validate() in web/app.js
       { const pe = paintError(node); if (pe) throw new Error(pe); } // paint stack + SVG paints, shared with validate() in web/app.js
