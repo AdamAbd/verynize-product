@@ -64,6 +64,8 @@ const HTML =
     await page.waitForFunction(() => window.livePreview.getSelectionState()?.mode === "edit");
     await page.waitForSelector("#preview-edit[aria-pressed=true]");
     await page.waitForSelector("#live-preview[data-preview-mode=edit]");
+    // Wonder PM3-hover: in Edit mode, Properties stay empty until an element is picked.
+    await page.locator("#screen-template").waitFor({ state: "hidden" });
     // Hover outlines the h1; click selects it with the sizing badge and the inspector.
     // Page coordinates of in-app points: the iframe sits in the zoomed canvas, so scale its viewport px.
     const box = await page.locator("#live-frame").boundingBox(),
@@ -106,6 +108,13 @@ const HTML =
       .filter({ hasText: "1 change" })
       .waitFor();
     assert.equal(await page.evaluate((id) => window.previewEdits.count(id), frameId), 1);
+    // The badge sits in the breadcrumb row above the browser toolbar, never over Publish / Stop (Wonder PM3-edited).
+    {
+      const badge = await page.locator("#live-preview [data-pe=preview-changes-badge]").boundingBox();
+      const bar = await page.locator("#live-preview .pf-bar").boundingBox();
+      assert.ok(badge.y + badge.height <= bar.y + 0.5, `badge ${JSON.stringify(badge)} is above the toolbar ${JSON.stringify(bar)}`);
+      assert.ok(Math.abs(badge.x + badge.width - (bar.x + bar.width - 5)) < 2, "badge is right-aligned with the frame");
+    }
     // Double-click a word edits the text in place.
     const word = await frame.evaluate(() => {
       const node = document.getElementById("title").firstChild,
@@ -122,9 +131,19 @@ const HTML =
         document.getElementById("title").isContentEditable &&
         getSelection().toString() === "preview",
     );
+    assert.equal(
+      await frame.evaluate(() => getComputedStyle(document.getElementById("title")).outlineStyle),
+      "none",
+      "no page focus ring around the edited text",
+    );
     await page.keyboard.type("edited");
     await page.keyboard.press("Escape");
     await page.waitForFunction((id) => window.previewEdits.count(id) === 2, frameId);
+    assert.equal(
+      await frame.evaluate(() => !!document.getElementById("verynize-edit-style") || document.getElementById("title").hasAttribute("data-verynize-editing")),
+      false,
+      "editing styles are removed when the edit ends",
+    );
     assert.equal(await text(), "Sunbird edited sandbox");
     assert.equal(
       await frame.evaluate(() => document.getElementById("title").hasAttribute("contenteditable")),
@@ -285,8 +304,14 @@ const HTML =
     assert.equal(Number(result.text.fontSize), 36);
     assert.equal(String(result.text.fontWeight), "700");
     assert.equal(result.text.color, "#172340", "text colour is an editable Text Fill");
+    assert.deepEqual(
+      result.text.backgroundFills,
+      [{ type: "solid", color: "#f4f6fe" }],
+      "the page colour behind the element is the text's Background Fill (Wonder PM4-result)",
+    );
     assert.deepEqual(result.selection, [result.text.id]);
     assert.notEqual(result.camera.x, before.x, "camera pans to the capture");
+    assert.equal(result.camera.y, before.y, "an in-view capture is revealed by a sideways pan only");
     // ⌘Return captures the whole page (one region frame, as the toolbar capture always did).
     await page.evaluate((id) => window.design.setSelection([id]), frameId);
     await page.locator("#live-capture").click();
@@ -304,6 +329,7 @@ const HTML =
     await page.locator("#live-capture").click();
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => window.livePreview.getSelectionState()?.mode === "select");
+    await page.locator("#screen-template").waitFor({ state: "visible" });
     assert.equal(requests, loads, "edits and captures never reload the app");
     assert.equal(loads, 1);
     console.log(

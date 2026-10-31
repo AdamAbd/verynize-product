@@ -175,6 +175,15 @@ const freePort = () => new Promise(resolve => { const s = net.createServer(); s.
     assert.equal(await page.locator(`${pf} [data-pf=publish]`).isVisible(), false, 'error toolbar keeps only expand');
     assert.equal(await page.locator(`${pf} [data-pf=expand]`).isVisible(), true);
     await shot('PS4-error');
+    // A failure reported by the header's Start (bd:preview-setup-state with the start status) shows the same exit details.
+    // Same sequence as web/src/islands/code/preview-state.ts startPreview: starting event, start, failed event.
+    await page.evaluate(async root => {
+      window.dispatchEvent(new CustomEvent('bd:preview-setup-state', {detail: {root, state: 'starting', message: ''}}));
+      const status = await window.desktop.devServer.start({root});
+      window.dispatchEvent(new CustomEvent('bd:preview-setup-state', {detail: {root, state: 'failed', message: status.tail || 'boom', status}}));
+    }, repo);
+    await page.waitForFunction(id => /exit 7/.test(document.querySelector(`[data-id="${id}"] .preview-setup-card`)?.textContent || ''), pid);
+    assert.match((await card.textContent()).replace(/\s+/g, ' '), /The start command exited before the app was ready\..*App stopped/, 'header-started failures keep the exit details');
     // View logs opens the terminal with the run output.
     await page.locator(`${pf} [data-act=logs]`).click();
     await page.waitForFunction(id => /Cannot find module/.test(document.querySelector(`[data-id="${id}"] .pf-term-log`).textContent), pid);

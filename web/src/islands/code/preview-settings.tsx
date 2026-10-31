@@ -200,6 +200,11 @@ function PreviewSettingsDialog({ root, state, onClose }: { root: string; state: 
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
       <DialogContent
         id="preview-settings"
+        // Keyboard focus starts on the dialog itself, not on "Detect with agent" (no ring at open, as in Wonder X1).
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          (event.currentTarget as HTMLElement | null)?.focus();
+        }}
         // Var syntax so tailwind-merge replaces DialogContent's max-w-lg (it does not know the theme's size).
         className="flex h-(--spacing-preview-settings-height) max-h-full max-w-(--spacing-preview-settings) gap-0 overflow-hidden rounded-preview-settings border-card-border p-0 sm:max-w-(--spacing-preview-settings)"
       >

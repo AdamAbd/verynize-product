@@ -134,10 +134,14 @@
   text-overflow: ellipsis;
   outline: none;
 }
-.pf-head .pf-path { width: auto; display: block; }
+/* Wonder PF2: at rest the path hugs its text (hover pill and tooltip centre on it); editing it opens a dark well
+   that fills the bar up to Publish, without a focus ring. */
+.pf-head .pf-path { width: auto; display: block; flex: 0 1 auto; field-sizing: content; max-width: 100%; }
 .pf-path:hover { background: var(--muted); }
 .pf-head .pf-icon:disabled:hover { background: transparent; }
-.pf-path:focus { background: var(--input); box-shadow: 0 0 0 1px var(--ring); }
+.pf-path:focus { background: var(--color-preview-path-edit); box-shadow: none; }
+.pf-head .pf-path:focus { flex: 1 1 auto; margin-right: 10px; }
+.pf-head .pf-path:focus-visible { outline: none; }
 .pf-head button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 @container (max-width: 300px) { .pf-btn span { display: none; } .pf-btn { padding: 0 4px; } }
 

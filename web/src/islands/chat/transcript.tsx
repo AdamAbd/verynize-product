@@ -38,7 +38,7 @@ import { ChatActionButton, ChatIconButton, ChatPillButton, ChatSuggestionButton 
 import { Markdown, openAppLink } from "./markdown";
 import { ChatMenu, ChatMenuContent, ChatMenuItem, ChatMenuNote, ChatMenuSeparator, ChatMenuTrigger } from "./menu";
 import { MentionIcon } from "./mention-popover";
-import { PreviewSavedCard, savedPreview } from "./preview-setup";
+import { PREVIEW_SETUP_REQUEST, PreviewSavedCard, savedPreview } from "./preview-setup";
 import { QuestionCard } from "./question-card";
 import { ChatTip } from "./tip";
 import { usageSummary } from "./usage-ring";
@@ -575,10 +575,18 @@ function UserMessage({ message, index, busy }: { message: ChatMessage; index: nu
     requestAnimationFrame(() => editButton.current?.querySelector("button")?.focus());
   };
   const mentions = message.mentions ?? [];
+  // The Preview's setup request is an app action, not typed text: logo + purple label, no context chips (PS2).
+  const setupRequest = message.text === PREVIEW_SETUP_REQUEST && !editing;
   return (
     <article className={cn(hook.userMessage, "group/msg relative m-0 flex w-full max-w-none flex-col items-end rounded-none border-0 bg-transparent p-0 text-base leading-5.25 text-foreground")}>
       <div className={cn("relative max-w-full rounded-2xl bg-input px-3 py-2", editing && "w-full")}>
-        {(!!message.images?.length || !!message.canvas || mentions.length > 0) && (
+        {setupRequest ? (
+          <div data-preview-request className={cn(hook.messageContent, "flex items-center gap-1.5 text-preview-request")}>
+            <LogoIcon className="size-3.5 shrink-0" />
+            {message.text}
+          </div>
+        ) : null}
+        {!setupRequest && (!!message.images?.length || !!message.canvas || mentions.length > 0) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {message.canvas && (
               <span className={cn(USER_CHIP)}>
@@ -600,7 +608,7 @@ function UserMessage({ message, index, busy }: { message: ChatMessage; index: nu
             ))}
           </div>
         )}
-        {editing ? (
+        {setupRequest ? null : editing ? (
           <EditBox
             initial={message.text}
             onCancel={close}

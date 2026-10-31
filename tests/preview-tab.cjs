@@ -46,7 +46,7 @@ const APP = `require('http').createServer((q,r)=>{r.setHeader('content-type','te
     const tab = page.locator(`[data-preview-tab="${frameId}"]`);
     await tab.waitFor();
     await page.waitForFunction(id => document.querySelector(`[data-preview-tab="${id}"]`)?.dataset.status === 'running', frameId);
-    assert.match((await tab.innerText()).replace(/\s+/g, ' '), /sunbird · Preview/);
+    assert.match((await tab.innerText()).replace(/\s+/g, ' '), /Sunbird · Preview/);
     assert.equal(await tab.locator('button[aria-current=page]').count(), 1, 'preview tab is the current tab');
     assert.equal(await page.locator('[data-document-tab]').getAttribute('aria-current'), null, 'document tab is not current');
     const view = page.locator('#preview-tab-view');
@@ -125,13 +125,13 @@ const APP = `require('http').createServer((q,r)=>{r.setHeader('content-type','te
     await page.waitForFunction(id => document.querySelector(`[data-preview-tab="${id}"]`)?.dataset.status === 'running', frameId);
     await page.evaluate(root => window.desktop.devServer.stop({root}), root);
     await page.waitForFunction(id => document.querySelector(`[data-preview-tab="${id}"]`)?.dataset.status === 'stopped', frameId, {timeout: 10000});
-    assert.match((await tab.innerText()).replace(/\s+/g, ' '), /sunbird · Stopped/);
+    assert.match((await tab.innerText()).replace(/\s+/g, ' '), /Sunbird · Stopped/);
     await view.getByText('Preview stopped').waitFor();
     assert.equal(await page.locator('iframe[name=verynize-preview-tab]').count(), 0, 'no stale app page once stopped');
     await page.evaluate(root => window.desktop.devServer.start({root}), root);
     await page.waitForFunction(id => document.querySelector(`[data-preview-tab="${id}"]`)?.dataset.status === 'running', frameId, {timeout: 10000});
     await page.waitForFunction(() => document.querySelector('iframe[name=verynize-preview-tab]')?.src.startsWith('http'));
-    assert.match((await tab.innerText()).replace(/\s+/g, ' '), /sunbird · Preview/);
+    assert.match((await tab.innerText()).replace(/\s+/g, ' '), /Sunbird · Preview/);
     console.log('PASS preview tab: ⌘⌥P/expand open, separate page state, browser bar, tab switching, show on canvas, close keeps server, stopped state');
   } finally {
     if (root) await page.evaluate(root => window.desktop.devServer.stop({root}), root).catch(() => {});

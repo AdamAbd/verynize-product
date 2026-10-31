@@ -364,6 +364,13 @@ function snapshotDocument(region, options = {}) {
   }
   for (const sheet of document.styleSheets) visit(sheet);
   walk(rootEl || document.body);
+  function backdropOf(el) {
+    for (; el; el = el.parentElement) {
+      const bg = getComputedStyle(el).backgroundColor;
+      if (bg && bg !== "transparent" && !/^rgba\(.*,\s*0\)$/.test(bg)) return bg;
+    }
+    return "";
+  }
   if (count >= 500) warnings.push("Capture limited to 500 elements");
   warnings.push(
     "Layout captured as fixed positioned layers; responsive rules and pseudo-elements are not reconstructed",
@@ -374,6 +381,9 @@ function snapshotDocument(region, options = {}) {
     warnings,
     area,
     element: !!rootEl,
+    // The colour the element is seen on (its own or the nearest opaque ancestor background). Element captures put it
+    // behind captured text, so dark text stays readable on the canvas (Wonder PM4-result: page colour behind the h1).
+    backdrop: rootEl ? backdropOf(rootEl) : "",
     title: document.title,
     url: location.href,
     fonts: { faces: faces.slice(0, 200), sheets: [...new Set(sheets)].slice(0, 20) },
@@ -868,7 +878,12 @@ function captureModel(snapshot) {
     }
     return node;
   });
-  if (!snapshot.element) nodes.unshift({
+  const backdrop = snapshot.element && cssColorHex(snapshot.backdrop || "");
+  if (backdrop)
+    for (const node of nodes)
+      if (!node.parentId && node.type === "text" && !node.backgroundFills)
+        node.backgroundFills = [{ type: "solid", color: backdrop }];
+    if (!snapshot.element) nodes.unshift({
     id: "capture-region",
     parentId: null,
     type: "frame",

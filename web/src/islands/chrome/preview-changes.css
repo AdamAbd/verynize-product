@@ -15,14 +15,15 @@
   align-items: center;
   gap: 5px;
   height: 22px;
-  margin-bottom: calc(2px * var(--iz, 1));
+  /* In the breadcrumb row, right-aligned, 2px above the 31px screen-sized browser toolbar (Wonder PM3-edited). */
+  margin-bottom: calc(33px * var(--iz, 1));
   padding: 0 6px;
   border: 0;
   border-radius: 6px;
   background: var(--preview-amber-bg);
   color: var(--preview-amber-fg);
   font:
-    500 13px/22px Inter,
+    500 12px/22px Inter,
     system-ui,
     sans-serif;
   white-space: nowrap;

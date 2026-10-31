@@ -17,6 +17,8 @@ import { workspace, type ChatPart, type ChatState } from "./store";
 type CanvasPreview = {ensure(options: {root: string; name?: string; chatId?: string; url?: string}): unknown; show(url: string, options?: {root: string; name?: string; chatId?: string}): void};
 const preview = () => (window as unknown as {livePreview?: CanvasPreview}).livePreview;
 
+/** The chat message a first Start sends; the transcript draws it as an app action (Wonder PS2: purple, logo). */
+export const PREVIEW_SETUP_REQUEST = "Set up the Preview";
 const INTRO_KEY = "verynize.preview-intro";
 let introUsed = false; // a Start this session hides the intro until the next launch
 const runningDismissed = new Set<string>();
@@ -34,7 +36,7 @@ export function PreviewSetup({state}: {state: ChatState}) {
       if (!state.activeRoot) return;
       workspace()?.openChat();
       workspace()?.attachText?.("preview", "Preview setup", `Inspect this repository's stack, package manager, install/setup requirements, development command and listening port. Use the project's actual tools (npm, Yarn, pnpm, Bun, Python or another runtime); never assume Vite+ is installed. For plain HTML without a package manifest, use an available Python interpreter with -u -m http.server and --bind 127.0.0.1; setup can be omitted. Use the propose_preview tool with Setup, Run and Port: in ask or edit access it becomes a card for my review, in auto or full access it is saved directly. Never start the server or the preview yourself; I start it with Start preview. Pass chatId ${JSON.stringify(state.conversationId)} and a short app name. The project root is ${JSON.stringify(state.activeRoot)}.`);
-      workspace()?.queueMessage?.("Set up the Preview");
+      workspace()?.queueMessage?.(PREVIEW_SETUP_REQUEST);
     };
     window.addEventListener("bd:setup-preview", setup);
     return () => { alive = false; clearInterval(timer); window.removeEventListener("bd:setup-preview", setup); };
