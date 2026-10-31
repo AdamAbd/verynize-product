@@ -6,6 +6,8 @@ import { PanelLeftIcon, PlusIcon } from "@/components/icons";
 import { activePage, legacy, legacySet, useBodyClass, useDesign } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { run } from "./legacy";
+import { PreviewTabs } from "./preview-tab/PreviewTabs";
+import { activate as showPreviewTab, VIEW_CLASS } from "./preview-tab/store";
 import { Tip } from "./tip";
 
 const iconButton =
@@ -17,6 +19,9 @@ const tabActive = "border-tab-edge bg-input text-foreground hover:text-foregroun
 export function TitleBar() {
   const doc = useDesign();
   const filesView = useBodyClass("files-view");
+  // An expanded preview tab (preview-tab/) is the visible tab instead of the design file.
+  const previewTabView = useBodyClass(VIEW_CLASS);
+  const documentActive = !filesView && !previewTabView;
   const chatOpen = useBodyClass("agent-chat-open");
   // The sidebar toggle shows the repositories / chats list (code island, `body.chat-sidebar-open`), not the layers.
   const chatSidebarOpen = useBodyClass("chat-sidebar-open");
@@ -144,9 +149,10 @@ export function TitleBar() {
 
         <div
           data-document-tab=""
-          aria-current={filesView ? undefined : "page"}
-          className={cn(tab, "min-w-0 shrink gap-0 pr-2.5", !filesView && tabActive)}
+          aria-current={documentActive ? "page" : undefined}
+          className={cn(tab, "min-w-0 shrink gap-0 pr-2.5", documentActive && tabActive)}
           onClick={() => {
+            showPreviewTab(null);
             if (filesView)
               (window.fileLibrary as { showEditor?: () => void } | undefined)?.showEditor?.();
           }}
@@ -164,6 +170,8 @@ export function TitleBar() {
           />
           {page ? <span className="min-w-0 truncate">&nbsp;-&nbsp;{page.name}</span> : null}
         </div>
+
+        <PreviewTabs tabClass={tab} activeClass={tabActive} />
 
         <Tip label="New file" side="bottom">
           <button

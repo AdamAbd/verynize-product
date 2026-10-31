@@ -13,6 +13,8 @@ import { CommandPalette } from "./chrome/CommandPalette";
 import { ShortcutsDrawer } from "./chrome/ShortcutsDrawer";
 import { applyLayout, toggleBodyClass, type LayoutName } from "./chrome/hooks";
 import { initLegacy } from "./chrome/legacy";
+import { PreviewTabView } from "./chrome/preview-tab/PreviewTabView";
+import { installPreviewTabs } from "./chrome/preview-tab/store";
 import "./chrome/chrome.css";
 
 function useLayoutShortcuts() {
@@ -58,6 +60,7 @@ function Island({ overlayHost }: { overlayHost: HTMLElement | null }) {
       <CanvasContextMenu />
       <CommandPalette />
       <ShortcutsDrawer />
+      <PreviewTabView />
       {overlayHost ? createPortal(<CanvasOverlays />, overlayHost) : null}
     </>
   );
@@ -65,6 +68,7 @@ function Island({ overlayHost }: { overlayHost: HTMLElement | null }) {
 
 function container() {
   initLegacy();
+  installPreviewTabs();
   document.body.classList.add("bd-chrome");
   let root = document.getElementById("bd-chrome-root");
   if (!root) {

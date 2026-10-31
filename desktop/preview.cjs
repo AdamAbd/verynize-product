@@ -57,9 +57,9 @@ function registerPreview(handle, parent) {
 
     finally { if(capture&&!window.isDestroyed())window.destroy(); }
   });
-  handle('captureLivePreview',async ({url,region=null}={})=>captureLiveFrame(parent,{url:localURL(url),region}));
+  handle('captureLivePreview',async ({url,region=null,target}={})=>captureLiveFrame(parent,{url:localURL(url),region,name:frameName(target)}));
   // Region picker hover highlight: the element box under a point of the embedded preview viewport.
-  handle('previewElementAt',async ({x,y}={})=>{if(!Number.isFinite(x)||!Number.isFinite(y))throw Error('A viewport point is required');return previewFrame(parent).executeJavaScript('('+elementAtPoint.toString()+')('+JSON.stringify({x,y})+')');});
+  handle('previewElementAt',async ({x,y,target}={})=>{if(!Number.isFinite(x)||!Number.isFinite(y))throw Error('A viewport point is required');return previewFrame(parent,frameName(target)).executeJavaScript('('+elementAtPoint.toString()+')('+JSON.stringify({x,y})+')');});
   require('./capture-remote.cjs').registerRemoteCapture(handle,parent);
   const edit = async (options, inspect = false) => {
     if (!options || typeof options !== 'object') throw Error('Preview edit options are required');
@@ -88,10 +88,12 @@ function registerPreview(handle, parent) {
     parent.webContents.setIgnoreMenuShortcuts(true);
     return {enabled:true};
   });
-  handle('previewOpenBrowser', () => shell.openExternal(localURL(previewFrame(parent).url)));
-  handle('previewNavigate', async ({direction} = {}) => {
+  handle('previewOpenBrowser', ({target} = {}) => shell.openExternal(localURL(previewFrame(parent,frameName(target)).url)));
+  // Current address of a preview frame (the expanded tab's path field follows in-app navigation).
+  handle('previewLocation', async ({target} = {}) => ({url: localURL(previewFrame(parent,frameName(target)).url)}));
+  handle('previewNavigate', async ({direction,target} = {}) => {
     if (!['back','forward','reload'].includes(direction)) throw Error('Invalid preview navigation');
-    const frame = previewFrame(parent);
+    const frame = previewFrame(parent,frameName(target));
     await frame.executeJavaScript(direction === 'reload' ? 'location.reload()' : direction === 'back' ? 'history.back()' : 'history.forward()');
     return {navigated: true};
   });
@@ -109,8 +111,8 @@ function registerPreview(handle, parent) {
     } finally {window.destroy();}
   });
 }
-async function captureLiveFrame(parent,{url,region=null}={}){
-  const frame=parent.webContents.mainFrame.frames.find(candidate=>candidate.name===PREVIEW_FRAME);
+async function captureLiveFrame(parent,{url,region=null,name=PREVIEW_FRAME}={}){
+  const frame=parent.webContents.mainFrame.frames.find(candidate=>candidate.name===name);
   if(!frame||frame.parent!==parent.webContents.mainFrame)throw Error('Open the running app preview first');
   const actual=new URL(localURL(frame.url));
   if(url){const expected=new URL(localURL(url));if(actual.origin!==expected.origin)throw Error('Preview navigated to a different origin; load it explicitly before capturing');}
@@ -130,6 +132,10 @@ async function captureLiveFrame(parent,{url,region=null}={}){
 // reach the out-of-process preview frame); if the debugger cannot attach (DevTools open), they
 // fall back to synthetic DOM events inside the page and report input:"synthetic".
 const PREVIEW_FRAME='verynize-live-preview';
+// The expanded "Open in a tab" preview (web/src/islands/chrome/preview-tab) is a second iframe with its own page
+// state; renderer calls opt into it with {target:'tab'}. Agent automation keeps acting on the canvas frame only.
+const PREVIEW_TAB_FRAME='verynize-preview-tab';
+const frameName=target=>target===undefined||target===null||target==='canvas'?PREVIEW_FRAME:target==='tab'?PREVIEW_TAB_FRAME:(()=>{throw Error('Unknown preview target')})();
 const automations=new WeakMap();
 const CONSOLE_LIMIT=500,CONSOLE_TEXT=2000;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -243,8 +249,8 @@ function scrollPage(o){
  return {...state(desc),moved:before[0]!==target.scrollLeft||before[1]!==target.scrollTop,atEnd:target.scrollTop+(box?box.clientHeight:innerHeight)>=target.scrollHeight-1};
 }
 
-function previewFrame(parent){
- const frame=parent.webContents.mainFrame.frames.find(candidate=>candidate.name===PREVIEW_FRAME);
+function previewFrame(parent,name=PREVIEW_FRAME){
+ const frame=parent.webContents.mainFrame.frames.find(candidate=>candidate.name===name);
  if(!frame||frame.parent!==parent.webContents.mainFrame||!frame.url||frame.url==='about:blank')throw Error('The running-app preview is not open; call preview_open first');
  try{localURL(frame.url);}catch{throw Error('The preview left localhost ('+String(frame.url).slice(0,200)+'); open a localhost URL with preview_open');}
  return frame;
