@@ -8,6 +8,7 @@
 // thumbnail, and a live preview has no static picture to draw.
 import { activePage, design, type LayerNode } from "@/lib/bridge";
 import { layerMenu, type Entry } from "./model";
+import { platform } from "@/lib/platform";
 
 type PreviewData = { root: string; url?: string };
 type LivePreview = {
@@ -15,12 +16,9 @@ type LivePreview = {
   getNodeId?: () => string | null;
   getURL?: () => string;
 };
-type PreviewDesktop = {
-  previewClearData?: (options: { url: string; logins: boolean }) => Promise<unknown>;
-};
 
 const live = () => (window as unknown as { livePreview?: LivePreview }).livePreview;
-const desktop = () => (window as unknown as { desktop?: PreviewDesktop }).desktop;
+const desktop = () => platform.desktop;
 /** The status footer, like the inspector's validation messages. */
 const notify = (message: string) => {
   const footer = document.querySelector("footer");

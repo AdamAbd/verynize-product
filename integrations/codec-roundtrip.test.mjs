@@ -1,7 +1,7 @@
 // General source round trips: document -> JSX -> document and document -> HTML/CSS -> document are the
 // identity (modulo ids) for a "kitchen sink" page that sets every layer property of the schema, and a
-// coverage check enumerates the schema from the validators (validate() in web/app.js,
-// validateDocument in design-store.mjs, the effect/paint/shader validators in web/node-style.js and
+// coverage check enumerates the schema from the validators (the shared validateDocument in
+// web/document-core.js, the effect/paint/shader validators in web/node-style.js and
 // web/shaders.js) plus the codec node model, and fails when a property is neither exercised by the
 // kitchen sink nor explicitly exempt.
 import test from "node:test";
@@ -42,13 +42,13 @@ function body(src, marker) {
 /** Layer property names the validators and the codec node model know about. */
 export function schemaKeys() {
   const app = read("web/app.js"),
-    store = read("integrations/design-store.mjs"),
+    core = read("web/document-core.js"),
     style = read("web/node-style.js"),
     shaders = read("web/shaders.js"),
     edit = read("integrations/design-edit.mjs");
   const texts = [
-    body(app, "function validate(d)"),
-    body(store, "export function validateDocument"),
+    body(core, "function validateNode(node)"),
+    body(core, "function normalizeDocument("),
     body(style, "function validateEffects"),
     body(style, "function paintError"),
     body(shaders, "function validate"),
@@ -59,6 +59,9 @@ export function schemaKeys() {
     for (const m of t.matchAll(/for\s*\(\s*const\s+(?:key|\[key,\s*\w+\])\s+of\s+\[([^\]]*)\]/g))
       for (const k of m[1].matchAll(/'([a-zA-Z]\w*)'/g)) keys.add(k[1]);
   }
+  // Per-type key lists of the shared validator (NUMERIC_KEYS, STRING_KEYS, BOOLEAN_KEYS).
+  for (const m of core.matchAll(/const [A-Z]+_KEYS = \[([^\]]*)\]/g))
+    for (const k of m[1].matchAll(/'([a-zA-Z]\w*)'/g)) keys.add(k[1]);
   for (const k of Object.keys(NODE_DEFAULTS)) keys.add(k);
   const defaults = app.match(/const defaults=\{([^}]*)\}/);
   if (defaults) for (const m of defaults[1].matchAll(/([a-zA-Z]\w*):/g)) keys.add(m[1]);

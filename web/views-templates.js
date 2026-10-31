@@ -68,7 +68,7 @@ $('component-add').onclick=guarded(async()=>{if(!window.design.getSelection().le
 $('component-publish').onclick=guarded(()=>{const c=publishComponent();return `Published “${c.name}” version ${c.version}`;});
 $('component-update-instances').onclick=guarded(()=>{const n=updateInstances();return n?`Updated ${n} instance${n===1?'':'s'}`:'Every instance is up to date';});
 // Packs: .zip in the desktop app (manifest + documents + embedded image assets, desktop/template-packs.cjs), JSON otherwise.
-const zipApi=()=>window.desktop?.templatePacks||null;
+const zipApi=()=>window.verynizePlatform.can('templatePacks')?window.desktop.templatePacks:null;
 async function exportZip(pack=exportPack()){const api=zipApi();if(!api)throw Error('Zip packs need the desktop app.');return new Uint8Array(await api.encode(pack));}
 async function importFile(file){if(file.size>50*1024*1024)throw Error('Template packs must be under 50 MB.');const bytes=new Uint8Array(await file.arrayBuffer());const zip=bytes[0]===0x50&&bytes[1]===0x4b;if(zip){const api=zipApi();if(!api)throw Error('Zip packs need the desktop app.');return importPack(await api.decode(bytes));}return importPack(JSON.parse(new TextDecoder().decode(bytes)));}
 const save=(blob,name)=>{const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};

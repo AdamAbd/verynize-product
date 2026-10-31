@@ -67,7 +67,7 @@
   // ---------- account ----------
   let account = null;
   async function refreshAccount() {
-    if (!desktop()?.figmaOAuth) {
+    if (!window.verynizePlatform.can("figma")) {
       $("figma-account-status").textContent = "Open the desktop app to connect a Figma account.";
       return;
     }
@@ -143,7 +143,7 @@
     $("figma-dialog").close();
   };
   $("figma-run").onclick = async () => {
-    if (!desktop()) {
+    if (!window.verynizePlatform.can("figma")) {
       $("figma-status").textContent = "Open the desktop app to import from Figma.";
       return;
     }
@@ -166,7 +166,7 @@
     }
   };
   $("figma-file").onclick = async () => {
-    if (!desktop()?.figmaFileOpen) {
+    if (!window.verynizePlatform.can("figma")) {
       $("figma-status").textContent = "Open the desktop app to import .fig files.";
       return;
     }
@@ -202,7 +202,7 @@
     if (![...(e.dataTransfer?.types || [])].includes("Files")) return;
     e.preventDefault(); // never let the window navigate to a dropped file
     if (!file) return;
-    if (!desktop()?.figmaFile) {
+    if (!window.verynizePlatform.can("figma")) {
       footer("Open the desktop app to import Figma files.");
       return;
     }
@@ -236,7 +236,7 @@
       typeof html === "string" && html.includes("(figma)") && html.includes("(/figma)"),
     async convert(html) {
       this.lastError = "";
-      if (!desktop()?.figmaClipboard) {
+      if (!window.verynizePlatform.can("figma")) {
         footer("Open the desktop app to paste Figma layers.");
         return null;
       }
