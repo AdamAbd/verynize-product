@@ -1,4 +1,4 @@
-// Paint stack (`fills`) and per-colour SVG replacement (`svgPaints`) for the headless engine: colour
+// Paint stack (`fills`, plus `backgroundFills` on text) and per-colour SVG replacement (`svgPaints`) for the headless engine: colour
 // variable rename/delete/sync across paints and the JSX attributes that carry both through the codec.
 // Rendering and validation live in web/node-style.js (shared with the canvas); see paintError there.
 import { paintError, eachPaintColor } from "./node-style.mjs";
@@ -48,6 +48,8 @@ export function paintAttrs(node, escapeAttr) {
     );
     out.push(`data-fills="${escapeAttr(JSON.stringify(fills))}"`);
   }
+  if (Array.isArray(node.backgroundFills))
+    out.push(`data-background-fills="${escapeAttr(JSON.stringify(node.backgroundFills))}"`);
   if (node.svgPaints && typeof node.svgPaints === "object")
     out.push(
       `data-svg-paints="${escapeAttr(
@@ -86,6 +88,22 @@ export function applyPaintAttrs(node, attrs, previous = null) {
       const error = paintError({ fills });
       if (error) throw new Error(error);
       node.fills = fills;
+    }
+  }
+  if (Object.hasOwn(attrs, "data-background-fills")) {
+    // Text Background Fill: same paint shape as data-fills (images keep their source inline).
+    const raw = attrs["data-background-fills"];
+    if (raw === "" || raw === false) delete node.backgroundFills;
+    else {
+      let fills;
+      try {
+        fills = JSON.parse(String(raw));
+      } catch {
+        throw new Error("data-background-fills must be a JSON list of paints");
+      }
+      const error = paintError({ type: node.type, backgroundFills: fills });
+      if (error) throw new Error(error);
+      node.backgroundFills = fills;
     }
   }
   if (Object.hasOwn(attrs, "data-svg-paints")) {

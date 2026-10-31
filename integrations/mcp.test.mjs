@@ -333,7 +333,7 @@ test('TOOLS_VERSION, instructions, design preferences, ask_agent and per-side ap
   const node = (await store.read('doc')).document.pages[0].nodes.find(n => n.id === 'sec');
   assert.equal(node.paddingTop, 96); assert.deepEqual(node.cornerRadii, [16, 16, 0, 0]); assert.equal(node.hMode, 'hug'); assert.deepEqual(node.margin, [0, 'auto', 0, 'auto']);
   const rev = JSON.parse(body(await run('read_document', { name: 'doc' }))).revision;
-  const bad = await run('apply_operations', { name: 'doc', revision: rev, operations: [{ type: 'update_node', pageId, nodeId: 'sec', properties: { paddingTop: -4, hMode: 'auto', cornerRadii: [1, 2] } }] });
+  const bad = await run('apply_operations', { name: 'doc', revision: rev, operations: [{ type: 'update_node', pageId, nodeId: 'sec', properties: { paddingTop: -4, hMode: 'stretch', cornerRadii: [1, 2] } }] });
   assert.equal(bad.isError, true); assert.match(body(bad), /paddingTop/); assert.match(body(bad), /hMode/); assert.match(body(bad), /cornerRadii/);
 });
 

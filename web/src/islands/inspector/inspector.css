@@ -31,3 +31,24 @@
 #bd-inspector-root input[type="color"] {
   -webkit-appearance: none;
 }
+/* Field shell (controls.tsx): the hover-only "apply variable" trigger floats just before the unit / sizing slot
+ * instead of reserving width, so values never collide with "px", "%" or "Fill ▾" while the field is idle. */
+#bd-inspector-root [data-field-suffix] [data-bind] {
+  position: absolute;
+  right: calc(100% + 2px);
+  background: var(--input);
+}
+
+/* Properties audit bug 7 / WP-13: no focus ring on inspector buttons after a pointer click. Radix hands focus back to
+   a menu or popover trigger on close, and Chrome then matches :focus-visible (the menu items were focused by script),
+   so the ring lingered on `+`, the blend drop and the header tools. Keyboard users keep the ring:
+   `data-input-modality` flips back to "keyboard" on the first navigation key (see inspector.tsx).
+   The utilities are compiled !important, and for important declarations an earlier cascade layer wins. The bundle
+   orders its layers properties, theme, utilities, base, so this has to live in `theme` to beat the ring utility. */
+@layer theme {
+  html[data-input-modality="pointer"] #properties
+    :is(button, [role="button"], [role="radio"], [role="checkbox"], summary):focus-visible {
+    outline: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+  }
+}

@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { Check, Copy, Folder, Pipette, X } from "lucide-react";
+import { Check, Copy, Folder, Pipette, Unlink, X } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { Field, IconButton, NativeSelect, Swatch, useHookClass } from "./controls";
@@ -34,12 +34,14 @@ import { groupByFolder, leafOf } from "./vars";
 let lastFormat: ColorFormat = "hex";
 const CHECKER = "repeating-conic-gradient(var(--accent) 0% 25%, var(--muted) 0% 50%) 50% / 8px 8px";
 
+/**
+ * Dynamic style through a ref. Applied after every render, not only when the style changes: an element that mounts
+ * later (the plane after switching from Variables to Custom on a bound paint) must still get its background.
+ */
 function useStyle(ref: React.RefObject<HTMLElement | null>, style: Partial<CSSStyleDeclaration>) {
-  const key = JSON.stringify(style);
   useLayoutEffect(() => {
     if (ref.current) Object.assign(ref.current.style, style);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  });
 }
 
 /** Drag helper: calls `move` with the pointer position normalised to the element (0–1). */
@@ -76,7 +78,6 @@ function Slider({
   value,
   max,
   track,
-  thumb,
   onDrag,
   onEnd,
   onStep,
@@ -85,7 +86,6 @@ function Slider({
   value: number;
   max: number;
   track: string;
-  thumb: string;
   onDrag: (fraction: number) => void;
   onEnd: () => void;
   onStep: (delta: number) => void;
@@ -93,7 +93,7 @@ function Slider({
   const trackRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLSpanElement>(null);
   useStyle(trackRef, { background: track });
-  useStyle(thumbRef, { left: `calc(${(value / max) * 100}% - 6px)`, background: thumb });
+  useStyle(thumbRef, { left: `calc(${(value / max) * 100}% - 5px)` });
   const start = useDrag((x) => onDrag(x), onEnd);
   return (
     <div
@@ -104,7 +104,7 @@ function Slider({
       aria-valuemin={0}
       aria-valuemax={max}
       aria-valuenow={Math.round(value)}
-      className="relative h-3 touch-none rounded-full shadow-field outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="relative mx-1.25 h-6 touch-none rounded-md shadow-field outline-none focus-visible:ring-1 focus-visible:ring-ring"
       onPointerDown={start}
       onKeyDown={(event) => {
         const step = event.shiftKey ? 10 : 1;
@@ -117,7 +117,7 @@ function Slider({
       <span
         ref={thumbRef}
         aria-hidden
-        className="pointer-events-none absolute -top-0.5 size-4 rounded-full ring-2 ring-foreground shadow-menu"
+        className="pointer-events-none absolute inset-y-0 w-2.5 rounded-full border-2 border-foreground shadow-menu"
       />
     </div>
   );
@@ -136,8 +136,17 @@ export type ColorPickerProps = {
   onClose: () => void;
   /** Heading of the picker (default "Color"). */
   title?: string;
-  /** Extra controls under the heading (the paint editor puts the paint type and gradient stops here). */
+  /** Extra controls under the heading (the gradient editor puts its stops here). */
   header?: ReactNode;
+  /** Paint type switch, on the left of the Custom / Variables row (Wonder: one row, type icons then tabs). */
+  typeSwitch?: ReactNode;
+  /** Extra buttons in the title row, before the close button (paint reorder). */
+  headTools?: ReactNode;
+  /**
+   * For a bound value: Custom-tab edits change the variable itself (Wonder B3: translucency lives in the variable),
+   * so the picker says so and offers an explicit detach instead of silently unbinding.
+   */
+  onDetach?: () => void;
 };
 
 export function ColorPicker({
@@ -150,6 +159,9 @@ export function ColorPicker({
   onClose,
   title = "Color",
   header,
+  typeSwitch,
+  headTools,
+  onDetach,
 }: ColorPickerProps) {
   const parsed = parseColor(value) ?? { r: 165, g: 139, b: 221, a: 1 };
   const [hsva, setHsva] = useState<Hsva>(() => rgbaToHsva(parsed));
@@ -169,7 +181,6 @@ export function ColorPicker({
   }, [value]);
 
   const rgba = hsvaToRgba(hsva);
-  const hex = toHex(rgba);
   const update = (next: Hsva, commit: boolean) => {
     live.current = next;
     setHsva(next);
@@ -228,32 +239,48 @@ export function ColorPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <div ref={head} className="-mt-1 flex h-7 items-center justify-between">
-        <strong className="text-xs font-normal text-foreground">{title}</strong>
-        <IconButton icon={X} label="Close colour picker" onClick={onClose} />
+      <div className="-mt-1 flex h-7 items-center gap-1">
+        <strong className="min-w-0 flex-1 truncate text-xs font-normal text-foreground">
+          {title}
+        </strong>
+        {headTools}
+        {/* `.dialog-head button` is the close button (tests and legacy callers). */}
+        <div ref={head} className="flex items-center">
+          <IconButton icon={X} label="Close colour picker" onClick={onClose} />
+        </div>
       </div>
       {header}
-      {onToken ? (
+      {typeSwitch || onToken ? (
+        // Wonder A2: without paint-type icons (strokes, shadows) the tabs sit on the left, right under the title.
         <div
-          role="tablist"
-          aria-label="Colour source"
-          className="flex h-6 self-end rounded-md bg-muted"
+          className={cn(
+            "flex h-6 items-center gap-2",
+            typeSwitch ? "justify-between" : "justify-start",
+          )}
         >
-          {(["custom", "variables"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              role="tab"
-              aria-selected={tab === t}
-              className="rounded-md px-2 text-xs text-muted-foreground hover:text-foreground aria-selected:bg-accent aria-selected:text-foreground"
-              onClick={() => setTab(t)}
-            >
-              {t === "custom" ? "Custom" : "Variables"}
-            </button>
-          ))}
+          {typeSwitch ?? null}
+          {onToken ? <SourceTabs tab={tab} onTab={setTab} /> : null}
+        </div>
+      ) : null}
+      {token && onDetach && tab === "custom" ? (
+        <div
+          data-bound-edit={token}
+          className="-mb-1 flex h-6 items-center gap-2 text-2xs text-muted-foreground"
+        >
+          <span className="min-w-0 flex-1 truncate">Editing variable {token}</span>
+          <button
+            type="button"
+            aria-label="Detach variable"
+            className="flex h-5 items-center gap-1 rounded-sm px-1 text-foreground-3 hover:bg-muted hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={onDetach}
+          >
+            <Unlink className="size-3.5" aria-hidden />
+            Detach
+          </button>
         </div>
       ) : null}
       {tab === "variables" && onToken ? (
+
         <div
           role="listbox"
           aria-label="Colour variables"
@@ -344,7 +371,6 @@ export function ColorPicker({
             value={hsva.h}
             max={360}
             track="linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)"
-            thumb={`hsl(${hsva.h} 100% 50%)`}
             onDrag={(x) => update({ ...live.current, h: x * 360 }, false)}
             onEnd={commitLive}
             onStep={(delta) =>
@@ -356,7 +382,6 @@ export function ColorPicker({
             value={hsva.a * 100}
             max={100}
             track={`linear-gradient(to right, transparent, ${toHex({ ...rgba, a: 1 })}), ${CHECKER}`}
-            thumb={hex}
             onDrag={(x) => update({ ...live.current, a: Math.round(x * 100) / 100 }, false)}
             onEnd={commitLive}
             onStep={(delta) =>
@@ -441,6 +466,31 @@ export function ColorPicker({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function SourceTabs({
+  tab,
+  onTab,
+}: {
+  tab: "custom" | "variables";
+  onTab: (tab: "custom" | "variables") => void;
+}) {
+  return (
+    <div role="tablist" aria-label="Colour source" className="flex h-6 rounded-md bg-muted">
+      {(["custom", "variables"] as const).map((t) => (
+        <button
+          key={t}
+          type="button"
+          role="tab"
+          aria-selected={tab === t}
+          className="rounded-md px-2 text-xs text-muted-foreground hover:text-foreground aria-selected:bg-accent aria-selected:text-foreground"
+          onClick={() => onTab(t)}
+        >
+          {t === "custom" ? "Custom" : "Variables"}
+        </button>
+      ))}
     </div>
   );
 }
