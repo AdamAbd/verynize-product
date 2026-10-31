@@ -1,13 +1,13 @@
 # Model API runtime (TanStack AI)
 
-Status: in progress on `feat/ai-runtime`. Source audit: `docs/audits/2026-10-31-tanstack-start-ai.md`.
+Status: server side of the read-only vertical (audit steps 1 and 3) implemented on `feat/ai-backend`; write tools and approvals (step 4) and the clients are not done yet. See [Implementation status](#implementation-status). Source audit: `docs/audits/2026-10-31-tanstack-start-ai.md`.
 
 Verynize chat has two kinds of runtime:
 
-| Runtime | Where it runs | Agents | Tools |
-|---|---|---|---|
-| Local coding agents | Desktop main process (`desktop/agent-runtime.cjs`) | `claude`, `codex` | Local MCP bridge, shell tools, the agent's own coding tools |
-| Model API (`api-model`) | Cloud backend (`cloud/ai.js`, `/api/ai/*`) | `openrouter` (TanStack AI `@tanstack/ai-openrouter`) | Verynize design tools against a cloud room |
+| Runtime                 | Where it runs                                      | Agents                                               | Tools                                                       |
+| ----------------------- | -------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------- |
+| Local coding agents     | Desktop main process (`desktop/agent-runtime.cjs`) | `claude`, `codex`                                    | Local MCP bridge, shell tools, the agent's own coding tools |
+| Model API (`api-model`) | Cloud backend (`cloud/ai.js`, `/api/ai/*`)         | `openrouter` (TanStack AI `@tanstack/ai-openrouter`) | Verynize design tools against a cloud room                  |
 
 The model API runtime does not replace Claude/Codex. It gives the web build (and any signed-in client) a chat that edits shared rooms through the same tool table as the hosted MCP server.
 
@@ -19,7 +19,7 @@ The cloud backend (`cloud/worker.js`) owns `/api/ai/*` on every target, like the
 
 `OPENROUTER_API_KEY` is a server secret (Worker secret / environment variable). It never reaches the browser bundle. Without it, `GET /api/ai/config` reports `enabled: false` and run requests answer 503. Being signed in to Claude Code or Codex says nothing about OpenRouter, and vice versa. The UI shows the two separately.
 
-Optional: `OPENROUTER_BASE_URL` (tests point it at a local fake), `VERYNIZE_AI_MODELS` (comma-separated allowlist, first is the default).
+Optional: `OPENROUTER_BASE_URL` (tests point it at a local fake), `VERYNIZE_AI_MODELS` (comma-separated allowlist `id[=Label]`, first is the default; default `openrouter/auto`), `VERYNIZE_AI_MAX_TURNS` (default 12), `VERYNIZE_AI_MAX_TOOL_CALLS` (default 40). On Cloudflare the key is a Worker secret (`cf secret put OPENROUTER_API_KEY`) that `cloudflare.config.ts` does not declare, so a deployment without it stays valid.
 
 ## HTTP API
 
@@ -31,27 +31,27 @@ All endpoints need a signed-in account (same `accountOf` as the rest of the API:
 - `POST /api/ai/runs/:runId/cancel` → `{ok: true}`. Sets the run's cancel flag; the executor stops before the next model call or tool call and emits `done {stopped: true}`.
 - `POST /api/ai/runs/:runId/approvals` body `{requestId, allow}` → `{ok: true}` or 409 if already decided, 404 if unknown, 403 if not the run's owner.
 
-Each SSE message is `data: <json>\n\n` with one event.
+Each SSE message is `data: <json>\n\n` with one event. Idle streams also carry SSE comment lines (`: keep-alive`) every 15 s, which SSE clients ignore.
 
 ## Events
 
 Events use the desktop runtime's vocabulary (`desktop/README.md`, `onAgentEvent`), so the chat UI renders both runtimes the same way. Every event is `{id: runId, chatId, seq, type, ...}`, `seq` starting at 1, strictly increasing per run, and stored before it is sent.
 
-| type | fields |
-|---|---|
-| `session` | `sessionId` (= runId), `agent: "openrouter"`, `model` |
-| `status` | `status: "running"\|"awaiting-approval"\|"tool"` |
-| `assistant-text-delta` | `text` |
-| `assistant-text` | `text` (the full text of one assistant message) |
-| `thinking-delta` | `text` |
-| `tool-call` | `toolCallId`, `name`, `input` |
-| `tool-input-delta` | `toolCallId`, `delta` |
-| `tool-result` | `toolCallId`, `name`, `output` (text), `isError` |
-| `permission-request` | `requestId`, `toolCallId`, `name`, `input`, `title` |
-| `permission-resolved` | `requestId`, `allow`, `reason?` (`"user"`, `"timeout"`, `"cancelled"`) |
-| `usage` | `inputTokens`, `outputTokens`, `model` |
-| `error` | `message` |
-| `done` | `code` (`"ok"`, `"error"`, `"cancelled"`, `"budget"`), `stopped`, `sessionId` |
+| type                   | fields                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `session`              | `sessionId` (= runId), `agent: "openrouter"`, `model`                         |
+| `status`               | `status: "running"\|"awaiting-approval"\|"tool"`                              |
+| `assistant-text-delta` | `text`                                                                        |
+| `assistant-text`       | `text` (the full text of one assistant message)                               |
+| `thinking-delta`       | `text`                                                                        |
+| `tool-call`            | `toolCallId`, `name`, `input`                                                 |
+| `tool-input-delta`     | `toolCallId`, `delta`                                                         |
+| `tool-result`          | `toolCallId`, `name`, `output` (text), `isError`                              |
+| `permission-request`   | `requestId`, `toolCallId`, `name`, `input`, `title`                           |
+| `permission-resolved`  | `requestId`, `allow`, `reason?` (`"user"`, `"timeout"`, `"cancelled"`)        |
+| `usage`                | `inputTokens`, `outputTokens`, `model`                                        |
+| `error`                | `message`                                                                     |
+| `done`                 | `code` (`"ok"`, `"error"`, `"cancelled"`, `"budget"`), `stopped`, `sessionId` |
 
 ## Policy (enforced in the executor, not the prompt)
 
@@ -67,3 +67,24 @@ Events use the desktop runtime's vocabulary (`desktop/README.md`, `onAgentEvent`
 
 - `AgentService` (renderer): `run`, `cancel`, `respondPermission`, `subscribe`, `models`. Desktop implements it over IPC (`window.desktop.runAgent` …), web over the HTTP API above (`web/src/lib/agent-service.ts`).
 - The web build gets the `agents` capability from the web transport when `GET /api/ai/config` is enabled and the user is signed in. Claude/Codex stay desktop-only.
+
+## Implementation status
+
+Server modules:
+
+- `cloud/design-backend.js`: `createRoomBackend(env, request, url, account, {roomId?})` (the design-tools backend over rooms; `roomId` scopes it to one room and adds nothing else), `callHostedTool(backend, name, args)`, `hostedToolDefinitions()`, `isReadOnlyTool(definition)`, `accountRooms`, `UNAVAILABLE`, `OVERRIDES`, `HOSTED_INSTRUCTIONS`, `ROOM_ID`. `cloud/mcp.js` uses the same module.
+- `cloud/ai.js`: `handleAi(request, env, url, {accountOf, limited, ctx})`, routed from `cloud/worker.js` for `/api/ai/*` (lazy import); `aiConfig(env)`.
+- `cloud/ai-executor.js`: `executeRun(options)`, `createEventLog(env, run, {startSeq, onEvent})`, `createRunPolicy({backend})`, `buildSystemPrompt(...)`, `toolOutputText(result)`.
+- `cloud/ai-store.js` + migration `0005_ai_runs.sql`: tables `ai_run`, `ai_run_event`, `ai_approval`, `ai_tool_result` (applied by `db:migrate` on D1 and at start-up on Node and Vercel).
+
+Verified (tests, the provider faked by a local OpenAI-compatible server): `tests/cloud-ai.mjs` on workerd, Node and Vercel (`npm run test:cloud`, `test:cloud:node`, `test:cloud:vercel`) and `tests/ai-routing.mjs` (`npm run test:web`). `@tanstack/ai-openrouter` and `@openrouter/sdk` run unchanged in workerd (the Cloudflare bundle), so no OpenAI-compatible fallback adapter is needed. No request has been made to the real OpenRouter API.
+
+Where the implementation is narrower or more specific than the sections above:
+
+- **Read-only tools only.** Write tools are not offered yet, so no permission requests are raised; `access` is validated and stored but has no effect. The approvals endpoint is implemented against `ai_approval` (404/403/409, decided once). Step 4 plugs in through `createRunPolicy`: `offers(definition)` (add write tools), `authorize(call)` (already re-checks the room role and refuses writes below `editor`; an `ask` approval waits here: insert the `ai_approval` row, emit `permission-request`, poll the decision, `denyPending` when the run ends) and `execute(call, run)` (check `getToolResult` first and `recordToolResult` after a write).
+- **One room per run.** The backend of a run is scoped to its `roomId`: tools refuse other room ids, `list_documents` shows only that room and `create_document` is not offered.
+- **Extra refusals.** 400 for invalid input (`idempotencyKey` is required), 403 for browser requests from another origin and for runs on a room the caller cannot read, 409 when the chat already has a running turn, 429 when more than three turns of the account are running or `AI_LIMIT` (20 new runs per minute per account) is exceeded.
+- **Events.** `usage` is sent once per run with the totals, before `done`. A text block is reported (`assistant-text`) before the tool calls that follow it. `done {code: "budget"}` has no extra `error` event; `stopped` is true only for `cancelled`. Images in tool results are replaced by a text note (only `finish_artboard`, a write tool, returns one among hosted tools).
+- **Cancel** is polled from the database once a second and before every tool call; the model stream is aborted with the run's `AbortController`.
+- **Host lifetime.** The run executes inside the request that started it. Node keeps it running after the client disconnects; Vercel and Cloudflare keep it with `waitUntil` (Vercel `maxDuration` 300 s; Cloudflare allows about 30 s after the response ends). A run cut off this way is closed as `done {code: "error"}` by the next reader once its 30 s lease expires.
+- **Auth** is the router's `accountOf`: `Authorization: Bearer` or `X-Verynize-Session`. The Better Auth cookie is not read by `accountOf` today, for these endpoints or the rest of the API.

@@ -48,7 +48,7 @@ The image keeps all state in `/data` (a volume). Run exactly one container per d
 | `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`   | S3-compatible storage for room images (path-style URLs: AWS S3, MinIO, R2, B2).                                                                                                                                                                                                                                               |
 | `WEB_ROOT`                                                                            | Directory served as the web app (default `web/`; `web/src` is never served).                                                                                                                                                                                                                                                  |
 
-Rate limits match `cloudflare.config.ts` (10 room creations and 10 sign-in attempts per minute per IP, 240 hosted MCP requests per minute per IP and per account), counted in memory.
+Rate limits match `cloudflare.config.ts` (10 room creations and 10 sign-in attempts per minute per IP, 240 hosted MCP requests per minute per IP and per account, 20 model API runs per minute per account), counted in memory. The model API runtime ([ai-runtime.md](ai-runtime.md)) is off until `OPENROUTER_API_KEY` is set; `OPENROUTER_BASE_URL`, `VERYNIZE_AI_MODELS`, `VERYNIZE_AI_MAX_TURNS` and `VERYNIZE_AI_MAX_TOOL_CALLS` are optional.
 
 ## Operations
 
