@@ -119,3 +119,29 @@ test("platform: loading the script twice keeps the first object", () => {
   assert.equal(context.verynizePlatform, first);
   assert.equal(context.verynizePlatform.kind, "web");
 });
+
+test("platform.agents: the chat transport registry is separate from the desktop capabilities", () => {
+  const web = platformWith(undefined);
+  assert.equal(web.agents.service(), null);
+  assert.equal(web.agents.ready(), false);
+  assert.ok(Object.isFrozen(web.agents));
+  let ready = false;
+  let calls = 0;
+  const unsubscribe = web.agents.subscribe(() => calls++);
+  const service = { kind: "web", ready: () => ready };
+  const withdraw = web.agents.provide(service);
+  assert.equal(web.agents.service(), service);
+  assert.equal(web.agents.ready(), false, "registered but not ready (e.g. signed out)");
+  ready = true;
+  web.agents.changed();
+  assert.equal(web.agents.ready(), true);
+  assert.equal(calls, 2, "provide and changed notify subscribers");
+  // A web transport never turns on a desktop capability.
+  assert.equal(web.can("agents"), false);
+  assert.ok(Object.values(web.capabilities).every((value) => value === false));
+  withdraw();
+  assert.equal(web.agents.service(), null);
+  unsubscribe();
+  web.agents.changed();
+  assert.equal(calls, 3);
+});
