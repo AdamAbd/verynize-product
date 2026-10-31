@@ -211,10 +211,14 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await page.locator('[data-page-id="p1"]').click({button: 'right'});
     assert.deepEqual(await items('[data-bd-context-menu][data-target=page]'), ['Rename', '|', 'Delete']);
     assert.equal(await disabled('page.delete'), true, 'the only page cannot be deleted');
+    // Wonder R3-delete-hover: label and delete-key glyph in a solid muted red, rgb(132,69,68).
+    assert.deepEqual(await item('page.delete').evaluate(el => [getComputedStyle(el).color, getComputedStyle(el.querySelector('svg')).color]),
+      ['rgb(132, 69, 68)', 'rgb(132, 69, 68)'], 'disabled Delete is muted red');
     await close();
     await seed(FIXTURE, 2);
     await page.locator('[data-page-id="p2"]').click({button: 'right'});
     assert.equal(await disabled('page.delete'), false);
+    assert.notEqual(await item('page.delete').evaluate(el => getComputedStyle(el).color), 'rgb(132, 69, 68)', 'an enabled Delete keeps the full red');
     await item('page.delete').click();
     await page.waitForTimeout(150);
     assert.deepEqual(await page.evaluate(() => window.design.getDocument().pages.map(p => p.id)), ['p1'], 'Delete removes the page');
