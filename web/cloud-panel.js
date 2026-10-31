@@ -628,6 +628,8 @@
   function disconnect(message = "Disconnected. Local design retained.", leave = false) {
     if (outboxTimer && !leave) saveOutbox(true);
     if (leave) forgetRoom(connection);
+    // Leaving drops a matching #room= invite fragment, which the shell router otherwise keeps.
+    if (leave && connection) window.shellNavigation?.clearRoomHash?.(connection.id);
     generation++;
     resetHistory();
     clearTimeout(timer);
