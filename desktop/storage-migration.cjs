@@ -7,10 +7,16 @@
 // module reads the old storage in a hidden window at a file:// URL and writes it in a hidden window
 // at app://verynize/storage-migration.html (both blank pages in the default session).
 //
-// - Keys already present on app://verynize are never overwritten; the old file:// data is left in
-//   place (an older build can still read it).
-// - A marker file in userData records the result so the copy runs once. A failed copy writes no
-//   marker and is retried on the next launch (it only fills missing keys, so it is idempotent).
+// - Keys already present on app://verynize are kept; the old file:// data is left in place (an older
+//   build can still read it).
+// - A marker file in userData records the result so the copy runs once. It is written as
+//   `{pending: true}` before the copy starts and replaced by the result when the copy finishes.
+// - Recovery: a pending marker means an earlier attempt failed or crashed, and the editor then ran on
+//   an empty app://verynize origin and wrote its first-run defaults there (an empty file library,
+//   default settings, an empty chat list). Keeping those would hide the user's real data for good, so
+//   the retry lets the file:// values win, after saving every app:// value it replaces to
+//   userData/storage-origin-migration-replaced.json. After MAX_ATTEMPTS failures it gives up (each
+//   attempt can block startup for up to TIMEOUT).
 // - Profiles without file:// storage (fresh installs, test runs) are marked done without opening a window.
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -18,15 +24,27 @@ const { pathToFileURL } = require("node:url");
 const { ORIGIN } = require("./app-protocol.cjs");
 
 const MARKER = "storage-origin-migration.json";
+const REPLACED = "storage-origin-migration-replaced.json";
+const MAX_ATTEMPTS = 3;
 const PAGE = "storage-migration.html";
 const OUTBOX = { db: "verynize-cloud", store: "outbox", version: 1 };
 const TIMEOUT = 15000;
 
-const exists = (file) =>
-  fs.access(file).then(
-    () => true,
-    () => false,
-  );
+/** The marker's record, `null` when there is none. An unreadable marker counts as done (never loop). */
+async function readMarker(file) {
+  let text;
+  try {
+    text = await fs.readFile(file, "utf8");
+  } catch (error) {
+    return error?.code === "ENOENT" ? null : { unreadable: true };
+  }
+  try {
+    const record = JSON.parse(text);
+    return record && typeof record === "object" ? record : { unreadable: true };
+  } catch {
+    return { unreadable: true };
+  }
+}
 
 // Runs in the file:// page. Only plain strings / structured-clone values leave it.
 const READ = `(async () => {
@@ -52,11 +70,15 @@ const READ = `(async () => {
 })()`;
 
 // Runs in the app://verynize page with the data read above.
-const WRITE = (data) => `(async (data) => {
-  let copied = 0, kept = 0, failed = 0, outbox = 0;
+// `overwrite` lists keys whose app:// value is replaced (recovery after a failed attempt).
+const WRITE = (data, overwrite = []) => `(async (data, overwrite) => {
+  let copied = 0, kept = 0, replaced = 0, failed = 0, outbox = 0;
+  const failedKeys = [];
   for (const [key, value] of Object.entries(data.local)) {
-    if (localStorage.getItem(key) !== null) { kept++; continue; }
-    try { localStorage.setItem(key, value); copied++; } catch { failed++; }
+    const current = localStorage.getItem(key);
+    if (current === value) { kept++; continue; }
+    if (current !== null && !overwrite.includes(key)) { kept++; continue; }
+    try { localStorage.setItem(key, value); if (current === null) copied++; else replaced++; } catch { failed++; failedKeys.push(key); }
   }
   if (data.outbox.length) {
     try {
@@ -72,10 +94,10 @@ const WRITE = (data) => `(async (data) => {
         tx.oncomplete = () => resolve(added); tx.onerror = tx.onabort = () => resolve(0);
       });
       db.close();
-    } catch { failed++; }
+    } catch { failed++; failedKeys.push('indexedDB:' + ${JSON.stringify(OUTBOX.db)}); }
   }
-  return { copied, kept, failed, outbox };
-})(${JSON.stringify(data)})`;
+  return { copied, kept, replaced, failed, failedKeys, outbox };
+})(${JSON.stringify(data)}, ${JSON.stringify(overwrite)})`;
 
 /** Cheap pre-check without a renderer. Chromium keys localStorage rows by origin (`META:file://`,
  *  `_file://\0\1key`) and names IndexedDB folders `file__0.indexeddb.*`. The first key of every
@@ -112,7 +134,10 @@ const withTimeout = (promise, ms, label) =>
 async function migrateStorage({ app, BrowserWindow, log = console }) {
   const userData = app.getPath("userData");
   const marker = path.join(userData, MARKER);
-  if (await exists(marker)) return { skipped: "done" };
+  const previous = await readMarker(marker);
+  if (previous && !previous.pending) return { skipped: "done" };
+  const recover = !!previous?.pending;
+  const attempts = (Number(previous?.attempts) || 0) + 1;
   const write = (result) =>
     fs.writeFile(
       marker,
@@ -124,9 +149,12 @@ async function migrateStorage({ app, BrowserWindow, log = console }) {
     );
   // Nothing stored for file:// (fresh profile, or file:// never used storage): no window needed.
   if (!(await hasFileOriginData(userData))) {
-    await write({ fresh: true, copied: 0 });
+    await write({ fresh: true, copied: 0 }).catch(() => {});
     return { fresh: true };
   }
+  // Written before the copy: if it fails or the app dies mid-copy, the next launch knows the
+  // editor may have run on an empty origin (see Recovery above).
+  await write({ pending: true, attempts }).catch(() => {});
   const win = new BrowserWindow({
     show: false,
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
@@ -140,22 +168,53 @@ async function migrateStorage({ app, BrowserWindow, log = console }) {
       const found = Object.keys(data.local).length;
       if (!found && !data.outbox.length) return { copied: 0, found: 0 };
       await win.loadURL(`${ORIGIN}/${PAGE}`);
-      const result = await win.webContents.executeJavaScript(WRITE(data), true);
-      return { found, ...result };
+      let overwrite = [];
+      if (recover) {
+        // Save the app:// values about to be replaced before touching them.
+        const current = (await win.webContents.executeJavaScript(READ, true)).local;
+        overwrite = Object.keys(data.local).filter(
+          (key) => key in current && current[key] !== data.local[key],
+        );
+        if (overwrite.length)
+          await fs.writeFile(
+            path.join(userData, REPLACED),
+            JSON.stringify(
+              {
+                at: new Date().toISOString(),
+                local: Object.fromEntries(overwrite.map((key) => [key, current[key]])),
+              },
+              null,
+              2,
+            ) + "\n",
+            { mode: 0o600 },
+          );
+      }
+      const result = await win.webContents.executeJavaScript(WRITE(data, overwrite), true);
+      return { found, ...(recover ? { recovered: true } : {}), ...result };
     };
     const result = await withTimeout(run(), TIMEOUT, "Storage migration");
     if (result.failed)
       log.warn?.(
         `Storage migration: ${result.failed} item(s) could not be copied from file:// to ${ORIGIN}`,
       );
-    await write(result);
+    await write({ ...result, attempts });
     return result;
   } catch (error) {
-    log.error?.("Storage migration failed (will retry next launch):", error);
-    return { error: String(error?.message || error) };
+    const message = String(error?.message || error);
+    const gaveUp = attempts >= MAX_ATTEMPTS;
+    log.error?.(
+      `Storage migration failed (${gaveUp ? "giving up" : "will retry next launch"}):`,
+      error,
+    );
+    await write(
+      gaveUp
+        ? { gaveUp: true, attempts, error: message }
+        : { pending: true, attempts, error: message },
+    ).catch(() => {});
+    return { error: message };
   } finally {
     if (!win.isDestroyed()) win.destroy();
   }
 }
 
-module.exports = { migrateStorage, hasFileOriginData, MARKER };
+module.exports = { migrateStorage, hasFileOriginData, readMarker, MARKER, REPLACED, MAX_ATTEMPTS };
