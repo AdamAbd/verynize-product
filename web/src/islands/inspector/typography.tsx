@@ -50,6 +50,7 @@ import { WEIGHTS, fmt, pageNodes, patchNodes, setField, weightName, type Node } 
 import { BindableField, VariableChip } from "./bind";
 import {
   ALL_WEIGHTS,
+  isUnsupportedFont,
   loadCatalog,
   loadLocalFonts,
   nearestWeight,
@@ -85,27 +86,34 @@ const KIND_LABEL: Record<FontEntry["kind"], string> = {
   local: "Installed",
 };
 
-function FontFamilyPicker({
+export function FontFamilyPicker({
   doc,
   node,
   selection,
   fonts,
   onLocalFonts,
+  onChoose,
 }: {
   doc: DesignDocument;
   node: Node;
   selection: string[];
   fonts: FontEntry[];
   onLocalFonts: () => void;
+  /** Apply the chosen family somewhere other than the selected layers (a preview element); hides variables. */
+  onChoose?: (family: string) => void;
 }) {
   const value = node.fontFamily;
+  // Wonder PM3: a family Verynize cannot offer reads "<family> (unsupported)".
+  const unsupported = isUnsupportedFont(value, fonts, { generic: !onChoose });
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const [source, setSource] = useState<"all" | FontEntry["kind"]>("all");
   const list = useRef<HTMLDivElement>(null);
   const q = query.trim().toLowerCase();
-  const familyVars = Object.entries(variablesOf(doc)).filter(([, v]) => v.type === "fontFamily");
+  const familyVars = onChoose
+    ? []
+    : Object.entries(variablesOf(doc)).filter(([, v]) => v.type === "fontFamily");
   const bound = bindingsOf(node).fontFamily;
   const used = [
     ...new Set(
@@ -159,6 +167,7 @@ function FontFamilyPicker({
     setActive(0);
     family = family.trim();
     if (!family || (family === value && !bound)) return;
+    if (onChoose) return onChoose(family);
     const weights = weightsFor(family, fonts);
     patchNodes(selection, (n) => {
       const b = { ...bindingsOf(n) };
@@ -194,7 +203,9 @@ function FontFamilyPicker({
             />
           ) : (
             <>
-              <span className="truncate">{value}</span>
+              <span className="truncate" data-font-unsupported={unsupported || undefined}>
+                {unsupported ? `${value} (unsupported)` : value}
+              </span>
               <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
             </>
           )}

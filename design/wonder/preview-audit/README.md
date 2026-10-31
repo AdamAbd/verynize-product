@@ -1,0 +1,131 @@
+# Preview parity: Verynize vs Wonder (2026-10-31)
+
+Gap analysis and fix record for the **preview** feature: running a repository's dev server and showing it as a live frame on the canvas, with its browser toolbar, status cards, Navigate / Edit / Capture modes, preview tab, settings, terminal and publish popover.
+
+## Method
+
+| Side | Captured by | Evidence |
+|---|---|---|
+| Wonder | A Codex computer-use agent on the live app (`/Applications/Wonder.app`), in the scratch file "Sunbird", against `/tmp/preview-sandbox` (heading, counter, input, `/about` link, image). `screencapture -x` at 2×, full window 2880×1740. | [wonder/notes.md](wonder/notes.md) (steps, exact strings, measurements, verdict per id, and a "Do not use" list), [manifest.json](wonder/manifest.json), [measurements.json](wonder/measurements.json) |
+| Verynize before | Claude (Opus) with Playwright `_electron` at 1440×870 @2×, before the fix pass. | [verynize/notes.md](verynize/notes.md), [verynize/architecture.md](verynize/architecture.md), [verynize/capture.cjs](verynize/capture.cjs), [metrics.json](verynize/metrics.json) |
+| Verynize after | One script, [verynize/capture-after.cjs](verynize/capture-after.cjs), on the merged `feat/preview-parity`. It uses a git copy of the same sandbox, added through the Code workspace, with the fake Codex agent and a real `python3 -m http.server`. The canvas is dark (#2b2b2b), zoom 55%, and the frame is 1512×982 at (418, 246) with its body at screen (306, 158), as in Wonder. | `verynize/after/<id>.png`, [after/metrics.json](verynize/after/metrics.json) (visible strings per shot plus the integration seam checks) |
+
+- **Pairs.** `pairs/` holds Wonder on the left and Verynize before the fixes on the right. `pairs-after/` holds Wonder on the left and Verynize after the fixes on the right.
+  - Rebuild both with `python3 design/wonder/preview-audit/make-pairs.py`.
+  - Re-capture the after side with `npm run build:ui && node design/wonder/preview-audit/verynize/capture-after.cjs`.
+- **Wonder retakes.** The script uses Wonder's retake (`-verified`, `-final`) when one exists, and skips the first attempts that the Wonder notes exclude.
+  - `PP2-stopped-verified` is paired as evidence of the discard confirmation, not of the stopped result. The stopped result is `PS5-paused`.
+- **Fixture differences, not gaps.**
+  - Worktree names are random birds ("Wren", "Osprey") where Wonder has "Dipper".
+  - The port is a free one, because Wonder's own server still held 8000.
+  - The failing start command is `sh -c "sleep 4; exit 7"` where Wonder used `exit 7`, so that the starting state lasts long enough to capture.
+  - The fake agent's reply text differs from Wonder's agent.
+  - The default document has different layers.
+  - Verynize's chat dock overlays the canvas, while Wonder's chat is its own column. That is app-wide layout, outside the preview.
+
+## Per id
+
+Verdicts: **Match** means the strings, order, layout, size and colours agree within the capture tolerance. **Close** means it agrees apart from the listed details. **Deliberate difference** is a documented product choice. **Not observable in Wonder** means Wonder's evidence does not show the behaviour.
+
+### PS. Starting a preview
+
+| Id | Wonder | Verynize before | Verynize after | Verdict |
+|---|---|---|---|---|
+| PS1 header | **Start preview** split button; the intro card "Preview your app on the canvas / See your changes live, next to this chat."; idle menu **Open in a tab ⌘⌥P** · **Preview settings**. [idle](pairs/PS1-idle.png), [menu](pairs/PS1-menu.png) | The same split control, but an overloaded menu and no intro card | Same strings, intro card and 176 px menu. [idle](pairs-after/PS1-idle.png), [menu](pairs-after/PS1-menu.png) | **Match** |
+| PS2 first start | The chat gets a purple **Set up the Preview** action with the app logo; Auto mode saves the profile; the card reads **Preview setup / Saved by auto mode** · `python3 -m http.server 8000` · "You can change it in Preview settings." [card](pairs/PS2-card.png) | A Setup/Run/Port review card pinned above the composer | The same request pill and saved card. The review card remains for ask/edit access. [card](pairs-after/PS2-card.png) | **Match** |
+| PS2 / X1 Preview settings | A 992×640 modal with sections Name / Start command / Opens at, Add start command, Setup and stop, Detect with agent · Cancel · Save. [settings](pairs/PS2-edit.png) | A small configuration dialog | The same modal, strings and size; no focus ring at open. [running](pairs-after/PS2-edit.png), [first open](pairs-after/X1-settings.png) | **Close**: the sidebar lists only **Preview**, because Verynize has no Worktrees, Context or Memory repository settings. Before any configuration, Verynize prefills the start command it detected for a static site, where Wonder shows the empty `npm run dev` placeholder. |
+| PS3 starting | **Starting your app** · `preview-sandbox · App · 0:01` · **Stop** · steps (Starting app, the command, Waiting for the app) · **Show terminal**; toolbar **Starting preview…**. [pair](pairs/PS3-starting.png) | A "Start preview" button that actually stopped, and no spinner | Same card, timer, Stop and steps. [pair](pairs-after/PS3-starting.png) | **Match** |
+| PS4 failure | **Couldn’t start your app** · "The start command exited before the app was ready." · **App stopped** with the command and exit code · Show preview / Not reached · View logs, Try again, Fix with agent; the toolbar keeps only expand. [pair](pairs/PS4-error.png) | A raw IPC error string and only Start | Same card. A start from the chat header now carries the exit details too (fixed in this pass). [pair](pairs-after/PS4-error.png) | **Match** |
+| PS5 paused | **Ready to start your preview** · "Start this preview to connect to your local app." · **Last address: localhost:…** · Start preview; toolbar **Preview paused** · Publish · Start · expand. [pair](pairs/PS5-paused.png) | The same card in legacy styling | Same. [pair](pairs-after/PS5-paused.png) | **Match** |
+| PS6 Code workspace | The **Stop preview** split button and the card "Your app is running / Open the Preview on the canvas next to this chat. / Show preview", which returns to the selected frame. [code](pairs/PS6-code.png) | The Code toolbar control | Same strings and behaviour. [code](pairs-after/PS6-code.png), [show preview](pairs-after/PS6-show-preview.png) | **Close**: the Code workspace layout itself differs (file tree and terminal arrangement, the Next steps panel). |
+
+### PF. The preview frame
+
+| Id | Wonder | Verynize before | Verynize after | Verdict |
+|---|---|---|---|---|
+| PF1 running, selected | Breadcrumb **preview-sandbox › Dipper**, **Local**, green dot, purple when selected, badge **1512 x 982**. [pair](pairs/PF1-selected.png) | App name only | Same breadcrumb (worktree capitalised), badge and selection. [pair](pairs-after/PF1-selected.png) | **Match** |
+| PF2 toolbar | Back, Forward, Reload, path `/`, Publish, Stop, expand. The bar is 31 screen px at any zoom and the buttons sit on #222 chips. [pair](pairs/PF2-toolbar.png) | Zoom-scaled legacy glyphs; no Publish | Same order, sizes and fills. [pair](pairs-after/PF2-toolbar.png) | **Match** |
+| PF2 tooltips | **Back ⌘[**, **Forward ⌘]**, **Reload / ⇧-click ignores cache**, the full URL over the path, **Publish to the web**, **Open in a tab ⌘⌥P**; Stop has none. | None | Same strings. The path tooltip now centres on the path text. [back](pairs-after/PF2-back-hover.png), [forward](pairs-after/PF2-forward-hover.png), [reload](pairs-after/PF2-reload-hover.png), [path](pairs-after/PF2-path-hover.png), [publish](pairs-after/PF2-publish-hover.png), [stop](pairs-after/PF2-stop-hover.png), [expand](pairs-after/PF2-expand-hover.png) | **Match** |
+| PF2 path editor | Clicking the path opens a dark #181818 well from the path to Publish, with the slash selected and no ring. [pair](pairs/PF2-path-hover.png) | A plain input | Same well and no ring (fixed in this pass). [pair](pairs-after/PF2-path.png) | **Match**. Typed-path submission is not proven in Wonder; Verynize navigates on Enter. |
+| PF3 expand | A new internal tab **Dipper · Preview** with a full-width browser bar, the bottom modes toolbar and **Show on canvas**. [pair](pairs/PF3-expanded.png) | A camera fit | Same, including the capitalised tab name (fixed in this pass). [pair](pairs-after/PF3-expanded.png) | **Match** |
+| PF4 screen templates | A 13-item preset list (iPhone 17 402 × 874 … TV 3840 × 2160); iPhone 17 reflows the app to 402×874 with a compact toolbar. [presets](pairs/PF4-resize.png) | No presets | Same list, menu width and reflow. With a staged edit, as in Wonder, the breadcrumb truncates ("preview-…") to end before the "1 change" badge (fixed in the follow-up pass). [presets](pairs-after/PF4-presets.png), [iPhone](pairs-after/PF4-resize.png) | **Match** |
+| PF5 context menu | Copy ⌘C, Copy as ›, Copy link to selection · Select layer ›, Paste ⌘V, Paste styles, Paste to replace, Paste over selection, Duplicate (disabled) · Hide, Lock · Arrange ›, **Show terminal**, **Clear preview data**, **Clear preview data (including logins)** · Layout › · Set as file thumbnail. [pair](pairs/PF5-context.png) | A generic frame menu | Same groups and order. [pair](pairs-after/PF5-context.png) | **Close**: Set as file thumbnail is disabled (Verynize file cards have no chosen thumbnail), and the paste rows are disabled because the capture's clipboard was empty. |
+| PF6 inspector | Screen template, Position, Layout (W/H, aspect), Appearance (Opacity), Export. No fill, border or shadow sections. [pair](pairs/PF6-inspector.png) | A generic frame inspector | Same sections. [pair](pairs-after/PF6-inspector.png) | **Match** |
+| PF7 layer row | Browser-window icon, the worktree name ("Dipper"). Seen in the PF6 shots. | A generic frame icon and the app name | Browser-window icon and the capitalised worktree name (fixed in this pass). | **Match** |
+| PF8 second preview | Duplicate is disabled and no second canvas preview was established. | Supported through the API | Unchanged | **Not observable in Wonder** |
+
+### PM. Modes
+
+| Id | Wonder | Verynize before | Verynize after | Verdict |
+|---|---|---|---|---|
+| PM1 toolbar | **Navigate / Edit / Capture / …**. Idle labels #c0c0c0; the hovered control gets a #222 pill. Tooltips **Navigate inside**, **Inspect element ⌘⇧I**, **Capture / Add an editable design to canvas**. [navigate](pairs/PM1-navigate-hover.png) | No tooltips and a weak active state | Same strings, label colour and hover pill (fixed in this pass). [navigate](pairs-after/PM1-navigate-hover.png), [edit](pairs-after/PM1-edit-hover.png), [capture](pairs-after/PM1-capture-hover.png) | **Match**. The Navigate icon glyph differs slightly. |
+| X4 more actions | **Send all input to app**, **Open in browser**. | In the overflow menu | Same. [pair](pairs-after/X4-more-actions.png) | **Match** |
+| PM2 Navigate | Blue outer outline; the counter goes to 1; typing "Sunbird" in the input; the About link loads `/about/` and the path follows. [navigate](pairs/PM2-navigate.png) | Worked | Same. [navigate](pairs-after/PM2-navigate.png), [typed](pairs-after/PM2-typed.png), [about](pairs-after/PM2-about.png) | **Match**. Scrolling and input release are not proven in Wonder. |
+| PM3 Edit | Hovering outlines the h1. Edit mode leaves Properties empty until an element is picked. Clicking selects it with the badge **1432 Fill x 42.5 Hug** and **Add to chat ⌘L**. A double-click selects the word in pale purple; typing gives **Sunbird edited sandbox** and the **1 change** badge above the toolbar. [hover](pairs/PM3-hover.png), [select](pairs/PM3-select.png), [inspector](pairs/PM3-inspector.png), [edited](pairs/PM3-edited.png) | Selector-form edits | Same flow and badge text. Fixed in this pass: the badge sits in the breadcrumb row instead of over Publish/Stop; Properties are empty while nothing is picked; the word selection is pale purple with no page focus ring. [hover](pairs-after/PM3-hover.png), [select](pairs-after/PM3-select.png), [inspector](pairs-after/PM3-inspector.png), [edited](pairs-after/PM3-edited.png) | **Close**: the element inspector now has Wonder's structure (follow-up pass): the read-only alignment row, X/Y, rotation, Left/Top constraints, Z Auto and the constraint diagram; W/H with px menus, the min width and min height rows, Padding, Margin; Opacity, Corner radius and Clip content; **system-ui (unsupported)** with a dimmed weight menu, size, Line height Auto, Letter spacing; Text Fill. The Add to chat tooltip still sits at the ⊕ chip instead of below the element. |
+| X2 changes popover | **Preview changes / Not in your code yet**, the element row with eye and revert, the old text struck through, **Hide all changes / Compare with the original**, **Revert all changes / Puts back the original values**. [pair](pairs/PM3-edited.png) | None | Same strings and layout. [pair](pairs-after/X2-changes.png) | **Match**. Wonder's badge icon is a boxed ±; Verynize's is an unboxed ±. |
+| PM4 Capture | The hover outline with **1432 × 43** and the keyboard strip. Clicking creates an editable **Text** layer 100 px right of the preview, top-aligned, on the page colour, and pans sideways to it. [capture](pairs/PM4-capture.png), [result](pairs/PM4-result.png) | Viewport capture only | Same placement: x = preview right + 100, y = preview y, as checked in metrics.json. Fixed in this pass: the page colour (#f4f6fe) becomes the text's Background Fill, and the reveal pans only sideways when the layer is in view. [capture](pairs-after/PM4-capture.png), [result](pairs-after/PM4-result.png) | **Close**: line height is Auto and Clip content is on, as in Wonder (follow-up pass). The family reads "system-ui" without "(unsupported)": system-ui is Verynize's default text font and a listed Generic font in its picker, so the layer inspector only labels families missing from the font list. Verynize also draws the layer name ("Text") above the selected layer. |
+| PM5 Add to chat | The chat opens with only the purple **h1 "Sunbird previe…** chip; nothing is sent. [pair](pairs/PM5-context.png) | Frame-level context only | The element chip **h1 "Sunbird edited…** is added and nothing is sent. The frame's own selection chip is dismissed, so the composer holds only the element chip (follow-up pass). [pair](pairs-after/PM5-context.png) | **Close**: Verynize draws the chip boxed where Wonder draws plain purple text. |
+
+### PP. Publish, stop, external browser
+
+| Id | Wonder | Verynize before | Verynize after | Verdict |
+|---|---|---|---|---|
+| PP1 Publish | A popover: **Publish to the web / Not published yet**, **Share your app / Pro lets you publish your app to the web.**, **Environment variables / 0 keys sent ›**, purple **Publish [Pro]**. [pair](pairs/PP1-publish.png) | Missing on the frame; a backend exists under Share | The same popover and placement. The description reads "Build this app and share it at a public link." and the action is **Publish** without the Pro badge. [pair](pairs-after/PP1-publish.png) | **Deliberate difference**: Verynize has no Pro plan gate. |
+| PP2 Stop with edits | **Discard preview edits? / 1 unsaved edit will be lost when this preview stops. / This can’t be undone. / Keep editing / Discard and stop**. [pair](pairs/PP2-stopped.png) | No confirmation | The same dialog from the frame Stop and from the chat header Stop; Keep editing leaves the server running. [pair](pairs-after/PP2-stopped.png) | **Match** |
+| PP3 / X5 external browser, running menu | Running split menu: **Open in a tab ⌘⌥P**, **Go to preview**, **Open in browser** · **Preview settings**; the header shows **Stop preview** with a pause glyph and a green dot. [Wonder](wonder/X5-running-menu.png) | Present | Same. [pair](pairs-after/X5-running-menu.png) | **Match**. The actual external launch is not observable in Wonder. |
+
+### X. Extra findings
+
+| Id | Wonder | Verynize after | Verdict |
+|---|---|---|---|
+| X3 terminal | A panel inside the frame: **Terminal · Your keys go to the app**, Copy logs, Hide terminal, the server log, footer **Detected localhost:8000 · Esc to stop typing**. | The same panel, buttons, log and **Detected localhost:…** footer. Python servers now run unbuffered, so the "Serving HTTP on …" line appears as in Wonder (fixed in this pass). [pair](pairs-after/X3-terminal.png) | **Deliberate difference**: Verynize's terminal is read-only logs, so it does not claim "Your keys go to the app" or "Esc to stop typing". |
+
+## Integration seams (checked by capture-after.cjs, recorded in after/metrics.json)
+
+- The frame toolbar expand button opens the preview tab.
+- **Open in a tab** in the header menu and **⌘⌥P** open the same tab.
+- The frame Stop and the header Stop both ask **Discard preview edits?** while edits are staged, and Keep editing leaves the server running.
+- **Show terminal** in the context menu opens the frame terminal.
+- A captured element lands 100 px right of the preview, top-aligned (frame (418, 246, w 1512) → text (2030, 246)).
+
+## Fixes made in this pass
+
+- **Header-started failures.** A failure after a Start from the chat header now passes its status to the frame, so the card shows "The start command exited before the app was ready" with the exit code, as a frame-started run did (`web/src/islands/code/preview-state.ts`, `web/live-preview.js`).
+- **"1 change" badge.** It moved out of the toolbar, where it covered Publish and Stop, into the breadcrumb row 2 px above the toolbar, at 12 px (`web/src/islands/chrome/preview-changes.css`).
+- **Mode toolbar.** Idle labels are #c0c0c0 instead of #909090, and the hovered or open control gets the #222 pill (`preview-toolbar.css`, token `--color-preview-mode-label`).
+- **Path field.** It hugs its text, so the hover pill and the URL tooltip centre on it. Editing opens a #181818 well up to Publish, with no focus ring (`web/preview-frame-chrome.css`, token `--color-preview-path-edit`).
+- **Text editing in the page.** There is no page focus ring around the edited element, and the word selection is pale purple. Both are removed when editing ends (`desktop/preview-dom.cjs`).
+- **Inspector in Edit mode.** Properties are empty until an element is picked (`inspector.tsx`, `preview-element.tsx`).
+- **Element capture.** The page colour behind the element becomes the captured text's Background Fill, and an in-view capture is revealed by a sideways pan only (`desktop/capture-core.cjs`, `web/live-preview.js`).
+- **Names.** The layer and the preview tab use the capitalised worktree name ("Wren · Preview"), like Wonder's "Dipper" (`web/live-preview.js`, `preview-tab/store.ts`).
+- **"Set up the Preview" request.** It is drawn as an app action, with the logo, purple text and no context chips (`chat/transcript.tsx`, token `--color-preview-request`).
+- **Preview settings focus.** The modal opens with focus on itself, not on "Detect with agent" (`code/preview-settings.tsx`).
+- **Python output.** Dev servers get `PYTHONUNBUFFERED=1`, so a piped `python3 -m http.server` logs its address straight away (`desktop/dev-server.cjs`).
+
+### Follow-up pass
+
+- **Element inspector (PM3).** It reuses the layer inspector's pieces (align tool groups, constraint selects and diagram, size rows, Clip content checkbox, font family picker), so it looks the same. Position is read-only. The min width and min height rows, and Clip content (`overflow`), stage edits like the other fields (`inspector/preview-element.tsx`, `desktop/preview-dom.cjs`, `web/preview-edit.js`).
+- **"(unsupported)".** `isUnsupportedFont()` in `inspector/fonts.ts` is shared by both inspectors. On a page element, CSS generic keywords such as `system-ui` count as unsupported, because they name whatever the browser picks; the weight menu is then dimmed, as in Wonder. In the layer inspector only a family missing from the font list is labelled, because `system-ui` is Verynize's own default text font.
+- **Captured text (PM4).** CSS `line-height: normal` becomes Auto, and the captured text layer has Clip content on (`desktop/capture-core.cjs`).
+- **Add to chat (PM5).** Adding an element dismisses the preview frame's selection chip until the selection changes (`web/preview-edit.js`).
+- **Breadcrumb (PF4).** The "N changes" badge reserves its width in the breadcrumb row, so a narrow frame's breadcrumb ends in an ellipsis before it (`chrome/preview-changes.tsx`, `web/preview-frame-chrome.css`).
+- **Purple bar at the canvas edge.** A capture artifact. The default document's Violet card and its text layers sat just left of the preview and showed at the canvas edge. `capture-after.cjs` now moves the starter layers 4000 px left (they stay in the Layers list). The script also shoots PF4-resize after the staged edit, as Wonder did.
+
+## Remaining gaps
+
+- **Captured text (PM4).** The family reads "system-ui" without "(unsupported)" (see the follow-up pass), and Verynize shows the layer name above the selected layer.
+- **Add to chat (PM3, PM5).** The tooltip sits at the ⊕ chip instead of below the element, and the composer chip is boxed.
+- **Preview settings (X1).** The sidebar has only Preview. A static site prefills its detected start command.
+- **Terminal (X3).** Read-only, so there is no "Your keys go to the app" or "Esc to stop typing" (deliberate).
+- **Publish (PP1).** No Pro gate (deliberate).
+- **Code workspace layout (PS6).** Differs outside the preview card and button.
+- **Not proven in Wonder, left as is:**
+  - typed-path submission (PF2);
+  - pointer resizing (PF4);
+  - a second canvas preview (PF8);
+  - scrolling and input release (PM2);
+  - style edits, undo and redo, and apply-to-code (PM3);
+  - full-page capture formats (PM4);
+  - the external browser launch (PP3);
+  - startup with a setup command or expanded logs (PS3);
+  - persistence after reopening (PS5).
