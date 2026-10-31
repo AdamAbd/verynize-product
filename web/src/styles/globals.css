@@ -241,6 +241,8 @@ html[data-ui-theme="light"] {
   --spacing-tab-name: 220px;
   /* </chrome-tokens> */
   /* <sidebar-tokens> */
+  /* Inline page rename field (Wonder L2-rename-field: #181818 inside a 1px primary outline). */
+  --color-page-rename: color-mix(in srgb, var(--background) 86%, black);
   /* </sidebar-tokens> */
   /* <inspector-tokens> */
   /* Fields in 22/43 and 2026-10-30/05–06: a 0.5px edge all round, a shade lighter than the #2b2b2b fill (#303030). */
