@@ -1,6 +1,7 @@
 // Wonder selection marks: hidden-layer outline (CM6-hidden), constraint guides and no name label on nested layers
 // (S2, CM3-text-menu), hover without child outlines (S1-hover-final), whole-number Alt distances (TR5), stack-child
-// drags that follow the pointer with no drop column (R1, TR7) and caret-only
+// drags that follow the pointer with no drop column and no selection chrome but the name label, the parent left
+// untouched until release (R1, TR7) and caret-only
 // text editing (TX1-click, TX1-drag).
 const {_electron} = require('@playwright/test');
 const assert = require('node:assert/strict');
@@ -151,11 +152,24 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
       await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, {steps: 8});
       const seen = await during(); await page.mouse.up(); return seen;
     }
+    // What the dragged layer shows while held: its own outline, corner handles, size badge, name label and ⊕ chip.
+    const dragChrome = id => page.evaluate(id => {
+      const el = document.querySelector(`#canvas [data-id=${id}]`), visible = e => !!e && e.checkVisibility({visibilityProperty: true}) && !e.closest('[hidden]');
+      return {outline: getComputedStyle(el).outlineStyle, handles: [...el.querySelectorAll(':scope > .handle')].filter(visible).length,
+        badge: visible(document.getElementById('selection-measure')), name: visible(document.getElementById('selection-name')), chip: visible(document.getElementById('selection-chat-chip'))};
+    }, id);
     await seed(row()); await select(['k2']);
     // R1-row-drag-slot: dragged 120 right, the child is drawn over the last slot; its own slot stays open.
     const slot = await held([170, 80], [290, 80], async () => ({k1: await worldBox('k1'), k2: await worldBox('k2'), k3: await worldBox('k3'),
-      kids: await kidsOf(), column: await page.locator('#canvas-overlay .drop-column').count(), parent: await shown('#canvas-overlay .drop-target')}));
+      kids: await kidsOf(), column: await page.locator('#canvas-overlay .drop-column').count(), parent: await shown('#canvas-overlay .drop-target'),
+      chrome: await dragChrome('k2'), row: await worldBox('row'), drop: await page.evaluate(() => {
+        const cs = getComputedStyle(document.querySelector('#canvas-overlay .drop-target'));
+        return {outline: cs.outlineWidth, offset: cs.outlineOffset, color: cs.outlineColor, label: getComputedStyle(document.querySelector('#canvas-overlay .frame-label[data-id=row]')).color};
+      })}));
     assert.deepEqual(slot.k2, {x: 260, y: 20, w: 100, h: 120}, 'the child follows the pointer');
+    assert.deepEqual(slot.chrome, {outline: 'none', handles: 0, badge: false, name: false, chip: false}, 'R1-row-drag-slot: the dragged child has no outline, handles, badge or label');
+    assert.deepEqual(slot.row, {x: 0, y: 0, w: 380, h: 160}, 'the parent does not re-lay out while the child is held');
+    assert.deepEqual(slot.drop, {outline: '1px', offset: '-0.5px', color: PURPLE, label: PURPLE}, 'the parent is outlined 1px #c468f7 and its label tinted');
     assert.deepEqual([slot.k1, slot.k3], [{x: 20, y: 20, w: 100, h: 60}, {x: 260, y: 20, w: 100, h: 90}], 'siblings keep their slots during the drag');
     assert.deepEqual(slot.kids, ['k1', 'k2', 'k3'], 'no live reorder');
     assert.equal(slot.column, 0, 'no drop column');
@@ -166,8 +180,16 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal(await page.locator('#canvas [data-id=k2]').evaluate(e => e.style.translate), '', 'the drag offset clears');
     // R1-row-drag-far: dragged out below the row, the child follows the pointer and lands on the page there.
     await seed(row()); await select(['k2']);
-    const far = await held([170, 80], [220, 330], () => worldBox('k2'));
+    const farSeen = await held([170, 80], [220, 330], async () => ({k2: await worldBox('k2'), k1: await worldBox('k1'), k3: await worldBox('k3'), row: await worldBox('row'),
+      chrome: await dragChrome('k2'), name: await boxOf('#canvas-overlay #selection-name'), ghost: await boxOf('#canvas [data-id=k2]'), drop: await shown('#canvas-overlay .drop-target'),
+      label: await page.locator('#canvas-overlay .frame-label[data-id=row]').evaluate(e => e.classList.contains('hovered'))}));
+    const far = farSeen.k2;
     assert.deepEqual(far, {x: 190, y: 270, w: 100, h: 120}, 'the child follows the pointer out of the row');
+    // R1-row-drag-far: no outline, handles or badge; the purple name label rides above the dragged child.
+    assert.deepEqual(farSeen.chrome, {outline: 'none', handles: 0, badge: false, name: true, chip: false}, 'outside its row the dragged child shows only its name label');
+    near(farSeen.name.x, farSeen.ghost.x, 1, 'label at the child left edge'); near(farSeen.name.y + farSeen.name.h, farSeen.ghost.y, 4, 'label just above the child');
+    assert.deepEqual([farSeen.k1, farSeen.k3, farSeen.row], [{x: 20, y: 20, w: 100, h: 60}, {x: 260, y: 20, w: 100, h: 90}, {x: 0, y: 0, w: 380, h: 160}], 'the row keeps its layout and the empty slot until release');
+    assert.deepEqual([farSeen.drop, farSeen.label], [false, false], 'the row is not outlined once the child leaves it');
     const out = await page.evaluate(() => window.design.getDocument().pages[0].nodes.find(n => n.id === 'k2'));
     assert.deepEqual([out.parentId || null, out.x, out.y], [null, 190, 270], 'released outside, it is a top-level layer where it was drawn');
     // TR7-out-during's "column" is a marquee: a press in the gap between two children draws the marquee box.

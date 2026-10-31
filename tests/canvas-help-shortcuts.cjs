@@ -109,6 +109,24 @@ const nodes = [
     const label = id => fit.labels.find(l => l.id === id);
     assert.equal(label('help-discord').max, '112px'); assert.equal(label('help-diagnostics').max, '128px');
     assert.deepEqual(fit.labels.filter(l => l.cut).map(l => [l.id, l.shown]), [['help-discord', 'Discord commu'], ['help-diagnostics', 'Export diagnostic l']], 'only Discord and Export truncate, like Wonder');
+    // Wonder T5-help What's new section (measured from the 2× capture): label 12px from 10px in; entries without
+    // icons, 13px titles and 12px #a8a8a8 dates from 12px in, the title's line box 5.5px into the 44px row (cap top
+    // 11px) with a 16.5px baseline step to the date; "View all" a 29px row of 13px text, also 12px in.
+    const news = await p.evaluate(() => {
+      const menu = document.getElementById('bd-help-menu').getBoundingClientRect();
+      const text = el => { const range = document.createRange(); range.selectNodeContents(el); const r = range.getBoundingClientRect(); return {left: r.left - menu.left, top: r.top, height: r.height}; };
+      const label = [...document.querySelectorAll('#bd-help-menu [role=group] > *')].find(e => e.textContent === "What's new");
+      const row = document.querySelector('#bd-help-menu [data-whats-new]'), rowTop = row.getBoundingClientRect().top;
+      const title = row.querySelector('[data-whats-new-title]'), date = row.querySelector('[data-whats-new-date]'), all = document.getElementById('help-whats-new');
+      const font = el => [getComputedStyle(el).fontSize, getComputedStyle(el).color];
+      const lineTop = el => +(el.getBoundingClientRect().top - rowTop).toFixed(2), lineH = el => el.getBoundingClientRect().height;
+      return {label: [text(label).left, getComputedStyle(label).fontSize], title: [text(title).left, ...font(title), lineTop(title), lineH(title)],
+        date: [text(date).left, ...font(date), lineTop(date), lineH(date)], all: [text(all.querySelector('span')).left, getComputedStyle(all).fontSize, all.offsetHeight]};
+    });
+    assert.deepEqual(news.label, [10, '12px'], "What's new label");
+    assert.deepEqual(news.title, [12, '13px', 'rgb(232, 232, 232)', 5.5, 20], 'entry title: 13px, 12px in, line box 5.5px into the row');
+    assert.deepEqual(news.date, [12, '12px', 'rgb(168, 168, 168)', 26.5, 12], 'entry date: 12px secondary grey below the title');
+    assert.deepEqual(news.all, [12, '13px', 29], 'View all: 13px text in a 29px row');
     await p.locator('#help-onboarding').click();
     await p.locator('#onboarding').waitFor();
     await p.evaluate(() => { localStorage.setItem('verynize.onboarding', 'done'); });

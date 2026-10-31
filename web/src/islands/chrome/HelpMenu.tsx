@@ -2,6 +2,9 @@
 // Give feedback, Contact us ↗, Discord community ↗, Export diagnostic logs | What's new. Items without a Verynize
 // mechanism use placeholder URLs for now (see help-links.ts). What's new lists placeholder entries (title over a
 // date, 44px rows like Wonder's "Wonder Capture / August 18") before View all.
+// Wonder T5-help, measured: the section has no icons; label 12px ink from x+10 of the menu; entry titles and
+// "View all" 13px, dates 12px secondary grey, all from x+12; titles' cap top 11px into the 44px row and baselines
+// 16.5px apart (13px/20px title over 12px/12px date, 1px apart, centred); "View all" is an ordinary 29px row.
 import { useState, type ComponentType } from "react";
 import {
   ArrowUpRight,
@@ -130,24 +133,28 @@ export function HelpMenu() {
         </MenuGroup>
         <MenuSeparator />
         <MenuGroup>
-          <MenuLabel className="px-2">What&apos;s new</MenuLabel>
+          <MenuLabel className="px-1.25">What&apos;s new</MenuLabel>
           {WHATS_NEW.map(({ id, title, date, url }) => (
             <MenuItem
               key={id}
               data-whats-new={id}
-              className="h-11 gap-2.5 px-2"
+              className="h-11 gap-2.5 px-1.75"
               onSelect={() => openExternal(url)}
             >
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate">{title}</span>
-                <span className="truncate text-foreground-3">{date}</span>
+              <span className="flex min-w-0 flex-col gap-px">
+                <span data-whats-new-title="" className="truncate text-sm leading-5">
+                  {title}
+                </span>
+                <span data-whats-new-date="" className="truncate text-xs leading-3 text-foreground-3">
+                  {date}
+                </span>
               </span>
               <ArrowUpRight className="ml-auto size-3 text-muted-foreground" />
             </MenuItem>
           ))}
           <MenuItem
             id="help-whats-new"
-            className={row}
+            className="h-7.25 gap-2.25 px-1.75 text-sm"
             disabled={!whatsNew}
             onSelect={() => whatsNew?.()}
           >

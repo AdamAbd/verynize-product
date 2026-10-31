@@ -739,6 +739,7 @@
       else { textEdit.cleanup(); textEdit = null; }
     }
 
+    let layerPreview = null; // {ids, parentId, index?} while a drag previews a new parent in the Layers tree
     function guideTargets(moving) {
       const first = find(moving[0]); if (!first) return [];
       const excluded = new Set(moving.flatMap(id => [...ed.descendants(id)]));
@@ -753,12 +754,32 @@
     // There is no "drop column": the tall translucent purple box in Wonder's TR7-out-during is a marquee. Its corner
     // starts in the empty gap left of the child (not on it), the child has not moved and the inspector shows Z Auto
     // (a real drag shows Z 9999, R1), and the sibling capture TR7-reorder-during ends with "2 nodes selected".
+    // While the pointer is held the dragged layer has no outline, handles or size badge, only its name label when it
+    // would land on the page (R1-row-drag-slot/-far, TR4-guide; CSS in selection-chrome.js). A drop that would change
+    // the parent without the document changing yet (a stack child leaving its stack, a layer entering a stack) is
+    // previewed in the Layers tree (R1-row-drag-out/-far, R1-row-return-during) through `bd:layer-preview`; the preview
+    // is no document state, so it adds no undo step and is never saved. A drag of stack children alone changes nothing
+    // before release, so Escape cancels it outright (no undo step either).
+    function setLayerPreview(next) {
+      if (JSON.stringify(next) === JSON.stringify(layerPreview)) return false;
+      layerPreview = next; window.dispatchEvent(new CustomEvent('bd:layer-preview', {detail: next}));
+      return true;
+    }
     function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
       const g = gesture(), start = {x: e.clientX, y: e.clientY};
-      let free = null, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null;
+      let free = null, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null, deferred = false, cancelled = false;
+      const onKey = ev => {
+        if (ev.key !== 'Escape' || !deferred || cancelled) return;
+        ev.preventDefault(); ev.stopImmediatePropagation();
+        cancelled = true; window.removeEventListener('keydown', onKey, true);
+        clearGhosts(stacked); drawGuides([]); drawDrop(null); setLayerPreview(null);
+        workspace.classList.remove('moving'); ed.updateMeasurement();
+      };
       const begin = ev => {
-        g.commit();
+        const picked = moving.map(find).filter(Boolean);
+        deferred = !ev.altKey && picked.length > 0 && picked.every(inStack);
+        if (deferred) window.addEventListener('keydown', onKey, true); else g.commit();
         if (ev.altKey) moving = duplicateNodes(moving, 0);
         const nodes = moving.map(find).filter(Boolean);
         free = nodes.filter(n => !inStack(n)).map(n => ({n, x: n.x, y: n.y})); // anchored layers re-derive their insets from x/y (beforeRender)
@@ -773,7 +794,7 @@
         workspace.classList.add('moving'); showHover(null);
       };
       track(e, ev => {
-        if (!moving.length) return;
+        if (!moving.length || cancelled) return;
         if (!free) { if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 3) return; begin(ev); }
         let dx = (ev.clientX - start.x) / cam.zoom, dy = (ev.clientY - start.y) / cam.zoom;
         if (ev.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
@@ -798,13 +819,17 @@
           targets = guideTargets(free.map(s => s.n.id));
           drop = {};
         }
+        const previewed = setLayerPreview(drop.parent ? {ids: [...moving], parentId: drop.parent.id || null, ...(drop.index === undefined ? {} : {index: drop.index})} : null);
         placeGhosts(stacked, grab, dx, dy);
-        if (stacked.length) ed.updateMeasurement(); // name and size badges follow the dragged copy
+        if (stacked.length || previewed) ed.updateMeasurement(); // the name label follows the dragged copy
         drawGuides(guides); drawDrop(drop);
       }, () => {
+        window.removeEventListener('keydown', onKey, true);
+        if (cancelled) return;
         workspace.classList.remove('moving');
         if (!free) { onClick?.(); return; }
-        drawGuides([]); drawDrop(null);
+        drawGuides([]); drawDrop(null); setLayerPreview(null);
+        if (deferred) g.commit();
         // Stack children leaving their stack land where the pointer put them (relocate measures the ghosts).
         if (drop?.parent) relocate(moving.map(find).filter(Boolean), drop.parent.id === '' ? null : drop.parent.id, drop.index);
         else if (stacked.length) { if (drop?.index !== undefined) placeInStack(home, stacked, drop.index); clearGhosts(stacked); }
@@ -884,6 +909,8 @@
     function drawDrop(drop) {
       const target = drop?.frame, b = target && screenBox(target);
       dropBox.hidden = !b; dropLine.hidden = true;
+      // Wonder R1-row-drag-slot / -return-during: the receiving frame's label takes the outline purple, like a hover.
+      for (const label of frameLabels.children) label.classList.toggle('hovered', label.dataset.id === (target || hoverId));
       if (!b) return;
       placeBox(dropBox, b);
       if (!drop.parent) return;
@@ -973,7 +1000,8 @@
       if (!Object.keys(node.bindings).length) delete node.bindings;
     }
     // Resize, rotate and the selection chrome (label, badge, ⊕ chip, multi-selection box) live in selection-chrome.js.
-    const chrome = window.BetterSelectionChrome.install({ed, cam, wrap, overlay, workspace, find, sel, track, gesture, isFlow, unbindKeys, elementOf, worldRect, drawGuides, showHover, getTool: () => tool});
+    const chrome = window.BetterSelectionChrome.install({ed, cam, wrap, overlay, workspace, find, sel, track, gesture, isFlow, unbindKeys, elementOf, worldRect, drawGuides, showHover, getTool: () => tool,
+      previewParent: id => (layerPreview?.ids.includes(id) ? layerPreview.parentId : undefined)});
     const baseMeasurement = ed.updateMeasurement; ed.updateMeasurement = () => { baseMeasurement(); chrome.draw(); };
     function startResize(e, id, corner) { chrome.startResize(e, id, corner); }
 
