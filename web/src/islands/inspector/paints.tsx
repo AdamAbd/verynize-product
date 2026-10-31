@@ -13,16 +13,18 @@ import {
   type ReactNode,
 } from "react";
 import { ArrowDown, ArrowLeftRight, ArrowUp, Eye, GripVertical, ImageIcon, Plus, RotateCw, Square, Unlink, X } from "lucide-react";
-import { ClosedEyeIcon, GradientPaintIcon, RemoveIcon, ShaderIcon } from "@/components/icons";
+import { ClosedEyeIcon, GradientPaintIcon, RemoveIcon } from "@/components/icons";
 import type { DesignDocument } from "@/lib/bridge";
-import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { ColorPicker, ColorPopover } from "./color-picker";
 import { alphaPercent, parseColor, toHex, withAlpha } from "./color";
-import { Caption, Field, IconButton, NativeSelect, Swatch, type IconType } from "./controls";
+import { Field, IconButton, NativeSelect, Swatch, type IconType } from "./controls";
 import { VariableChip } from "./bind";
 import { notify } from "./legacy";
-import { HEX, hexLabel, pageNodes, parseHex, patchNodes, setField, type Node } from "./model";
+import { HEX, hexLabel, pageNodes, parseHex, patchNodes, type Node } from "./model";
 import { setTokenColor } from "./vars";
+import { isParam } from "./shader-library";
+import { ShaderModeToggle, shaderModeApplies } from "./shader-mode";
 
 export type Stop = { position: number; color: string; token?: string };
 export type Paint = {
@@ -118,6 +120,8 @@ export function editPaints(
   selection: string[],
   edit: (paints: Paint[], node: Node) => Paint[] | null,
   target: PaintTarget = "fills",
+  /** Further fields for every edited layer (same undo step), e.g. leaving Shader mode. */
+  extra?: Record<string, unknown>,
 ) {
   const tokens = window.design.getDocument().tokens ?? {};
   patchNodes(selection, (node) => {
@@ -125,7 +129,7 @@ export function editPaints(
     // Only text layers carry a Background Fill stack behind the glyphs.
     if (target === "backgroundFills" && node.type !== "text") return {};
     const next = edit(paintsOf(node, target), node);
-    return next ? stackPatch(node, next, tokens, target) : {};
+    return next ? { ...stackPatch(node, next, tokens, target), ...extra } : {};
   });
 }
 /** `editPaints` bound to the stack this component renders (the module-level name stays the call shape). */
@@ -238,21 +242,14 @@ function paintPreview(p: Paint, tokens: Tokens) {
     : (layer?.image ?? "transparent");
 }
 
-/* ---------- Header tools: Animated + Add paint ---------- */
-const ANIMATED = [
-  { value: "", label: "None" },
-  { value: "aurora", label: "Aurora" },
-  { value: "sunset", label: "Sunset" },
-  { value: "ocean", label: "Ocean" },
-];
+/* ---------- Header tools: Shader mode + Add paint ---------- */
 /** Wonder A1: the first paint is white; every further paint is black at 20 %. */
 const defaultPaint = (paints: Paint[]): Paint =>
   paints.length ? { type: "solid", color: "#00000033" } : { type: "solid", color: "#ffffff" };
 
 /**
- * Header of a Fill section (Wonder A1): the wavy-square paint/animation tool, then `+`, 8 px apart. Binding a colour
- * variable happens in the picker's Variables tab and detaching in the row itself, so the wavy square only holds the
- * animated gradient that used to sit under the stack.
+ * Header of a Fill section (Wonder A1): the wavy-square Shader mode toggle (H6), then `+`, 8 px apart. Binding a
+ * colour variable happens in the picker's Variables tab and detaching in the row itself.
  */
 export function FillTools({
   node,
@@ -264,53 +261,35 @@ export function FillTools({
   selection: string[];
   target?: PaintTarget;
 }) {
-  const [open, setOpen] = useState(false);
   const background = target === "backgroundFills";
+  // Shader layers keep one colour (it drives the shader) and have no header tools.
+  if (node.type === "shader") return null;
+  const shader = shaderModeApplies(node, target) && !!node.shaderFill;
   return (
     <div className="flex items-center gap-2" data-paint-target={target}>
-      <Popover open={open} onOpenChange={setOpen} modal={false}>
-        <PopoverTrigger asChild>
-          <IconButton
-            icon={ShaderIcon}
-            label="Animated fill"
-            aria-expanded={open}
-            active={!!node.animated}
-            data-fill-animated
-          />
-        </PopoverTrigger>
-        <PopoverContent
-          id="fill-animated"
-          side="left"
-          align="start"
-          sideOffset={12}
-          className="w-56"
-          onOpenAutoFocus={(event) => event.preventDefault()}
-        >
-          <Caption label="Animated">
-            <NativeSelect
-              name="animated"
-              label="Animated gradient"
-              value={node.animated ?? ""}
-              onChange={(value) => setField(selection, node, "animated", value)}
-              options={ANIMATED}
-            />
-          </Caption>
-        </PopoverContent>
-      </Popover>
-      {node.type !== "shader" ? (
-        <IconButton
-          icon={Plus}
-          label={background ? "Add background paint" : "Add paint"}
-          onClick={() => editPaints(selection, (ps) => [defaultPaint(ps), ...ps], target)}
-        />
-      ) : null}
+      <ShaderModeToggle node={node} selection={selection} target={target} />
+      {/* Wonder keeps `+` in Shader mode (H6-open-confirmed); adding a paint goes back to the paint rows. */}
+      <IconButton
+        icon={Plus}
+        label={background ? "Add background paint" : "Add paint"}
+        onClick={() =>
+          editPaints(
+            selection,
+            (ps) => [defaultPaint(ps), ...ps],
+            target,
+            shader ? { shaderFill: undefined } : undefined,
+          )
+        }
+      />
     </div>
   );
 }
 
 /** Whether the stack renders any row (an empty Fill section is its header only). */
 export const hasPaintRows = (node: Node, target: PaintTarget = "fills") =>
-  (target === "fills" && node.type === "shader") || paintsOf(node, target).length > 0;
+  (target === "fills" && node.type === "shader") ||
+  (shaderModeApplies(node, target) && !!node.shaderFill) ||
+  paintsOf(node, target).length > 0;
 
 /* ---------- Stack ---------- */
 export function PaintStack({
@@ -330,6 +309,9 @@ export function PaintStack({
     return (
       <SolidRow doc={doc} node={node} selection={selection} paints={paints} index={0} legacy />
     );
+  // Shader mode (H6): a parametric preset's colours replace the paint rows (ShaderFill); classic presets are
+  // tinted by the fill colour, so its rows stay. The stored paints are kept either way.
+  if (shaderModeApplies(node, target) && node.shaderFill && isParam(node.shaderPreset)) return null;
   // Wonder A1: no placeholder text; the section collapses to its header.
   if (!paints.length) return null;
   return (

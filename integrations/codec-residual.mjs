@@ -10,6 +10,7 @@
 import { effectsOf } from "./node-style.mjs";
 import { normalizeColorsIn } from "./codec-css.mjs";
 import { CORNER_KEYS, PADDING_AXES } from "./variables.mjs";
+import { shaderError } from "./shaders.mjs";
 
 export const RESIDUAL_ATTR = "data-vn";
 const NODE_KEEP = new Set(["id", "parentId", "shortId"]);
@@ -128,6 +129,14 @@ const DORMANT = [
     (n) => n.type === "frame" && n.layout !== "grid" && n.columns !== undefined && n.columns !== 2,
   ],
   ["rows", (n) => n.type === "frame" && n.layout !== "grid" && n.rows !== undefined],
+  ["columnSizes", (n) => n.type === "frame" && n.layout !== "grid" && n.columnSizes !== undefined],
+  [
+    "rowSizes",
+    (n) =>
+      n.type === "frame" &&
+      (n.layout !== "grid" || !(Number(n.rows) >= 1)) &&
+      n.rowSizes !== undefined,
+  ],
   [
     "direction",
     (n) =>
@@ -188,6 +197,10 @@ const DORMANT = [
   ],
 ];
 const BOX = ["x", "y", "w", "h"];
+// Shader mode (shaderFill) and the shader settings of a non-shader layer have no class; Shader layers write
+// them as JSX attributes instead (shaders.mjs). Values equal to the node defaults are left out.
+const SHADER_KEYS = ["shaderFill", "shaderPreset", "shaderSpeed", "shaderIntensity", "shaderColors", "shaderParams"];
+const SHADER_DEFAULTS = { shaderFill: false, shaderPreset: "aurora", shaderSpeed: 1, shaderIntensity: 1 };
 
 // --- write ---------------------------------------------------------------------------------------
 
@@ -216,10 +229,15 @@ export function residualOf(node) {
   }
   if (Array.isArray(node.textRuns) && node.textRuns.length) r.textRuns = node.textRuns;
   if (node.locked === true) r.locked = true;
+  // Grid "Automatic positioning" off has no class (it changes no CSS).
+  if (node.type === "frame" && node.autoPosition === false) r.autoPosition = false;
   if (node.preview && typeof node.preview === "object" && !node.parentId) r.preview = node.preview;
   const name = typeof node.name === "string" ? node.name : "";
   if (name && (name !== name.trim() || name.length > 200)) r.name = name;
   for (const [key, dormant] of DORMANT) if (dormant(node)) r[key] = node[key];
+  if (node.type !== "shader")
+    for (const key of SHADER_KEYS)
+      if (node[key] !== undefined && node[key] !== SHADER_DEFAULTS[key]) r[key] = node[key];
   // Hidden layers are skipped by layout, so their last geometry cannot be recomputed on import.
   if (node.hidden === true && node.parentId) r.box = BOX.map((key) => node[key]);
   return Object.keys(r).length ? r : null;
@@ -306,6 +324,7 @@ export function applyResidual(node, attrs, { tokens = {}, warnings = [], where =
     if (Object.keys(kept).length < Object.keys(r.bindings).length) stale.push("bindings");
   }
   if (r.locked === true) node.locked = true;
+  if (r.autoPosition === false && node.type === "frame") node.autoPosition = false;
   if (r.preview && typeof r.preview === "object" && !node.parentId)
     node.preview = structuredClone(r.preview);
   if (typeof r.name === "string" && r.name.trim() && r.name.trim().slice(0, 200) === node.name)
@@ -315,6 +334,12 @@ export function applyResidual(node, attrs, { tokens = {}, warnings = [], where =
       const next = { ...node, [key]: r[key] };
       if (dormant(next)) node[key] = r[key];
     }
+  if (node.type !== "shader" && SHADER_KEYS.some((key) => r[key] !== undefined)) {
+    const next = { ...node };
+    for (const key of SHADER_KEYS) if (r[key] !== undefined) next[key] = structuredClone(r[key]);
+    if (shaderError(next)) stale.push("shaderFill");
+    else for (const key of SHADER_KEYS) if (r[key] !== undefined) node[key] = next[key];
+  }
   if (
     Array.isArray(r.box) &&
     node.hidden === true &&
