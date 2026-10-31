@@ -49,3 +49,4 @@ def pair_dir(left, right, out):
 
 
 print(f"{pair_dir(HERE / 'wonder', HERE / 'verynize', HERE / 'pairs')} pairs")
+print(f"{pair_dir(HERE / 'wonder', HERE / 'verynize' / 'after', HERE / 'pairs-after')} after-fix pairs")
