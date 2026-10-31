@@ -135,6 +135,10 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
   deferred pending ids). It also works for an island built alone (`node scripts/build-ui.cjs <area>`): then only that
   island is counted. Electron tests call `waitForUiReady(page)` from `tests/helpers/ui-ready.cjs` after launch and after
   every reload, before clicking shell controls (`tests/ui-ready.cjs` is the regression test).
+- **Chat composer toolbar** matches Wonder exactly: `+` (attach menu), model picker, access level, then the right-side
+  indicators (works with, autonomy, tools, usage ring) and Send. Don't add chips to it. The design style picker
+  (`chat/style-picker.tsx`, menu `#chat-style-menu`, `window.chatDesignStyle`) has no chip; only the `/style` slash
+  command opens it (event `bd:open-style-picker`), anchored above the composer.
 - **Zoom menu**: tests click `#zoom-menu-button` then `#zoom-in`, `#zoom-out`, `#zoom-fit`, `#zoom-reset`, `#snap`,
   `#saved-views-open` (chrome island). `#zoom-reset` text must keep the zoom percentage (tests parse it).
 - **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask-0-css]`, `[name=layout]`,

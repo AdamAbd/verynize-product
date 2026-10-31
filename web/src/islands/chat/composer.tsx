@@ -467,6 +467,7 @@ export function Composer({ state }: { state: ChatState }) {
       )}
       <MentionPopover />
       {!WEB && <SlashCommands state={state} />}
+      <StylePicker />
       <WorkingDirectories state={state} />
       {(state.attachments.length > 0 || mentions.length > 0) && (
         <div className={cn(hook.mentions, "flex flex-wrap gap-1.5 px-2 pt-2 pb-1.5")}>
@@ -517,7 +518,6 @@ export function Composer({ state }: { state: ChatState }) {
         {!WEB && <AttachMenu state={state} />}
         <ModelMenu state={state} open={modelOpen} onOpenChange={setModelOpen} />
         <AccessMenu access={state.defaults.access} />
-        <StylePicker />
         <span className="flex-1" />
         <WorksWith state={state} />
         <AutonomyPopover state={state} />

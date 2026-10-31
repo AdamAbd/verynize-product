@@ -74,8 +74,8 @@ Enforcement:
 
 ## Design style: renderer → runtime → context → agent
 
-1. **Picker** (`web/src/islands/chat/style-picker.tsx`): chip `#chat-style-picker` (`data-style-id`) beside the model and access controls, menu `#chat-style-menu`. It lists `window.desktop.designStylesList()` with **Auto** (no style) first, stores the pick in localStorage `verynize.chat.design-style`, and exposes `window.chatDesignStyle.get()/set(id)`. `get()` returns `''` when there is no catalog or the stored id is not in it. Hidden when the desktop has no catalog. The `/style` slash command opens it.
-2. **Starter briefs**: clicking an empty-chat suggestion that has a `style` also calls `window.chatDesignStyle.set(style)`, so the picker shows it and the run carries it.
+1. **Picker** (`web/src/islands/chat/style-picker.tsx`): menu `#chat-style-menu`, opened only by the `/style` slash command. The composer toolbar has no style chip, matching Wonder (its toolbar is `+`, model, access, then the indicators and Send; a live audit found no style picker anywhere in Wonder). The menu anchors above the composer, starts focus on the current choice and returns focus to the prompt after a pick. It lists `window.desktop.designStylesList()` with **Auto** (no style) first, stores the pick in localStorage `verynize.chat.design-style`, and exposes `window.chatDesignStyle.get()/set(id)`. `get()` returns `''` when there is no catalog or the stored id is not in it. Without a catalog nothing renders and `/style` is not offered.
+2. **Starter briefs**: clicking an empty-chat suggestion that has a `style` also calls `window.chatDesignStyle.set(style)`, so the run carries it (and `/style` shows it checked).
 3. **Renderer** (`web/desktop-panel.js`): each composed task records `designStyle: window.chatDesignStyle?.get?.() || ''`, and `runAgent` receives `designStyle` when it is set.
 4. **IPC**: `designStylesList` returns `[{id, name, summary}]` from `listStyles()` (lazy `import()`, ids filtered to the slug pattern, `[]` on any failure). `runAgent({designStyle})` is validated by `normalizeDesignStyle` (`/^[a-z0-9-]{1,40}$/`; anything else rejects the run, empty means none).
 5. **Turn context**: `buildTurnContext` adds one line to `<verynize-context>`: `Design style chosen by the user: <slug>. Load it with get_design_guidelines {style: "<slug>"} before designing, and follow it unless the user asks otherwise.` A run with a style but no other context still gets the block.
@@ -100,6 +100,6 @@ Enforcement:
 | `resolveStyle`, `designTokens`, `getDesignGuidelines` with slugs and archetypes | `node --test integrations/design-knowledge.test.mjs` |
 | Tool output order, `get_skills {skill}` / `{name}` / catalog, `guidelines: "none"`, `apply_style_tokens {style}` with alpha extras | `node --test integrations/mcp.test.mjs` |
 | Preferences block, IPC validator, gate per runtime and access, `designStyle` validation and context line, `designStylesList` | `node --test tests/agent-runtime.cjs` |
-| Style picker, run carries `designStyle`, `/style` | `node tests/chat-composer-menu.cjs` |
+| No Style chip in the composer, `/style` opens the picker (keyboard and click), run carries `designStyle` | `node tests/chat-composer-menu.cjs` |
 | Twelve styled starter briefs, four shown, click selects the style | `node tests/agent-chat.cjs` |
 | Preference counters and limits in Settings | `node tests/settings.cjs` |
