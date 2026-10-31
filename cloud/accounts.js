@@ -2,7 +2,7 @@
 // passkeys, handoffs and the development outbox. Profiles, the room membership index,
 // publications and apps live in D1 (cloud/profiles.js); `accounts` here is a mirror of each
 // account's id, email, handle and name for passkey ceremonies, and the source of the one-time copy.
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject } from "#cloud-runtime";
 import { randomHex, digestHex, rpcFail, sameDigest } from "./http.js";
 import { sendMail } from "./mail.js";
 import { ALGORITHMS, toBase64url, verifyRegistration, verifyAssertion } from "./webauthn.js";

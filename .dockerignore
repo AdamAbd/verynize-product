@@ -1,0 +1,11 @@
+.git
+node_modules
+data
+dist
+.cloudflare
+web/dist
+eval
+design
+tests
+docs
+*.log

@@ -1,11 +1,10 @@
 // Accounts, public creator profiles, identity-based room roles, capability links with roles,
 // token rotation/recovery and migration of rooms created by the previous Worker, on local workerd.
-import { Miniflare } from "miniflare";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions, signIn } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions, signIn } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-accounts-"));
 const state = path.join(dir, "state");

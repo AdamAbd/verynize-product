@@ -6,6 +6,8 @@ The Worker (`cloud/worker.js`) serves Better Auth identities from D1 (`cloud/aut
 - `AccountDirectory` (`cloud/accounts.js`), a single instance: credentials only. It holds magic-link sign-in, hashed legacy sessions, passkeys, handoffs, the development outbox and a mirror of each account (id, email, handle, name) for passkey ceremonies. Profiles, the room membership index, publications and the app registry live in D1 (`cloud/profiles.js`, see "Account directory in D1").
 - `PublishedApp` (`cloud/apps.js`), one per published app: immutable, versioned static builds.
 
+The same code also runs on Node (`server/node.mjs`, VPS or Docker) through the adapters in `cloud/platform/`: see [cloud/platform/README.md](platform/README.md) for the runtime interfaces and how Durable Object semantics are kept, and [docs/self-hosting.md](../docs/self-hosting.md) to run it. On Vercel (`api/server.mjs`, several stateless instances with libSQL, Redis and S3) it runs through `cloud/platform/vercel/`: see [docs/deployment-vercel.md](../docs/deployment-vercel.md).
+
 Documents are generic JSON (object or array) up to 2 MB per request. Version-2 design documents (`pages[].nodes[]`) merge per page, per node and per property. Other documents merge per top-level key.
 
 ## Merging (`web/cloud-ops.js`, shared by the Worker and the desktop panel)
@@ -182,7 +184,7 @@ Images in shared rooms are stored once in the `ASSETS_BUCKET` R2 bucket (named s
 
 ## Email delivery (`cloud/mail.js`)
 
-`EMAIL_PROVIDER` selects the transport. `cloudflare` sends through the `EMAIL` send-email binding from `EMAIL_FROM` (what `cloudflare.config.ts` uses). `outbox` stores messages for `/api/dev/outbox` (tests and local development only). `webhook` POSTs `{to,subject,text}` to `EMAIL_WEBHOOK_URL` with `Bearer EMAIL_WEBHOOK_TOKEN`, so that a relay you operate sends the mail. Any other value disables email sign-in with a 503. The webhook relay needs its own live credential and has not been exercised. Invitation emails are best effort, and a failed delivery never blocks the membership change. Passkeys work without email delivery.
+`EMAIL_PROVIDER` selects the transport. `cloudflare` sends through the `EMAIL` send-email binding from `EMAIL_FROM` (what `cloudflare.config.ts` uses). `smtp` (Node server) sends through `SMTP_MAILER`, an SMTP transport with the same `send` shape, from `EMAIL_FROM`. `outbox` stores messages for `/api/dev/outbox` (tests and local development only). `webhook` POSTs `{to,subject,text}` to `EMAIL_WEBHOOK_URL` with `Bearer EMAIL_WEBHOOK_TOKEN`, so that a relay you operate sends the mail. Any other value disables email sign-in with a 503. The webhook relay needs its own live credential and has not been exercised. Invitation emails are best effort, and a failed delivery never blocks the membership change. Passkeys work without email delivery.
 
 ## Security notes
 
@@ -195,6 +197,8 @@ Rooms created by the previous snapshot-only Worker are migrated in place. Their 
 `cloudflare.config.ts` enables `nodejs_compat` (Better Auth imports `node:async_hooks`), raises the CPU limit to 30 s per invocation (Workers Paid, for scrypt), and declares the `DB` D1 database, the `BETTER_AUTH_SECRET` secret, the `ASSETS_BUCKET` R2 bucket and its `ASSET_SIGNING_SECRET` secret (room assets), the three SQLite Durable Object classes, three rate limits (`ROOM_CREATION`, `AUTH_LIMIT`, `MCP_LIMIT`), the email variables and Worker-first routing for `/api/*`, `/u/*` and `/apps/*`. Vite serves the web static assets. Deploy only through `npm run deploy` (`cf deploy`). This implementation has only been built and tested locally (`npm run deploy:check` is a dry run), not deployed. Before a public deployment, it still needs account quotas beyond the per-account app limit, room deletion and lifecycle, abuse reporting for public profiles and apps, and a dedicated apps origin.
 
 ## Tests (local workerd via Miniflare; nothing mocked)
+
+Every scenario also runs on the Node runtime: `npm run test:cloud:node` (or `CLOUD_RUNTIME=node node tests/<file>.mjs`). The harness then exports `tests/helpers/node-cloud.mjs` as `Miniflare`: the same options and methods, backed by a real Node server in a child process. On Node, `tests/cloud-email.mjs` checks the SMTP transport against an SMTP listener run by the test instead of the send-email binding. `npm run test:cloud:vercel` (or `CLOUD_RUNTIME=vercel`) runs them on the Vercel runtime with three instances, a local Redis and a libSQL file (`tests/helpers/vercel-cloud.mjs`), then the multi-instance guarantees in `tests/cloud-vercel-instances.mjs`.
 
 `tests/cloud-harness.mjs` builds the Worker with `vp build` once per test process and runs that bundle (the same one `cf deploy --prebuilt` uploads), and applies `cloud/migrations` to the persisted local D1 database, recording them in `d1_migrations` as `cf d1 migrations apply` does.
 

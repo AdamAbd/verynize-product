@@ -4,12 +4,11 @@
 // publications and apps survive; an email that already had a D1 profile keeps it and receives the
 // old rows; a taken handle is replaced; the copy runs once; and the first email + password sign-in
 // of an old account moves its owned rooms into the personal workspace.
-import { Miniflare } from "miniflare";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions, passwordUser } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions, passwordUser } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-directory-migration-"));
 const state = path.join(dir, "state");

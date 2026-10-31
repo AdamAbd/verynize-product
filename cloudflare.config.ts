@@ -3,14 +3,18 @@ export default defineConfig({
   worker: {
     name: "verynize",
     domains: ["verynize.gayaloo.app"],
-    entrypoint: "./cloud/worker.js",
+    // The Start server entry; it forwards backend paths to cloud/worker.js and re-exports its
+    // Durable Objects (web-start/README.md).
+    entrypoint: "./web-start/src/server.cloudflare.ts",
     compatibilityDate: "2026-10-28",
     // Better Auth imports node:async_hooks and node:crypto.
     compatibilityFlags: ["nodejs_compat"],
     // Workers Paid: room for scrypt password hashing (Better Auth's default) on sign-up and sign-in.
     limits: { cpuMs: 30_000 },
     assets: {
-      notFoundHandling: "single-page-application",
+      // Start renders every page that is not a static file, so there is no SPA fallback.
+      notFoundHandling: "none",
+      // Backend paths never resolve to a static file. Same list as web-start/worker-paths.mjs.
       runWorkerFirst: ["/api/*", "/u/*", "/apps/*", "/passkey", "/passkey.js", "/account/*"],
     },
     env: {

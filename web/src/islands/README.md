@@ -42,6 +42,26 @@ Build a local component in your island folder (wrapping Radix primitives from `r
 
 The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; islands are the only shell UI.
 
+## Desktop vs web runtime (`web/src/lib/platform.ts`)
+
+One place answers "what can this runtime do": `web/platform.js`, a classic script that `web/index.html` loads before
+every other script, registers a frozen `window.verynizePlatform`; `platform.ts` types it and re-exports it.
+
+- `platform.kind` is `"desktop"` when the Electron preload exposed `window.desktop`, else `"web"`.
+- `platform.desktop` is the bridge typed as `DesktopApi` (`web/src/lib/desktop-api.ts`), or `null` on the web. Never
+  read `window.desktop` or cast `window` to reach it; import `platform` (or `can`) from `@/lib/platform`.
+- `can(capability)` / `platform.capabilities` (`projects`, `git`, `designFiles`, `agents`, `agentAccounts`, `terminal`,
+  `devServer`, `livePreview`, `rasterExport`, `codeExport`, `imageGeneration`, `figma`, `htmlImport`, `templatePacks`,
+  `webCapture`, `publishApps`, `passkeyWindow`, `localFonts`, `notifications`, `externalLinks`, `agentBridge`,
+  `onboarding`): true when every preload method the feature needs is present. Gate desktop-only UI on a capability,
+  then call `platform.desktop.x()`.
+- Legacy scripts use the same object: `window.verynizePlatform.can('figma')`; they may keep calling
+  `window.desktop.x()` behind that check.
+- New preload method: add it to `DesktopApi` and `DESKTOP_API_SHAPE` (tsc checks the two agree) — `tests/platform-contract.cjs`
+  fails until the typed contract matches `desktop/preload.cjs`. New capability: add it to `CAPABILITY_METHODS` in
+  `web/platform.js` and `CAPABILITIES` in `platform.ts` (the same test compares them).
+- `tests/web-platform.cjs` loads the app in plain Chromium (no preload) and checks the web behaviour.
+
 ## Cross-island contracts
 
 - **Layout state** lives in `body` classes: `left-collapsed`, `right-collapsed` (any island may toggle them; the chrome
@@ -51,7 +71,12 @@ The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; isla
   trigger button must have class `app-menu-trigger` (tests click `.app-menu-trigger:visible` then a command id such as
   `#rectangle`, `#undo`, `#save-project`, `#shell-settings`, `#rename-page`, `#import-tokens`, `#icon-kind`).
   Commands must stay reachable by those ids inside the opened menu.
-- **Code mode**: `body.code-mode` (toggle with `window.agentWorkspace.setCodeMode(on)`; `openProject()` enters it, `#project-toggle`
+- **Shell routes** (`web/src/lib/router/shell-router.ts`, docs/spikes/tanstack-router.md): the URL owns the top-level
+  view — `/` (`files-view`), `/editor`, `/code` (`code-mode`), `/settings/<section>` (`settings-open`). Never toggle
+  those three body classes yourself: navigate with `navigate()` or call the legacy request APIs
+  (`fileLibrary.showHome/showEditor`, `appSettings.open/close/select`, `agentWorkspace.setCodeMode`), which update the
+  URL and apply the view synchronously. The `apply*` functions on those objects are for the router only.
+- **Code mode**: `body.code-mode` (toggle with `window.agentWorkspace.setCodeMode(on)`, which navigates to `/code` or `/editor`; `openProject()` enters it, `#project-toggle`
   toggles it). Tests use `#code-add-repository` then `#project-open` / `#project-new` / `#project-clone`, `#code-new-chat`,
   `#code-new-quick-chat`, `[data-repository=<name>]`, `[data-chat-id=<id>]`, `#code-file-tree[data-root=<path>]
   [data-path=<file>]`, `#code-file-filter`, `#code-editor`, `#code-editor-save`, `#code-start-preview`, `#code-panel-toggle`,

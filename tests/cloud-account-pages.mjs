@@ -2,13 +2,12 @@
 // tab): a verification link lands on /account/verified, and the password-reset page checks the
 // repeated password, removes the token from the address bar, saves the new password and refuses
 // its link afterwards.
-import { Miniflare } from "miniflare";
 import { _electron as electron } from "@playwright/test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-account-pages-"));
 const mf = new Miniflare(await cloudOptions(path.join(dir, "state")));

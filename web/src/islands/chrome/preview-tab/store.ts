@@ -7,6 +7,7 @@
 // list(). Body class `preview-tab-view` while a preview tab is the visible tab.
 import { useSyncExternalStore } from "react";
 import type { LayerNode } from "@/lib/bridge";
+import { platform } from "@/lib/platform";
 
 export type PreviewTabStatus = "running" | "starting" | "stopped" | "error";
 export type PreviewTab = {
@@ -26,10 +27,6 @@ export type PreviewTab = {
 type State = { tabs: PreviewTab[]; active: string | null };
 
 type PreviewNode = LayerNode & { preview?: { root?: string; name?: string; chatId?: string; url?: string } };
-type DevStatus = { state?: string; url?: string | null };
-type Desktop = {
-  devServer?: { status(options: { root: string }): Promise<DevStatus> };
-};
 type LivePreview = {
   nodeElement?(id: string): HTMLElement | undefined;
   getNodeId?(): string | null;
@@ -37,7 +34,7 @@ type LivePreview = {
 };
 type FileLibrary = { currentId?: string | null; open?(id: string): Promise<unknown>; showEditor?(): void };
 
-const desktop = () => (window as unknown as { desktop?: Desktop }).desktop;
+const desktop = () => platform.desktop;
 const livePreview = () => (window as unknown as { livePreview?: LivePreview }).livePreview;
 const fileLibrary = () => window.fileLibrary as unknown as FileLibrary | undefined;
 

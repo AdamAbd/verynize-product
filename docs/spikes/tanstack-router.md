@@ -1,18 +1,16 @@
 # Renderer router spike
 
 This spike adds `@tanstack/react-router` 1.170.46, using code-based routes and a
-null-rendering React island. `/` selects the existing Files home and `/editor`
-selects the existing editor. The canvas, document, other islands, settings and
-code-mode implementations remain legacy-owned. `/settings/<section>` mirrors the
-settings overlay (see "Settings route" below).
+null-rendering React island. The URL is the single source of truth for the
+top-level shell (see "Shell state model" below): `/` is the Files home,
+`/editor` the editor, `/code` the Code workspace and `/settings/<section>` the
+settings overlay over one of them. The canvas, document, other islands and the
+settings and code-mode UI remain legacy-owned; only the choice of view moved.
 
-`fileLibrary.showHome()` and `showEditor()` emit `bd:view-change`; the router
-listens and pushes a path only when the view differs. Route effects call those
-same APIs, with a guard against feedback. Opening another file while already in
-the editor does not create another route entry. History is view history, not
-file history: Back returns to the home/editor view, not the previous document.
-`window.shellRouter` exposes the imperative router for integrations and the
-file-history regression test.
+Opening another file while already in the editor does not create another route
+entry. History is view history, not file history: Back returns to the previous
+view, not the previous document. `window.shellRouter` exposes the imperative
+router for integrations and tests.
 
 HTTP(S) and the proposed `app://verynize` origin use browser history.
 `/index.html` is replaced with `/` before router construction, preserving search
@@ -47,9 +45,9 @@ Why the hash, checked against the code:
 - No server ever needs the fragment. `cloud/rooms.js` `access()` reads the
   capability from `Authorization: Bearer` (and from `?token=` only on
   `/api/rooms/<id>/socket`, because browsers cannot set WebSocket headers; that
-  request URL is never a page URL). The editor page is a static asset served by
-  the Worker's `single-page-application` fallback (`cloudflare.config.ts`); it
-  takes no room parameters. `web/cloud-panel.js` reads `location.hash` once at
+  request URL is never a page URL). On the web the editor page is the client-only
+  shell of the Start app (`web-start/README.md`; before that, a static asset served
+  by the Worker's `single-page-application` fallback); it takes no room parameters. `web/cloud-panel.js` reads `location.hash` once at
   startup and joins through `request()` with the token in a header.
 - A token in the page query would leak. The editor page has no
   `Referrer-Policy` (only Worker-rendered pages, apps and room assets send
@@ -96,17 +94,100 @@ library's cloud record. Under `file://` (memory history) the real address bar is
 untouched, so the fragment is preserved trivially; `clearRoomHash` uses
 `replaceState` there.
 
+## Shell state model
+
+```text
+                 app code: navigate()             legacy entry points
+                 Back/Forward, reload,            showHome/showEditor, appSettings.open/close/select,
+                 typed URL                        agentWorkspace.setCodeMode, ⌘, ⌘K Escape, deep links
+                        |                                   |
+                        |                          window.shellRequest(target, apply)   (web/shell-request.js)
+                        |                                   |
+                        |                    router loaded? |-- no --> apply() now, queue target
+                        |                                   |           (folded onto the startup URL
+                        v                                   v            when the router loads)
+               browser/memory history  <-- commit --  request(target)   (shell-router.ts)
+                        |                                   |
+                        v                                   | applies synchronously
+               route component (/, /editor, /code,          |
+               /settings/$section) applies its location     |
+                        \                                  /
+                         `--------> applyShell(view, settings) <---'
+                                          |
+          agentWorkspace.applyCodeMode · fileLibrary.applyHome/applyEditor · appSettings.applyOpen/applyClose
+                                          |
+                      body.code-mode · body.files-view · body.settings-open (+ #settings-screen)
+```
+
+| Route                 | `files-view`        | `code-mode`         | `settings-open` |
+| --------------------- | ------------------- | ------------------- | --------------- |
+| `/`                   | on                  | off                 | off             |
+| `/editor`             | off                 | off                 | off             |
+| `/code`               | off                 | on                  | off             |
+| `/settings/<section>` | per `settingsUnder` | per `settingsUnder` | on              |
+
+Code mode is its own route (`/code`), not `/editor?mode=code`: it is a full-window
+view exclusive with the editor and the Files home (`code.css` hides `main` and
+`#file-home`), and app navigation keeps the search string by default, so a
+`mode` query would follow every later navigation. Choosing Files (or ⌘K) in code
+mode therefore leaves code mode for the home; before, the home opened hidden
+behind the code workspace. `setCodeMode(false)` outside code mode is still a
+no-op. Code mode is still persisted (`verynize-code-mode`): on desktop, when the
+window opens on its launch entry (`/editor`, a fresh load without history
+state), the code island replaces that entry with `/code`. Anywhere else the URL
+wins (reload, Back/Forward, typed or shared URLs, the web).
+
+Not routed (layout state inside a view): `code-sidebar-collapsed`,
+`left-collapsed`/`right-collapsed`, `agent-chat-open`, `chat-sidebar-open`, the
+preview tab view (`data-pt`) and onboarding.
+
+Requests are synchronous: `request()` writes history (directly, not through
+`router.navigate`, whose `latestLocation` lags a push made in the same tick, so
+`showHome(); showEditor()` would drop the second change) and applies the shell
+before returning, so callers reading body classes or `getState()` right after
+still see the new view. The router renders the entry afterwards and its route
+component re-applies it, which is a no-op. Route components skip a location that
+is no longer the current history entry (a request already committed a newer one).
+Repeated requests for the current shell never touch history.
+
+Removed mirror machinery: the `bd:view-change` event (legacy no longer emits it,
+the router no longer listens), `syncFromShell`, the `applyingRoute` feedback
+guard, `adoptShellOnLanding` and the body-class startup adoption. Kept, and why:
+
+- The pre-router queue (`window.shellRequest.pending`). `dist/ui.js` loads after
+  every legacy script, so a request can happen before the router exists. It is
+  applied at once (the UI responds) and queued only if it changed the shell; the
+  router folds the queue onto the startup URL and replaces that entry. Unlike
+  the old adoption it keeps the URL's view: settings opened while ui.js loads on
+  `/` opens over the Files home.
+- The stale-route check (entry key comparison) described above.
+- `closing`: settings closes with `history.back()` (so Forward can reopen it),
+  which lands asynchronously. Requests made before it lands are applied at once
+  and committed after landing; routes skip the settings entry meanwhile. The
+  settings entry's key is kept in `sessionStorage`, so a reload before it lands
+  comes back closed on the view underneath (previously it reopened settings). A
+  traversal that never lands is replaced after one second.
+- `fromPath`/`lastAction`, so a settings entry pushed by `navigate()` (no state)
+  records the view it was opened from.
+
+Legacy compatibility: `fileLibrary.showHome/showEditor`,
+`appSettings.open/close/select` and `agentWorkspace.setCodeMode` keep their
+names and synchronous effect; they are now requests. The appliers are new on the
+same objects (`fileLibrary.applyHome/applyEditor`, `appSettings.applyOpen/
+applyClose`, `agentWorkspace.applyCodeMode`) and are for the router only: calling
+them directly bypasses the URL. `appSettings.select` while settings is closed
+only selects the section, as before.
+
 ## Settings route
 
 `/settings/<section>` (`account`, `preferences`, `agents`, `accounts`, `tools`,
 `projects`, `usage`, `models`, `connections`, `memory`, `members`,
-`permissions`) mirrors the legacy overlay (`window.appSettings`, body class
-`settings-open`, `#settings-screen`). `web/settings.js` emits `bd:view-change`
-when it opens, switches section and closes. `/settings` and unknown sections are
+`permissions`) owns the legacy overlay (`window.appSettings`, body class
+`settings-open`, `#settings-screen`). `/settings` and unknown sections are
 replaced in place by `/settings/preferences`.
 
 The URL names only the section. The view underneath is not in the URL. It is
-stored in that entry's history state (`settingsUnder`: `/` or `/editor`,
+stored in that entry's history state (`settingsUnder`: `/`, `/editor` or `/code`,
 `settingsPushed`). Settings is app-level, not view-specific, so the URL stays
 canonical and shareable. Per-entry history state survives reload and
 Back/Forward, so a reload of `/settings/account` opened over Files home comes
@@ -117,28 +198,21 @@ view).
 History:
 
 - Opening (menu `#shell-settings`, ⌘,, `appSettings.open`, avatar/profile
-  buttons, or a router navigation from `/` or `/editor`) pushes one entry.
+  buttons, or a router navigation from a view) pushes one entry.
   Switching sections replaces it, so Back always closes settings in one step.
 - Back closes settings and shows the view underneath. Forward reopens it.
-- Closing (`#settings-back`, Escape, `appSettings.close`, code mode, deep links)
+- Closing (`#settings-back`, Escape, `appSettings.close`, deep links)
   steps back to the entry it was pushed from (`history.back()`), so no entry is
-  added. Forward can reopen settings. If there is no such entry (a typed URL), or
-  the view underneath changed meanwhile, the settings entry is replaced with the
-  current view.
+  added. Forward can reopen settings. If there is no such entry (a typed URL),
+  the settings entry is replaced with the view underneath.
+- Requesting a view while settings is open (Files, ⌘K, code mode, opening a
+  file) closes settings and pushes that view; Back reopens settings.
 - Repeated `open`/`select` calls for the current section do not touch history.
 
-Legacy shell changes (home/editor/settings) write the history directly
-(`commit()`), and the router follows its notification. `router.navigate` compares
-against `router.latestLocation`, which lags a push made in the same tick.
-`showHome(); showEditor()` would otherwise leave the URL on `/` with the editor
-showing, and the route effect would then switch the shell back to home. That
-broke `tests/views-templates.cjs` until the change, and `tests/shell-router.cjs`
-now covers it.
-
-Known edges: settings closes through `history.back()`, so the URL catches up one
-tick after the overlay hides. A reload in that tick reopens settings. Escape over
-Files home with settings open still closes settings and also leaves home (two
-pre-existing key handlers); the URL ends on `/editor`, matching the shell.
+Fixed edges: the URL used to catch up one tick after closing (a reload in that
+tick reopened settings); see `closing` above. Escape over the Files home with
+settings open used to close settings and also leave home: settings now marks the
+Escape handled (`preventDefault`) and the Files home ignores a handled Escape.
 `leftRooms` lives only for the page session.
 
 ### Room-hash and settings validation (spike/room-hash-settings)

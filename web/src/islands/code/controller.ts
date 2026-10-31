@@ -5,6 +5,7 @@
 import { useSyncExternalStore } from "react";
 import type { ChatSummary } from "../chat/store";
 import { desktop, errorMessage, setStatus, workspace, type Repository } from "./api";
+import { isLaunchEntry, request } from "@/lib/router/shell-router";
 
 type Store = { repositories: Repository[]; loaded: boolean; pending: boolean };
 let store: Store = { repositories: [], loaded: false, pending: false };
@@ -233,7 +234,10 @@ export async function start() {
     const repo = repositoryByKey(last.key);
     if (repo) openChat(repo.root, typeof last.chatId === "string" ? last.chatId : "");
   }
-  if (localStorage.getItem("verynize-code-mode") === "1") ws?.setCodeMode?.(true);
+  // Code mode persists across desktop launches (the window opens /editor): reopen it in place of that launch entry.
+  // Anywhere else the URL wins (reload, Back/Forward, a typed or shared URL).
+  if (desktop() && localStorage.getItem("verynize-code-mode") === "1" && isLaunchEntry("/editor"))
+    request({ view: "/code" }, { replace: true });
 }
 
 export type CodeWorkspaceApi = {

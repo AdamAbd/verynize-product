@@ -24,7 +24,7 @@ require('./app-preferences.cjs').attachDeepLinks(app); // verynize:// design lin
 app.whenReady().then(async () => {
   appProtocol.registerHandler(protocol, net);
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  await require('./storage-migration.cjs').migrateStorage({app,BrowserWindow}); // one-time file:// → app://verynize localStorage/IndexedDB copy
+  const storageMigration=require('./storage-migration.cjs');const migration=await storageMigration.migrateStorage({app,BrowserWindow}); // one-time file:// → app://verynize localStorage/IndexedDB copy; applies staged old-build edits
   // Design preferences: one file shared by the agent persona (agent-runtime.cjs) and the MCP tools.
   if(!process.env.VERYNIZE_PREFERENCES)process.env.VERYNIZE_PREFERENCES=path.join(app.getPath('userData'),'design-preferences.json');
   // ask_agent MCP tool: nested read-only helper run on the most recent window's agent runtime.
@@ -35,6 +35,8 @@ app.whenReady().then(async () => {
   // Named accounts, Verynize MCP servers/permission defaults and per-chat autonomy: one store each for all windows.
   agentStores={profiles:new (require('./agent-profiles.cjs').AgentProfiles)({userData:app.getPath('userData')}),tools:new (require('./agent-tool-config.cjs').AgentToolConfig)({userData:app.getPath('userData')}),autonomy:new (require('./agent-autonomy.cjs').AgentAutonomy)({userData:app.getPath('userData')})};
   mcpBridge.startBridge(app,{askAgent}).catch(error=>console.error('MCP bridge failed to start:',error)); // agent-bridge hook
+  // Editor windows only: the storage probe's hidden window must not count as an open editor on macOS activate.
+  const editorWindows = new Set();
   const createWindow = () => {
     // Keep normal/restored bounds inside the display; an oversized initial window is clamped
     // by macOS but retains off-screen restore bounds, making zoom/resize inconsistent.
@@ -123,9 +125,11 @@ app.whenReady().then(async () => {
     win.webContents.on('will-navigate', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
     win.webContents.on('will-redirect', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
     win.loadURL(appProtocol.ENTRY_URL);
+    editorWindows.add(win); win.on('closed', () => editorWindows.delete(win));
+    return win;
   };
-  createWindow();
-  app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
+  storageMigration.probeAfterLaunch({app,BrowserWindow,editor:createWindow(),startup:migration}); // background check for old-build (file://) edits, staged for the next launch
+  app.on('activate', () => { if (!editorWindows.size) createWindow(); });
 });
 app.on('will-quit',()=>mcpBridge.stopBridge()); // agent-bridge hook
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
