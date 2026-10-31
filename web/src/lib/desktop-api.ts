@@ -264,6 +264,7 @@ export interface DesktopApi {
   gitPullRequest: GitApi["gitPullRequest"];
   gitCreatePullRequest: GitApi["gitCreatePullRequest"];
   designPreferences: PreferencesIpc;
+  designStylesList(): Promise<{ id: string; name: string; summary?: string }[]>;
   agentBehavior: BehaviorIpc;
   // Composer: slash commands, design references, worktree files (desktop/agent-commands.cjs, chat-attachments.cjs).
   listAgentModels: Untyped;
@@ -436,6 +437,7 @@ export const DESKTOP_API_SHAPE = {
   gitPullRequest: true,
   gitCreatePullRequest: true,
   designPreferences: { list: true, save: true, update: true, remove: true },
+  designStylesList: true,
   agentBehavior: {
     get: true,
     set: true,

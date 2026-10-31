@@ -13,9 +13,15 @@ await nav('Agents');await nav('Memory');
 await page.waitForSelector('#settings-design-preferences-label');
 if(shimmed){
  await page.getByText('No saved preferences yet').waitFor();
- await page.locator('#settings-design-preference-new').fill('Cards use 12px radius');await page.locator('#settings-design-preference-add').click();
+ assert.equal(await page.locator('#settings-design-preference-count').innerText(),'0 / 50','preference count shows the 50-item limit');
+ // 280-character limit with a live counter on add.
+ await page.locator('#settings-design-preference-new').fill('x'.repeat(300));
+ assert.equal((await page.locator('#settings-design-preference-new').inputValue()).length,280,'new preferences stop at 280 characters');
+ assert.equal(await page.locator('#settings-design-preference-new-counter').innerText(),'280 / 280');
+ await page.locator('#settings-design-preference-new').fill('Cards use 12px radius');await page.locator('#settings-design-preference-new-counter').filter({hasText:'21 / 280'}).waitFor();await page.locator('#settings-design-preference-add').click();
  await page.locator('[data-preference-text]').filter({hasText:'Cards use 12px radius'}).waitFor();
- await page.locator('[data-preference-action="edit"]').first().click();await page.locator('[data-preference-edit]').fill('Cards use 8px radius');await page.locator('[data-preference-save]').click();
+ await page.locator('#settings-design-preference-count').filter({hasText:'1 / 50'}).waitFor();
+ await page.locator('[data-preference-action="edit"]').first().click();await page.locator('[data-preference-edit]').fill('Cards use 8px radius');await page.locator('#settings-design-preference-edit-counter').filter({hasText:'20 / 280'}).waitFor();await page.locator('[data-preference-save]').click();
  await page.locator('[data-preference-text]').filter({hasText:'Cards use 8px radius'}).waitFor();
  assert.deepEqual(await page.evaluate(async()=>(await window.desktop.designPreferences.list()).map(p=>p.text)),['Cards use 8px radius']);
  await page.locator('[data-preference-action="delete"]').first().click();await page.getByText('No saved preferences yet').waitFor();

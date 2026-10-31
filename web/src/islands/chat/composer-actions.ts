@@ -4,6 +4,7 @@
 import { legacyClick, legacySet } from "@/lib/bridge";
 import { errorMessage } from "../code/api";
 import { workspace } from "./store";
+import { OPEN_STYLE_PICKER_EVENT, hasStyleCatalog } from "./style-picker";
 import { platform } from "@/lib/platform";
 
 export type AgentCommand = { name: string; description: string; argumentHint: string; source: string };
@@ -133,6 +134,14 @@ export const BUILTIN_COMMANDS: BuiltinCommand[] = [
     description: "Start a fresh agent session; the transcript stays",
     source: "verynize",
     run: () => void attempt(() => workspace()?.clearSession?.()),
+  },
+  {
+    name: "style",
+    argumentHint: "",
+    description: "Choose the design style for the next messages",
+    source: "verynize",
+    when: hasStyleCatalog,
+    run: () => window.dispatchEvent(new Event(OPEN_STYLE_PICKER_EVENT)),
   },
   {
     name: "canvas-context",
