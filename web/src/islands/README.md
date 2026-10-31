@@ -68,7 +68,7 @@ The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; isla
 - **Zoom menu**: tests click `#zoom-menu-button` then `#zoom-in`, `#zoom-out`, `#zoom-fit`, `#zoom-reset`, `#snap`,
   `#saved-views-open` (chrome island). `#zoom-reset` text must keep the zoom percentage (tests parse it).
 - **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask-0-css]`, `[name=layout]`,
-  `[name=wMode]`, `[name=shaderPreset]`, `[name=shaderSpeed]`, `[name=shaderIntensity]`, `[name=animated]`,
+  `[name=wMode]`, `[name=shaderPreset]`, `[name=shaderSpeed]`, `[name=shaderIntensity]`, `[data-shader-mode]` (Fill header Shader mode toggle), `#shader-fill-preset`, `[name=animated]` (only while an older layer has one),
   `[name=color]`, `.insp-display [data-layout=flex]`, `#mask-section .insp-add`, `#shader-settings summary`,
   `#choose-shader`, `#type-settings-toggle` / `#type-settings`, `#precision-right`, `#color-value`, `#color-dialog` … — grep `tests/` for the full list.
   Field names must be unique in the document (Playwright strict mode), so the legacy `#inspector` form may not keep

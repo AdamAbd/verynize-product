@@ -53,6 +53,7 @@ import { FilterSection } from "./filters";
 import { MaskSection } from "./masks";
 import { BorderSection } from "./border-colors";
 import {
+  ShaderFill,
   ShaderParameters,
   ShaderPicker,
   isParam,
@@ -721,6 +722,13 @@ function ShaderSettings({ node, selection }: { node: Node | undefined; selection
   );
 }
 
+const ANIMATED = [
+  { value: "", label: "None" },
+  { value: "aurora", label: "Aurora" },
+  { value: "sunset", label: "Sunset" },
+  { value: "ocean", label: "Ocean" },
+];
+
 function FillSection({
   doc,
   node,
@@ -746,20 +754,38 @@ function FillSection({
       {/* Wonder A1: an empty fill is the 32 px header only; a row starts 5 px under it and ends 12 px above the divider. */}
       <div
         className={cn(
-          node && (hasPaintRows(node) || node.gradient) ? "flex" : "hidden",
+          node && (hasPaintRows(node) || node.gradient || node.animated) ? "flex" : "hidden",
           "flex-col gap-2 px-3 pt-1.25 pb-3",
         )}
       >
         <ShaderSettings node={node} selection={selection} />
         {node ? <ShaderParameters doc={doc} node={node} selection={selection} /> : null}
+        {/* Shader mode (H6): preset dropdown + colours in place of the paint rows (Text Fill has no shader mode). */}
+        {node && node.type !== "text" ? (
+          <ShaderFill doc={doc} node={node} selection={selection} />
+        ) : null}
         {node ? (
           <>
             {/* Parametric shaders take their colours from the rows above; the single fill colour only drives the classic presets. */}
             {node.type === "shader" && isParam(node.shaderPreset) ? null : (
               <PaintStack doc={doc} node={node} selection={selection} />
             )}
-            {/* Free-form CSS gradients (older documents, codec input) stay editable until cleared. The animated
-                gradient lives behind the header's wavy-square tool (FillTools). */}
+            {/* Older animated gradients (`animated`, replaced by Shader mode) keep rendering and stay editable
+                until cleared; turning Shader mode on clears them too. */}
+            {node.animated ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Caption label="Animated gradient">
+                  <NativeSelect
+                    name="animated"
+                    label="Animated gradient"
+                    value={node.animated}
+                    onChange={set("animated")}
+                    options={ANIMATED}
+                  />
+                </Caption>
+              </div>
+            ) : null}
+            {/* Free-form CSS gradients (older documents, codec input) stay editable until cleared. */}
             {node.gradient ? (
               <div className="grid grid-cols-2 gap-2">
                 <Caption label="CSS gradient">
@@ -803,6 +829,7 @@ function TextBackgroundFillSection({
       </div>
       {hasPaintRows(node, "backgroundFills") ? (
         <div className="flex flex-col gap-2 px-3 pt-1.25 pb-3">
+          <ShaderFill doc={doc} node={node} selection={selection} />
           <PaintStack doc={doc} node={node} selection={selection} target="backgroundFills" />
         </div>
       ) : null}
