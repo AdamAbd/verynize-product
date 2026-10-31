@@ -6,6 +6,10 @@
 // - Gestures: invisible edge zones resize one axis (TR1), zones just outside each corner rotate around the centre
 //   (TR2), and corner/edge resize keeps Shift (aspect), Alt (from the centre) and the Scale tool (T4, proportional by
 //   the drag projected on the box diagonal).
+// - Wonder details measured from design/wonder/canvas-audit: a selected hidden layer keeps a 1px outline of its bounds
+//   and nothing else (CM6-hidden); a selected nested layer gets dashed guides to the parent edges it is constrained
+//   to and no name label (S2-classic, CM3-text-menu: #c468f7 at 75%, 1px, 2.5/2 dashes); a text layer being edited
+//   shows only its caret, plus the ⊕ chip for a fixed-size box (TX1-click, TX1-selection, TX1-drag).
 // Everything here is screen-space DOM in #canvas-overlay; the canvas itself stays imperative.
 (() => {
   const ZONE = 18; // rotate zone size outside each corner (screen px)
@@ -17,6 +21,7 @@
   const NAME_OFFSET = 20; // label line box (18 px) sits just above the box
   const CHIP_SIZE = 12, CHIP_INSET = 4, CHIP_RISE = 14; // ⊕: 12 px circle, right edge 4 px inside the box, centre 14 px above
   const MIN_SIZE = 10;
+  const SELECT = '#c468f7'; // Wonder's selection purple (CM6-hidden outline, S2 guides)
   const r2 = v => Math.round(v * 100) / 100;
   // Rotation in degrees, rounded to 0.01 and normalised to (−180, 180].
   function normalize(deg) { const r = ((r2(deg) + 180) % 360 + 360) % 360 - 180; return r === -180 ? 180 : r2(r) || 0; }
@@ -57,7 +62,17 @@
 #canvas[data-multi-select] .layer>.handle,#canvas-overlay[data-multi-select] .clipped-selection .handle{display:none!important}
 #canvas-overlay .frame-label.selected{color:var(--shell-accent,#b93cdb)}
 .transforming #canvas-overlay #selection-chat-chip,.moving #canvas-overlay #selection-chat-chip{visibility:hidden}
-.panning #canvas-overlay .resize-edge,.panning #canvas-overlay .rotate-zone,.space-pan #canvas-overlay .resize-edge,.space-pan #canvas-overlay .rotate-zone{pointer-events:none}`;
+.panning #canvas-overlay .resize-edge,.panning #canvas-overlay .rotate-zone,.space-pan #canvas-overlay .resize-edge,.space-pan #canvas-overlay .rotate-zone{pointer-events:none}
+#canvas-overlay #selection-chat-chip[hidden],#canvas-overlay #selection-name[hidden],#canvas-overlay #selection-measure[hidden]{display:none!important}
+#canvas-overlay .hidden-outline{position:absolute;box-sizing:border-box;border:1px solid ${SELECT};transform-origin:50% 50%}
+#canvas-overlay .constraint-guides{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+#canvas-overlay .constraint-guide{stroke:${SELECT};stroke-opacity:.75;stroke-width:1;stroke-dasharray:2.5 2;shape-rendering:crispEdges}
+.moving #canvas-overlay .constraint-guides,.transforming #canvas-overlay .constraint-guides{display:none}
+#canvas .layer.selected[data-text-editing]{outline:none!important}
+#canvas .layer.selected[data-text-editing]::after,#canvas .layer[data-text-editing]>.handle{display:none!important}
+#canvas-wrap:has(#canvas .layer[data-text-editing]) #canvas-overlay .clipped-selection{display:none}
+#canvas .layer.selected[data-clip-ring]:not([data-outline]){outline:none!important}
+#canvas .layer.selected[data-clip-ring]::after,#canvas .layer[data-clip-ring]>.handle{display:none!important}`;
 
   function install(ctx) {
     const {ed, cam, wrap, overlay, workspace, find, sel, track, gesture, isFlow, unbindKeys, elementOf} = ctx;
@@ -68,6 +83,8 @@
     const box = document.createElement('div'); box.className = 'sel-box'; // rotates exactly with the node: gesture zones
     const textBox = document.createElement('div'); textBox.className = 'sel-text-box'; // rotates by the chrome angle: label, chip, badge
     const union = document.createElement('div'); union.className = 'selection-union';
+    const hiddenOutline = document.createElement('div'); hiddenOutline.className = 'hidden-outline';
+    const guides = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); guides.setAttribute('class', 'constraint-guides');
     for (const corner of ['nw', 'ne', 'sw', 'se']) { const h = document.createElement('div'); h.className = 'union-handle'; h.dataset.corner = corner; union.append(h); }
     const chip = document.createElement('button'); chip.type = 'button'; chip.id = 'selection-chat-chip'; chip.title = 'Add to chat'; chip.setAttribute('aria-label', 'Add selection to chat');
     chip.addEventListener('click', e => { e.stopPropagation(); addToChat(); });
@@ -75,9 +92,9 @@
     for (const edge of ['n', 'e', 's', 'w']) { const z = document.createElement('div'); z.className = 'resize-edge'; z.dataset.edge = edge; edges[edge] = z; }
     for (const corner of ['nw', 'ne', 'sw', 'se']) { const z = document.createElement('div'); z.className = 'rotate-zone'; z.dataset.corner = corner; z.style.clipPath = notchedSquare(corner, ZONE, NOTCH); zones[corner] = z; }
     box.append(...Object.values(edges), ...Object.values(zones));
-    layer.append(union, box, textBox);
+    layer.append(guides, hiddenOutline, union, box, textBox);
     overlay.append(layer);
-    union.hidden = box.hidden = textBox.hidden = true;
+    union.hidden = box.hidden = textBox.hidden = hiddenOutline.hidden = true;
     let busy = false;
     const tool = () => ctx.getTool();
 
@@ -94,12 +111,50 @@
       return list.filter(n => !list.some(o => o.id !== n.id && ed.descendants(o.id).has(n.id)));
     }
 
+    // A hidden layer renders as display:none: lay it out for one synchronous measurement (never painted).
+    function hiddenFrame(n) {
+      const el = elementOf(n.id); if (!el) return null;
+      const NS = window.BetterNodeStyle, parent = n.parentId ? find(n.parentId) : null;
+      let display = 'block';
+      try { display = NS.nodeStyle({...n, hidden: false}, parent).box.find(([k]) => k === 'display')?.[1] || 'block'; } catch {}
+      const prev = {display: el.style.getPropertyValue('display'), visibility: el.style.getPropertyValue('visibility')};
+      el.style.setProperty('display', display); el.style.setProperty('visibility', 'hidden');
+      const f = screenFrame(n);
+      el.style.setProperty('display', prev.display || 'none');
+      if (prev.visibility) el.style.setProperty('visibility', prev.visibility); else el.style.removeProperty('visibility');
+      return f;
+    }
+    // Wonder S2: dashed lines from the selected child to the parent edges it is pinned to (Left/Top → left/top edge,
+    // Right/Bottom → right/bottom, Left & Right → both). Centre and Scale constraints draw none (not observed).
+    function drawConstraintGuides(n) {
+      guides.replaceChildren();
+      const parent = n.parentId && find(n.parentId);
+      if (!parent || parent.hidden || (isFlow(parent) && n.position !== 'absolute') || totalRotation(n) % 360) return;
+      const childEl = elementOf(n.id), parentEl = elementOf(parent.id); if (!childEl || !parentEl) return;
+      const v = viewport(), c = childEl.getBoundingClientRect(), p = parentEl.getBoundingClientRect();
+      if (!c.width && !c.height) return;
+      const cons = window.BetterNodeStyle?.constraintsOf?.(n) || {h: 'start', v: 'start'};
+      const cx = c.left + c.width / 2 - v.left, cy = c.top + c.height / 2 - v.top;
+      const line = (side, x1, y1, x2, y2) => {
+        if (Math.abs(x2 - x1) + Math.abs(y2 - y1) < 1) return;
+        const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        for (const [k, val] of Object.entries({x1, y1, x2, y2})) l.setAttribute(k, val);
+        l.setAttribute('class', 'constraint-guide'); l.dataset.side = side; guides.append(l);
+      };
+      if (cons.h === 'start' || cons.h === 'stretch') line('left', p.left - v.left, cy, c.left - v.left, cy);
+      if (cons.h === 'end' || cons.h === 'stretch') line('right', c.right - v.left, cy, p.right - v.left, cy);
+      if (cons.v === 'start' || cons.v === 'stretch') line('top', cx, p.top - v.top, cx, c.top - v.top);
+      if (cons.v === 'end' || cons.v === 'stretch') line('bottom', cx, c.bottom - v.top, cx, p.bottom - v.top);
+    }
+
     // ---------- Drawing ----------
     function draw() {
       const ids = [...sel()], multi = ids.length > 1;
       const name = document.getElementById('selection-name'), badge = document.getElementById('selection-measure');
       if (multi) { ed.canvas.dataset.multiSelect = ''; overlay.dataset.multiSelect = ''; } else { delete ed.canvas.dataset.multiSelect; delete overlay.dataset.multiSelect; }
-      union.hidden = box.hidden = textBox.hidden = true;
+      union.hidden = box.hidden = textBox.hidden = hiddenOutline.hidden = true;
+      guides.replaceChildren();
+      for (const el of ed.canvas.querySelectorAll('[data-clip-ring]')) delete el.dataset.clipRing;
       if (!ids.length || document.body.classList.contains('files-view')) return;
       if (multi) {
         const rects = topSelected().filter(n => !n.hidden).map(n => ctx.worldRect(n.id)).filter(Boolean);
@@ -111,11 +166,23 @@
         union.hidden = false;
         if (name) name.hidden = true;
         if (badge) { badge.hidden = false; badge.textContent = `${r2(w)} x ${r2(h)}`; union.append(badge); }
-        union.append(chip);
+        chip.hidden = false; union.append(chip);
         return;
       }
-      const n = find(ids[0]), f = n && !n.hidden && screenFrame(n);
+      const n = find(ids[0]);
+      if (!n) return;
+      // Wonder CM6-hidden: only the bounds, as an empty 1px outline (no handles, label, badge or chip).
+      if (n.hidden) {
+        const h = hiddenFrame(n); if (!h) return;
+        place(hiddenOutline, h.cx, h.cy, h.w, h.h, h.angle); hiddenOutline.hidden = false;
+        return;
+      }
+      const f = screenFrame(n);
       if (!f) return;
+      const nodeEl = elementOf(n.id), editing = !!nodeEl?.hasAttribute('data-text-editing');
+      // The clip-proof ring (canvas-interactions) replaces the layer's own outline: one 1.5px ring, not two.
+      if (nodeEl && overlay.querySelector('.clipped-selection .selection-ring')) nodeEl.dataset.clipRing = '';
+      if (!editing) drawConstraintGuides(n);
       // Gesture zones: only for an unlocked layer with the Move or Scale tool.
       if (!n.locked && (tool() === 'move' || tool() === 'scale')) {
         place(box, f.cx, f.cy, f.w, f.h, f.angle);
@@ -139,9 +206,10 @@
       // Label, chip and badge: the node's frame turned by k·90° so the chrome angle stays within (−45°, 45°].
       const angle = chromeAngle(f.angle), quarter = ((Math.round((f.angle - angle) / 90) % 4) + 4) % 4, swap = quarter % 2 === 1;
       place(textBox, f.cx, f.cy, swap ? f.h : f.w, swap ? f.w : f.h, angle);
-      if (name) textBox.append(name);
+      if (name) { textBox.append(name); if (n.parentId || n.type === 'text' || editing) name.hidden = true; } // Wonder S2 / CM3: no label on nested or text layers
       textBox.append(chip);
-      if (badge) textBox.append(badge);
+      chip.hidden = editing && n.wMode !== 'fixed'; // TX1: a hugging text being typed shows only its caret
+      if (badge) { textBox.append(badge); if (editing) badge.hidden = true; }
       textBox.hidden = false;
     }
 
