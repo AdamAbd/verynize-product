@@ -1,0 +1,32 @@
+Implement this Wonder design.
+
+Design to implement (each link ends in the Wonder page id and the element id: wonder://node/<organization>/<pageId>/<elementId>):
+  wonder://node/01a1869b-a6b9-7930-bebe-92e5ee4a6a41/01a18d87-1f8f-7e79-8ef9-dbd9c8e0ea95/01a19004-3bec-76d5-a10a-423421ccdc3b
+  Read each element through the Wonder MCP server (https://mcp.wonder.so/mcp): get_element_code with that pageId and element id, and load the design-to-code skill with get_skills.
+  (If you don't have the Wonder MCP installed yet, see https://wonder.design/docs/mcp)
+
+Inline snapshot (fallback, captured at 2026-10-31T04:52:17.771Z):
+```tsx
+/**
+ * Made with Wonder
+ * https://app.wonder.so/adam-abdurrahman/files/01a18d87-1f8e-75f1-ac73-a768cc5c591f/branches/main/pages/01a18d87-1f8f-7e79-8ef9-dbd9c8e0ea95?nodeId=01a19004-3bec-76d5-a10a-423421ccdc3b
+ * Oct 31, 2026
+ */
+export default function () {
+  return (
+    <>
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin />
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap" rel="stylesheet" />
+      <style>{"* { box-sizing: border-box; }"}</style>
+      <div style={{ position: "relative", width: "420px", height: "391.176px", overflowX: "clip", overflowY: "clip", flexShrink: "0", backgroundColor: "#ffffff" }}>
+        <div style={{ position: "absolute", width: "100px", height: "80px", overflowX: "clip", overflowY: "clip", left: "49px", top: "40px" }}></div>
+        <span style={{ position: "absolute", width: "fit-content", height: "fit-content", left: "59px", top: "160px", color: "#000000", fontFamily: "Inter", fontSize: "12px", lineHeight: "normal", textAlign: "left", wordBreak: "break-word", display: "block", overflowWrap: "break-word" }}>Canvas au</span>
+      </div>
+    </>
+  );
+}
+```
+
+How to implement it:
+Design to code: a design is a visual spec, not code to paste. For every part, reuse the repo component that implements it; where the design differs, extend it with a prop or variant instead of forking it, or wrap it. Create a new one only when nothing fits, and say so. Use the repo's tokens, utilities and icons, not Wonder's var(--…) names, hex, px or arbitrary values where a repo token exists. Follow the repo's file, prop, state and data patterns. Check the result against the design.
