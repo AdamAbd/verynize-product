@@ -8,6 +8,9 @@ import { useBodyClass, useWindowEvent } from "@/lib/bridge";
 import { TitleBar } from "./chrome/TitleBar";
 import { AppMenu } from "./chrome/AppMenu";
 import { CanvasOverlays } from "./chrome/CanvasOverlays";
+import { CanvasContextMenu } from "./context-menu/CanvasContextMenu";
+import { CommandPalette } from "./chrome/CommandPalette";
+import { ShortcutsDrawer } from "./chrome/ShortcutsDrawer";
 import { applyLayout, toggleBodyClass, type LayoutName } from "./chrome/hooks";
 import { initLegacy } from "./chrome/legacy";
 import "./chrome/chrome.css";
@@ -52,6 +55,9 @@ function Island({ overlayHost }: { overlayHost: HTMLElement | null }) {
     <>
       <TitleBar />
       <AppMenu />
+      <CanvasContextMenu />
+      <CommandPalette />
+      <ShortcutsDrawer />
       {overlayHost ? createPortal(<CanvasOverlays />, overlayHost) : null}
     </>
   );

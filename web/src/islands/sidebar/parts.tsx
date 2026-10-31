@@ -31,6 +31,16 @@ export function IconButton({ label, tooltip = true, className, children, ref, ..
   );
 }
 
+/** Wraps one control in the app tooltip (instead of a native `title`). */
+export function Hint({ label, side = "top", children }: { label: string; side?: "top" | "bottom"; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side={side}>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** Collapsible section header ("Pages", "Layers"): 36px, chevron + title on the left, actions on the right. */
 export function SectionHeader({
   title,

@@ -1,28 +1,18 @@
 // Floating controls inside #workspace: bottom toolbar + views menu (20/22/19), page pill (22/29), `?` help and the
 // zoom readout + zoom menu. Rendered through a portal into a host appended to #workspace.
-import { useRef, useState, type ComponentType, type ReactNode } from "react";
-import { Popover } from "radix-ui";
+import { useState, type ComponentType, type ReactNode } from "react";
 import {
   Check,
   ChevronsUpDown,
-  Circle,
   File,
   Hand,
   MousePointer2,
   Pin,
-  Pipette,
   SquareArrowUpRight,
   Scan,
   Type,
 } from "lucide-react";
-import {
-  activePage,
-  legacySet,
-  legacy,
-  portalContainer,
-  useBodyClass,
-  useDesign,
-} from "@/lib/bridge";
+import { activePage, legacySet, legacy, useBodyClass, useDesign } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import {
   CanvasLayoutIcon,
@@ -45,13 +35,12 @@ import {
   type LayoutName,
 } from "./hooks";
 import { initialSnap, run } from "./legacy";
+import { HelpMenu } from "./HelpMenu";
 import {
   Kbd,
-  MenuCheckboxItem,
   MenuContent,
   MenuGroup,
   MenuItem,
-  MenuItemIndicator,
   MenuLabel,
   MenuPseudoLabelItem,
   MenuRoot,
@@ -63,13 +52,13 @@ import { Tip } from "./tip";
 import { PreviewToolbar } from "./PreviewToolbar";
 
 type Icon = ComponentType<{ className?: string }>;
+// Wonder T1: Move, Scale, Hand | Frame, Shader, Text. Eyedropper (I) and Ellipse (O) stay on the keyboard and in
+// the command palette.
 const TOOLS: { id: string; tool: string; label: string; key: string; icon: Icon }[] = [
   { id: "select-tool", tool: "move", label: "Move", key: "V", icon: MousePointer2 },
   { id: "scale-tool", tool: "scale", label: "Scale", key: "K", icon: SquareArrowUpRight },
   { id: "pan-tool", tool: "hand", label: "Hand", key: "H", icon: Hand },
-  { id: "eyedropper-tool", tool: "eyedropper", label: "Eyedropper", key: "I", icon: Pipette },
   { id: "add-frame", tool: "frame", label: "Frame", key: "F", icon: Scan },
-  { id: "add-ellipse", tool: "ellipse", label: "Ellipse", key: "O", icon: Circle },
   { id: "add-shader", tool: "shader", label: "Shader", key: "S", icon: ShaderIcon },
   { id: "text", tool: "text", label: "Text", key: "T", icon: Type },
 ];
@@ -97,7 +86,7 @@ export function CanvasOverlays() {
       <Toolbar />
       <PreviewToolbar />
       {leftCollapsed && <PagePill />}
-      <Help />
+      <HelpMenu />
       <Zoom />
     </>
   );
@@ -133,7 +122,7 @@ function Toolbar() {
                   toolButton,
                   tool === name && "bg-accent text-foreground hover:bg-accent",
                 )}
-                onClick={() => run(id)}
+                onClick={() => (name === "text" ? toggleTool("text") : run(id))}
               >
                 <Icon />
               </button>
@@ -173,6 +162,11 @@ function Toolbar() {
   );
 }
 
+/** Text arms the tool like Frame does (Wonder TX1): a canvas click or drag then creates the layer. */
+function toggleTool(name: string) {
+  window.design.setTool(window.design.getTool() === name ? "move" : name);
+}
+
 function ToolSlot({ separator, children }: { separator: boolean; children: ReactNode }) {
   return (
     <>
@@ -190,7 +184,7 @@ function ViewMenu({ layout }: { layout: LayoutName }) {
   const choose = applyLayout;
   return (
     <MenuRoot open={open} onOpenChange={setOpen} modal={false}>
-      <Tip label="Views">
+      <Tip label="Save or choose a view">
         <MenuTrigger asChild>
           <button
             type="button"
@@ -317,70 +311,10 @@ function markAppMenuTrigger(node: HTMLButtonElement | null) {
   node?.classList.add("app-menu-trigger");
 }
 
-/* ---------- `?` help ---------- */
-const SHORTCUTS: [string, string][] = [
-  ["Move", "V"],
-  ["Scale", "K"],
-  ["Hand", "H / Space"],
-  ["Frame", "F"],
-  ["Rectangle", "R"],
-  ["Ellipse", "O"],
-  ["Text", "T"],
-  ["Shader", "S"],
-  ["Eyedropper", "I"],
-  ["Flip horizontal / vertical", "⇧H / ⇧V"],
-  ["Rotate 90°", "⌥⇧R"],
-  ["Zoom in / out", "⌘+ / ⌘−"],
-  ["Zoom to fit", "⇧1"],
-  ["Zoom to 100%", "⇧0"],
-  ["Undo / Redo", "⌘Z / ⇧⌘Z"],
-  ["Nudge", "Arrows"],
-  ["Multi-select", "Shift click"],
-  ["Search files", "⌘K"],
-  ["Details · Design · Canvas", "⌥1 ⌥2 ⌥0"],
-];
-function Help() {
-  return (
-    <Popover.Root>
-      <Tip label="Help and shortcuts" side="right">
-        <Popover.Trigger asChild>
-          <button
-            type="button"
-            id="bd-canvas-help"
-            aria-label="Help and keyboard shortcuts"
-            className="absolute bottom-1.75 left-1.75 z-30 flex size-6.5 items-center justify-center rounded-full border border-edge bg-help text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring aria-expanded:text-foreground"
-          >
-            ?
-          </button>
-        </Popover.Trigger>
-      </Tip>
-      <Popover.Portal container={portalContainer()}>
-        <Popover.Content
-          side="top"
-          align="start"
-          sideOffset={8}
-          collisionPadding={8}
-          aria-label="Keyboard shortcuts"
-          className="z-50 w-view-menu rounded-2xl border border-menu-edge bg-background p-1 text-xs text-foreground shadow-menu outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
-        >
-          <p className="flex h-6.25 items-center px-1.5 text-muted-foreground">
-            Keyboard shortcuts
-          </p>
-          <dl className="m-0 flex flex-col gap-px">
-            {SHORTCUTS.map(([label, keys]) => (
-              <div key={label} className="flex h-6.25 items-center gap-2 px-1.5">
-                <dt className="truncate">{label}</dt>
-                <dd className="m-0 ml-auto shrink-0 text-muted-foreground">{keys}</dd>
-              </div>
-            ))}
-          </dl>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
-
 /* ---------- Zoom readout + menu ---------- */
+// Wonder T6: Zoom to 50%, Zoom to 100% ⇧0, Zoom to 200% | Zoom in ⌘+, Zoom out ⌘−, Zoom to fit ⇧1.
+// Snap to objects and Saved views… moved out of this menu: both are in the ⌘K command palette, and Saved views is
+// also the `+` views menu's "Save current view". Their ids stay on hidden proxies for legacy code and tests.
 let snapState = initialSnap;
 function useSnap(): [boolean, (value: boolean) => void] {
   const [snap, setSnapState] = useState(() => snapState);
@@ -394,17 +328,11 @@ function useSnap(): [boolean, (value: boolean) => void] {
   ];
 }
 
+const zoomTo = (percent: 50 | 200) => () => window.design.runCommand(`view.zoom${percent}`);
+
 function Zoom() {
   const zoom = useZoom();
   const [open, setOpen] = useState(false);
-  const [snap, setSnap] = useSnap();
-  const snapRef = useRef(snap);
-  snapRef.current = snap;
-  // Legacy drag code reads `$('#snap')?.checked`; give the menu item the same property.
-  const snapItem = (node: HTMLElement | null) => {
-    if (node && !Object.prototype.hasOwnProperty.call(node, "checked"))
-      Object.defineProperty(node, "checked", { configurable: true, get: () => snapRef.current });
-  };
   return (
     <>
       <MenuRoot open={open} onOpenChange={setOpen} modal={false}>
@@ -424,8 +352,27 @@ function Zoom() {
           side="top"
           align="end"
           sideOffset={6}
-          className="w-view-menu"
+          className="w-44"
         >
+          <MenuGroup>
+            <MenuItem id="zoom-50" onSelect={zoomTo(50)}>
+              Zoom to 50%
+            </MenuItem>
+            {/* Text content stays the live percentage (tests and legacy applyCamera() use it); the visible
+                label "Zoom to 100% ⇧0" comes from chrome.css ::before/::after. */}
+            <MenuPseudoLabelItem
+              id="zoom-reset"
+              data-zoom-reset=""
+              aria-label="Zoom to 100%"
+              onSelect={() => run("zoom-reset")}
+            >
+              {`${zoom}%`}
+            </MenuPseudoLabelItem>
+            <MenuItem id="zoom-200" onSelect={zoomTo(200)}>
+              Zoom to 200%
+            </MenuItem>
+          </MenuGroup>
+          <MenuSeparator />
           <MenuGroup>
             <MenuItem id="zoom-in" onSelect={() => run("zoom-in")}>
               Zoom in
@@ -439,69 +386,43 @@ function Zoom() {
               Zoom to fit
               <Shortcut>⇧1</Shortcut>
             </MenuItem>
-            {/* Text content stays the live percentage (tests and legacy applyCamera() use it); the visible
-                label comes from chrome.css ::before/::after. */}
-            <MenuPseudoLabelItem
-              id="zoom-reset"
-              data-zoom-reset=""
-              aria-label="Zoom to 100%"
-              onSelect={() => run("zoom-reset")}
-            >
-              {`${zoom}%`}
-            </MenuPseudoLabelItem>
-          </MenuGroup>
-          <MenuSeparator />
-          <MenuGroup>
-            <MenuCheckboxItem
-              id="snap"
-              ref={snapItem}
-              checked={snap}
-              onCheckedChange={(value) => setSnap(value === true)}
-            >
-              Snap to objects
-              <span className="ml-auto flex size-4 items-center justify-center">
-                <MenuItemIndicator>
-                  <Check className="text-foreground" />
-                </MenuItemIndicator>
-              </span>
-            </MenuCheckboxItem>
-            <MenuItem id="saved-views-open" onSelect={() => run("saved-views-open")}>
-              Saved views…
-            </MenuItem>
           </MenuGroup>
         </MenuContent>
       </MenuRoot>
-      {!open && <ZoomProxies zoom={zoom} snap={snap} setSnap={setSnap} />}
+      <ZoomProxies zoom={zoom} menuOpen={open} />
     </>
   );
 }
 
-/** Hidden owners of the zoom ids while the zoom menu is closed (or the editor is behind Files). */
-function ZoomProxies({
-  zoom,
-  snap,
-  setSnap,
-}: {
-  zoom?: number;
-  snap?: boolean;
-  setSnap?: (v: boolean) => void;
-}) {
+/** Hidden owners of the zoom ids while the zoom menu is closed (or the editor is behind Files), plus the snap
+ * checkbox and the saved-views command, which no longer have a place in the zoom menu. */
+function ZoomProxies({ zoom, menuOpen = false }: { zoom?: number; menuOpen?: boolean }) {
   const fallbackZoom = useZoom();
-  const [fallbackSnap, setFallbackSnap] = useSnap();
+  const [snap, setSnap] = useSnap();
   return (
     <div hidden data-chrome-proxies="zoom">
-      {(["zoom-in", "zoom-out", "zoom-fit", "saved-views-open"] as const).map((id) => (
-        <button key={id} type="button" id={id} tabIndex={-1} onClick={() => run(id)} />
-      ))}
-      <button type="button" id="zoom-reset" tabIndex={-1} onClick={() => run("zoom-reset")}>
-        {`${zoom ?? fallbackZoom}%`}
-      </button>
+      {!menuOpen && (
+        <>
+          {(["zoom-in", "zoom-out", "zoom-fit"] as const).map((id) => (
+            <button key={id} type="button" id={id} tabIndex={-1} onClick={() => run(id)} />
+          ))}
+          <button type="button" id="zoom-reset" tabIndex={-1} onClick={() => run("zoom-reset")}>
+            {`${zoom ?? fallbackZoom}%`}
+          </button>
+        </>
+      )}
+      <button
+        type="button"
+        id="saved-views-open"
+        tabIndex={-1}
+        onClick={() => run("saved-views-open")}
+      />
       <input
         type="checkbox"
         id="snap"
         tabIndex={-1}
-        checked={snap ?? fallbackSnap}
-        onChange={(event) => (setSnap ?? setFallbackSnap)(event.target.checked)}
+        checked={snap}
+        onChange={(event) => setSnap(event.target.checked)}
       />
     </div>
   );

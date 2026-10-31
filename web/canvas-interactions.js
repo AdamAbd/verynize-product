@@ -508,6 +508,7 @@
       if (e.target.closest('.frame-label')) return;
       if (space || tool === 'hand' || e.button === 1) { startPan(e); return; }
       if (e.button !== 0) return;
+      if (chrome.pointerDown(e)) return;
       const spacing = e.target.closest('#canvas-overlay .spacing-band');
       if (spacing) { startSpacing(e, spacingBands[Number(spacing.dataset.index)], Number(spacing.dataset.index)); return; }
       if (tool === 'eyedropper') { e.preventDefault(); const hex = colorAt(e.clientX, e.clientY); if (hex) { eyedropperRun++; applyPickedColor(hex); setTool('move'); } return; }
@@ -672,7 +673,11 @@
       s.el.removeAttribute('contenteditable'); delete s.el.dataset.textEditing;
       for (const k of ['user-select', '-webkit-user-select', 'cursor']) s.el.style.removeProperty(k);
       if (document.activeElement === s.el) s.el.blur();
-      const n = find(s.id);
+      const n = find(s.id), draft = draftText?.id === s.id ? draftText : null;
+      if (draft) draftText = null;
+      // Deleting everything in the editor can leave a lone line break behind: that is still no content.
+      if (n && !/[^\n]/.test(text) && (commit || draft)) { removeText(n, !draft); return; }
+      if (n && draft) { commitDraftText(n, s.el, text, runsFrom(styles), draft.before); return; }
       if (commit && n) {
         const runs = runsFrom(styles);
         if (text !== String(n.text || '') || JSON.stringify(runs) !== JSON.stringify(runsFrom(charStylesOf(n)))) {
@@ -680,6 +685,49 @@
         }
       }
       ed.render(); // back to the canonical layer DOM (run spans, selection handles)
+    }
+    // ---------- Text tool (Wonder TX1) ----------
+    // A click creates an empty layer named "Text" that hugs its content (Inter Regular 12, line height auto, letter
+    // spacing 0); a drag creates a fixed box of the gesture size. The ink is black, or white over a dark background.
+    // The new layer enters the undo history only once it has text (one step that removes it again); editing that
+    // ends with no text removes it. Any text layer emptied in the editor is removed as one undo step.
+    let draftText = null;
+    function inkAt(clientX, clientY) {
+      for (const el of document.elementsFromPoint(clientX, clientY)) {
+        if (el.closest('#canvas .layer')?.dataset.designType === 'text') continue;
+        const value = getComputedStyle(el).backgroundColor, c = (value.match(/[\d.]+/g) || []).map(Number);
+        if (c.length < 3 || (c.length > 3 ? c[3] : 1) < 0.5) continue;
+        const scale = value.startsWith('color(') ? 1 : 255;
+        return (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / scale < 0.5 ? '#ffffff' : '#000000';
+      }
+      return '#000000';
+    }
+    function createText(r, click, parent, clientX, clientY) {
+      const before = ed.snapshot();
+      let x = r.x, y = r.y;
+      if (parent) { const pr = worldRect(parent.id); if (pr) { x = r.x - pr.x - (parent.strokeWidth || 0); y = r.y - pr.y - (parent.strokeWidth || 0); } }
+      const n = {...ed.defaults, id: ed.uid(), type: 'text', name: 'Text', text: '', textRuns: [], parentId: parent?.id || null,
+        x: Math.round(x), y: Math.round(y), w: click ? 1 : Math.max(1, Math.round(r.w)), h: click ? 14.5 : Math.max(1, Math.round(r.h)),
+        color: inkAt(clientX, clientY), fontFamily: 'Inter', fontWeight: '400', fontSize: 12, lineHeight: 'auto', letterSpacing: 0, radius: 0,
+        ...(click ? {wMode: 'hug', hMode: 'hug'} : {wMode: 'fixed', hMode: 'fixed'})};
+      ed.nodes().push(n); ed.setSelection([n.id]); ed.render();
+      draftText = {id: n.id, before};
+      editText();
+    }
+    function commitDraftText(n, el, text, runs, before) {
+      Object.assign(n, {text, textRuns: runs});
+      // Hug axes store the measured size so geometry readers (badge, agents, export) see the real box.
+      const round = v => Math.max(1, Math.round(v * 100) / 100);
+      if (n.wMode === 'hug' && el.offsetWidth) n.w = round(el.offsetWidth);
+      if (n.hMode === 'hug' && el.offsetHeight) n.h = round(el.offsetHeight);
+      ed.pushHistory(before); ed.render();
+    }
+    function removeText(n, recordUndo) {
+      const before = recordUndo ? ed.snapshot() : null, list = ed.nodes(), index = list.indexOf(n);
+      if (index >= 0) list.splice(index, 1);
+      ed.setSelection([...sel()].filter(id => id !== n.id));
+      if (before) ed.pushHistory(before);
+      ed.render();
     }
     // A render while editing (collaboration, autosave, inspector) rebuilds the layer: keep the live editor in place.
     function keepTextEditor() {
@@ -899,8 +947,15 @@
         line.setAttribute('x1', toScreenX(g.x1)); line.setAttribute('y1', toScreenY(g.y1)); line.setAttribute('x2', toScreenX(g.x2)); line.setAttribute('y2', toScreenY(g.y2));
         line.setAttribute('class', 'guide guide-' + g.type + (className ? ' ' + className : ''));
         guideSvg.append(line);
+        // Alignment guides end in small dots on the aligned points (Wonder TR4).
+        if (g.type === 'line') for (const [x, y] of [[g.x1, g.y1], [g.x2, g.y2]]) {
+          const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          dot.setAttribute('cx', toScreenX(x)); dot.setAttribute('cy', toScreenY(y)); dot.setAttribute('r', 2); dot.setAttribute('class', 'guide-dot');
+          guideSvg.append(dot);
+        }
         if (g.label !== undefined) {
           const label = document.createElement('span'); label.className = 'guide-label'; label.textContent = String(g.label);
+          label.dataset.axis = Math.abs(g.x2 - g.x1) >= Math.abs(g.y2 - g.y1) ? 'x' : 'y'; if (className) label.classList.add(className);
           label.style.left = (toScreenX(g.x1) + toScreenX(g.x2)) / 2 + 'px'; label.style.top = (toScreenY(g.y1) + toScreenY(g.y2)) / 2 + 'px';
           guideLabels.append(label);
         }
@@ -912,43 +967,10 @@
       for (const key of keys) if (key) delete node.bindings[key];
       if (!Object.keys(node.bindings).length) delete node.bindings;
     }
-    function startResize(e, id, corner) {
-      const n = find(id); if (!n || n.locked) return;
-      let total = Number(n.rotation) || 0, ancestor = n;
-      while (ancestor.parentId) { ancestor = find(ancestor.parentId); if (!ancestor) break; total += Number(ancestor.rotation) || 0; }
-      const s = {x: n.x, y: n.y, w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, start = {x: e.clientX, y: e.clientY}, g = gesture(), scaling = tool === 'scale';
-      const content = scaling ? [...ed.descendants(id)].map(find).filter(Boolean).map(d => ({d, x: d.x, y: d.y, w: d.w, h: d.h, fontSize: d.fontSize, radius: d.radius, gap: d.gap, padding: d.padding, strokeWidth: d.strokeWidth})) : [];
-      track(e, ev => {
-        g.commit();
-        const dx = (ev.clientX - start.x) / cam.zoom, dy = (ev.clientY - start.y) / cam.zoom, angle = total * Math.PI / 180;
-        const localX = dx * Math.cos(angle) + dy * Math.sin(angle), localY = -dx * Math.sin(angle) + dy * Math.cos(angle);
-        const sx = (corner.includes('e') ? 1 : -1) * (n.flipX ? -1 : 1), sy = (corner.includes('s') ? 1 : -1) * (n.flipY ? -1 : 1), centered = ev.altKey ? 2 : 1; // handles flip with the layer
-        let w = Math.max(10, s.w + sx * localX * centered), h = Math.max(10, s.h + sy * localY * centered);
-        if (ev.shiftKey || scaling) { const fx = w / s.w, fy = h / s.h, f = Math.abs(fx - 1) > Math.abs(fy - 1) ? fx : fy; w = Math.max(10, s.w * f); h = Math.max(10, s.h * f); }
-        const dw = w - s.w, dh = h - s.h, a = (Number(n.rotation) || 0) * Math.PI / 180, parent = find(n.parentId);
-        n.w = w; n.h = h;
-        // A dragged size replaces a variable-bound W/H: keep the new value, drop the binding (undo restores both).
-        unbindKeys(n, [w !== s.w && 'w', h !== s.h && 'h']);
-        // A dragged size is Fixed (Hug / Fill / Auto / Calculate end); a Relative (%) size keeps its mode and scales.
-        if (n.wMode && n.wMode !== 'fixed') { n.wMode = 'fixed'; delete n.wCalc; }
-        if (n.hMode && n.hMode !== 'fixed') { n.hMode = 'fixed'; delete n.hCalc; }
-        if (s.wPct !== undefined && s.w) n.wPct = Math.round(s.wPct * w / s.w * 100) / 100;
-        if (s.hPct !== undefined && s.h) n.hPct = Math.round(s.hPct * h / s.h * 100) / 100;
-        if (!isFlow(parent)) {
-          if (ev.altKey) { n.x = s.x - dw / 2; n.y = s.y - dh / 2; }
-          else { n.x = s.x + (sx * dw * Math.cos(a) - sy * dh * Math.sin(a) - dw) / 2; n.y = s.y + (sx * dw * Math.sin(a) + sy * dh * Math.cos(a) - dh) / 2; }
-        }
-        if (scaling) {
-          const f = w / s.w;
-          for (const c of content) {
-            if (c.d.id !== id) { c.d.x = c.x * f; c.d.y = c.y * f; c.d.w = Math.max(1, c.w * f); c.d.h = Math.max(1, c.h * f); }
-            c.d.fontSize = clamp(c.fontSize * f, 8, 200); c.d.radius = c.radius * f; c.d.gap = c.gap * f; c.d.padding = c.padding * f; c.d.strokeWidth = c.strokeWidth * f;
-            if (f !== 1) unbindKeys(c.d, [c.d.id !== id && 'w', c.d.id !== id && 'h', 'fontSize', 'radius', 'gap', 'padding', 'strokeWidth']);
-          }
-        }
-        ed.render();
-      });
-    }
+    // Resize, rotate and the selection chrome (label, badge, ⊕ chip, multi-selection box) live in selection-chrome.js.
+    const chrome = window.BetterSelectionChrome.install({ed, cam, wrap, overlay, workspace, find, sel, track, gesture, isFlow, unbindKeys, elementOf, worldRect, drawGuides, showHover, getTool: () => tool});
+    const baseMeasurement = ed.updateMeasurement; ed.updateMeasurement = () => { baseMeasurement(); chrome.draw(); };
+    function startResize(e, id, corner) { chrome.startResize(e, id, corner); }
 
     function startMarquee(e, scope = null, onClick) {
       const additive = e.shiftKey, base = additive ? new Set(sel()) : new Set();
@@ -990,6 +1012,7 @@
       track(e, ev => { last = screenToWorld(ev.clientX, ev.clientY); square = ev.shiftKey; showMarquee(rectFor(last, square), 'draw'); }, () => {
         marqueeBox.hidden = true;
         let r = rectFor(last, square);
+        if (kind === 'text') { setTool('move'); createText(r, r.w * cam.zoom < 3 && r.h * cam.zoom < 3, parent, e.clientX, e.clientY); return; }
         if (r.w * cam.zoom < 3 && r.h * cam.zoom < 3) {
           const size = {frame: [100, 100], rectangle: [200, 150], ellipse: [200, 200], text: [240, 60], shader: [480, 300]}[kind];
           r = {x: p0.x, y: p0.y, w: size[0], h: size[1]};
@@ -999,10 +1022,8 @@
         if (parent) { const pr = worldRect(parent.id); if (pr) { x = r.x - pr.x - (parent.strokeWidth || 0); y = r.y - pr.y - (parent.strokeWidth || 0); } }
         const extra = {x: Math.round(x), y: Math.round(y), w: Math.round(r.w), h: Math.round(r.h), parentId: parent?.id || null};
         if (kind === 'shader') Object.assign(extra, {name: 'Aurora shader', color: '#a58bdd'});
-        if (kind === 'text') extra.fontSize = 24;
         setTool('move');
         if (kind === 'ellipse') insertEllipse(extra); else ed.add(kind, extra);
-        if (kind === 'text') editText();
       });
     }
 
@@ -1015,6 +1036,7 @@
       if (e.altKey) measureTo(e); else if (overlay.dataset.measuring) { overlay.dataset.measuring = ''; drawGuides([]); }
     });
     function measureTo(e) {
+      if (chrome.busy()) return; // no distance guides during a resize or rotate gesture
       const a = union(topSelected().map(n => worldRect(n.id)));
       if (!a) return;
       const el = e.target.closest?.('#canvas .layer');
@@ -1026,10 +1048,23 @@
       const guides = [], cy = a.y + a.h / 2, cx = a.x + a.w / 2;
       const inside = b.x <= a.x && b.y <= a.y && b.x + b.w >= a.x + a.w && b.y + b.h >= a.y + a.h;
       const seg = (x1, y1, x2, y2) => { const len = Math.abs(x2 - x1) + Math.abs(y2 - y1); if (len > 0.01) guides.push({type: 'measure', x1, y1, x2, y2, label: Math.round(len * 10) / 10}); };
+      const extend = (x1, y1, x2, y2) => { if (Math.abs(x2 - x1) + Math.abs(y2 - y1) > 0.01) guides.push({type: 'extend', x1, y1, x2, y2}); };
       if (inside) { seg(b.x, cy, a.x, cy); seg(a.x + a.w, cy, b.x + b.w, cy); seg(cx, b.y, cx, a.y); seg(cx, a.y + a.h, cx, b.y + b.h); }
       else {
         if (b.x >= a.x + a.w) seg(a.x + a.w, cy, b.x, cy); else if (a.x >= b.x + b.w) seg(b.x + b.w, cy, a.x, cy);
         if (b.y >= a.y + a.h) seg(cx, a.y + a.h, cx, b.y); else if (a.y >= b.y + b.h) seg(cx, b.y + b.h, cx, a.y);
+        // Wonder (TR5): when the hovered layer sits above/below the selection, its side edges are extended (dashed) to the
+        // selection's centre line and the edge offsets are labelled; the same rotated when it sits beside the selection.
+        const overlapX = b.x < a.x + a.w && a.x < b.x + b.w, overlapY = b.y < a.y + a.h && a.y < b.y + b.h;
+        if (overlapX && !overlapY) {
+          const edge = b.y + b.h <= a.y ? b.y + b.h : b.y;
+          if (a.x > b.x) { extend(b.x, edge, b.x, cy); seg(b.x, cy, a.x, cy); }
+          if (b.x + b.w > a.x + a.w) { extend(b.x + b.w, edge, b.x + b.w, cy); seg(a.x + a.w, cy, b.x + b.w, cy); }
+        } else if (overlapY && !overlapX) {
+          const edge = b.x + b.w <= a.x ? b.x + b.w : b.x;
+          if (a.y > b.y) { extend(edge, b.y, cx, b.y); seg(cx, b.y, cx, a.y); }
+          if (b.y + b.h > a.y + a.h) { extend(edge, b.y + b.h, cx, b.y + b.h); seg(cx, a.y + a.h, cx, b.y + b.h); }
+        }
       }
       drawGuides(guides, 'measure');
     }
@@ -1037,9 +1072,9 @@
     // Name labels above top-level frames (artboards); drag a label to move its frame.
     function drawFrameLabels() {
       frameLabels.replaceChildren();
-      for (const n of ed.nodes().filter(n => !n.parentId && n.type === 'frame' && !n.hidden && !n.preview)) {
-        const r = worldRect(n.id); if (!r || sel().has(n.id)) continue;
-        const label = document.createElement('span'); label.className = 'frame-label'; label.textContent = n.name; label.dataset.id = n.id;
+      for (const n of ed.nodes().filter(n => !n.parentId && n.type === 'frame' && !n.hidden && !n.preview && !n.labelHidden)) {
+        const r = worldRect(n.id); if (!r || (sel().has(n.id) && sel().size === 1)) continue;
+        const label = document.createElement('span'); label.className = 'frame-label' + (sel().has(n.id) ? ' selected' : ''); label.textContent = n.name; label.dataset.id = n.id;
         label.style.left = toScreenX(r.x) + 'px'; label.style.top = toScreenY(r.y) - 18 + 'px';
         label.onpointerdown = e => { if (e.button !== 0 || space || tool === 'hand') return; e.stopPropagation(); select(e.shiftKey ? [...sel(), n.id] : [n.id]); if (!e.shiftKey) startMove(e); };
         frameLabels.append(label);
@@ -1053,6 +1088,7 @@
       const copies = ed.nodes().filter(n => all.has(n.id)).map(n => ({...structuredClone(n), id: mapping.get(n.id), parentId: mapping.get(n.parentId) || n.parentId, x: n.x + (all.has(n.parentId) ? 0 : offset), y: n.y + (all.has(n.parentId) ? 0 : offset)}));
       ed.nodes().push(...copies);
       const result = ids.map(id => mapping.get(id));
+      hooks.duplicated?.(result);
       ed.setSelection(new Set(result));
       return result;
     }
@@ -1426,6 +1462,8 @@
       {id: 'view.zoomIn', label: 'Zoom in', section: 'View', keys: ['mod+=', 'mod+shift+=', 'mod+plus'], run: () => stepZoom(1)},
       {id: 'view.zoomOut', label: 'Zoom out', section: 'View', keys: ['mod+-'], run: () => stepZoom(-1)},
       {id: 'view.zoom100', label: 'Zoom to 100%', section: 'View', keys: ['mod+0', 'shift+0'], run: () => zoomCenter(1)},
+      {id: 'view.zoom50', label: 'Zoom to 50%', section: 'View', keys: [], run: () => zoomCenter(0.5)},
+      {id: 'view.zoom200', label: 'Zoom to 200%', section: 'View', keys: [], run: () => zoomCenter(2)},
       {id: 'view.fit', label: 'Zoom to fit', section: 'View', keys: ['shift+1'], run: () => fit()},
       {id: 'view.selection', label: 'Zoom to selection', section: 'View', keys: ['shift+2'], run: zoomToSelection},
       {id: 'transform.frame', label: 'Frame selection', section: 'Transform', keys: ['mod+g', 'mod+alt+g'], when: needsSelection, run: frameSelection},
@@ -1464,7 +1502,7 @@
     }
     const keyIndex = new Map();
     for (const c of commands) for (const k of c.keys) keyIndex.set(k, c);
-    function runCommand(id) { const c = commands.find(x => x.id === id); if (!c || (c.when && !c.when())) return false; c.run(); return true; }
+    function runCommand(id, arg) { const c = commands.find(x => x.id === id); if (!c || (c.when && !c.when())) return false; c.run(arg); return true; }
     const shortcutText = k => k.replace('mod+', /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+').replace('alt+', '⌥').replace('shift+', '⇧').replace('ctrl+', '⌃').toUpperCase();
 
     document.addEventListener('keydown', e => {
@@ -1496,27 +1534,20 @@
 
     // ---------- Context menu ----------
     function closeMenu() { menu?.remove(); menu = null; }
+    // The menu itself is the React context menu (web/src/islands/context-menu): this only retargets the selection like a
+    // click would (a child of a selected frame, a frame label, or a locked layer, which is not hit-tested) and hands over.
     wrap.addEventListener('contextmenu', e => {
+      if (textEdit?.el.contains(e.target)) return;
       e.preventDefault(); closeMenu();
-      const el = e.target.closest('#canvas .layer');
-      if (el) { const id = resolveHit(el.dataset.id); if (!sel().has(id)) select([id]); }
-      menu = document.createElement('div'); menu.id = 'canvas-menu'; menu.setAttribute('role', 'menu');
-      const groups = [['edit.copy', 'edit.cut', 'edit.paste', 'edit.duplicate', 'edit.delete'], ['edit.copyPng', 'edit.copyCode', 'edit.copyStyle', 'edit.pasteStyle'], ['select.all', 'select.inverse', 'select.matching'], ['arrange.front', 'arrange.forward', 'arrange.backward', 'arrange.back'], ['transform.flipH', 'transform.flipV', 'transform.rotate90', 'transform.scaleDown', 'transform.scaleUp'], ['transform.frame', 'transform.unframe', 'transform.autoLayout', 'transform.removeAutoLayout'], ['layer.visibility', 'layer.lock'], ['view.fit', 'view.selection']];
-      for (const group of groups) {
-        const items = group.map(id => commands.find(c => c.id === id)).filter(c => c.id === 'edit.paste' ? !!clipboard : (!c.when || c.when()));
-        if (!items.length) continue;
-        if (menu.childElementCount) menu.append(document.createElement('hr'));
-        for (const c of items) {
-          const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'menuitem'); b.dataset.command = c.id;
-          const label = document.createElement('span'); label.textContent = c.label; const keys = document.createElement('kbd'); keys.textContent = c.keys[0] ? shortcutText(c.keys[0]) : '';
-          b.append(label, keys); b.onclick = () => { closeMenu(); c.run(); }; menu.append(b);
-        }
-      }
-      document.body.append(menu);
-      const r = menu.getBoundingClientRect();
-      menu.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + 'px'; menu.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + 'px';
+      const label = e.target.closest('.frame-label'), el = e.target.closest('#canvas .layer'), chrome = sel().size === 1 && e.target.closest('#canvas-overlay .rotate-zone, #canvas-overlay .resize-edge, #selection-chat-chip') ? [...sel()][0] : null;
+      const under = [...canvas.querySelectorAll('.layer[data-id]')].filter(l => { const r = l.getBoundingClientRect(); return r.width && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; }).map(l => l.dataset.id).reverse();
+      const locked = under.find(id => find(id)?.locked), above = locked && (!el || under.indexOf(locked) < under.indexOf(el.dataset.id));
+      const target = chrome || (label ? label.dataset.id : above ? locked : el ? clickTarget(el.dataset.id) : null);
+      if (target && !sel().has(target)) select([target]);
+      window.dispatchEvent(new CustomEvent('bd:canvas-menu', {detail: {x: e.clientX, y: e.clientY, point: screenToWorld(e.clientX, e.clientY), target, under}}));
     });
-    document.addEventListener('pointerdown', e => { if (menu && !menu.contains(e.target)) closeMenu(); }, true);
+    // Whether the in-app clipboard holds layers (the context menus list Paste disabled otherwise).
+    window.BetterCanvas.canPaste = () => !!clipboard;
 
     // ---------- Toolbar wiring (runs after the shell has built the toolbar) ----------
     function wireToolbar() {
@@ -1605,10 +1636,21 @@
         if (saved) setCamera(saved.x, saved.y, saved.zoom); else requestAnimationFrame(() => fit(true));
       }
       for (const id of drilled) if (!find(id)) drilled.delete(id);
-      drawFrameLabels(); drawClippedSelection();
+      drawFrameLabels(); drawClippedSelection(); chrome.draw();
       refreshHover(true);
     }
     applyCamera();
+
+    // ---------- Extensions (web/clipboard-commands.js): more commands on the same registry and shortcuts ----------
+    const hooks = {};
+    // Adds a command, or merges fields into an existing one (same id); the shortcut index is rebuilt.
+    function register(command) {
+      const existing = commands.find(c => c.id === command.id);
+      if (existing) Object.assign(existing, command); else commands.push({keys: [], ...command});
+      keyIndex.clear(); for (const c of commands) for (const k of c.keys) keyIndex.set(k, c);
+    }
+    const context = {ed, find, sel, selectedNodes, topSelected, worldRect, union, placeInView, isFlow, inStack, footer, writeSystemClipboard, register, hooks, getClipboard: () => clipboard, paste: (data, options) => paste(data, options)};
+    for (const extend of extensions) extend(context);
 
     return {
       beforeRender, afterRender, setConstraints, constraintsOf: id => { const n = find(id); return n && anchorable(n) ? NS().constraintsOf(n) : null; }, reveal, setTool, getTool: () => tool, insertFramePreset, framePresets: () => FRAME_PRESETS.map(([category, presets]) => ({category, presets: presets.map(([name, w, h]) => ({name, w, h}))})), fit, zoomToSelection, stepZoom, zoomAt, zoomCenter, setCamera, screenToWorld, worldRect, placeInView,
@@ -1621,5 +1663,6 @@
       getDrilled: () => [...drilled],
     };
   }
-  window.BetterCanvas = {install, ZOOM_STOPS, FRAME_PRESETS};
+  const extensions = [];
+  window.BetterCanvas = {install, ZOOM_STOPS, FRAME_PRESETS, extend: fn => extensions.push(fn)};
 })();
