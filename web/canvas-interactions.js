@@ -66,8 +66,9 @@
     hoverBox.className = 'hover-box'; dropBox.className = 'drop-target'; dropLine.className = 'drop-line';
     hoverBox.hidden = dropBox.hidden = dropLine.hidden = true;
     overlay.append(hoverBox, dropBox, dropLine);
-    // A clipping ancestor cuts off the selection ring and handles drawn inside the layer, so selected layers inside
-    // one get their chrome redrawn here, over the clip.
+    // A clipping ancestor, or the layer's own Clip content, cuts off the selection ring and handles drawn inside the
+    // layer (the corner handles straddle its edge), so such layers get their chrome redrawn here, over the clip.
+    // Wonder S4-frame-ready: a Clip content frame shows whole 9px handles.
     const clippedSelection = document.createElement('div');
     clippedSelection.className = 'clipped-selection';
     overlay.append(clippedSelection);
@@ -75,7 +76,7 @@
       clippedSelection.replaceChildren();
       for (const id of sel()) {
         const n = find(id); if (!n || n.hidden || n.rotation) continue;
-        let p = n.parentId && find(n.parentId), clipped = false;
+        let p = n.parentId && find(n.parentId), clipped = !!n.clipContent;
         while (p && !clipped) { clipped = !!p.clipContent; p = p.parentId && find(p.parentId); }
         const b = clipped && screenBox(id); if (!b) continue;
         const ring = document.createElement('div'); ring.className = 'selection-ring'; placeBox(ring, b);

@@ -220,7 +220,15 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal(await page.locator('#canvas .layer.selected').evaluate(e => getComputedStyle(e).outlineStyle), 'solid', 'and the selection ring');
 
     assert.deepEqual(errors, []);
-    console.log('PASS canvas selection marks: hidden-layer outline, nested constraint guides without labels, single clipped ring, hover outline + label only, whole-number Alt distances, stack drag follows the pointer without a drop column, caret-only text editing');
+    // Wonder S4-frame-ready: a selected Clip content frame shows whole 9px corner handles straddling its corners; the
+    // frame's own clip must not cut them to a quarter. The pixel just outside the top-left corner belongs to a handle.
+    await seed([frame('clipper', 0, 0, 300, 270, {clipContent: true})]);
+    await select(['clipper']);
+    await page.waitForTimeout(150);
+    const corner = await screen(0, 0);
+    const outside = await page.evaluate(([x, y]) => document.elementsFromPoint(x - 3, y - 3).some(e => e.classList.contains('handle') && e.getBoundingClientRect().width >= 8.5), [corner.x, corner.y]);
+    assert.ok(outside, 'a Clip content frame keeps whole corner handles outside its edge');
+    console.log('PASS canvas selection marks: hidden-layer outline, nested constraint guides without labels, single clipped ring, hover outline + label only, whole-number Alt distances, stack drag follows the pointer without a drop column, caret-only text editing, whole handles on a Clip content frame');
   } finally {
     await app.close();
     await fs.rm(dir, {recursive: true, force: true});
