@@ -139,6 +139,13 @@ export async function createApproval(env, fields, now = Date.now()) {
     .run();
 }
 
+export const approvalForCall = (env, runId, toolCallId) =>
+  database(env)
+    .select()
+    .from(aiApproval)
+    .where(and(eq(aiApproval.runId, runId), eq(aiApproval.toolCallId, toolCallId)))
+    .get();
+
 export const getApproval = (env, runId, requestId) =>
   database(env)
     .select()
@@ -175,7 +182,11 @@ export async function denyPending(env, runId, reason, now = Date.now()) {
   return denied;
 }
 
-// Recorded results of write tool calls (at most once per run and tool call).
+// Recorded results of write tool calls (at most once per run and tool call). A write first claims
+// its row with PENDING_RESULT, then runs, then stores its output: a claim that was never completed
+// (the instance stopped mid-call) is never run again.
+
+export const PENDING_RESULT = "\u0000pending";
 
 export const getToolResult = (env, runId, toolCallId) =>
   database(env)
@@ -192,4 +203,13 @@ export async function recordToolResult(env, fields, now = Date.now()) {
     .onConflictDoNothing()
     .run();
   return !!result.meta?.changes;
+}
+
+/** Store the output of a claimed tool call (recordToolResult with PENDING_RESULT). */
+export async function completeToolResult(env, runId, toolCallId, { output, isError }) {
+  await database(env)
+    .update(aiToolResult)
+    .set({ output, isError })
+    .where(and(eq(aiToolResult.runId, runId), eq(aiToolResult.toolCallId, toolCallId)))
+    .run();
 }

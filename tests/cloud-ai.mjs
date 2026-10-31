@@ -1,19 +1,40 @@
 // Model API runtime (/api/ai/*, cloud/ai.js, docs/ai-runtime.md) on the real backend: config
 // enabled and disabled, authentication, room access, streamed text, a read tool call against a
-// real room, room scoping, cancel, reconnect with events?after=, idempotent replay, budgets,
-// approvals, an expired lease and the per-account rate limit. The LLM provider is the only fake:
-// a local OpenAI-compatible server (tests/helpers/fake-openrouter.mjs) set as OPENROUTER_BASE_URL.
+// real room, room scoping, cancel, reconnect with events?after=, idempotent replay, budgets, an
+// expired lease and the per-account rate limit; write tools: ask → approve/deny, approval endpoint
+// checks (owner, argsHash, replay, ended run), cancel and timeout while waiting, at most once per
+// tool call (re-POST, reconnect, repeated id), plan and helper runs, revocation mid-run, edit
+// access with a live room socket, and the same write through hosted MCP and the runtime giving
+// the same document. The LLM provider is the only fake: a local OpenAI-compatible server
+// (tests/helpers/fake-openrouter.mjs) set as OPENROUTER_BASE_URL.
 // Runs on workerd (default), Node and Vercel (CLOUD_RUNTIME, tests/cloud-harness.mjs).
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Miniflare, cloudOptions, passwordUser, RUNTIME } from "./cloud-harness.mjs";
-import { startFakeOpenRouter } from "./helpers/fake-openrouter.mjs";
+import { startFakeOpenRouter, toolMessages, userText } from "./helpers/fake-openrouter.mjs";
+import { validateDocument } from "../integrations/document-core.mjs";
 
 const ORIGIN = "http://local";
 let otherRoomId = null;
+const card = (label) =>
+  `<div data-node-label="${label}" className="w-[320px] bg-white p-6 flex flex-col gap-2"><p className="text-base text-slate-900">${label}</p></div>`;
+const labelOf = (body) => /\[label:([\w -]+)\]/.exec(userText(body))?.[1] || "AI card";
 const fake = await startFakeOpenRouter({
+  // One write (create_artboard of a card named by [label:…]), then a closing text.
+  write: (body) =>
+    toolMessages(body).length
+      ? [{ text: "Done." }]
+      : [
+          { text: "Adding a card." },
+          { tool: "create_artboard", args: { code: card(labelOf(body)) } },
+        ],
+  // The same write with the same tool call id in two turns.
+  dup: (body) =>
+    toolMessages(body).length >= 2
+      ? [{ text: "Done." }]
+      : [{ tool: "create_artboard", args: { code: card(labelOf(body)) }, id: "dup_call" }],
   hello: [[{ text: "Hello from the model." }]],
   tree: [
     [{ text: "Let me look at the room." }, { tool: "get_element_tree", args: {} }],
@@ -124,6 +145,63 @@ function assertSequence(events, runId, chatId, from = 1) {
   });
 }
 const systemOf = (body) => body.messages.find((m) => m.role === "system")?.content || "";
+const blank = (name) => ({
+  version: 2,
+  name,
+  pages: [{ id: "page-1", name: "Page 1", nodes: [] }],
+  tokens: {},
+});
+const roomDoc = async (id, token) =>
+  (await data(await request(`/api/rooms/${id}`, { token }), 200)).document;
+/** Names of the top-level nodes (artboards) of a document, in order. */
+const labels = (doc) =>
+  doc.pages.flatMap((page) => page.nodes.filter((n) => !n.parentId)).map((n) => n.name);
+/**
+ * A document with its page and node ids and node short ids (random per write) replaced by their
+ * order of appearance; everything else is compared as is.
+ */
+function canonicalIds(doc) {
+  const ids = new Map();
+  const id = (value) => {
+    if (!ids.has(value)) ids.set(value, `id-${ids.size + 1}`);
+    return ids.get(value);
+  };
+  const out = structuredClone(doc);
+  for (const page of out.pages) {
+    page.id = id(page.id);
+    for (const node of page.nodes) {
+      node.id = id(node.id);
+      if (node.shortId) node.shortId = id(`short:${node.shortId}`);
+    }
+  }
+  for (const page of out.pages)
+    for (const node of page.nodes) if (node.parentId) node.parentId = id(node.parentId);
+  return out;
+}
+/** A live room socket (like an open editor); next(predicate) waits for a message. */
+async function connectRoom(roomId, session) {
+  const upgrade = await mf.dispatchFetch(
+    `${ORIGIN}/api/rooms/${roomId}/socket?session=${encodeURIComponent(session)}&client=editor1`,
+    { headers: { Upgrade: "websocket" } },
+  );
+  assert.equal(upgrade.status, 101, "socket upgrade");
+  const socket = upgrade.webSocket;
+  const seen = [];
+  socket.addEventListener("message", (event) => seen.push(JSON.parse(event.data)));
+  socket.accept();
+  return {
+    socket,
+    async next(predicate, timeout = 8000) {
+      const deadline = Date.now() + timeout;
+      for (;;) {
+        const found = seen.find(predicate);
+        if (found) return found;
+        if (Date.now() > deadline) throw new Error("Timed out waiting for a socket message");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    },
+  };
+}
 
 try {
   // Disabled: no OPENROUTER_API_KEY.
@@ -328,24 +406,30 @@ try {
       ["user", "[scenario:hello] Say hello"],
     ],
   );
+  // Read and write tools of the shared hosted table; nothing unavailable or outside the room.
   const offered = sent.body.tools.map((t) => t.function.name);
   for (const name of [
     "get_design_context",
     "get_element_tree",
     "get_element_code",
     "list_documents",
+    "create_artboard",
+    "update_elements",
+    "delete_elements",
+    "apply_operations",
   ])
     assert.ok(offered.includes(name), `${name} is offered`);
   for (const name of [
     "take_screenshot",
-    "create_artboard",
-    "update_elements",
-    "delete_elements",
+    "ask_agent",
+    "import_html",
+    "export_document",
     "run_terminal_command",
     "save_design_preference",
     "create_document",
   ])
     assert.ok(!offered.includes(name), `${name} is not offered`);
+  assert.match(systemOf(sent.body), /Each write call waits for the user's approval/);
   const treeSchema = sent.body.tools.find((t) => t.function.name === "get_element_tree").function
     .parameters;
   assert.equal(treeSchema.type, "object");
@@ -503,32 +587,419 @@ try {
   assert.equal(burst.at(-1).code, "budget");
   assert.ok(!burst.some((e) => e.type === "assistant-text" && /unreachable/.test(e.text)));
 
-  // Approvals: bound to the run owner, decided once (rows written as the executor would).
-  const db = await mf.getD1Database("DB");
-  await db
-    .prepare(
-      'INSERT INTO ai_approval ("runId","requestId","toolCallId","toolName","argsHash","createdAt") VALUES (?,?,?,?,?,?)',
-    )
-    .bind(runId, "req-1", "call-1", "update_elements", "hash", Date.now())
-    .run();
-  const approve = (token, body, id = runId) =>
+  // ---------------------------------------------------------------------------------------------
+  // Write tools and approvals (Policy in docs/ai-runtime.md). Eva has her own room so these runs
+  // stay clear of Ana's per-account rate limit.
+  let db = await mf.getD1Database("DB");
+  const eva = await passwordUser(ORIGIN, "eva@example.test", "Eva", local, "192.0.2.3");
+  const evaMe = await data(await request("/api/me", { token: eva }), 200);
+  const evaRoom = await data(
+    await request("/api/rooms", { method: "POST", token: eva, body: { document: blank("Board") } }),
+    201,
+  );
+  const approve = (token, id, body) =>
     request(`/api/ai/runs/${id}/approvals`, { method: "POST", token, body });
-  assert.equal((await approve(dodi, { requestId: "req-1", allow: true })).status, 403);
-  assert.equal((await approve(ana, { requestId: "req-2", allow: true })).status, 404);
-  assert.equal((await approve(ana, { requestId: "req-1" })).status, 400);
+  const approvalRow = async (id, requestId) => ({
+    ...(await db
+      .prepare(
+        'SELECT "accountId","toolCallId","toolName","argsHash","decision","reason" FROM ai_approval WHERE "runId"=? AND "requestId"=?',
+      )
+      .bind(id, requestId)
+      .first()),
+  });
+  const statuses = (events) => events.filter((e) => e.type === "status").map((e) => e.status);
+  const modelRequestsFor = (marker) =>
+    fake.requests.filter((r) => userText(r.body).includes(marker)).map((r) => r.body);
+
+  // Ask (the default) → approve → applied. Nothing changes before the decision.
+  const askBody = {
+    chatId: "chat-ask",
+    roomId: evaRoom.id,
+    prompt: "[scenario:write] [label:Approved card]",
+    idempotencyKey: `ask-${Date.now()}`,
+  };
+  const ask = sseReader(
+    await request("/api/ai/runs", { method: "POST", token: eva, body: askBody }),
+  );
+  const permission = await ask.next((e) => e.type === "permission-request");
+  const askRunId = ask.events[0].id;
+  const askCall = ask.events.find((e) => e.type === "tool-call");
+  assert.equal(permission.name, "create_artboard");
+  assert.equal(permission.toolCallId, askCall.toolCallId);
+  assert.equal(permission.input.code, card("Approved card"));
+  assert.equal(permission.title, 'Canvas · create_artboard "Approved card"');
+  assert.match(permission.argsHash, /^[0-9a-f]{64}$/);
+  assert.deepEqual(await approvalRow(askRunId, permission.requestId), {
+    accountId: evaMe.account.id,
+    toolCallId: askCall.toolCallId,
+    toolName: "create_artboard",
+    argsHash: permission.argsHash,
+    decision: null,
+    reason: null,
+  });
+  assert.deepEqual(labels(await roomDoc(evaRoom.id, eva)), [], "nothing applied before approval");
+  // An idempotent re-POST while the run waits follows the same run: same request, no new model call.
+  const modelCalls = fake.requests.length;
+  const askAgain = sseReader(
+    await request("/api/ai/runs", { method: "POST", token: eva, body: askBody }),
+  );
   assert.equal(
-    (await approve(ana, { requestId: "req-1", allow: true }, crypto.randomUUID())).status,
+    (await askAgain.next((e) => e.type === "permission-request")).requestId,
+    permission.requestId,
+  );
+  // The endpoint: owner only, known request, the argsHash of the pending call, decided once.
+  const decision = { requestId: permission.requestId, allow: true, argsHash: permission.argsHash };
+  assert.equal((await approve(dodi, askRunId, decision)).status, 403, "another account");
+  assert.equal(
+    (await approve(eva, askRunId, { ...decision, requestId: crypto.randomUUID() })).status,
     404,
   );
-  assert.deepEqual(await data(await approve(ana, { requestId: "req-1", allow: false }), 200), {
-    ok: true,
-  });
-  assert.equal((await approve(ana, { requestId: "req-1", allow: true })).status, 409);
-  const decided = await db
-    .prepare('SELECT "decision", "reason" FROM ai_approval WHERE "runId"=? AND "requestId"=?')
-    .bind(runId, "req-1")
-    .first();
-  assert.deepEqual({ ...decided }, { decision: "deny", reason: "user" });
+  assert.equal((await approve(eva, crypto.randomUUID(), decision)).status, 404);
+  assert.equal(
+    (await approve(eva, askRunId, { requestId: permission.requestId })).status,
+    400,
+    "allow is required",
+  );
+  assert.equal(
+    (await approve(eva, askRunId, { requestId: permission.requestId, allow: true })).status,
+    400,
+    "approving needs the argsHash",
+  );
+  const mismatch = await approve(eva, askRunId, { ...decision, argsHash: "0".repeat(64) });
+  assert.equal(mismatch.status, 409, "the hash of other arguments is refused");
+  assert.match(await mismatch.text(), /do not match/);
+  assert.deepEqual(await data(await approve(eva, askRunId, decision), 200), { ok: true });
+  assert.equal((await approve(eva, askRunId, decision)).status, 409, "a replay is refused");
+  assert.equal(
+    (await approve(eva, askRunId, { ...decision, allow: false })).status,
+    409,
+    "decided once",
+  );
+  const askEvents = await ask.all();
+  assertSequence(askEvents, askRunId, "chat-ask");
+  assert.deepEqual(await askAgain.all(), askEvents, "both streams carry the same events");
+  const askResolved = askEvents.find((e) => e.type === "permission-resolved");
+  assert.deepEqual(
+    { requestId: askResolved.requestId, allow: askResolved.allow, reason: askResolved.reason },
+    { requestId: permission.requestId, allow: true, reason: "user" },
+  );
+  const askResult = askEvents.find((e) => e.type === "tool-result");
+  assert.equal(askResult.isError, false, askResult.output);
+  assert.ok(askResult.seq > askResolved.seq);
+  assert.deepEqual(statuses(askEvents), ["running", "awaiting-approval", "tool", "running"]);
+  assert.equal(askEvents.at(-1).code, "ok");
+  assert.equal(fake.requests.length, modelCalls + 1, "one more model call, after the tool result");
+  const approvedDoc = await roomDoc(evaRoom.id, eva);
+  validateDocument(structuredClone(approvedDoc));
+  assert.deepEqual(labels(approvedDoc), ["Approved card"]);
+  assert.equal((await approvalRow(askRunId, permission.requestId)).decision, "allow");
+  // At most once: re-POST and reconnect after the run replay the log; nothing is applied again.
+  assert.deepEqual(
+    await sseReader(
+      await request("/api/ai/runs", { method: "POST", token: eva, body: askBody }),
+    ).all(),
+    askEvents,
+  );
+  assert.deepEqual(
+    await sseReader(
+      await request(`/api/ai/runs/${askRunId}/events?after=${permission.seq}`, { token: eva }),
+    ).all(),
+    askEvents.filter((e) => e.seq > permission.seq),
+  );
+  assert.equal(fake.requests.length, modelCalls + 1, "replays call no model");
+  assert.deepEqual(labels(await roomDoc(evaRoom.id, eva)), ["Approved card"]);
+  const recordedRows = await db
+    .prepare('SELECT "toolCallId","isError" FROM ai_tool_result WHERE "runId"=?')
+    .bind(askRunId)
+    .all();
+  assert.deepEqual(
+    recordedRows.results.map((row) => ({ ...row })),
+    [{ toolCallId: askCall.toolCallId, isError: 0 }],
+  );
+  // An undecided request of a run that has ended cannot be decided any more.
+  await db
+    .prepare(
+      'INSERT INTO ai_approval ("runId","requestId","accountId","toolCallId","toolName","argsHash","createdAt") VALUES (?,?,?,?,?,?,?)',
+    )
+    .bind(askRunId, "late-request", evaMe.account.id, "late-call", "update_elements", "h", 1)
+    .run();
+  const ended = await approve(eva, askRunId, { requestId: "late-request", allow: false });
+  assert.equal(ended.status, 409);
+  assert.match(await ended.text(), /run has ended/);
+
+  // Ask → deny: not applied, and the model gets the denial as the tool result.
+  const deny = sseReader(
+    await startRun(eva, {
+      chatId: "chat-deny",
+      roomId: evaRoom.id,
+      prompt: "[scenario:write] [label:Denied card]",
+    }),
+  );
+  const denyRequest = await deny.next((e) => e.type === "permission-request");
+  const denyRunId = deny.events[0].id;
+  assert.deepEqual(
+    await data(
+      await approve(eva, denyRunId, { requestId: denyRequest.requestId, allow: false }),
+      200,
+    ),
+    { ok: true },
+  );
+  const denyEvents = await deny.all();
+  const denyResolved = denyEvents.find((e) => e.type === "permission-resolved");
+  assert.deepEqual([denyResolved.allow, denyResolved.reason], [false, "user"]);
+  const denyResult = denyEvents.find((e) => e.type === "tool-result");
+  assert.equal(denyResult.isError, true);
+  assert.match(denyResult.output, /denied by user/);
+  assert.equal(denyEvents.at(-1).code, "ok");
+  const sawDenial = modelRequestsFor("[label:Denied card]").at(-1);
+  assert.match(toolMessages(sawDenial)[0].content, /denied by user/);
+  assert.deepEqual(labels(await roomDoc(evaRoom.id, eva)), ["Approved card"]);
+  assert.deepEqual(
+    (({ decision, reason }) => ({ decision, reason }))(
+      await approvalRow(denyRunId, denyRequest.requestId),
+    ),
+    { decision: "deny", reason: "user" },
+  );
+
+  // Cancel while a write waits: the request is denied ("cancelled") and the run stops.
+  const waiting = sseReader(
+    await startRun(eva, {
+      chatId: "chat-cancel-ask",
+      roomId: evaRoom.id,
+      prompt: "[scenario:write] [label:Cancelled card]",
+    }),
+  );
+  const waitingRequest = await waiting.next((e) => e.type === "permission-request");
+  const waitingRunId = waiting.events[0].id;
+  await data(
+    await request(`/api/ai/runs/${waitingRunId}/cancel`, { method: "POST", token: eva }),
+    200,
+  );
+  const waitingEvents = await waiting.all();
+  const waitingResolved = waitingEvents.find((e) => e.type === "permission-resolved");
+  assert.deepEqual(
+    [waitingResolved.requestId, waitingResolved.allow, waitingResolved.reason],
+    [waitingRequest.requestId, false, "cancelled"],
+  );
+  assert.deepEqual(
+    [waitingEvents.at(-1).type, waitingEvents.at(-1).code, waitingEvents.at(-1).stopped],
+    ["done", "cancelled", true],
+  );
+  assertSequence(waitingEvents, waitingRunId, "chat-cancel-ask");
+  assert.equal((await approvalRow(waitingRunId, waitingRequest.requestId)).reason, "cancelled");
+  assert.equal(
+    (
+      await approve(eva, waitingRunId, {
+        requestId: waitingRequest.requestId,
+        allow: true,
+        argsHash: waitingRequest.argsHash,
+      })
+    ).status,
+    409,
+  );
+  assert.deepEqual(labels(await roomDoc(evaRoom.id, eva)), ["Approved card"]);
+
+  // A repeated tool call id within a run is applied once; the repeat gets the recorded result.
+  const twice = await sseReader(
+    await startRun(eva, {
+      chatId: "chat-dup",
+      roomId: evaRoom.id,
+      prompt: "[scenario:dup] [label:Once card]",
+      access: "edit",
+    }),
+  ).all();
+  const twiceResults = twice.filter((e) => e.type === "tool-result");
+  assert.equal(twiceResults.length, 2);
+  assert.ok(twiceResults.every((e) => e.toolCallId === "dup_call" && !e.isError));
+  assert.equal(twiceResults[1].output, twiceResults[0].output);
+  assert.ok(!twice.some((e) => e.type === "permission-request"));
+  assert.deepEqual(labels(await roomDoc(evaRoom.id, eva)), ["Approved card", "Once card"]);
+
+  // Plan first: write tools are offered but refused; nothing is applied, even with edit access.
+  const planned = await sseReader(
+    await startRun(eva, {
+      chatId: "chat-plan",
+      roomId: evaRoom.id,
+      prompt: "[scenario:write] [label:Planned card]",
+      access: "edit",
+      plan: true,
+    }),
+  ).all();
+  const planResult = planned.find((e) => e.type === "tool-result");
+  assert.equal(planResult.isError, true);
+  assert.match(planResult.output, /^Plan first: this run only plans/);
+  assert.ok(!planned.some((e) => e.type === "permission-request"));
+  assert.equal(planned.at(-1).code, "ok");
+  const planRequest = modelRequestsFor("[label:Planned card]")[0];
+  assert.match(systemOf(planRequest), /Plan before editing/);
+  assert.ok(planRequest.tools.some((t) => t.function.name === "create_artboard"));
+  assert.deepEqual(labels(await roomDoc(evaRoom.id, eva)), ["Approved card", "Once card"]);
+  assert.equal(
+    (await startRun(eva, { chatId: "c-p", roomId: evaRoom.id, prompt: "x", plan: "yes" })).status,
+    400,
+  );
+  // A helper run is read-only: no write tool is offered.
+  const helper = await sseReader(
+    await startRun(eva, {
+      chatId: "chat-helper",
+      roomId: evaRoom.id,
+      prompt: "[scenario:hello] [label:helper]",
+      helper: true,
+    }),
+  ).all();
+  assert.equal(helper.at(-1).code, "ok");
+  const helperTools = modelRequestsFor("[label:helper]")[0].tools.map((t) => t.function.name);
+  assert.ok(helperTools.includes("get_element_tree"));
+  assert.ok(!helperTools.includes("create_artboard") && !helperTools.includes("update_elements"));
+
+  // Revocation: Dodi (editor) is downgraded to viewer while his write waits; the approved call is
+  // refused immediately before it runs and the run carries on.
+  await data(
+    await request(`/api/rooms/${room.id}/members`, {
+      method: "POST",
+      token: ana,
+      body: { email: "dodi@example.test", role: "editor" },
+    }),
+    200,
+  );
+  const revoked = sseReader(
+    await startRun(dodi, {
+      chatId: "chat-revoke",
+      roomId: room.id,
+      prompt: "[scenario:write] [label:Revoked card]",
+    }),
+  );
+  const revokedRequest = await revoked.next((e) => e.type === "permission-request");
+  await data(
+    await request(`/api/rooms/${room.id}/members`, {
+      method: "POST",
+      token: ana,
+      body: { email: "dodi@example.test", role: "viewer" },
+    }),
+    200,
+  );
+  await data(
+    await approve(dodi, revoked.events[0].id, {
+      requestId: revokedRequest.requestId,
+      allow: true,
+      argsHash: revokedRequest.argsHash,
+    }),
+    200,
+  );
+  const revokedEvents = await revoked.all();
+  const revokedResult = revokedEvents.find((e) => e.type === "tool-result");
+  assert.equal(revokedResult.isError, true);
+  assert.match(revokedResult.output, /\(viewer\) cannot edit/);
+  assert.equal(revokedEvents.at(-1).code, "ok", "the run continues after the refusal");
+  // Removed from the room while waiting: refused, and the run ends with an error.
+  const dodiMe = await data(await request("/api/me", { token: dodi }), 200);
+  await data(
+    await request(`/api/rooms/${room.id}/members`, {
+      method: "POST",
+      token: ana,
+      body: { email: "dodi@example.test", role: "editor" },
+    }),
+    200,
+  );
+  const removed = sseReader(
+    await startRun(dodi, {
+      chatId: "chat-removed",
+      roomId: room.id,
+      prompt: "[scenario:write] [label:Removed card]",
+    }),
+  );
+  const removedRequest = await removed.next((e) => e.type === "permission-request");
+  await data(
+    await request(`/api/rooms/${room.id}/members/${dodiMe.account.id}`, {
+      method: "DELETE",
+      token: ana,
+    }),
+    200,
+  );
+  await data(
+    await approve(dodi, removed.events[0].id, {
+      requestId: removedRequest.requestId,
+      allow: true,
+      argsHash: removedRequest.argsHash,
+    }),
+    200,
+  );
+  const removedEvents = await removed.all();
+  const removedResult = removedEvents.find((e) => e.type === "tool-result");
+  assert.equal(removedResult.isError, true);
+  assert.match(removedResult.output, /no longer have access/);
+  assert.deepEqual(
+    removedEvents.slice(-2).map((e) => [e.type, e.code ?? e.message]),
+    [
+      ["error", "You no longer have access to this room."],
+      ["done", "error"],
+    ],
+  );
+  const afterRevocation = labels(await roomDoc(room.id, ana));
+  assert.ok(!afterRevocation.includes("Revoked card") && !afterRevocation.includes("Removed card"));
+
+  // Edit access: no prompt; an open room socket receives the ops and the document stays valid.
+  const editor = await connectRoom(room.id, ana);
+  const live = await sseReader(
+    await startRun(ana, {
+      chatId: "chat-edit",
+      roomId: room.id,
+      prompt: "[scenario:write] [label:Live card]",
+      access: "edit",
+    }),
+  ).all();
+  assert.ok(!live.some((e) => e.type.startsWith("permission-")));
+  assert.equal(live.find((e) => e.type === "tool-result").isError, false);
+  assert.deepEqual(statuses(live), ["running", "tool", "running"]);
+  const ops = await editor.next(
+    (m) => m.type === "ops" && JSON.stringify(m.ops).includes("Live card"),
+  );
+  assert.match(ops.client, /^mcp-/);
+  editor.socket.close();
+  const liveDoc = await roomDoc(room.id, ana);
+  validateDocument(structuredClone(liveDoc));
+  assert.deepEqual(labels(liveDoc), ["Hero", "Live card"]);
+
+  // The same write through hosted MCP and through the AI runtime gives the same document.
+  const twinA = await data(
+    await request("/api/rooms", { method: "POST", token: ana, body: { document: blank("Twin") } }),
+    201,
+  );
+  const twinB = await data(
+    await request("/api/rooms", { method: "POST", token: ana, body: { document: blank("Twin") } }),
+    201,
+  );
+  const viaMcp = await data(
+    await request("/api/mcp", {
+      method: "POST",
+      token: ana,
+      body: {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "create_artboard",
+          arguments: { document: twinA.id, code: card("Twin card") },
+        },
+      },
+    }),
+    200,
+  );
+  assert.ok(!viaMcp.result.isError, JSON.stringify(viaMcp.result));
+  const viaAi = await sseReader(
+    await startRun(ana, {
+      chatId: "chat-twin",
+      roomId: twinB.id,
+      prompt: "[scenario:write] [label:Twin card]",
+      access: "full",
+    }),
+  ).all();
+  assert.equal(viaAi.find((e) => e.type === "tool-result").isError, false);
+  const docA = await roomDoc(twinA.id, ana);
+  const docB = await roomDoc(twinB.id, ana);
+  validateDocument(structuredClone(docB));
+  assert.deepEqual(labels(docB), ["Twin card"]);
+  assert.deepEqual(canonicalIds(docB), canonicalIds(docA), "MCP and AI writes are identical");
 
   // A run whose instance stopped renewing its lease is closed as an error by the next reader.
   const me = await data(await request("/api/me", { token: ana }), 200);
@@ -575,6 +1046,82 @@ try {
     .bind(orphan)
     .first();
   assert.deepEqual({ ...status }, { status: "done", code: "error" });
+  // An orphan that was waiting for an approval: the request is denied and announced first.
+  const waitingOrphan = crypto.randomUUID();
+  await db
+    .prepare(
+      'INSERT INTO ai_run ("id","accountId","roomId","chatId","model","access","status","idempotencyKey","leaseUntil","createdAt","updatedAt") VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+    )
+    .bind(
+      waitingOrphan,
+      me.account.id,
+      room.id,
+      "chat-orphan-2",
+      "fake/model-a",
+      "ask",
+      "running",
+      "orphan-key-2",
+      past,
+      past,
+      past,
+    )
+    .run();
+  await db
+    .prepare(
+      'INSERT INTO ai_approval ("runId","requestId","accountId","toolCallId","toolName","argsHash","createdAt") VALUES (?,?,?,?,?,?,?)',
+    )
+    .bind(
+      waitingOrphan,
+      "orphan-request",
+      me.account.id,
+      "orphan-call",
+      "create_artboard",
+      "h",
+      past,
+    )
+    .run();
+  const closedWaiting = await sseReader(
+    await request(`/api/ai/runs/${waitingOrphan}/events`, { token: ana }),
+  ).all();
+  assert.deepEqual(types(closedWaiting), ["permission-resolved", "error", "done"]);
+  assert.deepEqual(
+    [closedWaiting[0].requestId, closedWaiting[0].allow, closedWaiting[0].reason],
+    ["orphan-request", false, "cancelled"],
+  );
+  assert.equal((await approvalRow(waitingOrphan, "orphan-request")).reason, "cancelled");
+
+  // An unanswered approval is denied after VERYNIZE_AI_APPROVAL_TIMEOUT_MS (10 minutes by default).
+  config.env = {
+    ...config.env,
+    VERYNIZE_AI_APPROVAL_TIMEOUT_MS: { type: "text", value: "1500" },
+  };
+  await mf.setOptions(options);
+  db = await mf.getD1Database("DB"); // stubs from before setOptions are stale
+  const late = sseReader(
+    await startRun(eva, {
+      chatId: "chat-timeout",
+      roomId: evaRoom.id,
+      prompt: "[scenario:write] [label:Late card]",
+    }),
+  );
+  const lateRequest = await late.next((e) => e.type === "permission-request");
+  const lateEvents = await late.all();
+  const lateResolved = lateEvents.find((e) => e.type === "permission-resolved");
+  assert.deepEqual(
+    [lateResolved.requestId, lateResolved.allow, lateResolved.reason],
+    [lateRequest.requestId, false, "timeout"],
+  );
+  const lateResult = lateEvents.find((e) => e.type === "tool-result");
+  assert.equal(lateResult.isError, true);
+  assert.match(lateResult.output, /timed out after 2 s; the call was not run/);
+  assert.equal(lateEvents.at(-1).code, "ok");
+  assert.deepEqual(
+    (({ decision, reason }) => ({ decision, reason }))(
+      await approvalRow(lateEvents[0].id, lateRequest.requestId),
+    ),
+    { decision: "deny", reason: "timeout" },
+  );
+  assert.ok(!labels(await roomDoc(evaRoom.id, eva)).includes("Late card"));
 
   // Rate limit per account (AI_LIMIT, 30 run requests a minute in the test configuration).
   let limitedAt = 0;

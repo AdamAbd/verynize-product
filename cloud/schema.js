@@ -255,6 +255,7 @@ export const aiApproval = sqliteTable(
   {
     runId: text("runId").notNull(),
     requestId: text("requestId").notNull(),
+    accountId: text("accountId").notNull().default(""),
     toolCallId: text("toolCallId").notNull(),
     toolName: text("toolName").notNull(),
     argsHash: text("argsHash").notNull(),

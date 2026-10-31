@@ -4,10 +4,11 @@
 // call budgets and cancellation. Events use the desktop runtime's vocabulary and are stored before
 // they are sent.
 //
-// Write tools and approvals (step 4 of the audit) plug in through `policy` (createRunPolicy):
-// `offers(definition)` chooses the tools the model sees, `authorize(call)` runs before every tool
-// call (role re-check; where an `ask` approval would wait) and `execute(call, run)` runs one call
-// (where a recorded result would be returned instead of reapplying a write).
+// Write tools and approvals go through `policy` (createRunPolicy): `offers(definition, name)`
+// chooses the tools the model sees, `authorize(call)` runs before every tool call (role, plan and
+// helper rules), `recorded(call)` returns a write's stored result instead of reapplying it,
+// `approve(call)` waits for an `ask` approval once the arguments are checked, and
+// `execute(call, run)` re-checks the role and runs the call at most once.
 import { chat, maxIterations, toolDefinition } from "@tanstack/ai";
 import { createOpenRouterText } from "@tanstack/ai-openrouter";
 import { z } from "zod";
@@ -19,7 +20,21 @@ import {
   hostedToolDefinitions,
   isReadOnlyTool,
 } from "./design-backend.js";
-import { appendEvent, finishRun, renewLease, cancelRequested } from "./ai-store.js";
+import {
+  PENDING_RESULT,
+  appendEvent,
+  approvalForCall,
+  cancelRequested,
+  completeToolResult,
+  createApproval,
+  decideApproval,
+  denyPending,
+  finishRun,
+  getApproval,
+  getToolResult,
+  recordToolResult,
+  renewLease,
+} from "./ai-store.js";
 
 export const DESIGN_STYLE = /^[a-z0-9-]{1,40}$/;
 const TICK_MS = 1000;
@@ -59,43 +74,262 @@ export function createEventLog(env, run, { startSeq = 0, onEvent = () => {} } = 
   };
 }
 
+const NO_ACCESS = "You no longer have access to this room.";
+const cannotEdit = (role) =>
+  `Your role in this room (${role}) cannot edit; ask an owner for editor access.`;
+const PLAN_REFUSAL =
+  "Plan first: this run only plans. Write tools are refused until the user approves the plan; reply with a short numbered plan of the changes instead (the user starts a new run to apply it).";
+const HELPER_REFUSAL = "This is a read-only helper run: it cannot change the room.";
+const INTERRUPTED =
+  "This tool call was started earlier but its result was not recorded (the server stopped). It is not applied again: read the room to see whether it took effect before retrying with a new call.";
+const NOT_APPROVED = "This write was not approved; it was not run.";
+/** Tools never offered to a run: they reach outside the run's one room. */
+export const ROOM_ESCAPING = new Set(["create_document"]);
+export const APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
+const APPROVAL_POLL_MS = 400;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** JSON with object keys sorted at every level (undefined members dropped): a stable form of args. */
+export function canonicalJson(value) {
+  if (Array.isArray(value))
+    return `[${value.map((item) => canonicalJson(item ?? null)).join(",")}]`;
+  if (value && typeof value === "object")
+    return `{${Object.keys(value)
+      .filter((key) => value[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  return JSON.stringify(value ?? null);
+}
+
+/** SHA-256 (hex) of a tool call's name and canonical arguments: what an approval is bound to. */
+export async function argsHash(name, args) {
+  const bytes = new TextEncoder().encode(canonicalJson({ tool: name, args: args ?? {} }));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** A short label for an approval card. */
+export function toolTitle(name, args = {}) {
+  const ids = Array.isArray(args?.ids) ? args.ids.length : 0;
+  const label = /data-node-label="([^"]{1,60})"/.exec(String(args?.code || ""))?.[1];
+  const detail = label ? ` "${label}"` : ids ? ` (${ids} element${ids === 1 ? "" : "s"})` : "";
+  return `Canvas · ${name}${detail}`;
+}
+
+const recordedResult = (row) =>
+  row.output === PENDING_RESULT
+    ? { output: INTERRUPTED, isError: true }
+    : { output: row.output, isError: !!row.isError };
+
+async function runTool(backend, name, args) {
+  const result = await callHostedTool(backend, name, args);
+  if (!result) return { output: `Unknown tool: ${name}`, isError: true };
+  return { output: toolOutputText(result), isError: !!result.isError };
+}
+
 /**
- * The run's tool policy. Phase 1 (this module): read-only tools only. Every call re-checks the
- * caller's role in the room: without access the run stops; write tools (when offered) need editor.
+ * The run's tool policy (docs/ai-runtime.md, "Policy"). Read tools run freely. Write tools come
+ * from the same hosted table; each one needs editor in the room (checked before the call and again
+ * immediately before it runs), an approval under `access: "ask"` (stored in ai_approval, decided
+ * through POST /approvals from any instance, polled here) and runs at most once per
+ * (runId, toolCallId) (claimed in ai_tool_result before it runs). `plan` runs refuse writes;
+ * `helper` runs are read-only (no write tool offered).
+ * @param {object} options
+ * @param {object} options.env bindings (DB)
+ * @param {object} options.backend createRoomBackend(..., {roomId})
+ * @param {object} options.run the ai_run row ({id, accountId, access})
+ * @param {(type: string, fields?: object) => Promise<void>} [options.emit] the run's event log
+ * @param {(status: string) => unknown} [options.setStatus]
+ * @param {() => boolean | Promise<boolean>} [options.isCancelled]
+ * @param {boolean} [options.plan]
+ * @param {boolean} [options.helper]
+ * @param {number} [options.approvalTimeoutMs]
+ * @param {number} [options.pollMs]
  */
-export function createRunPolicy({ backend }) {
+export function createRunPolicy({
+  env,
+  backend,
+  run,
+  emit = async () => {},
+  setStatus = async () => {},
+  isCancelled = () => false,
+  plan = false,
+  helper = false,
+  approvalTimeoutMs = APPROVAL_TIMEOUT_MS,
+  pollMs = APPROVAL_POLL_MS,
+}) {
+  const access = run?.access || "ask";
+  const isWrite = (definition) => !!definition && !isReadOnlyTool(definition);
+  const writeRefusal = helper ? HELPER_REFUSAL : plan ? PLAN_REFUSAL : null;
+  const resolved = (requestId, allow, reason) =>
+    emit("permission-resolved", { requestId, allow, reason });
+
   return {
-    offers: (definition) => isReadOnlyTool(definition),
-    /** @returns {Promise<{allow: true} | {allow: false, message: string, stop?: boolean}>} */
+    access,
+    plan,
+    /** Whether write tools are offered at all (a plan run offers them and refuses each call). */
+    writes: !helper,
+    offers: (definition, name) =>
+      !ROOM_ESCAPING.has(name) && (isReadOnlyTool(definition) || !helper),
+
+    /**
+     * Before a tool call (arguments not checked yet): the room role and the plan/helper rules.
+     * @returns {Promise<{allow: true} | {allow: false, message: string, stop?: boolean}>}
+     */
     async authorize({ definition }) {
       const { role } = await backend.role();
-      if (!role)
-        return { allow: false, stop: true, message: "You no longer have access to this room." };
-      if (!isReadOnlyTool(definition) && !atLeast(role, "editor"))
-        return {
-          allow: false,
-          message: `Your role in this room (${role}) cannot edit; ask an owner for editor access.`,
-        };
+      if (!role) return { allow: false, stop: true, message: NO_ACCESS };
+      if (!isWrite(definition)) return { allow: true };
+      if (writeRefusal) return { allow: false, message: writeRefusal };
+      if (!atLeast(role, "editor")) return { allow: false, message: cannotEdit(role) };
       return { allow: true };
     },
-    /** @returns {Promise<{output: string, isError: boolean}>} */
-    async execute({ name, args }) {
-      const result = await callHostedTool(backend, name, args);
-      if (!result) return { output: `Unknown tool: ${name}`, isError: true };
-      return { output: toolOutputText(result), isError: !!result.isError };
+
+    /** The recorded result of a write that already ran in this run (at most once), or null. */
+    async recorded({ toolCallId, definition }) {
+      if (!isWrite(definition) || !toolCallId) return null;
+      const row = await getToolResult(env, run.id, toolCallId);
+      return row ? recordedResult(row) : null;
+    },
+
+    /**
+     * After the arguments are checked, before the call runs: under `access: "ask"` a write waits
+     * for the user's decision (permission-request → ai_approval → permission-resolved).
+     * @returns {Promise<{allow: true} | {allow: false, message?: string, cancelled?: boolean}>}
+     */
+    async approve({ name, toolCallId, args, definition }) {
+      if (!isWrite(definition) || access !== "ask") return { allow: true };
+      const hash = await argsHash(name, args);
+      let approval = await approvalForCall(env, run.id, toolCallId);
+      let requestId = approval?.requestId;
+      if (!approval) {
+        requestId = crypto.randomUUID();
+        try {
+          await createApproval(env, {
+            runId: run.id,
+            requestId,
+            accountId: run.accountId,
+            toolCallId,
+            toolName: name,
+            argsHash: hash,
+          });
+        } catch (error) {
+          approval = await approvalForCall(env, run.id, toolCallId);
+          if (!approval) throw error;
+          requestId = approval.requestId;
+        }
+        if (!approval)
+          await emit("permission-request", {
+            requestId,
+            toolCallId,
+            name,
+            input: args ?? {},
+            title: toolTitle(name, args),
+            argsHash: hash,
+          });
+      }
+      // A tool call id the model repeated is bound to the first call's arguments.
+      if (approval && approval.argsHash !== hash)
+        return {
+          allow: false,
+          message: "This tool call id was already used with other arguments; the call was not run.",
+        };
+      let decided = approval?.decision ? approval : null;
+      const announce = !decided;
+      if (!decided) {
+        await setStatus("awaiting-approval");
+        const deadline = Date.now() + approvalTimeoutMs;
+        for (;;) {
+          const row = await getApproval(env, run.id, requestId);
+          if (row?.decision) {
+            decided = row;
+            break;
+          }
+          if (await isCancelled()) await decideApproval(env, run.id, requestId, false, "cancelled");
+          else if (Date.now() >= deadline)
+            await decideApproval(env, run.id, requestId, false, "timeout");
+          else await sleep(pollMs);
+        }
+      }
+      const allow = decided.decision === "allow" && decided.argsHash === hash;
+      if (announce) await resolved(requestId, allow, decided.reason || "user");
+      if (allow) return { allow: true };
+      if (decided.reason === "cancelled") return { allow: false, cancelled: true };
+      if (decided.reason === "timeout")
+        return {
+          allow: false,
+          message: `The approval request timed out after ${Math.round(approvalTimeoutMs / 1000)} s; the call was not run (denied).`,
+        };
+      return {
+        allow: false,
+        message:
+          "The user denied this tool call (denied by user); it was not run. Do not retry it unless the user asks.",
+      };
+    },
+
+    /**
+     * Run one call. A write re-checks the plan rules, its approval and the room role immediately
+     * before it runs, claims (runId, toolCallId) and records its result; a claimed call returns the
+     * recorded result instead of running again.
+     * @returns {Promise<{output: string, isError: boolean, stop?: boolean}>}
+     */
+    async execute({ name, args, toolCallId, definition }) {
+      if (!isWrite(definition)) return runTool(backend, name, args);
+      if (writeRefusal) return { output: writeRefusal, isError: true };
+      const prior = await getToolResult(env, run.id, toolCallId);
+      if (prior) return recordedResult(prior);
+      if (access === "ask") {
+        const approval = await approvalForCall(env, run.id, toolCallId);
+        if (
+          approval?.decision !== "allow" ||
+          approval.accountId !== run.accountId ||
+          approval.argsHash !== (await argsHash(name, args))
+        )
+          return { output: NOT_APPROVED, isError: true };
+      }
+      const { role } = await backend.role();
+      if (!role) return { output: NO_ACCESS, isError: true, stop: true };
+      if (!atLeast(role, "editor")) return { output: cannotEdit(role), isError: true };
+      const claimed = await recordToolResult(env, {
+        runId: run.id,
+        toolCallId,
+        toolName: name,
+        output: PENDING_RESULT,
+        isError: true,
+      });
+      if (!claimed) return recordedResult(await getToolResult(env, run.id, toolCallId));
+      let outcome;
+      try {
+        outcome = await runTool(backend, name, args);
+      } catch (error) {
+        outcome = { output: error?.message || String(error), isError: true };
+      }
+      await completeToolResult(env, run.id, toolCallId, outcome);
+      return outcome;
+    },
+
+    /** Deny every undecided approval of the run (it is ending) and announce each. */
+    async denyPending(reason = "cancelled") {
+      for (const requestId of await denyPending(env, run.id, reason))
+        await resolved(requestId, false, reason);
     },
   };
 }
 
 /** The system prompt: design persona, runtime facts, room context, design style, tool guide. */
-export function buildSystemPrompt({ room, role, designStyle, writes }) {
+export function buildSystemPrompt({ room, role, designStyle, writes, access = "ask", plan }) {
   const lines = [
     designPersona,
-    `You are running in Verynize's model API chat. Canvas work goes through the Verynize design tools against one shared cloud room: "${room.title || "Untitled"}" (room id ${room.id}; your role: ${role}). Omit "document" in tool calls or pass that id; other rooms are not reachable from this chat. Collaborators with the room open see changes live.`,
+    `You are running in Verynize's model API chat. Canvas work goes through the Verynize design tools against one shared cloud room: "${room.title || "Untitled"}" (room id ${room.id}; your role: ${role}). Omit "document" in tool calls or pass that id; other rooms are not reachable from this chat and you cannot create rooms. Collaborators with the room open see changes live.`,
     writes
-      ? "Write tools change the room for every collaborator; each call may need the user's approval."
-      : "This chat can read the room but not change it: only read tools are available. When the user asks for changes, explain what you would change and say that editing from this chat is not available yet. There is no screenshot tool; inspect elements with get_element_tree and get_element_code.",
+      ? `Write tools change the room for every collaborator. ${access === "ask" ? "Each write call waits for the user's approval; a denied call is not run, so do not repeat it unless the user asks." : "The user allowed writes without approval for this chat."} There is no screenshot tool; inspect elements with get_element_tree and get_element_code.`
+      : "This chat can read the room but not change it: only read tools are available. When the user asks for changes, explain what you would change. There is no screenshot tool; inspect elements with get_element_tree and get_element_code.",
   ];
+  if (plan)
+    lines.push(
+      "Plan before editing (set by the user for this run): inspect what you need with read tools and reply with a short numbered plan of the changes you intend to make. Do not call write tools: they are refused in this run. The user approves the plan by starting a new run.",
+    );
   if (designStyle && DESIGN_STYLE.test(designStyle))
     lines.push(
       `Design style chosen by the user: ${designStyle}. Load it with get_design_guidelines {style: "${designStyle}"} before designing, and follow it unless the user asks otherwise.`,
@@ -118,7 +352,10 @@ export function buildSystemPrompt({ room, role, designStyle, writes }) {
  * @param {{maxTurns: number, maxToolCalls: number}} options.limits
  * @param {{apiKey: string, baseUrl?: string, origin?: string}} options.provider
  * @param {ReturnType<typeof createEventLog>} options.log
- * @param {ReturnType<typeof createRunPolicy>} [options.policy]
+ * @param {boolean} [options.plan] refuse write calls (plan first)
+ * @param {boolean} [options.helper] read-only helper run (no write tools)
+ * @param {number} [options.approvalTimeoutMs] how long an `ask` write waits for its decision
+ * @param {ReturnType<typeof createRunPolicy>} [options.policy] replaces the default policy
  */
 export async function executeRun(options) {
   const {
@@ -133,8 +370,10 @@ export async function executeRun(options) {
     limits,
     provider,
     log,
+    plan = false,
+    helper = false,
+    approvalTimeoutMs,
   } = options;
-  const policy = options.policy || createRunPolicy({ backend });
   const emit = log.emit;
   const abortController = new AbortController();
   const state = {
@@ -161,6 +400,19 @@ export async function executeRun(options) {
     state.cancelled = true;
     abortController.abort("cancelled");
   };
+  const policy =
+    options.policy ||
+    createRunPolicy({
+      env,
+      backend,
+      run,
+      emit,
+      setStatus,
+      isCancelled: async () => state.cancelled || (await cancelRequested(env, run.id)),
+      plan,
+      helper,
+      approvalTimeoutMs,
+    });
 
   // Cancel flag and lease, polled from the database so a cancel from any instance is seen.
   let lastRenew = Date.now();
@@ -187,8 +439,8 @@ export async function executeRun(options) {
     await emit("session", { sessionId: run.id, agent: "openrouter", model: run.model });
     await setStatus("running");
 
-    const definitions = Object.entries(hostedToolDefinitions()).filter(([, definition]) =>
-      policy.offers(definition),
+    const definitions = Object.entries(hostedToolDefinitions()).filter(([name, definition]) =>
+      policy.offers(definition, name),
     );
     const tools = definitions.map(([name, definition]) =>
       toolDefinition({
@@ -200,11 +452,13 @@ export async function executeRun(options) {
           state.errors.set(context.toolCallId, true);
           return "Cancelled.";
         }
-        const { output, isError } = await policy.execute(
+        const { output, isError, stop } = await policy.execute(
           { name, args, toolCallId: context?.toolCallId, definition },
           run,
         );
         if (isError) state.errors.set(context?.toolCallId, true);
+        // Access to the room was lost: the result goes back, then the run ends.
+        if (stop) state.error ||= output;
         return output;
       }),
     );
@@ -240,6 +494,34 @@ export async function executeRun(options) {
           }
           return { type: "skip", result: verdict.message };
         }
+        // A write that already ran in this run (repeated tool call id): its recorded result.
+        const recorded = await policy.recorded?.({
+          toolCallId: call.toolCallId,
+          definition: byName.get(call.toolName),
+        });
+        if (recorded) {
+          if (recorded.isError) state.errors.set(call.toolCallId, true);
+          return { type: "skip", result: recorded.output };
+        }
+      },
+      // Arguments checked: an `ask` write waits here for the user's decision.
+      async onGuardToolCall(_ctx, call) {
+        const verdict = (await policy.approve?.({
+          name: call.toolName,
+          toolCallId: call.toolCallId,
+          args: call.args,
+          definition: byName.get(call.toolName),
+        })) || { allow: true };
+        if (verdict.cancelled) {
+          cancel();
+          state.errors.set(call.toolCallId, true);
+          return { type: "abort", reason: "cancelled" };
+        }
+        if (!verdict.allow) {
+          state.errors.set(call.toolCallId, true);
+          await setStatus("running");
+          return { type: "skip", result: verdict.message };
+        }
         await setStatus("tool");
       },
       onAfterToolCall(_ctx, info) {
@@ -265,7 +547,16 @@ export async function executeRun(options) {
       }),
       threadId: run.chatId,
       runId: run.id,
-      systemPrompts: [buildSystemPrompt({ room, role, designStyle, writes: false })],
+      systemPrompts: [
+        buildSystemPrompt({
+          room,
+          role,
+          designStyle,
+          writes: policy.writes !== false,
+          access: policy.access,
+          plan: policy.plan,
+        }),
+      ],
       messages,
       tools,
       toolExecution: "sequential",
@@ -355,6 +646,13 @@ export async function executeRun(options) {
     }
   } finally {
     clearInterval(ticker);
+  }
+
+  // Approvals still waiting when the run ends are denied (and announced before done).
+  try {
+    await policy.denyPending?.("cancelled");
+  } catch (error) {
+    console.error("ai run could not deny pending approvals", run.id, error?.message);
   }
 
   try {
