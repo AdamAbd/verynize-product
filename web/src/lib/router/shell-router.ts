@@ -291,8 +291,14 @@ export function request(target: ShellRequest, { replace = false }: { replace?: b
   return true;
 }
 
-/** The current shell path (history, not the asynchronously rendered router state). */
-export const shellPath = () => history.location.pathname;
+/**
+ * Whether the page still shows the entry it was loaded on, at `path`, and that load was a fresh navigation (no
+ * history state: not a reload or Back/Forward).
+ */
+export const isLaunchEntry = (path: ViewPath) =>
+  !rawStartState?.__TSR_key &&
+  entryState().__TSR_key === launchKey &&
+  history.location.pathname === path;
 
 /* ---------- Route components: URL → shell ---------- */
 
@@ -387,6 +393,8 @@ const settingsSectionRoute = createRoute({
 });
 
 /* ---------- Startup ---------- */
+
+const launchKey = entryState().__TSR_key;
 
 // A reload while settings was closing (history.back() not landed yet) comes back closed, on the view underneath.
 // Chromium can drop the entry's state when a reload cancels the traversal, so a state-less entry on the same path
