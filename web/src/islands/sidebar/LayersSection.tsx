@@ -13,15 +13,9 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
-import { ChevronRight, Eye, EyeOff, ListChevronsDownUp, Lock, LockOpen, Pencil, Search, Type } from "lucide-react";
+import { ChevronRight, Eye, EyeOff, ListChevronsDownUp, Lock, Search, Type } from "lucide-react";
 import { design, useSelection } from "@/lib/bridge";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { LayerRowMenu, RowMenuRoot, RowMenuTrigger } from "../context-menu/RowMenus";
 import { cn } from "@/lib/utils";
 import { IconButton, InlineRename, SectionHeader } from "./parts";
 import { LayerTypeIcon } from "./icons";
@@ -133,8 +127,8 @@ const LayerRow = memo(function LayerRow({
   };
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
+    <RowMenuRoot>
+      <RowMenuTrigger asChild>
         <div
           role="treeitem"
           aria-level={depth + 1}
@@ -154,6 +148,10 @@ const LayerRow = memo(function LayerRow({
             if (!dragJustEnded()) select(node.id, e);
           }}
           onDoubleClick={() => onRename(node.id)}
+          onContextMenu={() => {
+            // Wonder CM7: the row menu acts on this layer; a multi-selection that contains it is kept.
+            if (!selected) design().setSelection([node.id]);
+          }}
           onKeyDown={onKeyDown}
         >
           <button
@@ -245,23 +243,9 @@ const LayerRow = memo(function LayerRow({
             </div>
           )}
         </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-44">
-        <ContextMenuItem onSelect={() => onRename(node.id)}>
-          <Pencil />
-          Rename
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => toggleFlag(node, "locked")}>
-          {node.locked ? <LockOpen /> : <Lock />}
-          {node.locked ? "Unlock" : "Lock"}
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => toggleFlag(node, "hidden")}>
-          {node.hidden ? <Eye /> : <EyeOff />}
-          {node.hidden ? "Show" : "Hide"}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+      </RowMenuTrigger>
+      <LayerRowMenu />
+    </RowMenuRoot>
   );
 });
 

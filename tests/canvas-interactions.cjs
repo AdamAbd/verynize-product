@@ -377,8 +377,9 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.evaluate(() => window.design.setSelection(['label']));
     const labelBox = await page.locator('#canvas [data-id=label]').boundingBox();
     await page.mouse.click(labelBox.x + 5, labelBox.y + 5, {button: 'right'});
-    assert.ok(await page.locator('#canvas-menu [data-command="transform.frame"]').isVisible(), 'context menu lists commands');
-    await page.locator('#canvas-menu [data-command="transform.frame"]').click();
+    await page.locator('#canvas-menu [data-command="menu.layout"]').hover();
+    await page.locator('[data-submenu="menu.layout"] [data-command="transform.frame"]').waitFor({timeout: 3000}); // context menu lists commands
+    await page.locator('[data-submenu="menu.layout"] [data-command="transform.frame"]').click();
     assert.equal((await node('label')).parentId !== null, true, 'context menu runs commands');
 
     // Documents and saved views stay compatible after reload.

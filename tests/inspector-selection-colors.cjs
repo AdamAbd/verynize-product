@@ -90,20 +90,20 @@ const shots = process.env.VERYNIZE_EVIDENCE_DIR;
     );
     const order = await sectionOrder();
     assert.equal(order.at(-1), "export-section", "Export is the last section: " + order);
-    // Scale ½× / 2× moved to the canvas context menu; Duplicate and Delete stay there and on their shortcuts.
-    await page.locator('#canvas [data-id="card"]').click({ button: "right" });
+    // Scale ½× / 2× (formerly in the Layer section) are commands; Wonder's context menu has no scale items.
+    const commandIds = await page.evaluate(() => window.design.commands().map((c) => c.id));
     for (const id of ["edit.duplicate", "edit.delete", "transform.scaleDown", "transform.scaleUp"])
-      assert.ok(await page.locator(`#canvas-menu [data-command="${id}"]`).isVisible(), id + " in context menu");
-    await page.locator('#canvas-menu [data-command="transform.scaleUp"]').click();
+      assert.ok(commandIds.includes(id), id + " is a command");
+    await page.evaluate(() => window.design.setSelection(["card"]));
+    await page.evaluate(() => window.design.runCommand("transform.scaleUp"));
     assert.deepEqual([(await node("card")).w, (await node("card")).h], [400, 240], "Scale 2×");
-    await page.locator('#canvas [data-id="card"]').click({ button: "right" });
-    await page.locator('#canvas-menu [data-command="transform.scaleDown"]').click();
+    await page.evaluate(() => window.design.runCommand("transform.scaleDown"));
     assert.deepEqual([(await node("card")).w, (await node("card")).h], [200, 120], "Scale ½×");
     await page.evaluate(() => window.design.runCommand("edit.duplicate"));
     assert.equal((await nodes()).length, 2, "Duplicate (⌘D) still works without the Layer section");
     await page.evaluate(() => window.design.runCommand("edit.delete"));
     assert.equal((await nodes()).length, 1, "Delete still works without the Layer section");
-    console.log("PASS no Layer section; scale, duplicate and delete reachable from the context menu");
+    console.log("PASS no Layer section; scale, duplicate and delete reachable as commands");
 
     // --- A9: Selection colors for a parent frame -------------------------------------------------------------
     await setup(
