@@ -19,6 +19,15 @@ export const VARIABLE_TYPES = ['dimension', 'number', 'fontFamily', 'fontWeight'
 // derived keys are written); a Dimension bound to line height is converted from pixels to a multiplier.
 export const BINDABLE = { radius: ['dimension', 'number'], gap: ['dimension', 'number'], padding: ['dimension', 'number'], strokeWidth: ['dimension', 'number'], fontSize: ['dimension', 'number'], letterSpacing: ['dimension', 'number'], lineHeight: ['number', 'dimension'], opacity: ['number'], fontFamily: ['fontFamily'], fontWeight: ['fontWeight'], w: ['dimension'], h: ['dimension'], minW: ['dimension'], maxW: ['dimension'], minH: ['dimension'], maxH: ['dimension'], paddingX: ['dimension'], paddingY: ['dimension'], radiusTopLeft: ['dimension'], radiusTopRight: ['dimension'], radiusBottomRight: ['dimension'], radiusBottomLeft: ['dimension'] };
 export const VARIABLE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,99}$/;
+// Room asset URLs (cloud/assets.js): https (http only on loopback), no credentials, exactly
+// /api/rooms/<uuid>/assets/<uuid> with an optional ?sig=<64 hex>. Mirrors roomAssetUrl() in web/app.js.
+const ROOM_ASSET_PATH = /^\/api\/rooms\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export function isRoomAssetUrl(value) {
+  if (typeof value !== 'string' || value.length > 512) return false;
+  let url; try { url = new URL(value); } catch { return false; }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  return url.href === value && (url.protocol === 'https:' || (url.protocol === 'http:' && loopback)) && !url.username && !url.password && !url.hash && ROOM_ASSET_PATH.test(url.pathname) && /^(\?sig=[0-9a-f]{64})?$/.test(url.search);
+}
 const RESERVED_NAMES = ['__proto__', 'prototype', 'constructor'];
 export function checkVariableValue(type, value) {
   if (type === 'dimension' || type === 'number') return Number.isFinite(value) && Math.abs(value) <= 1e6;
@@ -87,7 +96,7 @@ export function validateDocument(document) {
       for(const key of ['x','y','w','h'])if(!Number.isFinite(node[key]) || Math.abs(node[key])>1e6 || (['w','h'].includes(key)&&node[key]<1))throw new Error(`Invalid node ${key}`);
       if(node.text!==undefined && (typeof node.text!=='string'||node.text.length>1000000))throw new Error('Invalid node text');
       if(node.textRuns!==undefined&&(!Array.isArray(node.textRuns)||node.textRuns.some(r=>!r||!Number.isInteger(r.start)||!Number.isInteger(r.end)||r.start<0||r.end<=r.start||r.end>(node.text||'').length||typeof r.bold!=='boolean'||typeof r.italic!=='boolean'||(r.color!==undefined&&!/^#[0-9a-f]{6}$/i.test(r.color))||(r.fontSize!==undefined&&(!Number.isFinite(r.fontSize)||r.fontSize<8||r.fontSize>200)))))throw new Error('Invalid text ranges');
-      if(node.src && (!/^data:image\/(png|jpeg|webp|gif|svg\+xml);/i.test(node.src)))throw new Error('Image source must be an embedded image');
+      if(node.src && (!/^data:image\/(png|jpeg|webp|gif|svg\+xml);/i.test(node.src)) && !isRoomAssetUrl(node.src))throw new Error('Image source must be an embedded image or a room asset URL');
       for(const key of ['fontSize','radius','gap','padding','columns','zIndex','rotation','opacity','strokeWidth','lineHeight','letterSpacing'])if(node[key]!==undefined&&!Number.isFinite(node[key]))throw new Error(`Invalid node ${key}`);
       if(node.preview!==undefined){const v=node.preview;if(node.type!=='frame'||node.parentId||!v||typeof v!=='object'||Array.isArray(v)||typeof v.root!=='string'||v.root.length>4096||['name','chatId','url'].some(k=>v[k]!==undefined&&(typeof v[k]!=='string'||v[k].length>4096)))throw Error('Invalid preview configuration');if(v.url){let u;try{u=new URL(v.url)}catch{throw Error('Invalid preview URL')}if(!['http:','https:'].includes(u.protocol)||!['localhost','127.0.0.1','[::1]'].includes(u.hostname)||u.username||u.password)throw Error('Invalid preview URL')}}
       if(node.opacity!==undefined&&(node.opacity<0||node.opacity>100))throw Error('Invalid opacity');if(node.clipContent!==undefined&&typeof node.clipContent!=='boolean')throw Error('Invalid clipping');for(const key of ['locked','hidden','flipX','flipY','ellipse'])if(node[key]!==undefined&&typeof node[key]!=='boolean')throw new Error(`Invalid node ${key}`);

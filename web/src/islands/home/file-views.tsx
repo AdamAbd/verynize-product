@@ -1,5 +1,6 @@
-import { FolderIcon } from "lucide-react";
+import { CloudIcon, FolderIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isRemoteRoom, openEntry, ROLE_LABEL } from "./cloud-files";
 import { FileActions, type FileActionHandlers } from "./file-actions";
 import { hook, library, relativeDay, type LibraryFile, type LibraryFolder } from "./library";
 import { Thumbnail } from "./thumbnail";
@@ -14,7 +15,28 @@ type ViewProps = {
   handlers: FileActionHandlers;
 };
 
-const open = (file: LibraryFile) => void library().open(file.id);
+const open = (file: LibraryFile) => openEntry(file, (id) => library().open(id));
+/** Cloud-backed files and listed rooms: room id hook, workspace (or "Shared") and role. */
+const roomAttrs = (file: LibraryFile) =>
+  file.cloud
+    ? {
+        "data-room-id": file.cloud.roomId,
+        "data-cloud": file.cloud.detached ? "detached" : "linked",
+      }
+    : {};
+const placeOf = (file: LibraryFile) =>
+  file.room ? (file.room.organizationName ?? "Shared with you") : file.cloud ? "Cloud" : "Personal";
+function CloudBadges({ file }: { file: LibraryFile }) {
+  if (!file.cloud) return null;
+  return (
+    <>
+      <CloudIcon aria-label="Cloud file" className="ml-1 size-3.5 shrink-0" />
+      <Badge className="ml-1">
+        {file.cloud.detached ? "Detached" : ROLE_LABEL[file.cloud.role ?? ""] || "Cloud"}
+      </Badge>
+    </>
+  );
+}
 const enter = (folder: LibraryFolder) => library().setFolder(folder.id);
 const countIn = (files: LibraryFile[], folder: LibraryFolder) =>
   files.filter((f) => f.folder === folder.id && !f.archived).length;
@@ -47,6 +69,7 @@ export function FileGrid({ files, folders, shownFolders, allFiles, owner, handle
             <article
               key={file.id}
               data-file-id={file.id}
+              {...roomAttrs(file)}
               className={cn(
                 hook("file-card"),
                 "group relative flex h-59 min-w-0 flex-col overflow-hidden rounded-lg border border-card-border bg-card",
@@ -70,18 +93,24 @@ export function FileGrid({ files, folders, shownFolders, allFiles, owner, handle
                     {file.name}
                   </strong>
                   <span className="mt-0.5 flex h-5 items-center gap-1.5 text-sm text-muted-foreground">
-                    <Avatar name={owner} className="size-4 text-2xs" />
-                    Personal
+                    <Avatar
+                      name={file.room?.organizationName ?? owner}
+                      className="size-4 text-2xs"
+                    />
+                    <span className="truncate">{placeOf(file)}</span>
+                    <CloudBadges file={file} />
                     {file.publication && <Badge className="ml-1">Public</Badge>}
                   </span>
                 </span>
               </button>
-              <FileActions
-                file={file}
-                folders={folders}
-                handlers={handlers}
-                className="absolute right-2 bottom-7"
-              />
+              {!isRemoteRoom(file) && (
+                <FileActions
+                  file={file}
+                  folders={folders}
+                  handlers={handlers}
+                  className="absolute right-2 bottom-7"
+                />
+              )}
             </article>
           ))}
         </div>
@@ -127,6 +156,7 @@ export function FileList({ files, folders, shownFolders, allFiles, handlers }: V
           <article
             key={file.id}
             data-file-id={file.id}
+            {...roomAttrs(file)}
             className={cn(hook("file-card"), "group relative -mx-2 rounded-lg px-2 hover:bg-muted")}
           >
             <button
@@ -149,20 +179,23 @@ export function FileList({ files, folders, shownFolders, allFiles, handlers }: V
                   {file.name}
                 </strong>
               </span>
-              <span className="flex">
+              <span className="flex items-center text-muted-foreground">
                 <span className="flex h-5 items-center rounded-md border border-edge bg-muted px-1.5 text-sm text-foreground-2">
-                  {file.publication ? "Public" : "Private"}
+                  {file.publication ? "Public" : file.cloud ? "Cloud" : "Private"}
                 </span>
+                <CloudBadges file={file} />
               </span>
               <span />
               <span className="text-sm text-foreground-2">{relativeDay(file.updated)}</span>
             </button>
-            <FileActions
-              file={file}
-              folders={folders}
-              handlers={handlers}
-              className="absolute top-1/2 right-2 -translate-y-1/2"
-            />
+            {!isRemoteRoom(file) && (
+              <FileActions
+                file={file}
+                folders={folders}
+                handlers={handlers}
+                className="absolute top-1/2 right-2 -translate-y-1/2"
+              />
+            )}
           </article>
         ))}
       </div>

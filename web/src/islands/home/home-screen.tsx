@@ -1,8 +1,16 @@
 import { useMemo, useState } from "react";
-import { ArchiveIcon, FileIcon, FolderPlusIcon, LayoutGridIcon, LayoutListIcon, SearchIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  FileIcon,
+  FolderPlusIcon,
+  LayoutGridIcon,
+  LayoutListIcon,
+  SearchIcon,
+} from "lucide-react";
 import { PlusIcon } from "@/components/icons";
 import { useBodyClass } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
+import { mergeCloudFiles, useCloudRooms } from "./cloud-files";
 import { FileGrid, FileList } from "./file-views";
 import type { FileActionHandlers } from "./file-actions";
 import {
@@ -35,9 +43,10 @@ export function HomeScreen() {
   const [dialog, setDialog] = useState<NameRequest | null>(null);
 
   const lib = library();
+  const { rooms } = useCloudRooms(open);
   const files = useMemo(
-    () => visibleFiles(all, filter, folder, query),
-    [all, filter, folder, query],
+    () => visibleFiles(mergeCloudFiles(all, rooms), filter, folder, query),
+    [all, rooms, filter, folder, query],
   );
   const shownFolders = filter !== "archived" && !query.trim() && !folder ? folders : [];
   const currentFolder = folders.find((f) => f.id === folder);

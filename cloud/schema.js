@@ -193,3 +193,23 @@ export const migrationState = sqliteTable("migration_state", {
   state: text("state").notNull(),
   updatedAt: integer("updatedAt").notNull(),
 });
+
+// Room assets (cloud/assets.js, migration 0004): R2 images referenced by URL from room documents.
+export const roomAsset = sqliteTable(
+  "room_asset",
+  {
+    id: text("id").notNull().primaryKey(),
+    roomId: text("roomId").notNull(),
+    sha256: text("sha256").notNull(),
+    size: integer("size").notNull(),
+    contentType: text("contentType").notNull(),
+    status: text("status").notNull(),
+    createdBy: text("createdBy"),
+    createdAt: integer("createdAt").notNull(),
+    uploadedAt: integer("uploadedAt"),
+  },
+  (table) => [
+    unique().on(table.roomId, table.sha256),
+    index("room_asset_roomId_idx").on(table.roomId),
+  ],
+);
