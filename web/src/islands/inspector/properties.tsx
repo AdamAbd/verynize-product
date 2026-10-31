@@ -22,6 +22,7 @@ import { ColorPopover } from "./color-picker";
 import { BindableField } from "./bind";
 import { CORNER_KEYS } from "./vars";
 import { ExportSection } from "./export-section";
+import { FramePresetsSection, useCanvasTool } from "./frame-presets";
 import { FillTools, PaintStack, hasPaintRows } from "./paints";
 import { parseColor, toHex } from "./color";
 import {
@@ -965,6 +966,8 @@ export function PropertiesBody({
   const fillsMixed = many && mixedFills(doc, selection);
   const shadowsMixed = many && mixedShadows(doc, selection);
   const filtersMixed = many && mixedFilters(doc, selection);
+  // Wonder D1: the armed Frame tool with nothing selected offers frame presets in place of the Page section.
+  const framePresets = useCanvasTool() === "frame" && !node;
   return (
     <>
       {node ? <PositionSection doc={doc} node={node} selection={selection} /> : null}
@@ -1024,7 +1027,8 @@ export function PropertiesBody({
       ) : null}
       {node ? <SelectionColorsSection doc={doc} node={node} selection={selection} /> : null}
       {node ? <ExportSection doc={doc} node={node} selection={selection} /> : null}
-      {!node ? <PageSection doc={doc} /> : null}
+      {framePresets ? <FramePresetsSection /> : null}
+      {!node && !framePresets ? <PageSection doc={doc} /> : null}
       <LayerCommands />
     </>
   );

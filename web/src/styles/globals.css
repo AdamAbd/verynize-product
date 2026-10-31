@@ -267,6 +267,8 @@ html[data-ui-theme="light"] {
   --color-toggle-active-foreground: color-mix(in srgb, var(--primary-text) 82%, white);
   /* Page swatch edge (properties-audit C8): a 1px #555555 ring so a dark page colour stays visible on #2b2b2b. */
   --color-swatch-ring: color-mix(in srgb, var(--foreground) 22%, var(--input));
+  /* Frame tool preset names (properties-audit D1): #c0c0c0, between the #d4d4d4 category labels and #909090 sizes. */
+  --color-preset-name: color-mix(in srgb, var(--foreground-2) 70%, var(--muted-foreground));
   /* </inspector-tokens> */
   /* <home-tokens> */
   /* </home-tokens> */

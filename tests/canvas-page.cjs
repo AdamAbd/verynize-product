@@ -9,7 +9,11 @@ const {_electron}=require(process.cwd()+'/node_modules/@playwright/test');const 
     assert.equal(await p.locator('#canvas .layer').count(),0);
     assert.equal(await p.locator('#canvas').evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)');
     // Frames carry no grey outline unless selected.
+    // The toolbar Frame button arms the tool (Wonder D1); a click on the canvas makes the frame.
     await p.locator('#add-frame').click();
+    assert.equal(await p.locator('#canvas .layer').count(),0,'arming the frame tool creates nothing');
+    await p.locator('#canvas-wrap').click();
+    assert.equal(await p.locator('#canvas .frame-layer').count(),1);
     await p.evaluate(()=>window.design.setSelection([]));
     assert.equal(await p.locator('#canvas .frame-layer').evaluate(e=>getComputedStyle(e).outlineStyle),'none');
     // Nothing selected: Variables collapsed, Properties shows the page colour.
