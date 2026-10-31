@@ -6,6 +6,9 @@
   const ZOOM_STOPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32];
   const MIN_ZOOM = ZOOM_STOPS[0], MAX_ZOOM = ZOOM_STOPS.at(-1);
   const SAFE = {top: 48, right: 40, bottom: 96, left: 40};
+  // Zoom to selection (⇧2) margins, measured in Wonder V3-selection (120×120 → 538 %: 64 px above and below inside the
+  // 830 px tall view, minus the 56 px toolbar band) and V4-high-zoom (150×105 → 548 %: 29 px left and right).
+  const SELECTION_SAFE = {top: 64, right: 29, bottom: 120, left: 29};
   const BOARD = {x: 0, y: 0, w: 1000, h: 700};
   const DRAW_TOOLS = new Set(['frame', 'rectangle', 'ellipse', 'text', 'shader']);
   const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', eyedropper: 'eyedropper-tool', frame: 'add-frame', rectangle: 'rectangle', ellipse: 'add-ellipse', text: 'text', shader: 'add-shader'};
@@ -291,11 +294,11 @@
       const x = Math.min(...rects.map(r => r.x)), y = Math.min(...rects.map(r => r.y));
       return {x, y, w: Math.max(...rects.map(r => r.x + r.w)) - x, h: Math.max(...rects.map(r => r.y + r.h)) - y};
     }
-    function fitBounds(b, maxZoom = MAX_ZOOM, fitting = false) {
+    function fitBounds(b, maxZoom = MAX_ZOOM, fitting = false, safe = SAFE) {
       const r = viewport(); if (!b || !r.width || !r.height) return;
-      const aw = Math.max(40, r.width - SAFE.left - SAFE.right), ah = Math.max(40, r.height - SAFE.top - SAFE.bottom);
+      const aw = Math.max(40, r.width - safe.left - safe.right), ah = Math.max(40, r.height - safe.top - safe.bottom);
       const z = clamp(Math.min(aw / Math.max(1, b.w), ah / Math.max(1, b.h), maxZoom), MIN_ZOOM, MAX_ZOOM);
-      setCamera(SAFE.left + (aw - b.w * z) / 2 - b.x * z, SAFE.top + (ah - b.h * z) / 2 - b.y * z, z, fitting);
+      setCamera(safe.left + (aw - b.w * z) / 2 - b.x * z, safe.top + (ah - b.h * z) / 2 - b.y * z, z, fitting);
     }
     function contentBounds() {
       const tops = ed.nodes().filter(n => !n.parentId && !n.hidden);
@@ -304,7 +307,7 @@
       return union(rects) || BOARD;
     }
     const fit = (initial = false) => fitBounds(contentBounds(), initial ? 1 : MAX_ZOOM, true);
-    function zoomToSelection() { const b = union([...sel()].map(worldRect)); if (b) fitBounds(b); else fit(); }
+    function zoomToSelection() { const b = union([...sel()].map(worldRect)); if (b) fitBounds(b, MAX_ZOOM, false, SELECTION_SAFE); else fit(); }
     function placeInView(w, h) {
       const r = viewport(), c = screenToWorld(r.left + r.width / 2, r.top + (r.height - SAFE.bottom + SAFE.top) / 2);
       return {x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2)};
@@ -1520,6 +1523,8 @@
       {id: 'align.bottom', label: 'Align bottom', section: 'Alignment', keys: ['alt+s'], when: needsSelection, run: () => ed.align('bottom')},
       {id: 'align.distributeX', label: 'Distribute horizontal spacing', section: 'Alignment', keys: ['ctrl+alt+h'], when: needsSelection, run: () => ed.align('horizontal')},
       {id: 'align.distributeY', label: 'Distribute vertical spacing', section: 'Alignment', keys: ['ctrl+alt+v'], when: needsSelection, run: () => ed.align('vertical')},
+      // Inspector Scale section (Scale tool, Wonder T4): window.design.runCommand('transform.scaleBy', {id, factor}).
+      {id: 'transform.scaleBy', label: 'Scale layer', section: 'Transform', keys: [], hidden: true, run: arg => chrome.scaleBy(arg?.id, arg?.factor)},
       ...Array.from({length: 10}, (_, d) => ({id: 'opacity.' + d, label: `Opacity ${d ? d * 10 : 100}%`, section: 'Shape', keys: [String(d)], when: needsSelection, hidden: true, run: () => { ed.checkpoint(); selectedNodes().forEach(n => { n.opacity = d ? d * 10 : 100; }); ed.render(); }})),
     ];
     const KEY_NAMES = {BracketLeft: '[', BracketRight: ']', Equal: '=', Minus: '-', Backslash: '\\', NumpadAdd: 'plus', NumpadSubtract: '-', Enter: 'enter', NumpadEnter: 'enter', Tab: 'tab', Escape: 'escape', Delete: 'delete', Backspace: 'backspace'};

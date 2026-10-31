@@ -98,7 +98,10 @@ function Toolbar() {
   useBodyClass("left-collapsed");
   useBodyClass("right-collapsed");
   const layout = currentLayout();
-  const applied = useAppliedLayout() === layout && isExactLayout();
+  // Wonder (canvas audit T1, T3, T4, V3 …): the toggle of the panel layout on screen stays drawn active even when the
+  // view reads "Design · edited"; only while the views menu is open does the `+` take the highlight (T2-plus).
+  const [viewsOpen, setViewsOpen] = useState(false);
+  const active = isExactLayout() && !viewsOpen;
   return (
     <div
       id="canvas-toolbar"
@@ -141,10 +144,10 @@ function Toolbar() {
                   type="button"
                   id={`layout-${name}`}
                   aria-label={`${label} layout`}
-                  aria-pressed={applied && layout === name}
+                  aria-pressed={active && layout === name}
                   className={cn(
                     layoutButton,
-                    applied &&
+                    active &&
                       layout === name &&
                       "bg-accent text-primary-text hover:text-primary-text",
                   )}
@@ -155,7 +158,7 @@ function Toolbar() {
               </Tip>
             );
           })}
-          <ViewMenu layout={layout} />
+          <ViewMenu layout={layout} open={viewsOpen} onOpenChange={setViewsOpen} />
         </div>
       </div>
     </div>
@@ -177,8 +180,15 @@ function ToolSlot({ separator, children }: { separator: boolean; children: React
 }
 
 /* ---------- Views menu (19) ---------- */
-function ViewMenu({ layout }: { layout: LayoutName }) {
-  const [open, setOpen] = useState(false);
+function ViewMenu({
+  layout,
+  open,
+  onOpenChange: setOpen,
+}: {
+  layout: LayoutName;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const edited = useAppliedLayout() !== layout || !isExactLayout();
   const label = LAYOUTS.find((l) => l.name === layout)?.label ?? "Design";
   const choose = applyLayout;

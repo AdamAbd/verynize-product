@@ -5,7 +5,7 @@
 // - CM5-multi-verified shows the item for four selected top-level siblings, but Wonder's result for more than two was
 //   not captured. Assumption: the bottom-most selected sibling's shape becomes the mask of every other selected
 //   sibling (each gets its own inset() relative to its own box), and the bottom-most layer is consumed.
-// - "Detach mask as shape" recreates the geometry as a plain white Frame right below the layer (P5-detach-mask:
+// - "Detach mask as shape" recreates the geometry as a plain white Frame (Clip content on) right below the layer (P5-detach-mask:
 //   the source's fill is not restored) and drops the mask. "Remove mask" only clears it (P5-remove-result).
 // Every operation is one undo step. Rendering and validation live in web/node-style.js (mask type `shape`).
 import { activePage, design, type LayerNode } from "@/lib/bridge";
@@ -154,6 +154,8 @@ export function detachShapeMask(nodeId: string, index: number): boolean {
     h: Math.max(1, round(box.h * (1 - (t + b) / 100))),
     color: "#ffffff",
     radius: 0,
+    // Wonder P5-detached-layer-inspector: the detached Frame has Clip content on, like a drawn Frame.
+    clipContent: true,
   };
   if (!frame.parentId) delete (frame as Partial<MaskedNode>).parentId;
   // Inside an auto layout the shape keeps its place without pushing the siblings.

@@ -140,8 +140,64 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     near(t.fontSize, 10 * k, 0.05, 'child type scales with the factor'); near(t.w, 60 * k, 0.05);
     await page.evaluate(() => window.design.runCommand('tool.move'));
 
+    // ---------- T4: the Scale section (Wonder T4-scale-retry: Scale ✕, W 150 | H 105, 150 %) ----------
+    await seed([{id: 'f', name: 'Frame', type: 'frame', x: 200, y: 200, w: 100, h: 70, color: '#ffffff'}, {id: 't', name: 'Label', type: 'text', parentId: 'f', x: 10, y: 10, w: 60, h: 20, text: 'Hi', fontSize: 10, color: '#000000'}], ['f']);
+    assert.equal(await page.locator('#scale-section').count(), 0, 'no Scale section with the Move tool');
+    await page.evaluate(() => window.design.runCommand('tool.scale'));
+    await page.locator('#scale-section').waitFor();
+    assert.equal(await page.locator('#insp-properties [name=x]').isVisible(), false, 'the Scale section replaces the other sections');
+    const scaleField = name => page.locator(`#scale-section [name=${name}]`);
+    assert.deepEqual([await scaleField('scaleW').inputValue(), await scaleField('scaleH').inputValue(), await scaleField('scalePercent').inputValue()], ['100', '70', '100']);
+    const sw = await scaleField('scaleW').locator('xpath=ancestor::*[@data-field-shell][1]').boundingBox();
+    const sp = await scaleField('scalePercent').locator('xpath=ancestor::*[@data-field-shell][1]').boundingBox();
+    near(sw.width, 124, 1, 'W field width'); near(sp.width, 256, 1, '% field spans both columns'); near(sp.y - sw.y, 32, 0.5, 'rows 8px apart');
+    // A Scale-tool drag reads 150 % against the size the section opened with.
+    await dragFrom(await center('#canvas [data-id=f] > .handle[data-corner=se]'), 50, 35);
+    await page.waitForFunction(() => document.querySelector('#scale-section [name=scaleW]')?.value === '150', null, {timeout: 3000}).catch(() => {});
+    assert.deepEqual([await scaleField('scaleW').inputValue(), await scaleField('scaleH').inputValue(), await scaleField('scalePercent').inputValue()], ['150', '105', '150']);
+    await page.evaluate(() => window.design.runCommand('edit.undo'));
+    // Typing a percentage scales the layer and its content like the tool, in one undo step.
+    await scaleField('scalePercent').fill('200');
+    await scaleField('scalePercent').press('Enter');
+    f = await node('f');
+    assert.deepEqual([f.x, f.y, f.w, f.h], [200, 200, 200, 140], '200 % keeps the top-left corner');
+    let label = await node('t');
+    assert.deepEqual([label.x, label.y, label.w, label.h, label.fontSize], [20, 20, 120, 40, 20], 'children and type scale too');
+    await page.evaluate(() => window.design.runCommand('edit.undo'));
+    f = await node('f'); label = await node('t');
+    assert.deepEqual([f.w, f.h, label.fontSize], [100, 70, 10], 'one undo step restores the layer and its content');
+    // W (or H) scales proportionally.
+    await scaleField('scaleW').fill('150');
+    await scaleField('scaleW').press('Enter');
+    f = await node('f');
+    assert.deepEqual([f.w, f.h], [150, 105]);
+    assert.equal(await scaleField('scalePercent').inputValue(), '150');
+    await scaleField('scaleH').fill('35');
+    await scaleField('scaleH').press('Enter');
+    f = await node('f');
+    assert.deepEqual([f.w, f.h], [50, 35]);
+    assert.equal(await scaleField('scalePercent').inputValue(), '50');
+    // ✕ leaves the Scale tool and restores the regular inspector.
+    await page.locator('#scale-close').click();
+    await page.locator('#scale-section').waitFor({state: 'detached'});
+    assert.equal(await page.evaluate(() => window.design.getTool()), 'move');
+    assert.equal(await page.locator('#insp-properties [name=x]').isVisible(), true);
+
+    // ---------- TR2: the rotation field shows "-47.19" in full (Wonder TR2-rotate-verified) ----------
+    await seed([rect('r', 150, 300, 100, 70, {rotation: -47.19})], ['r']);
+    const rotation = await page.locator('[name=rotation]').evaluate(el => ({value: el.value, fits: el.scrollWidth <= el.clientWidth}));
+    assert.deepEqual(rotation, {value: '-47.19', fits: true}, 'rotation value is not truncated');
+
+    // ---------- V3: zoom to selection leaves Wonder's margins (V3-selection: 120×120 → 538 % in an 880×830 view) ----------
+    await seed([rect('z', 515, -133, 120, 120)], ['z']);
+    await page.evaluate(() => window.design.runCommand('view.selection'));
+    const view = await page.evaluate(() => { const r = document.querySelector('#canvas-wrap').getBoundingClientRect(); return {w: r.width, h: r.height, zoom: window.design.getCamera().zoom}; });
+    near(view.zoom, Math.min((view.w - 58) / 120, (view.h - 184) / 120), 0.001, 'zoom to selection: 29px sides, 64px top, 120px bottom');
+    const zr = await page.locator('#canvas [data-id=z]').boundingBox(), wrapBox = await page.locator('#canvas-wrap').boundingBox();
+    near(zr.y - wrapBox.y, 64, 1, 'selection sits 64px below the top edge');
+
     assert.deepEqual(errors, []);
-    console.log('canvas transform: PASS badge text and gap, chat chip, multi-selection box, rotate zones with Shift snap, edge resize with Shift/Alt and no guides, proportional Scale tool');
+    console.log('canvas transform: PASS badge text and gap, chat chip, multi-selection box, rotate zones with Shift snap, edge resize with Shift/Alt and no guides, proportional Scale tool, Scale section, rotation field width, zoom-to-selection margins');
   } finally {
     await app.close();
     await fs.rm(dir, {recursive: true, force: true});
