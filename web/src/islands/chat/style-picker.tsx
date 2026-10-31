@@ -1,21 +1,21 @@
 // Design style picker in the composer: a chip beside the model and access controls that pins one entry of the
-// runtime's design style catalog (window.desktop.designStylesList) for the next runs. "Auto" (no style) lets the agent
+// runtime's design style catalog (platform.desktop.designStylesList) for the next runs. "Auto" (no style) lets the agent
 // choose. The pick is remembered for the session (localStorage) and read by web/desktop-panel.js when it composes a
 // task, through window.chatDesignStyle.get(); the run request then carries it as `designStyle`.
 // Hidden when the desktop build has no style catalog. "/style" (slash command) opens it.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { PaletteIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { platform } from "@/lib/platform";
 import { ChatChipButton } from "./controls";
 import { ChatMenu, ChatMenuContent, ChatMenuLabel, ChatMenuOptionItem, ChatMenuRadioGroup, ChatMenuSeparator, ChatMenuTrigger } from "./menu";
 
 export type DesignStyle = { id: string; name: string; summary?: string };
-type StyleDesktop = { designStylesList?(): Promise<DesignStyle[]> };
 
 const STORAGE_KEY = "verynize.chat.design-style";
 export const OPEN_STYLE_PICKER_EVENT = "bd:open-style-picker";
 
-const styleDesktop = () => (window as unknown as { desktop?: StyleDesktop }).desktop;
+const styleDesktop = (): { designStylesList?(): Promise<DesignStyle[]> } | null => platform.desktop;
 /** Whether this desktop build offers the style catalog. */
 export const hasStyleCatalog = () => typeof styleDesktop()?.designStylesList === "function";
 

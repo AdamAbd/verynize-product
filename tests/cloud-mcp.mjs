@@ -2,12 +2,11 @@
 // handshake, tool listing, authentication, listing/reading rooms, edits that live sockets receive
 // as `ops` and that persist, role checks (viewer, other account), creating rooms in the personal
 // organization, unavailable tools and JSON-RPC edge cases.
-import { Miniflare } from "miniflare";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions, passwordUser, signIn } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions, passwordUser, signIn } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-mcp-"));
 const mf = new Miniflare(await cloudOptions(path.join(dir, "state")));

@@ -8,7 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const appProtocol = require("../desktop/app-protocol.cjs");
-const { MARKER } = require("../desktop/storage-migration.cjs");
+const { MARKER, PROBE, STAGED } = require("../desktop/storage-migration.cjs");
 
 const ENTRY = "app://verynize/editor";
 const SECRET = "registerSchemes(protocol)"; // text from desktop/main.cjs: must never be served
@@ -318,11 +318,30 @@ async function migrationChecks(profile) {
   } finally {
     await app.close();
   }
-  // Third launch: the marker short-circuits, no hidden window.
-  const again = await launch(profile);
+  // Third launch: no window before the editor; the downgrade probe runs in the background and
+  // neither recopies nor stages unchanged storage.
+  const before = await fs.readFile(marker, "utf8");
+  await fs.rm(path.join(profile, PROBE), { force: true });
+  const again = await electron.launch({
+    env: { ...env, VERYNIZE_STORAGE_PROBE_DELAY_MS: "0" },
+    args: [".", `--user-data-dir=${profile}`],
+  });
   try {
-    const page = await again.firstWindow();
-    assert.equal(page.url(), ENTRY, "no migration window once the marker exists");
+    const page = await editor(again);
+    assert.equal(page.url(), ENTRY, "editor opens without waiting for the downgrade probe");
+    let probe;
+    for (let i = 0; i < 400 && !probe; i++) {
+      probe = await fs
+        .readFile(path.join(profile, PROBE), "utf8")
+        .then(JSON.parse)
+        .catch(() => null);
+      if (!probe) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(probe, "background probe finished");
+    assert.equal(probe.unchanged, true, JSON.stringify(probe));
+    assert.equal(probe.startup.windows, 0, "no hidden window before the editor");
+    assert.equal(await fs.readFile(marker, "utf8"), before, "nothing recopied");
+    await assert.rejects(fs.access(path.join(profile, STAGED)), "nothing staged");
   } finally {
     await again.close();
   }

@@ -1,8 +1,22 @@
-// Local workerd configuration shared by the cloud tests (mirrors cloudflare.config.ts, with the
+// Local cloud configuration shared by the cloud tests (mirrors cloudflare.config.ts, with the
 // development email outbox instead of a live provider).
+//
+// CLOUD_RUNTIME selects the runtime the same scenarios run on: "workerd" (default, Miniflare and
+// the built Worker bundle), "node" (server/node.mjs's runtime: cloud/platform/node, in a child
+// process) or "vercel" (api/server.mjs's runtime: cloud/platform/vercel, several instances with a
+// local Redis and libSQL). Tests import `Miniflare` from here; on Node it is
+// tests/helpers/node-cloud.mjs and on Vercel tests/helpers/vercel-cloud.mjs, which take the same
+// options and offer the same methods.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
-import { Miniflare } from "miniflare";
+import { Miniflare as Workerd } from "miniflare";
+import { CURRENT_WORKER, NodeCloud } from "./helpers/node-cloud.mjs";
+import { VercelCloud } from "./helpers/vercel-cloud.mjs";
+
+export const RUNTIME = ["node", "vercel"].includes(process.env.CLOUD_RUNTIME)
+  ? process.env.CLOUD_RUNTIME
+  : "workerd";
+export const Miniflare = { node: NodeCloud, vercel: VercelCloud, workerd: Workerd }[RUNTIME];
 const root = new URL("../", import.meta.url);
 const BUNDLE = new URL(".cloudflare/output/v0/workers/default/bundle/", root);
 const MIGRATIONS = new URL("cloud/migrations/", root);
@@ -37,7 +51,7 @@ function buildWorker() {
  * like `cf d1 migrations apply`, so tests that restart Miniflare on the same state keep their data.
  */
 async function migrate(persistence) {
-  const mf = new Miniflare({
+  const mf = new Workerd({
     resourcePersistencePath: persistence,
     workers: [
       {
@@ -87,7 +101,9 @@ async function migrate(persistence) {
 }
 
 export async function cloudOptions(persistence, extra = {}) {
-  const [modules] = await Promise.all([buildWorker(), migrate(persistence)]);
+  // The Node and Vercel runtimes apply cloud/migrations themselves when they open the database.
+  const [modules] =
+    RUNTIME !== "workerd" ? [null] : await Promise.all([buildWorker(), migrate(persistence)]);
   return {
     resourcePersistencePath: persistence,
     ...extra,
@@ -97,7 +113,7 @@ export async function cloudOptions(persistence, extra = {}) {
           name: "verynize",
           compatibilityDate: "2026-10-28",
           compatibilityFlags: ["nodejs_compat"],
-          manifest: { mainModule: "index.js", modules },
+          manifest: modules ? { mainModule: "index.js", modules } : CURRENT_WORKER,
           env: {
             ROOM_CREATION: {
               type: "rate-limit",

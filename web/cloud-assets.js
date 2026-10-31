@@ -16,7 +16,7 @@
     "g",
   );
 
-  /** The same URL check as validate() in web/app.js and integrations/design-store.mjs. */
+  /** The same URL check as isRoomAssetUrl in web/document-core.js (the document schema). */
   function isAssetUrl(value) {
     if (typeof value !== "string" || value.length > 512) return false;
     let url;

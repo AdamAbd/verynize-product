@@ -146,10 +146,13 @@ function roomRequest(target, request, account, body, orgRole) {
     headers.set("content-type", "application/json");
     return new Request(target, { method: request.method, headers, body: JSON.stringify(body) });
   }
+  const streamed = !["GET", "HEAD"].includes(request.method);
   return new Request(target, {
     method: request.method,
     headers,
-    body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
+    body: streamed ? request.body : undefined,
+    // A streamed body needs a half-duplex request outside workerd (Node's fetch).
+    duplex: streamed ? "half" : undefined,
   });
 }
 
