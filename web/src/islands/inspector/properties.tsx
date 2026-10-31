@@ -1,5 +1,5 @@
 // Properties sections (design/wonder 22, 25, 43, 45–46, 55–56).
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, ChevronDown, Expand, Eye, RotateCcw, Scan, Check } from "lucide-react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
 import { activePage, type DesignDocument } from "@/lib/bridge";
@@ -18,6 +18,7 @@ import {
   type IconType,
 } from "./controls";
 import { formClick, notify } from "./legacy";
+import { Tip } from "../chrome/tip";
 import { ColorPopover } from "./color-picker";
 import { BindableField } from "./bind";
 import { CORNER_KEYS } from "./vars";
@@ -184,10 +185,9 @@ function toggleAbsolute(doc: DesignDocument, selection: string[], on: boolean) {
 }
 
 /**
- * The Position header's expand tool: resize a frame to fit its content. Flow frames hug both axes; a free frame
- * takes the bounds of its visible children (which keep their place on the canvas). Wonder's behaviour for this
- * icon was never captured (properties-audit §6), so this is the most plausible reading of the glyph; the captures
- * only show it dimmed, and every captured selection had no children.
+ * The Position header's expand tool, Wonder's "Resize to fill" (⌘⇧⌥F): flow frames hug both axes; a free frame
+ * takes the bounds of its visible children (which keep their place on the canvas). Matches Wonder H1-parent-after
+ * (the parent shrinks and moves around its child) and H1-flex-after (an already-fitting flex parent stays put).
  */
 function fitToContent(doc: DesignDocument, frame: Node) {
   const kids = pageNodes(doc).filter((n) => n.parentId === frame.id && !n.hidden);
@@ -245,16 +245,38 @@ function PositionSection({ doc, node, selection }: Props) {
   const fitEnabled =
     !many && node.type === "frame" && nodes.some((n) => n.parentId === node.id && !n.hidden);
   const constraints = readConstraints(selection);
+  // ⌘⇧⌥F runs the expand tool (Wonder's shortcut) while the canvas, not a field, has the keyboard.
+  // Captured on window so ⌘⇧F (global search) does not also see it.
+  const fit = useRef<(() => void) | null>(null);
+  fit.current = fitEnabled ? () => fitToContent(doc, node) : null;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.code !== "KeyF" || !event.shiftKey || !event.altKey || event.repeat) return;
+      if (!(navigator.platform.includes("Mac") ? event.metaKey : event.ctrlKey)) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.("input, textarea, select, [contenteditable=true]") || !fit.current) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      fit.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   const tools = (
     <>
-      <IconButton
-        id="position-fit-content"
-        icon={Expand}
-        label="Resize to fit content"
-        disabled={!fitEnabled}
-        className="disabled:opacity-50"
-        onClick={() => fitToContent(doc, node)}
-      />
+      {/* Wonder H1-tooltip: "Resize to fill ⌘⇧⌥F" (the parent shrinks and moves around its children). */}
+      <Tip label="Resize to fill" shortcut="⌘⇧⌥F">
+        <IconButton
+          id="position-fit-content"
+          icon={Expand}
+          label="Resize to fill"
+          title={undefined}
+          aria-keyshortcuts="Meta+Shift+Alt+F"
+          disabled={!fitEnabled}
+          className="disabled:opacity-50"
+          onClick={() => fitToContent(doc, node)}
+        />
+      </Tip>
       {node.parentId ? (
         <IconButton
           id="position-absolute"
