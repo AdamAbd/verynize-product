@@ -112,7 +112,7 @@ const APP = `require('http').createServer((q,r)=>{r.setHeader('content-type','te
     assert.equal(await tab.count(), 1);
 
     // The frame's expand button opens the same tab.
-    await page.locator(`[data-id="${frameId}"] [data-part=live-expand]`).click();
+    await page.locator(`.canvas-preview[data-id="${frameId}"] [data-pf=expand]`).click();
     await view.waitFor();
     assert.equal(await page.locator('[data-preview-tab]').count(), 1, 'expand reuses the open tab');
 
