@@ -551,6 +551,7 @@
      "Arrange",
      "|",
      "Layout",
+     "Use as mask",
      "|",
      "Set as file thumbnail"
     ]
@@ -902,8 +903,6 @@
      "Copy ⌘C",
      "Copy as",
      "Copy link to selection",
-     "|",
-     "Select layer",
      "Paste ⌘V",
      "Paste to replace ⌘⇧R",
      "Paste over selection ⌘⇧V",
@@ -1913,37 +1912,271 @@
   "file": "L2-drag.png",
   "selection": [],
   "tool": "move",
-  "zoom": "80%",
+  "zoom": "100%",
   "badge": null,
   "menus": [],
   "dialog": [],
   "toasts": [],
   "tips": [],
-  "nodes": []
+  "nodes": [
+   {
+    "id": "f1",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 56,
+    "y": -153,
+    "w": 420,
+    "h": 391.18,
+    "rotation": 0
+   },
+   {
+    "id": "inner",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": "f1",
+    "x": 49,
+    "y": 40,
+    "w": 100,
+    "h": 80,
+    "rotation": 0
+   },
+   {
+    "id": "canvasAu",
+    "name": "Canvas au",
+    "type": "text",
+    "parentId": "f1",
+    "x": 59,
+    "y": 160,
+    "w": 59.39,
+    "h": 14.5,
+    "rotation": 0
+   },
+   {
+    "id": "s2",
+    "name": "Frame 2",
+    "type": "frame",
+    "parentId": null,
+    "x": 515,
+    "y": -133,
+    "w": 120,
+    "h": 120,
+    "rotation": 0
+   },
+   {
+    "id": "s3",
+    "name": "Frame 3",
+    "type": "frame",
+    "parentId": null,
+    "x": 675,
+    "y": -133,
+    "w": 120,
+    "h": 120,
+    "rotation": 0
+   },
+   {
+    "id": "rot",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 150,
+    "y": 300,
+    "w": 100,
+    "h": 70,
+    "rotation": -47.19
+   },
+   {
+    "id": "small",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 260,
+    "y": 300,
+    "w": 100,
+    "h": 70,
+    "rotation": 0
+   }
+  ]
  },
  {
   "file": "L2-order.png",
   "selection": [],
   "tool": "move",
-  "zoom": "80%",
+  "zoom": "100%",
   "badge": null,
   "menus": [],
   "dialog": [],
   "toasts": [],
   "tips": [],
-  "nodes": []
+  "nodes": [
+   {
+    "id": "f1",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 56,
+    "y": -153,
+    "w": 420,
+    "h": 391.18,
+    "rotation": 0
+   },
+   {
+    "id": "inner",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": "f1",
+    "x": 49,
+    "y": 40,
+    "w": 100,
+    "h": 80,
+    "rotation": 0
+   },
+   {
+    "id": "canvasAu",
+    "name": "Canvas au",
+    "type": "text",
+    "parentId": "f1",
+    "x": 59,
+    "y": 160,
+    "w": 59.39,
+    "h": 14.5,
+    "rotation": 0
+   },
+   {
+    "id": "s2",
+    "name": "Frame 2",
+    "type": "frame",
+    "parentId": null,
+    "x": 515,
+    "y": -133,
+    "w": 120,
+    "h": 120,
+    "rotation": 0
+   },
+   {
+    "id": "s3",
+    "name": "Frame 3",
+    "type": "frame",
+    "parentId": null,
+    "x": 675,
+    "y": -133,
+    "w": 120,
+    "h": 120,
+    "rotation": 0
+   },
+   {
+    "id": "rot",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 150,
+    "y": 300,
+    "w": 100,
+    "h": 70,
+    "rotation": -47.19
+   },
+   {
+    "id": "small",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 260,
+    "y": 300,
+    "w": 100,
+    "h": 70,
+    "rotation": 0
+   }
+  ]
  },
  {
   "file": "L2-rename-field.png",
   "selection": [],
   "tool": "move",
-  "zoom": "80%",
+  "zoom": "100%",
   "badge": null,
   "menus": [],
   "dialog": [],
   "toasts": [],
   "tips": [],
-  "nodes": []
+  "nodes": [
+   {
+    "id": "f1",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 56,
+    "y": -153,
+    "w": 420,
+    "h": 391.18,
+    "rotation": 0
+   },
+   {
+    "id": "inner",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": "f1",
+    "x": 49,
+    "y": 40,
+    "w": 100,
+    "h": 80,
+    "rotation": 0
+   },
+   {
+    "id": "canvasAu",
+    "name": "Canvas au",
+    "type": "text",
+    "parentId": "f1",
+    "x": 59,
+    "y": 160,
+    "w": 59.39,
+    "h": 14.5,
+    "rotation": 0
+   },
+   {
+    "id": "s2",
+    "name": "Frame 2",
+    "type": "frame",
+    "parentId": null,
+    "x": 515,
+    "y": -133,
+    "w": 120,
+    "h": 120,
+    "rotation": 0
+   },
+   {
+    "id": "s3",
+    "name": "Frame 3",
+    "type": "frame",
+    "parentId": null,
+    "x": 675,
+    "y": -133,
+    "w": 120,
+    "h": 120,
+    "rotation": 0
+   },
+   {
+    "id": "rot",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 150,
+    "y": 300,
+    "w": 100,
+    "h": 70,
+    "rotation": -47.19
+   },
+   {
+    "id": "small",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 260,
+    "y": 300,
+    "w": 100,
+    "h": 70,
+    "rotation": 0
+   }
+  ]
  },
  {
   "file": "L2-rename.png",
@@ -2048,25 +2281,181 @@
   "file": "L2-renamed.png",
   "selection": [],
   "tool": "move",
-  "zoom": "80%",
+  "zoom": "100%",
   "badge": null,
   "menus": [],
   "dialog": [],
   "toasts": [],
   "tips": [],
-  "nodes": []
+  "nodes": [
+   {
+    "id": "f1",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 56,
+    "y": -153,
+    "w": 420,
+    "h": 391.18,
+    "rotation": 0
+   },
+   {
+    "id": "inner",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": "f1",
+    "x": 49,
+    "y": 40,
+    "w": 100,
+    "h": 80,
+    "rotation": 0
+   },
+   {
+    "id": "canvasAu",
+    "name": "Canvas au",
+    "type": "text",
+    "parentId": "f1",
+    "x": 59,
+    "y": 160,
+    "w": 59.39,
+    "h": 14.5,
+    "rotation": 0
+   },
+   {
+    "id": "s2",
+    "name": "Frame 2",
+    "type": "frame",
+    "parentId": null,
+    "x": 515,
+    "y": -133,
+    "w": 120,
+    "h": 120,
+    "rotation": 0
+   },
+   {
+    "id": "s3",
+    "name": "Frame 3",
+    "type": "frame",
+    "parentId": null,
+    "x": 675,
+    "y": -133,
+    "w": 120,
+    "h": 120,
+    "rotation": 0
+   },
+   {
+    "id": "rot",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 150,
+    "y": 300,
+    "w": 100,
+    "h": 70,
+    "rotation": -47.19
+   },
+   {
+    "id": "small",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 260,
+    "y": 300,
+    "w": 100,
+    "h": 70,
+    "rotation": 0
+   }
+  ]
  },
  {
   "file": "L2-reorder-during.png",
   "selection": [],
   "tool": "move",
-  "zoom": "80%",
+  "zoom": "100%",
   "badge": null,
   "menus": [],
   "dialog": [],
   "toasts": [],
   "tips": [],
-  "nodes": []
+  "nodes": [
+   {
+    "id": "f1",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 56,
+    "y": -153,
+    "w": 420,
+    "h": 391.18,
+    "rotation": 0
+   },
+   {
+    "id": "inner",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": "f1",
+    "x": 49,
+    "y": 40,
+    "w": 100,
+    "h": 80,
+    "rotation": 0
+   },
+   {
+    "id": "canvasAu",
+    "name": "Canvas au",
+    "type": "text",
+    "parentId": "f1",
+    "x": 59,
+    "y": 160,
+    "w": 59.39,
+    "h": 14.5,
+    "rotation": 0
+   },
+   {
+    "id": "s2",
+    "name": "Frame 2",
+    "type": "frame",
+    "parentId": null,
+    "x": 515,
+    "y": -133,
+    "w": 120,
+    "h": 120,
+    "rotation": 0
+   },
+   {
+    "id": "s3",
+    "name": "Frame 3",
+    "type": "frame",
+    "parentId": null,
+    "x": 675,
+    "y": -133,
+    "w": 120,
+    "h": 120,
+    "rotation": 0
+   },
+   {
+    "id": "rot",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 150,
+    "y": 300,
+    "w": 100,
+    "h": 70,
+    "rotation": -47.19
+   },
+   {
+    "id": "small",
+    "name": "Frame",
+    "type": "frame",
+    "parentId": null,
+    "x": 260,
+    "y": 300,
+    "w": 100,
+    "h": 70,
+    "rotation": 0
+   }
+  ]
  },
  {
   "file": "P2-empty.png",
@@ -2631,7 +3020,7 @@
  {
   "file": "P3-context-paste-result.png",
   "selection": [
-   "932a6043-ea3c-4f8c-bb77-5b176b5e766e"
+   "7d949226-0a5d-447c-b52c-f98a7f188acd"
   ],
   "tool": "move",
   "zoom": "100%",
@@ -2664,7 +3053,7 @@
     "rotation": 0
    },
    {
-    "id": "932a6043-ea3c-4f8c-bb77-5b176b5e766e",
+    "id": "7d949226-0a5d-447c-b52c-f98a7f188acd",
     "name": "Frame",
     "type": "frame",
     "parentId": "target",
@@ -2699,6 +3088,7 @@
     "fontFamily": "Inter",
     "fontWeight": "400",
     "fontSize": 12,
+    "lineHeight": "auto",
     "color": "#ffffff",
     "radius": 0,
     "wMode": "hug",
@@ -2725,7 +3115,6 @@
     "strokeColor": "#000000",
     "shadow": "",
     "clipContent": false,
-    "lineHeight": 1.15,
     "letterSpacing": 0,
     "alignItems": "stretch",
     "justifyContent": "flex-start"
@@ -2840,7 +3229,7 @@
  {
   "file": "P3-empty-result.png",
   "selection": [
-   "11c3eeec-ba1c-49ac-b47f-4068f26a3fa6"
+   "015ac05a-7dc5-4e54-bc48-9f84d1f69fc0"
   ],
   "tool": "move",
   "zoom": "100%",
@@ -2928,7 +3317,7 @@
     "rotation": 0
    },
    {
-    "id": "11c3eeec-ba1c-49ac-b47f-4068f26a3fa6",
+    "id": "015ac05a-7dc5-4e54-bc48-9f84d1f69fc0",
     "name": "Frame",
     "type": "frame",
     "parentId": null,
@@ -2979,7 +3368,7 @@
     "letterSpacing": 0,
     "alignItems": "stretch",
     "justifyContent": "flex-start",
-    "id": "11c3eeec-ba1c-49ac-b47f-4068f26a3fa6"
+    "id": "015ac05a-7dc5-4e54-bc48-9f84d1f69fc0"
    }
   ]
  },
@@ -3102,7 +3491,7 @@
     "rotation": 0
    },
    {
-    "id": "11c3eeec-ba1c-49ac-b47f-4068f26a3fa6",
+    "id": "015ac05a-7dc5-4e54-bc48-9f84d1f69fc0",
     "name": "Frame",
     "type": "frame",
     "parentId": null,
@@ -3254,7 +3643,7 @@
  {
   "file": "P3-paste-over-parent-result.png",
   "selection": [
-   "c2274e8e-d7ec-4323-9b8c-0e7b8c4cefdc"
+   "a2494a64-c837-4c3b-8327-1251b036b0d4"
   ],
   "tool": "move",
   "zoom": "100%",
@@ -3298,7 +3687,7 @@
     "rotation": 0
    },
    {
-    "id": "c2274e8e-d7ec-4323-9b8c-0e7b8c4cefdc",
+    "id": "a2494a64-c837-4c3b-8327-1251b036b0d4",
     "name": "Frame",
     "type": "frame",
     "parentId": null,
@@ -3349,7 +3738,7 @@
     "letterSpacing": 0,
     "alignItems": "stretch",
     "justifyContent": "flex-start",
-    "id": "c2274e8e-d7ec-4323-9b8c-0e7b8c4cefdc"
+    "id": "a2494a64-c837-4c3b-8327-1251b036b0d4"
    }
   ]
  },
@@ -3872,7 +4261,7 @@
  {
   "file": "P5-detach-mask.png",
   "selection": [
-   "fff8373f-5eae-4e0d-98da-803a9cc69eee"
+   "b08dd38c-ce8d-484e-a9ad-d5fbc83cc6b4"
   ],
   "tool": "move",
   "zoom": "100%",
@@ -3883,7 +4272,7 @@
   "tips": [],
   "nodes": [
    {
-    "id": "fff8373f-5eae-4e0d-98da-803a9cc69eee",
+    "id": "b08dd38c-ce8d-484e-a9ad-d5fbc83cc6b4",
     "name": "Frame",
     "type": "frame",
     "parentId": null,
@@ -3943,7 +4332,7 @@
  {
   "file": "P5-detached-layer-inspector.png",
   "selection": [
-   "fff8373f-5eae-4e0d-98da-803a9cc69eee"
+   "b08dd38c-ce8d-484e-a9ad-d5fbc83cc6b4"
   ],
   "tool": "move",
   "zoom": "100%",
@@ -3954,7 +4343,7 @@
   "tips": [],
   "nodes": [
    {
-    "id": "fff8373f-5eae-4e0d-98da-803a9cc69eee",
+    "id": "b08dd38c-ce8d-484e-a9ad-d5fbc83cc6b4",
     "name": "Frame",
     "type": "frame",
     "parentId": null,
@@ -5370,6 +5759,7 @@
      "Discord community",
      "Export diagnostic logs",
      "|",
+     "What's new in Verynize 0.15 October 31",
      "View all"
     ]
    }
@@ -6565,7 +6955,7 @@
  {
   "file": "TX1-click.png",
   "selection": [
-   "16b90d7b-f4df-4ece-a06e-c300fd6fed52"
+   "3e95db4c-031a-4555-93f9-f183edb1f90e"
   ],
   "tool": "move",
   "zoom": "100%",
@@ -6609,7 +6999,7 @@
     "rotation": 0
    },
    {
-    "id": "16b90d7b-f4df-4ece-a06e-c300fd6fed52",
+    "id": "3e95db4c-031a-4555-93f9-f183edb1f90e",
     "name": "Text",
     "type": "text",
     "parentId": "f1",
@@ -6630,11 +7020,11 @@
  {
   "file": "TX1-drag.png",
   "selection": [
-   "83c14f38-14c4-4e60-b950-dbae250a391a"
+   "10f6a16c-cbe2-4f59-9d77-73330c554335"
   ],
   "tool": "move",
   "zoom": "100%",
-  "badge": "150 x 60",
+  "badge": null,
   "menus": [],
   "dialog": [],
   "toasts": [],
@@ -6685,7 +7075,7 @@
     "rotation": 0
    },
    {
-    "id": "83c14f38-14c4-4e60-b950-dbae250a391a",
+    "id": "10f6a16c-cbe2-4f59-9d77-73330c554335",
     "name": "Text",
     "type": "text",
     "parentId": null,
@@ -7175,7 +7565,7 @@
    "s2"
   ],
   "tool": "move",
-  "zoom": "572%",
+  "zoom": "538%",
   "badge": "120 x 120",
   "menus": [],
   "dialog": [],
@@ -7267,7 +7657,7 @@
    "small"
   ],
   "tool": "move",
-  "zoom": "532%",
+  "zoom": "547%",
   "badge": "150 x 105",
   "menus": [],
   "dialog": [],

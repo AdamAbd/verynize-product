@@ -103,22 +103,13 @@ All slices are merged on `feat/canvas-parity`. **Every after-fix shot was retake
 
 ### Remaining differences
 
-From REVIEW.md, not fixed yet:
-- **CM5:** Use as mask is offered only for exactly 2 siblings; Wonder also shows it for 4.
-- **CM9:** the label menu still has Select layer ›.
-- **L2:** Rename from a page menu makes that page active.
-- **T4:** Wonder switches the inspector to a Scale section.
-- **TR7:** Wonder keeps a dragged flex child in its slot and shows a purple drop column.
-- **CM6 / S2:** no outline on a selected hidden layer, and no dashed parent guides on a selected child.
-- **Toolbar:** the Design toggle is not highlighted while that view is active.
-- **Small items:**
-  - no Paste styles in the menus;
-  - Delete is disabled when only one page exists;
-  - a detached mask shape has Clip content off;
-  - the rotation field is truncated;
-  - Alt distances show decimals;
-  - zoom to selection is 572 % vs Wonder's 538 %;
-  - the text caret is purple, and line height reads 1.15 instead of Auto;
-  - hovering a frame outlines its children.
+A follow-up pass fixed most of them; see the end of [REVIEW.md](verynize/after/REVIEW.md). Still open:
+- the TR7 drop column's exact sizing;
+- Wonder's 1.5 px caret, which Chromium can't widen;
+- the hover outline on rotated frames;
+- the selection purple, #b93cdb in Verynize vs #c468f7 in Wonder;
+- Help item truncation;
+- Scale on a multi-selection;
+- CM8 Delete on a single page, left disabled because Wonder never showed that case.
 
 Validation is recorded in the PR (#12).

@@ -185,3 +185,27 @@ Fixture-only differences hold for every shot and are not repeated below:
    - **TX1**: purple caret and chrome around a new drag text;
    - **CM3**: line height 1.15 against Auto and an extra name label on text;
    - **S1**: hover outlines children.
+
+## Follow-up fix pass (2026-10-31, afternoon)
+
+Three more slices fixed most of the summary above. These shots were retaken from the merged build: `capture-after.cjs CM3 CM5 CM6 CM9 L2 P3 P4 P5 S1 S2 S4 T1 T2 T3 T4 T5 TR1 TR2 TR5 TR7 TR8 TX1 V3 V4`.
+
+| Summary item | Now |
+|---|---|
+| 1. P2-select stale scroll | **Fixed earlier** (the active row stays in view while typing). |
+| 2. CM5 Use as mask for 3+ | **Fixed**: offered for 2 or more siblings. Assumption: the bottom-most selected sibling masks each of the others. |
+| 3. CM9 Select layer in the label menu | **Fixed**: Copy link is followed directly by Paste, as in Wonder. |
+| 4. L2 Rename switches the page | **Fixed**: Rename from the page menu renames by id and keeps the current page. |
+| 5. T4 Scale section | **Fixed**: the Scale section (✕, W, H, %) replaces the inspector while the Scale tool is on. The % preset menu is an assumption. |
+| 6. TR7 drop column | **Close**: the child stays in its slot under a purple translucent column. The column's sizing rule is an approximation (Wonder's spans downward from the slot). |
+| 7. CM6 / S2 marks | **Fixed**: a selected hidden layer gets an outline; a selected nested child gets dashed parent guides with no labels. Nested layers and text no longer show a name label. |
+| 8. Toolbar toggle | **Fixed per pixels**: the active view's toggle is highlighted while the views menu is closed. Wonder's T2-plus shows `+` highlighted only because its menu is open. |
+| 9. Small items | Fixed: the rotation field shows `-47.19`; Alt chips show whole numbers; zoom to selection gives 538 %; What's new has a placeholder entry; the caret is black on white; there is no chrome while typing; hover outlines only the frame; a detached mask shape has Clip content on. CM3's 1.15 came from the capture fixture (new text already stores Auto). |
+| Not changed | **CM8**: Delete stays disabled on a single page, because Wonder never exercised it. **Paste styles**: listed after Paste only once styles have been copied, matching Wonder's pass-b menus. |
+
+Still open:
+- Wonder's caret is 1.5 px wide, but Chromium's caret can't be widened.
+- The hover outline is axis-aligned on rotated frames.
+- The existing selection purple (#b93cdb) differs from Wonder's #c468f7. Only the new marks use Wonder's colour.
+- The Help menu doesn't truncate "Discord commu…" or "Export diagnostic l…".
+- Scale works on a single layer only.
