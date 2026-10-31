@@ -1,7 +1,16 @@
 // Typed view of the cloud account kept by web/cloud-panel.js (window.cloudAccount): the one
 // email + password session shared by onboarding, the workspace switcher and Settings › Members.
 // Organizations are Better Auth's (cloud/auth.js); room access follows them (cloud/orgs.js).
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
+import { queryOptions, useQuery } from "@tanstack/react-query";
+import { queryClient } from "@/lib/query/client";
+import {
+  accountScope,
+  queryKeys,
+  scopedRequest,
+  SIGNED_OUT,
+  type AccountScope,
+} from "@/lib/query/keys";
 
 export type CloudProfile = {
   id: string;
@@ -122,58 +131,63 @@ export function authRequest<T = unknown>(path: string, body?: unknown): Promise<
   );
 }
 
-// One shared organization list for every island, so a workspace that was just created or joined
-// is listed before it becomes the active one.
-const orgStore = {
-  key: "",
-  list: [] as Organization[],
-  error: "",
-  listeners: new Set<() => void>(),
-  pending: null as Promise<void> | null,
-};
-const notifyOrganizations = () => orgStore.listeners.forEach((fn) => fn());
-/** Reload the organizations of the signed-in email account (personal first). */
+// One shared organization list for every island (the shared query cache), so a workspace that was
+// just created or joined is listed before it becomes the active one.
+const byPersonalThenName = (a: Organization, b: Organization) =>
+  Number(isPersonal(b)) - Number(isPersonal(a)) || a.name.localeCompare(b.name);
+/** The organizations of an email account, personal first. */
+export const organizationsQuery = (scope: AccountScope) =>
+  queryOptions({
+    queryKey: queryKeys.organizations(scope),
+    queryFn: async () =>
+      (await scopedRequest<Organization[]>(scope, "/api/auth/organization/list")).sort(
+        byPersonalThenName,
+      ),
+  });
+/** One organization with its members and invitations. */
+export const fullOrganizationQuery = (scope: AccountScope, organizationId: string) =>
+  queryOptions({
+    queryKey: queryKeys.organization(scope, organizationId),
+    queryFn: () =>
+      scopedRequest<FullOrganization>(
+        scope,
+        `/api/auth/organization/get-full-organization?organizationId=${encodeURIComponent(organizationId)}`,
+      ),
+  });
+/** Pending invitations addressed to the account. */
+export const userInvitationsQuery = (scope: AccountScope) =>
+  queryOptions({
+    queryKey: queryKeys.invitations(scope),
+    queryFn: async () =>
+      (
+        await scopedRequest<OrganizationInvitation[]>(
+          scope,
+          "/api/auth/organization/list-user-invitations",
+        )
+      ).filter((invitation) => invitation.status === "pending"),
+  });
+
+/** Refetch the organization list of the signed-in account. */
 export function reloadOrganizations(): Promise<void> {
-  const account = cloudAccount()?.get() ?? null;
-  const key = account?.emailAccount ? `${account.server}|${account.account.email}` : "";
-  if (!key) {
-    orgStore.key = "";
-    orgStore.list = [];
-    notifyOrganizations();
-    return Promise.resolve();
-  }
-  const run = authRequest<Organization[]>("/organization/list").then(
-    (list) => {
-      list.sort(
-        (a, b) => Number(isPersonal(b)) - Number(isPersonal(a)) || a.name.localeCompare(b.name),
-      );
-      orgStore.key = key;
-      orgStore.list = list;
-      orgStore.error = "";
-      notifyOrganizations();
-    },
-    (e: unknown) => {
-      orgStore.error = e instanceof Error ? e.message : String(e);
-      notifyOrganizations();
-    },
-  );
-  orgStore.pending = run;
-  return run;
+  const scope = accountScope(cloudAccount()?.get());
+  if (!scope) return Promise.resolve();
+  // refetchType "all": also refresh the list when no island shows it right now, so a reader that
+  // mounts next (e.g. after switching to a just-created workspace) finds it current.
+  return queryClient.invalidateQueries({
+    queryKey: queryKeys.organizations(scope),
+    exact: true,
+    refetchType: "all",
+  });
 }
-const subscribeOrganizations = (fn: () => void) => {
-  orgStore.listeners.add(fn);
-  return () => orgStore.listeners.delete(fn);
-};
+const NO_ORGANIZATIONS: Organization[] = [];
 /** The organizations of the signed-in email account, personal first; refreshes on changes. */
 export function useOrganizations() {
   const account = useCloudAccount();
-  const organizations = useSyncExternalStore(subscribeOrganizations, () => orgStore.list);
-  const error = useSyncExternalStore(subscribeOrganizations, () => orgStore.error);
-  useEffect(() => {
-    void reloadOrganizations();
-  }, [account]);
-  const reload = useCallback(() => reloadOrganizations(), []);
-  return { account, organizations, error, reload };
+  const scope = accountScope(account);
+  const query = useQuery({ ...organizationsQuery(scope ?? SIGNED_OUT), enabled: !!scope });
+  const organizations = (scope && query.data) || NO_ORGANIZATIONS;
+  const error = scope && query.error ? query.error.message : "";
+  return { account, organizations, error, reload: reloadOrganizations };
 }
 /** Reload the shared list (after create, leave, accept…); resolves once it is current. */
 export const organizationsChanged = () => reloadOrganizations();
