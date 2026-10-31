@@ -267,6 +267,9 @@ html[data-ui-theme="light"] {
   --color-toggle-active-foreground: color-mix(in srgb, var(--primary-text) 82%, white);
   /* Page swatch edge (properties-audit C8): a 1px #555555 ring so a dark page colour stays visible on #2b2b2b. */
   --color-swatch-ring: color-mix(in srgb, var(--foreground) 22%, var(--input));
+  /* Type-to-bind suggestion list (properties-audit G1): #1c1c1c panel with a 0.5px #2f2f2f edge and a soft drop. */
+  --shadow-type-bind:
+    0 0 0 0.5px color-mix(in srgb, var(--foreground) 9.5%, var(--background)), 0 4px 12px rgb(0 0 0 / 0.3);
   /* </inspector-tokens> */
   /* <home-tokens> */
   /* </home-tokens> */

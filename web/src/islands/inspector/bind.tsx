@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { fieldPrefixInset, fieldShell } from "./controls";
 import type { Node } from "./model";
+import { TypeBind, type TypeBindMode } from "./type-bind";
 import {
   BINDABLE,
   bindVariable,
@@ -218,11 +219,17 @@ export function BindableField({
   prefix,
   suffix,
   className,
+  typeBind,
   children,
 }: BindProps & {
   prefix?: ReactNode;
   suffix?: ReactNode;
   className?: string;
+  /**
+   * Type-to-bind (properties audit G1): a suggestion list under the field while a name is typed; `"empty"` also
+   * shows it when an empty field is focused (Min/Max rows). Only where Wonder proved it: W/H, gap, limits.
+   */
+  typeBind?: TypeBindMode;
   children: (suffix: ReactNode) => ReactNode;
 }) {
   if (isBound(node, field))
@@ -237,14 +244,16 @@ export function BindableField({
         className={className}
       />
     );
+  const input = children(
+    <span className="flex items-center gap-1">
+      {suffix}
+      <BindButton doc={doc} node={node} selection={selection} field={field} label={label} />
+    </span>,
+  );
+  if (!typeBind) return <>{input}</>;
   return (
-    <>
-      {children(
-        <span className="flex items-center gap-1">
-          {suffix}
-          <BindButton doc={doc} node={node} selection={selection} field={field} label={label} />
-        </span>,
-      )}
-    </>
+    <TypeBind doc={doc} selection={selection} field={field} mode={typeBind}>
+      {input}
+    </TypeBind>
   );
 }
