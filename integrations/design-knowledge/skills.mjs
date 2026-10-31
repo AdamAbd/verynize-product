@@ -401,7 +401,7 @@ export function skillCatalog() {
   const supporting = entries.filter(e => e.kind === 'supporting');
   return `## Skills
 
-Load the one skill that matches the job with get_skills {name} before starting it, and follow it step by step. A quick text, color, spacing or icon tweak needs no skill.
+Load the one skill that matches the job with get_skills {skill} before starting it, and follow it step by step. A quick text, color, spacing or icon tweak needs no skill.
 
 ### Primary (one per job)
 ${primary.map(e => `- **${e.name}**: ${e.summary}${e.supporting.length ? ` Supporting: ${e.supporting.join(', ')}.` : ''}`).join('\n')}

@@ -872,9 +872,11 @@ function pickSuggestions(suggestions: Suggestion[], seed: string | null): Sugges
 
 /** Empty chat (34, 35): logo + prompt, with a few of the workspace's starter briefs as cards that fill the composer. */
 function EmptyState({ suggestions, seed }: { suggestions: Suggestion[]; seed: string | null }) {
-  const fill = (prompt: string) => {
+  // A brief written for a catalog style also pins that style in the composer picker, so the run carries `designStyle`.
+  const fill = ({ prompt, style }: Suggestion) => {
     const el = document.getElementById("project-prompt") as HTMLTextAreaElement | null;
     if (!el) return;
+    if (style) window.chatDesignStyle?.set(style);
     legacySet(el, prompt);
     el.focus();
     el.setSelectionRange(prompt.length, prompt.length);
@@ -887,7 +889,7 @@ function EmptyState({ suggestions, seed }: { suggestions: Suggestion[]; seed: st
         <ul aria-label="Suggestions" className="m-0 mt-3 grid w-full max-w-100 list-none grid-cols-2 gap-1.5 p-0">
           {pickSuggestions(suggestions, seed).map((item) => (
             <li key={item.title} data-suggestion={item.title} className="flex">
-              <ChatSuggestionButton hook={hook.suggestion} title={item.prompt} onClick={() => fill(item.prompt)} className="w-full">
+              <ChatSuggestionButton hook={hook.suggestion} title={item.prompt} onClick={() => fill(item)} className="w-full">
                 <span className="w-full truncate text-sm text-foreground-2">{item.title}</span>
                 <span className="line-clamp-2 text-xs leading-4 text-muted-foreground">{item.prompt}</span>
               </ChatSuggestionButton>
