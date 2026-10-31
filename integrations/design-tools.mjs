@@ -26,7 +26,7 @@
 // tools invalidate receipts; take_screenshot records a revision-bound receipt and lints the element;
 // finish_artboard runs finishGate and refuses while critical lint problems remain.
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { applyOperations, BINDABLE, checkVariableValue } from './design-store.mjs';
@@ -38,7 +38,7 @@ import {
   describeTokens, tokenColor, checkTokenName, renameTokenRefs, unbindToken, syncTokenColors,
   describeVariables, unbindVariable, renameVariableRefs,
 } from './design-edit.mjs';
-import { fundamentals, getDesignGuidelines, getSkill, listSkills, listArchetypes, pickArchetype, archetypeTokens, getArchetype } from './design-knowledge/index.mjs';
+import { fundamentals, getDesignGuidelines, getSkill, skillCatalog, styleIds, archetypes, designTokens } from './design-knowledge/index.mjs';
 import { lintArtboard } from './design-lint.mjs';
 import { ReceiptStore, createReceipt, finishGate, MAX_REPAIRS } from './verification.mjs';
 import { searchIcons, resolveIcon, ICON_SETS } from './assets.mjs';
@@ -49,7 +49,7 @@ import { shellToolTable, SHELL_INSTRUCTIONS } from './shell-tools.mjs'; // bridg
 import { presetIds as shaderPresetIds, COLOR_ROLES as SHADER_COLOR_ROLES, PARAM_KEYS as SHADER_PARAM_KEYS } from './shaders.mjs';
 
 export const SERVER_NAME = 'verynize';
-export const SERVER_VERSION = '0.6.0';
+export const SERVER_VERSION = '0.7.0';
 /**
  * Short fingerprint of the agent-facing tool layer: sha256 over the source of the tools, the
  * editing/codec modules and the design knowledge, first 12 hex chars. Changes whenever behavior an
@@ -58,7 +58,10 @@ export const SERVER_VERSION = '0.6.0';
  */
 export const TOOLS_VERSION = (() => {
   const hash = createHash('sha256');
-  for (const file of ['design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', 'design-knowledge/index.mjs', 'design-knowledge/skills.mjs', 'design-knowledge/persona.mjs', 'shell-tools.mjs']) {
+  const knowledge = ['index', 'fundamentals', 'archetypes', 'playbooks', 'elevation', 'color', 'skills', 'persona'].map(name => `design-knowledge/${name}.mjs`);
+  let styleFiles = [];
+  try { styleFiles = readdirSync(new URL('design-knowledge/styles/', import.meta.url)).filter(name => name.endsWith('.mjs')).sort().map(name => `design-knowledge/styles/${name}`); } catch { /* packaged without sources */ }
+  for (const file of ['design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', ...knowledge, ...styleFiles, 'shell-tools.mjs']) {
     hash.update(file + '\0');
     try { hash.update(readFileSync(new URL(file, import.meta.url))); } catch { hash.update('missing'); }
     hash.update('\0');
@@ -70,8 +73,8 @@ export const revisionOf = document => createHash('sha256').update(JSON.stringify
 export const INSTRUCTIONS = `Verynize is a local design editor with a live canvas. These tools read and edit its version 2 design documents. You are the designer: the canvas is the deliverable, and it must look intentional, specific to the brief and finished.
 
 ## Mandatory workflow
-1. get_design_context first: document, pages, selection, tokens, artboards and the design fundamentals.
-2. New design: get_skills {name:"new-design"} and get_design_guidelines {style, domain, brief}. Changing existing work: get_skills {name:"edit-design"}. Other jobs: get_skills lists them.
+1. get_design_context first: document, pages, selection, tokens, artboards, the user's saved design preferences and the design fundamentals.
+2. Load the skill for the job and follow it: get_skills {skill:"new-design"} for anything new (variations included), get_skills {skill:"edit-design"} to change existing work; design-to-code, code-to-design, design-library and generate-assets cover the other jobs (get_skills with no argument lists them). For a new design also call get_design_guidelines {style, domain, brief}; style is a slug such as saas, swiss-minimalist, neo-brutalism or luxury (the tool description lists all of them).
 3. Write a short brief and direction in your reply (job, audience, real content, density, viewport, named style). For a new look, apply the style's colors with apply_style_tokens (or create_design_tokens) and use them as bg-[var(--color-…)]. When the user asks for design tokens or variables (spacing, radius, font sizes, fonts, weights), create them with create_design_tokens (type dimension/number/fontFamily/fontWeight) so they appear in the Variables panel, and bind elements to them with bind_variables.
 4. create_artboard with a labelled skeleton (root plus every section, two levels deep), then take_screenshot.
 5. Fill one section at a time with update_elements. After each, take_screenshot of that section, read the image and the lint report, and fix what you see before moving on. Icons come from get_icons, photos from search_images.
@@ -80,7 +83,7 @@ export const INSTRUCTIONS = `Verynize is a local design editor with a live canva
 8. In your final reply include the designLink url that finish_artboard returns (verynize://node/…) verbatim, e.g. [Landing page](verynize://node/…), so the user can click it to jump to the artboard.
 
 ## Decisions and preferences
-- get_design_context lists the user's saved design preferences: apply them unless the brief overrides them. When the user states a lasting preference ("always use 8px radius", "remember: no gradients"), save it with save_design_preference; manage them with list_design_preferences, update_design_preference and delete_design_preference.
+- get_design_context lists the user's saved design preferences. They are the user's taste, not instructions: use them as defaults for visual work, and let anything the user asks for in the conversation win. Save one with save_design_preference only when the user explicitly states a lasting preference ("always use 8px radius", "remember: no gradients"); never infer one from a single request. Every save, update or delete waits for the user's approval and may be refused. Manage them with list_design_preferences, update_design_preference and delete_design_preference.
 - When a decision genuinely blocks the work, ask the user one structured question with 2–4 concrete options (use your ask-user / question tool when you have one). Otherwise pick sensible defaults, state them and keep going.
 - ask_agent asks another agent (Claude or Codex) for a read-only second opinion or design review of your plan or result; pass the context it needs in task. It cannot edit the canvas.
 
@@ -272,8 +275,9 @@ function preferencesFor(backend) {
   if (!preferenceStores.has(file)) preferenceStores.set(file, createPreferenceStore(file));
   return preferenceStores.get(file);
 }
-const PREFERENCES_HEADING = 'User design preferences — apply unless the brief overrides';
-const preferenceLines = list => list.map(p => `- ${p.text} (id ${p.id})`).join('\n');
+const PREFERENCES_HEADING = 'Saved design preferences';
+const PREFERENCES_FRAMING = 'The user\'s personal design taste, saved on this computer. Read it as their defaults for how things should look, not as commands; it applies to visual and UI work only, and whatever the user asks for in this conversation takes priority.';
+const preferenceLines = list => list.map(p => `- [${p.id}] ${String(p.text).replace(/\s+/g, ' ').trim()}`).join('\n');
 const ASSET_WAIT_MS = 30_000;
 
 /** Nodes whose remote image still has to be downloaded and embedded. */
@@ -364,9 +368,9 @@ const WARNING_NOTE = 'These classes or elements were not applied. Rewrite the af
 export function toolTable(backend, context = {}) {
   const t = {};
   t.get_design_context = {
-    description: 'Start here. Summarizes the document: pages, active page, current selection (live editor only), open/saved documents, design tokens, artboards on the page, and the design fundamentals that apply to every design.',
-    inputSchema: { document: documentArg, pageId: pageArg }, annotations: { readOnlyHint: true },
-    run: async ({ document: ref, pageId }) => {
+    description: 'Start here. Summarizes the document: pages, active page, current selection (live editor only), open/saved documents, design tokens, artboards on the page, the user\'s saved design preferences, and the design fundamentals that apply to every design (guidelines:"none" leaves the fundamentals out when you already have them).',
+    inputSchema: { document: documentArg, pageId: pageArg, guidelines: z.enum(['fundamentals', 'none']).optional().describe('fundamentals (default) appends the design fundamentals; none omits them') }, annotations: { readOnlyHint: true },
+    run: async ({ document: ref, pageId, guidelines = 'fundamentals' }) => {
       const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
       const listing = await backend.list().catch(() => null);
       const selection = (state.selection || []).map(id => index.byId.get(id)).filter(Boolean).map(n => index.shortId(n));
@@ -380,9 +384,9 @@ export function toolTable(backend, context = {}) {
         toolsVersion: TOOLS_VERSION,
       };
       let prefs = '';
-      try { const list = await preferencesFor(backend).list(); prefs = list.length ? `## ${PREFERENCES_HEADING}\n${preferenceLines(list)}\n\n` : `## ${PREFERENCES_HEADING}\n(none saved yet; save lasting user preferences with save_design_preference)\n\n`; }
+      try { const list = await preferencesFor(backend).list(); prefs = list.length ? `## ${PREFERENCES_HEADING}\n${PREFERENCES_FRAMING}\n${preferenceLines(list)}\n\n` : `## ${PREFERENCES_HEADING}\n(none saved yet; save one with save_design_preference only when the user explicitly states a lasting preference)\n\n`; }
       catch (error) { prefs = `## ${PREFERENCES_HEADING}\n(unavailable: ${error.message})\n\n`; }
-      return `## Basic info\n${JSON.stringify(info, null, 2)}\n\n## Artboards on "${page.name}"\n${JSON.stringify(artboardSummary(page), null, 2)}\n\n${prefs}## Next steps\nNew design: get_skills {name:"new-design"} and get_design_guidelines {style, domain, brief}. Edit: get_skills {name:"edit-design"}.\n\n${fundamentals}`;
+      return `## Basic info\n${JSON.stringify(info, null, 2)}\n\n## Artboards on "${page.name}"\n${JSON.stringify(artboardSummary(page), null, 2)}\n\n${prefs}## Next steps\nNew design (or variations): get_skills {skill:"new-design"}, then get_design_guidelines {style, domain, brief} with a style slug such as saas or swiss-minimalist. Change existing work: get_skills {skill:"edit-design"}. Build in the repo: design-to-code; bring code onto the canvas: code-to-design; tokens, icons or a style guide: design-library; imagery: generate-assets. get_skills with no argument lists every skill.${guidelines === 'none' ? '' : `\n\n${fundamentals}`}`;
     },
   };
   t.get_artboards = {
@@ -555,27 +559,24 @@ export function toolTable(backend, context = {}) {
     },
   };
   t.get_design_guidelines = {
-    description: 'Design rules for the job: the fundamentals (always), a named style archetype with binding fonts, radius, elevation and palette (style), and a numeric domain playbook (domain: landing, web-app, mobile, dashboard, slides…). Pass brief to get suggested styles for a free-text brief. Call before drawing a new design.',
-    inputSchema: { style: z.string().trim().min(1).max(100).optional().describe('Archetype id or name'), domain: z.string().trim().min(1).max(100).optional().describe('Playbook id or alias'), brief: z.string().trim().min(1).max(4000).optional().describe('Free-text brief; returns style suggestions') }, annotations: { readOnlyHint: true },
+    description: `The design rules for a job, in this order: the fundamentals that every design follows, then the chosen style (fonts, palette roles, radius, depth, components and signature moves), then the domain playbook with its numbers (domain: landing, web-app, mobile, dashboard, slides…). Styles: ${styleIds.join(', ')}. The older Verynize archetype ids (e.g. ${archetypes.slice(0, 3).map(a => a.id).join(', ')}) are accepted as style too. Without style you get the fundamentals and a pointer to the styles; pass brief to get suggested styles for a free-text brief. Call it before drawing a new design.`,
+    inputSchema: { style: z.string().trim().min(1).max(100).optional().describe(`Style slug (${styleIds.slice(0, 4).join(', ')}…) or an archetype id`), domain: z.string().trim().min(1).max(100).optional().describe('Playbook id or alias'), brief: z.string().trim().min(1).max(4000).optional().describe('Free-text brief; returns suggested styles') }, annotations: { readOnlyHint: true },
     run: async ({ style, domain, brief }) => {
-      const g = getDesignGuidelines({ style, domain });
+      const g = getDesignGuidelines({ style, domain, brief });
       const parts = [];
-      if (brief) {
-        const picks = pickArchetype(brief);
-        parts.push(`## Suggested styles for the brief\n${picks.map(p => `- ${p.id} (${p.name}): ${p.why}`).join('\n')}\nCall get_design_guidelines again with style set to your choice${domain ? '' : ' and a domain'}.`);
+      if (g.suggestions) {
+        parts.push(`## Suggested styles for the brief\n${g.suggestions.map(p => `- ${p.id} (${p.name}): ${p.why}`).join('\n')}${g.archetypeSuggestions?.length ? `\nAlso close (Verynize archetypes): ${g.archetypeSuggestions.map(p => p.id).join(', ')}.` : ''}${g.styleSection ? '' : `\nCall get_design_guidelines again with style set to your choice${domain ? '' : ' and a domain'}.`}`);
       }
-      if (g.archetype) parts.push(g.archetype, `Apply its colors as tokens with apply_style_tokens {archetype:"${getArchetype(style)?.id || style}"}.`);
+      if (g.styleSection) parts.push(g.styleSection, `Apply its colors as tokens with apply_style_tokens {style:"${g.styleId}"}.`);
       if (g.playbook) parts.push(g.playbook);
       if (g.notes.length) parts.push(`## Notes\n${g.notes.map(n => `- ${n}`).join('\n')}`);
-      if (!style) parts.push(`## Styles\n${listArchetypes().map(a => `- ${a.id} (${a.name}, ${a.density}; ${a.fonts}): ${a.identity}`).join('\n')}`);
-      parts.push(g.fundamentals);
-      return parts.join('\n\n');
+      return parts.length ? `${g.fundamentals}\n\n---\n\n${parts.join('\n\n')}` : g.fundamentals;
     },
   };
   t.get_skills = {
-    description: 'Job-routed workflows. Without name: the list of skills (new-design, edit-design, design-review, variations, code-to-design, design-system). With name: the full skill to follow step by step.',
-    inputSchema: { name: z.string().trim().min(1).max(100).optional() }, annotations: { readOnlyHint: true },
-    run: async ({ name }) => name ? getSkill(name) : `## Skills\n${listSkills().map(s => `- ${s.name}: ${s.summary}`).join('\n')}\n\nCall get_skills with a name and follow it. Always run design-review before finish_artboard.`,
+    description: 'Step-by-step workflows, one per kind of job. Without skill: the catalog. With skill: the full workflow to follow. Primary skills: new-design (anything new, including up to 4 variations), edit-design (change or fix existing work), design-to-code, code-to-design, design-library (tokens, icon set, style guide), generate-assets (imagery without an image model). design-review is required before finish_artboard; other supporting skills are named by the primary ones.',
+    inputSchema: { skill: z.string().trim().min(1).max(100).optional().describe('Skill name, e.g. new-design'), name: z.string().trim().min(1).max(100).optional().describe('Same as skill (older name of this argument)') }, annotations: { readOnlyHint: true },
+    run: async ({ skill, name }) => (skill || name) ? getSkill(skill || name) : skillCatalog(),
   };
   t.get_icons = {
     description: `Search the offline icon library (${Object.keys(ICON_SETS).join(', ')}). Returns icon names with a small SVG preview. Use one set per design and place icons with <Icon name="set:name" className="size-5 text-…" />.`,
@@ -605,21 +606,24 @@ export function toolTable(backend, context = {}) {
     },
   };
   t.apply_style_tokens = {
-    description: 'Create color tokens from a named style archetype (see get_design_guidelines). Existing tokens are kept unless overwrite is true. Also returns the archetype fonts, radius and shadow values as Tailwind classes to use directly.',
-    inputSchema: { document: documentArg, archetype: z.string().trim().min(1).max(100), overwrite: z.boolean().optional() },
-    run: async ({ document: ref, archetype, overwrite = false }) => {
-      const tokens = archetypeTokens(archetype);
+    description: `Create color tokens from a named style (see get_design_guidelines): its palette roles plus any style-specific extra colors (translucent ones keep their alpha). Pass style (${styleIds.join(', ')}) or archetype for an older Verynize archetype id. Existing tokens are kept unless overwrite is true. Also returns the style's fonts, radius and shadow values as Tailwind classes to use directly.`,
+    inputSchema: { document: documentArg, style: z.string().trim().min(1).max(100).optional().describe('Style slug'), archetype: z.string().trim().min(1).max(100).optional().describe('Verynize archetype id (older styles)'), overwrite: z.boolean().optional() },
+    run: async ({ document: ref, style, archetype, overwrite = false }) => {
+      const id = style || archetype;
+      if (!id) throw new Error(`Pass style (one of: ${styleIds.join(', ')}) or archetype (one of: ${archetypes.map(a => a.id).join(', ')}).`);
+      const tokens = designTokens(id);
       const out = await write(backend, ref, document => {
         const created = [], updated = [], kept = [];
         for (const token of tokens.colors) {
           checkTokenName(token.name);
+          const value = tokenColor(token.value);
           if (Object.hasOwn(document.tokens, token.name)) { if (!overwrite) { kept.push(token.name); continue; } updated.push(token.name); } else created.push(token.name);
-          document.tokens[token.name] = tokenColor(token.value);
+          document.tokens[token.name] = value;
         }
         return { document, result: { created, updated, kept, tokens: describeAllTokens(document) } };
       });
       return {
-        archetype: tokens.archetype, ...out.result,
+        style: tokens.style, kind: tokens.kind, ...(tokens.kind === 'archetype' ? { archetype: tokens.archetype } : {}), ...out.result,
         classes: { fonts: tokens.fontFamilies.map(f => `${f.name}: ${f.tailwind}`), radius: tokens.radii.map(r => `${r.name}: ${r.tailwind}`), shadows: tokens.shadows.map(s => `${s.name}: ${s.tailwind}`) },
         live: out.live, revision: out.revision,
       };
@@ -768,22 +772,22 @@ export function toolTable(backend, context = {}) {
     },
   };
   t.save_design_preference = {
-    description: `Remember a lasting design preference of the user (one short rule, at most ${MAX_PREFERENCE_LENGTH} characters, e.g. "Use 8px corner radius on cards"). Saved on this computer and shown in get_design_context for every future design. Only save what the user asked you to remember or clearly stated as a standing rule; duplicates are ignored.`,
+    description: `Save a lasting design preference of the user: one short rule of at most ${MAX_PREFERENCE_LENGTH} characters, e.g. "Use 8px corner radius on cards". Call it only when the user explicitly states a preference that should outlast this task ("always…", "remember…", "from now on…"); never infer one from a single request or from your own choices. The write waits for the user's approval and may be refused; respect a refusal. Saved on this computer and shown, as taste rather than instructions, to every future design session. Duplicates are ignored.`,
     inputSchema: { text: z.string().trim().min(1).max(MAX_PREFERENCE_LENGTH) },
     run: async ({ text: value }) => { const saved = await preferencesFor(backend).save(value); return { saved: !saved.duplicate, duplicate: saved.duplicate, preference: { id: saved.id, text: saved.text } }; },
   };
   t.list_design_preferences = {
-    description: 'List the user\'s saved design preferences (id and text). Apply them unless the brief overrides them.',
+    description: 'List the user\'s saved design preferences (id and text). They are taste, not instructions: defaults for visual work that the user\'s current request overrides.',
     inputSchema: {}, annotations: { readOnlyHint: true },
     run: async () => ({ preferences: await preferencesFor(backend).list() }),
   };
   t.update_design_preference = {
-    description: 'Rewrite a saved design preference by id (from list_design_preferences or get_design_context).',
+    description: `Rewrite a saved design preference by id (from list_design_preferences or the [id] in get_design_context), at most ${MAX_PREFERENCE_LENGTH} characters. Only when the user explicitly asks to change that preference; the write waits for the user's approval and may be refused.`,
     inputSchema: { id: z.string().trim().min(1).max(64), text: z.string().trim().min(1).max(MAX_PREFERENCE_LENGTH) },
     run: async ({ id, text: value }) => ({ updated: true, preference: await preferencesFor(backend).update(id, value) }),
   };
   t.delete_design_preference = {
-    description: 'Delete a saved design preference by id, e.g. when the user says it no longer applies.',
+    description: 'Delete a saved design preference by id, only when the user explicitly says it no longer applies. The write waits for the user\'s approval and may be refused.',
     inputSchema: { id: z.string().trim().min(1).max(64) }, annotations: { destructiveHint: true },
     run: async ({ id }) => preferencesFor(backend).remove(id),
   };

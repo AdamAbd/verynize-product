@@ -30,7 +30,7 @@ const path=require('node:path');
     const json=async(name,args)=>JSON.parse((await call(name,args)).content[0].text);
 
     const context=(await call('get_design_context')).content[0].text;
-    assert.match(context,/"live": true/);assert.ok(context.includes(`"toolsVersion": "${info.toolsVersion}"`));assert.match(context,/User design preferences — apply unless the brief overrides/);
+    assert.match(context,/"live": true/);assert.ok(context.includes(`"toolsVersion": "${info.toolsVersion}"`));assert.match(context,/## Saved design preferences\n/);
     assert.ok((await client.listTools()).tools.some(t=>t.name==='ask_agent'),'ask_agent is exposed live');
     const pref=(await json('save_design_preference',{text:'Live test: cards use 12px radius'})).preference;
     assert.ok((await json('list_design_preferences')).preferences.some(p=>p.id===pref.id));
