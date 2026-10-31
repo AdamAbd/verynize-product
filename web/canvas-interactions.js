@@ -46,11 +46,11 @@
     const guideSvg = overlay.querySelector('.guide-layer'), guideLabels = overlay.querySelector('.guide-labels'), frameLabels = overlay.querySelector('.frame-labels'), marqueeBox = overlay.querySelector('.marquee');
 
 
-    // ---------- Hover: outline what a click would select, with its children dashed ----------
-    const hoverBox = document.createElement('div'), hoverKids = document.createElement('div'), dropBox = document.createElement('div'), dropLine = document.createElement('div');
-    hoverBox.className = 'hover-box'; hoverKids.className = 'hover-children'; dropBox.className = 'drop-target'; dropLine.className = 'drop-line';
-    hoverBox.hidden = dropBox.hidden = dropLine.hidden = true;
-    overlay.append(hoverKids, hoverBox, dropBox, dropLine);
+    // ---------- Hover: outline what a click would select and tint its name label (Wonder S1-hover-final) ----------
+    const hoverBox = document.createElement('div'), dropBox = document.createElement('div'), dropLine = document.createElement('div'), dropColumn = document.createElement('div');
+    hoverBox.className = 'hover-box'; dropBox.className = 'drop-target'; dropLine.className = 'drop-line'; dropColumn.className = 'drop-column';
+    hoverBox.hidden = dropBox.hidden = dropLine.hidden = dropColumn.hidden = true;
+    overlay.append(hoverBox, dropBox, dropLine, dropColumn);
     // A clipping ancestor cuts off the selection ring and handles drawn inside the layer, so selected layers inside
     // one get their chrome redrawn here, over the clip.
     const clippedSelection = document.createElement('div');
@@ -77,28 +77,24 @@
       return {left: r.left - v.left, top: r.top - v.top, width: r.width, height: r.height};
     }
     function placeBox(el, b) { Object.assign(el.style, {left: b.left + 'px', top: b.top + 'px', width: b.width + 'px', height: b.height + 'px'}); }
-    function showHover(id, children = true) {
+    function showHover(id) {
       hoverId = id || null; overlay.dataset.hover = hoverId || '';
+      for (const label of frameLabels.children) label.classList.toggle('hovered', label.dataset.id === hoverId);
       const b = hoverId && screenBox(hoverId);
-      hoverBox.hidden = !b; hoverKids.replaceChildren();
-      if (!b) return;
-      placeBox(hoverBox, b);
-      if (children) for (const k of ed.nodes().filter(n => n.parentId === hoverId && !n.hidden).slice(0, 200)) {
-        const kb = screenBox(k.id); if (!kb) continue;
-        const d = document.createElement('div'); d.className = 'hover-child'; placeBox(d, kb); hoverKids.append(d);
-      }
+      hoverBox.hidden = !b;
+      if (b) placeBox(hoverBox, b);
     }
     // Recompute the hover from the last pointer position (after a move, camera change, render or modifier change).
     function refreshHover(force = false) {
-      let id = null, children = true;
-      if (rowHover) { id = find(rowHover) && !sel().has(rowHover) ? rowHover : null; children = false; }
+      let id = null;
+      if (rowHover) id = find(rowHover) && !sel().has(rowHover) ? rowHover : null;
       else if (hoverPoint && !space && !spacingDrag && (tool === 'move' || tool === 'scale') && !workspace.classList.contains('panning') && !workspace.classList.contains('moving')) {
         const hit = document.elementFromPoint(hoverPoint.x, hoverPoint.y), label = hit?.closest?.('#canvas-overlay .frame-label');
-        if (label) { id = label.dataset.id; children = false; }
+        if (label) id = label.dataset.id;
         else if (hit && canvas.contains(hit) && !hit.closest('.handle')) { const el = hit.closest('.layer'); if (el) id = clickTarget(el.dataset.id, hoverPoint.deep); }
         if (id && (sel().has(id) || find(id)?.locked)) id = null;
       }
-      if (force || id !== hoverId) showHover(id, children);
+      if (force || id !== hoverId) showHover(id);
       drawSpacing();
     }
     wrap.addEventListener('pointerleave', () => { hoverPoint = null; refreshHover(); });
@@ -656,7 +652,7 @@
       el.addEventListener('keydown', onKey); el.addEventListener('blur', onBlur);
       document.addEventListener('pointerdown', outside, true);
       textEdit = {id: n.id, el, cleanup: () => { el.removeEventListener('keydown', onKey); el.removeEventListener('blur', onBlur); document.removeEventListener('pointerdown', outside, true); }};
-      showHover(null);
+      showHover(null); chrome.draw(); // only the caret while typing (Wonder TX1)
       el.focus({preventScroll: true});
       const selection = getSelection();
       const caret = point && document.caretRangeFromPoint?.(point.x, point.y);
@@ -744,13 +740,13 @@
       if (first.parentId) { const p = worldRect(first.parentId); if (p) targets.push({...p, parent: true}); }
       return targets;
     }
-    // Drag-move. Free layers follow the pointer through x/y (with snapping). Auto-layout children follow it as a
-    // translated ghost and reorder live inside their stack. Dropping over another frame re-parents the layers into
+    // Drag-move. Free layers follow the pointer through x/y (with snapping). Auto-layout children stay in their slot
+    // (reordering live inside their stack) under a translucent drop column that marks where they land (Wonder TR7). Dropping over another frame re-parents the layers into
     // it (at the stack slot under the pointer when that frame is an auto layout); top-level frames stay top-level.
     function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
       const g = gesture(), start = {x: e.clientX, y: e.clientY};
-      let free = null, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null;
+      let free = null, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null, last = {dx: 0, dy: 0};
       const begin = ev => {
         g.commit();
         if (ev.altKey) moving = duplicateNodes(moving, 0);
@@ -794,13 +790,15 @@
           targets = guideTargets(free.map(s => s.n.id));
           drop = {};
         }
-        placeGhosts(stacked, grab, dx, dy);
-        if (stacked.length) ed.updateMeasurement(); // name and size badges follow the dragged copy
-        drawGuides(guides); drawDrop(drop);
+        last = {dx, dy};
+        if (stacked.length) ed.updateMeasurement();
+        drawGuides(guides); drawDrop(drop); drawColumn(drop, home, stacked, grab, dx, dy);
       }, () => {
         workspace.classList.remove('moving');
         if (!free) { onClick?.(); return; }
-        drawGuides([]); drawDrop(null);
+        drawGuides([]); drawDrop(null); drawColumn(null);
+        // Stack children leaving their stack land where the pointer put them: measure them there, then re-parent.
+        if (drop?.parent && stacked.length) placeGhosts(stacked, grab, last.dx, last.dy);
         if (drop?.parent) relocate(moving.map(find).filter(Boolean), drop.parent.id === '' ? null : drop.parent.id, drop.index);
         else if (stacked.length) clearGhosts(stacked);
         ed.render();
@@ -894,6 +892,37 @@
         const ref = at || prev, x = at && prev && Math.abs(prev.top - at.top) < 1 ? (prev.left + prev.width + at.left) / 2 : at ? at.left - 2 : prev ? prev.left + prev.width + 2 : b.left + b.width / 2;
         placeBox(dropLine, {left: x - 1, top: ref ? ref.top : b.top + 4, width: 2, height: ref ? ref.height : Math.max(0, b.height - 8)});
       }
+    }
+
+    // Wonder TR7: while a stack child is dragged it keeps its slot and a translucent column shows where it lands —
+    // its slot across the whole stack when it stays in (or enters) a stack, else its box at the pointer.
+    function drawColumn(drop, home, stacked, grab, dx, dy) {
+      dropColumn.hidden = true;
+      if (!drop || !stacked?.length) return;
+      dropLine.hidden = true;
+      const moving = union(stacked.map(n => grab.get(n.id))); if (!moving) return;
+      const targetId = drop.parent ? (isFlow(find(drop.parent.id)) ? drop.parent.id : null) : (isFlow(find(home)) ? home : null);
+      let b;
+      if (targetId) {
+        const t = screenBox(targetId); if (!t) return;
+        const node = find(targetId), column = node.layout === 'flex' && !node.flexWrap && node.direction === 'column';
+        const mainSize = (column ? moving.h : moving.w) * cam.zoom;
+        let start;
+        if (!drop.parent) { // live-reordered: the children already sit in their slot
+          const slots = stacked.map(n => screenBox(n.id)).filter(Boolean); if (!slots.length) return;
+          start = column ? Math.min(...slots.map(r => r.top)) : Math.min(...slots.map(r => r.left));
+        } else {
+          const kids = ed.nodes().filter(n => n.parentId === targetId && !sel().has(n.id)).map(n => (n.hidden || n.position === 'absolute' ? null : screenBox(n.id)));
+          const at = kids.slice(drop.index).find(Boolean), prev = kids.slice(0, drop.index).findLast(Boolean);
+          const end = r => (column ? r.top + r.height : r.left + r.width), begin = r => (column ? r.top : r.left);
+          const mid = at && prev ? (end(prev) + begin(at)) / 2 : at ? begin(at) : prev ? end(prev) : (column ? t.top + t.height / 2 : t.left + t.width / 2);
+          start = mid - mainSize / 2;
+        }
+        b = column ? {left: t.left, top: start, width: t.width, height: mainSize} : {left: start, top: t.top, width: mainSize, height: t.height};
+      } else {
+        b = {left: (moving.x + dx) * cam.zoom + cam.x, top: (moving.y + dy) * cam.zoom + cam.y, width: moving.w * cam.zoom, height: moving.h * cam.zoom};
+      }
+      placeBox(dropColumn, b); dropColumn.hidden = false;
     }
 
     // Snap a moving box to sibling/parent edges and centers, or to equal spacing.
@@ -1047,7 +1076,7 @@
       if (!b) { drawGuides([]); return; }
       const guides = [], cy = a.y + a.h / 2, cx = a.x + a.w / 2;
       const inside = b.x <= a.x && b.y <= a.y && b.x + b.w >= a.x + a.w && b.y + b.h >= a.y + a.h;
-      const seg = (x1, y1, x2, y2) => { const len = Math.abs(x2 - x1) + Math.abs(y2 - y1); if (len > 0.01) guides.push({type: 'measure', x1, y1, x2, y2, label: Math.round(len * 10) / 10}); };
+      const seg = (x1, y1, x2, y2) => { const len = Math.abs(x2 - x1) + Math.abs(y2 - y1); if (len > 0.01) guides.push({type: 'measure', x1, y1, x2, y2, label: Math.round(len)}); }; // Wonder TR5: whole numbers
       const extend = (x1, y1, x2, y2) => { if (Math.abs(x2 - x1) + Math.abs(y2 - y1) > 0.01) guides.push({type: 'extend', x1, y1, x2, y2}); };
       if (inside) { seg(b.x, cy, a.x, cy); seg(a.x + a.w, cy, b.x + b.w, cy); seg(cx, b.y, cx, a.y); seg(cx, a.y + a.h, cx, b.y + b.h); }
       else {
@@ -1074,7 +1103,7 @@
       frameLabels.replaceChildren();
       for (const n of ed.nodes().filter(n => !n.parentId && n.type === 'frame' && !n.hidden && !n.preview && !n.labelHidden)) {
         const r = worldRect(n.id); if (!r || (sel().has(n.id) && sel().size === 1)) continue;
-        const label = document.createElement('span'); label.className = 'frame-label' + (sel().has(n.id) ? ' selected' : ''); label.textContent = n.name; label.dataset.id = n.id;
+        const label = document.createElement('span'); label.className = 'frame-label' + (sel().has(n.id) ? ' selected' : '') + (n.id === hoverId ? ' hovered' : ''); label.textContent = n.name; label.dataset.id = n.id;
         label.style.left = toScreenX(r.x) + 'px'; label.style.top = toScreenY(r.y) - 18 + 'px';
         label.onpointerdown = e => { if (e.button !== 0 || space || tool === 'hand') return; e.stopPropagation(); select(e.shiftKey ? [...sel(), n.id] : [n.id]); if (!e.shiftKey) startMove(e); };
         frameLabels.append(label);
