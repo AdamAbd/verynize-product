@@ -1,19 +1,46 @@
-// Inspector for a DOM element selected in a live preview's Edit mode (Wonder PM3-inspector): Position (read-only),
-// Layout (W/H, padding, margin), Appearance (opacity, corner radius), Typography and Text Fill. Values are the page's
-// computed styles; editing one stages a transient style on the element through window.previewEdits (web/preview-edit.js).
-import { useSyncExternalStore } from "react";
-import { Scan } from "lucide-react";
+// Inspector for a DOM element selected in a live preview's Edit mode (Wonder PM3-inspector), laid out like the layer
+// inspector: Position (alignment, X/Y, rotation, constraints, Z and the constraint diagram, all read-only), Layout
+// (W/H, min width/height, padding, margin), Appearance (opacity, corner radius, Clip content), Typography and Text
+// Fill. Values are the page's computed styles; editing one stages a transient style on the element through
+// window.previewEdits (web/preview-edit.js).
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { ChevronDown, Droplet, Expand, Eye, Scan } from "lucide-react";
 import {
+  AngleIcon,
+  FlipHorizontalIcon,
+  FlipVerticalIcon,
   FontSizeIcon,
   LineHeightIcon,
+  MarginSidesIcon,
   MarginXIcon,
   MarginYIcon,
   OpacityIcon,
+  PaddingSidesIcon,
   PaddingXIcon,
   PaddingYIcon,
+  RotateRightIcon,
+  SizeMinIcon,
+  SizeOptionsIcon,
+  SlidersIcon,
 } from "@/components/icons";
-import { Affix, Caption, Field, IconAffix, NativeSelect, Section, Swatch } from "./controls";
-import { WEIGHTS, weightName } from "./model";
+import { useDesign } from "@/lib/bridge";
+import {
+  Affix,
+  Caption,
+  Field,
+  IconAffix,
+  IconButton,
+  NativeSelect,
+  Section,
+  Swatch,
+  type IconType,
+} from "./controls";
+import { ConstraintSelect, ConstraintWidget } from "./constraints";
+import { Row, SizeMinHIcon } from "./layout";
+import { ALIGN_GROUPS, InspectorCheckbox, ToolButton, ToolGroup } from "./properties";
+import { FontFamilyPicker } from "./typography";
+import { isUnsupportedFont, loadCatalog, loadLocalFonts, type FontEntry } from "./fonts";
+import { WEIGHTS, weightName, type Node } from "./model";
 
 type Styles = Record<string, string>;
 export type PreviewElement = {
@@ -85,7 +112,46 @@ const length = (raw: string) => {
   return /^-?\d*\.?\d+$/.test(t) ? t + "px" : t;
 };
 
+/** A header or row tool Wonder draws for a DOM element, inert here (its behaviour on page elements is not proven). */
+function InertTool({ icon, label }: { icon: IconType; label: string }) {
+  return <IconButton icon={icon} label={label} disabled className="disabled:opacity-100" />;
+}
+/** "px ▾" at the end of a field, like the unit menus of the layer inspector. */
+const unitChevron = (unit?: string) => (
+  <>
+    {unit ? <span>{unit}</span> : null}
+    <ChevronDown aria-hidden className="size-3 shrink-0" />
+  </>
+);
+const READ_ONLY = "has-disabled:bg-field-disabled";
+const noop = () => null;
+
+/** Fonts for the family picker: the catalog, plus installed fonts once the picker opens. */
+function useFonts() {
+  const [catalog, setCatalog] = useState<FontEntry[]>([]);
+  const [installed, setInstalled] = useState<FontEntry[]>([]);
+  useEffect(() => {
+    let live = true;
+    void loadCatalog().then((fonts) => live && setCatalog(fonts));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const fonts = useMemo(() => [...catalog, ...installed], [catalog, installed]);
+  return { fonts, requestLocal: () => void loadLocalFonts().then(setInstalled) };
+}
+
+function Group({ label, tool, children }: { label: string; tool: ReactNode; children: ReactNode }) {
+  return (
+    <Caption label={label} className="mt-2">
+      <Row tool={tool}>{children}</Row>
+    </Caption>
+  );
+}
+
 export function PreviewElementBody({ element }: { element: PreviewElement }) {
+  const doc = useDesign();
+  const { fonts, requestLocal } = useFonts();
   const set =
     (prop: string, transform: (raw: string) => string = length) =>
     (raw: string) =>
@@ -94,34 +160,83 @@ export function PreviewElementBody({ element }: { element: PreviewElement }) {
   const fill = hex(st.color || "");
   const lineHeight = st.lineHeight === "normal" ? "Auto" : px(st.lineHeight);
   const letterSpacing = st.letterSpacing === "normal" ? "0" : px(st.letterSpacing);
+  const minimum = (value: string | undefined) => px(value) || "0";
+  const clipped = /^(hidden|clip)/.test(st.overflow || "");
   const weight = String(st.fontWeight || "400");
   const weights = WEIGHTS.some(([v]) => v === weight)
     ? WEIGHTS
     : [...WEIGHTS, [weight, weightName(weight)] as [string, string]];
+  const family = firstFamily(st.fontFamily || "");
+  // Wonder PM3: with an unsupported family the weight menu is dimmed (no weights to offer).
+  const unsupported = isUnsupportedFont(family, fonts, { generic: false });
+  // The picker reads the family from a layer-shaped value; choosing stages font-family on the page element.
+  const familyNode = useMemo(() => ({ id: "", fontFamily: family }) as unknown as Node, [family]);
   return (
     <div id="preview-element-inspector" data-element-path={element.path}>
-      <Section title="Position">
-        <div className="grid grid-cols-2 gap-2">
+      <Section title="Position" tools={<InertTool icon={Expand} label="Resize to fill" />}>
+        <div className="grid grid-cols-3 gap-2">
+          {ALIGN_GROUPS.map((group, i) => (
+            <ToolGroup key={i} disabled>
+              {group.map((b) => (
+                <ToolButton key={b.id} label={b.label} icon={b.icon} disabled onClick={noop} />
+              ))}
+            </ToolGroup>
+          ))}
+          <ToolGroup disabled>
+            <ToolButton label="Rotate 90°" icon={RotateRightIcon} disabled onClick={noop} />
+            <ToolButton label="Flip horizontal" icon={FlipHorizontalIcon} disabled onClick={noop} />
+            <ToolButton label="Flip vertical" icon={FlipVerticalIcon} disabled onClick={noop} />
+          </ToolGroup>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
           <Field
             name="pe-x"
             label="X"
             value={r2(element.position.x)}
-            onCommit={() => null}
+            onCommit={noop}
             prefix={<Affix>X</Affix>}
+            className={READ_ONLY}
             disabled
           />
           <Field
             name="pe-y"
             label="Y"
             value={r2(element.position.y)}
-            onCommit={() => null}
+            onCommit={noop}
             prefix={<Affix>Y</Affix>}
+            className={READ_ONLY}
+            disabled
+          />
+          <Field
+            name="pe-rotation"
+            label="Rotation"
+            value="0"
+            onCommit={noop}
+            prefix={<IconAffix icon={AngleIcon} />}
+            suffix="°"
+            inputClassName="disabled:text-foreground"
+            disabled
+          />
+        </div>
+        <div className="grid grid-cols-3 gap-2" data-preview-constraints>
+          <ConstraintSelect axis="h" selection={[]} list={null} />
+          <ConstraintSelect axis="v" selection={[]} list={null} />
+          <ConstraintWidget selection={[]} list={null} />
+          <Field
+            name="pe-z"
+            label="Stack order"
+            value=""
+            placeholder="Auto"
+            onCommit={noop}
+            prefix={<Affix>Z</Affix>}
+            className={"col-span-2 " + READ_ONLY}
+            inputClassName="disabled:placeholder:text-field-disabled-foreground"
             disabled
           />
         </div>
       </Section>
       <Section title="Layout">
-        <div className="grid grid-cols-2 gap-2">
+        <Row tool={<InertTool icon={SizeOptionsIcon} label="Size options" />}>
           <Field
             name="pe-width"
             label="Width"
@@ -129,7 +244,8 @@ export function PreviewElementBody({ element }: { element: PreviewElement }) {
             value={r2(element.box.width)}
             onCommit={set("width")}
             prefix={<Affix>W</Affix>}
-            suffix="px"
+            className="pr-1"
+            suffix={unitChevron("px")}
           />
           <Field
             name="pe-height"
@@ -138,57 +254,88 @@ export function PreviewElementBody({ element }: { element: PreviewElement }) {
             value={r2(element.box.height)}
             onCommit={set("height")}
             prefix={<Affix>H</Affix>}
+            className="pr-1"
+            suffix={unitChevron("px")}
+          />
+        </Row>
+        <Row>
+          <Field
+            name="pe-min-width"
+            label="Min width"
+            numeric
+            value={minimum(st.minWidth)}
+            onCommit={set("min-width")}
+            prefix={<IconAffix icon={SizeMinIcon} />}
+            className="col-span-2 pr-1"
+            suffix={unitChevron()}
+          />
+        </Row>
+        <Row>
+          <Field
+            name="pe-min-height"
+            label="Min height"
+            numeric
+            value={minimum(st.minHeight)}
+            onCommit={set("min-height")}
+            prefix={<IconAffix icon={SizeMinHIcon} />}
+            className="col-span-2 pr-1"
+            suffix={unitChevron()}
+          />
+        </Row>
+        <Group label="Padding" tool={<InertTool icon={PaddingSidesIcon} label="Independent padding" />}>
+          <Field
+            name="pe-padding-x"
+            label="Horizontal padding"
+            numeric
+            value={px(st.paddingLeft)}
+            onCommit={set("padding-inline")}
+            prefix={<IconAffix icon={PaddingXIcon} />}
             suffix="px"
           />
-        </div>
-        <Caption label="Padding">
-          <div className="grid grid-cols-2 gap-2">
-            <Field
-              name="pe-padding-x"
-              label="Horizontal padding"
-              numeric
-              value={px(st.paddingLeft)}
-              onCommit={set("padding-inline")}
-              prefix={<IconAffix icon={PaddingXIcon} />}
-              suffix="px"
-            />
-            <Field
-              name="pe-padding-y"
-              label="Vertical padding"
-              numeric
-              value={px(st.paddingTop)}
-              onCommit={set("padding-block")}
-              prefix={<IconAffix icon={PaddingYIcon} />}
-              suffix="px"
-            />
-          </div>
-        </Caption>
-        <Caption label="Margin">
-          <div className="grid grid-cols-2 gap-2">
-            <Field
-              name="pe-margin-x"
-              label="Horizontal margin"
-              numeric
-              value={px(st.marginLeft)}
-              onCommit={set("margin-inline")}
-              prefix={<IconAffix icon={MarginXIcon} />}
-              suffix="px"
-            />
-            <Field
-              name="pe-margin-y"
-              label="Vertical margin"
-              numeric
-              value={px(st.marginTop)}
-              onCommit={set("margin-block")}
-              prefix={<IconAffix icon={MarginYIcon} />}
-              suffix="px"
-            />
-          </div>
-        </Caption>
+          <Field
+            name="pe-padding-y"
+            label="Vertical padding"
+            numeric
+            value={px(st.paddingTop)}
+            onCommit={set("padding-block")}
+            prefix={<IconAffix icon={PaddingYIcon} />}
+            suffix="px"
+          />
+        </Group>
+        <Group label="Margin" tool={<InertTool icon={MarginSidesIcon} label="Independent margins" />}>
+          <Field
+            name="pe-margin-x"
+            label="Horizontal margin"
+            numeric
+            value={px(st.marginLeft)}
+            onCommit={set("margin-inline")}
+            prefix={<IconAffix icon={MarginXIcon} />}
+            className="pr-1"
+            suffix={unitChevron("px")}
+          />
+          <Field
+            name="pe-margin-y"
+            label="Vertical margin"
+            numeric
+            value={px(st.marginTop)}
+            onCommit={set("margin-block")}
+            prefix={<IconAffix icon={MarginYIcon} />}
+            className="pr-1"
+            suffix={unitChevron("px")}
+          />
+        </Group>
       </Section>
-      <Section title="Appearance">
-        <div className="grid grid-cols-2 gap-2">
-          <Caption label="Opacity">
+      <Section
+        title="Appearance"
+        tools={
+          <>
+            <InertTool icon={Eye} label="Hide element" />
+            <InertTool icon={Droplet} label="Blend mode" />
+          </>
+        }
+      >
+        <div className="flex items-end gap-2">
+          <Caption label="Opacity" className="flex-1">
             <Field
               name="pe-opacity"
               label="Opacity"
@@ -201,7 +348,7 @@ export function PreviewElementBody({ element }: { element: PreviewElement }) {
               suffix="%"
             />
           </Caption>
-          <Caption label="Corner radius">
+          <Caption label="Corner radius" className="flex-1">
             <Field
               name="pe-radius"
               label="Corner radius"
@@ -211,15 +358,26 @@ export function PreviewElementBody({ element }: { element: PreviewElement }) {
               prefix={<IconAffix icon={Scan} />}
             />
           </Caption>
+          <InertTool icon={Scan} label="Independent corner radii" />
         </div>
-      </Section>
-      <Section title="Typography">
-        <Field
-          name="pe-font-family"
-          label="Font family"
-          value={firstFamily(st.fontFamily || "")}
-          onCommit={set("font-family", (raw) => raw.trim())}
+        <InspectorCheckbox
+          name="pe-clip"
+          label="Clip content"
+          checked={clipped}
+          onChange={(on) => edits()?.setStyle("overflow", on ? "hidden" : "visible")}
         />
+      </Section>
+      <Section title="Typography" tools={<InertTool icon={SlidersIcon} label="Type settings" />}>
+        <div data-preview-font-family>
+          <FontFamilyPicker
+            doc={doc}
+            node={familyNode}
+            selection={[]}
+            fonts={fonts}
+            onLocalFonts={requestLocal}
+            onChoose={(next) => edits()?.setStyle("font-family", next)}
+          />
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <NativeSelect
             name="pe-font-weight"
@@ -227,6 +385,7 @@ export function PreviewElementBody({ element }: { element: PreviewElement }) {
             value={weight}
             options={weights.map(([value, label]) => ({ value, label }))}
             onChange={set("font-weight", (raw) => raw)}
+            disabled={unsupported}
           />
           <Field
             name="pe-font-size"

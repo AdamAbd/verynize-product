@@ -833,7 +833,11 @@ function captureModel(snapshot) {
       strokeColor: c.borderTopColor,
       shadow: c.boxShadow === "none" ? "" : c.boxShadow,
       clipContent: ["hidden", "clip"].includes(c.overflow),
-      lineHeight: num(c.lineHeight, num(c.fontSize, 16) * 1.2) / num(c.fontSize, 16),
+      // CSS `normal` is the font's own leading: the inspector's Auto (Wonder PM4), not a guessed 1.2 ratio.
+      lineHeight:
+        c.lineHeight === "normal"
+          ? "auto"
+          : num(c.lineHeight, num(c.fontSize, 16) * 1.2) / num(c.fontSize, 16),
       letterSpacing: num(c.letterSpacing),
       layout: "free",
       direction: c.flexDirection,
@@ -878,6 +882,9 @@ function captureModel(snapshot) {
     }
     return node;
   });
+  // Wonder PM4: the layer of a captured text element lands with Clip content on.
+  if (snapshot.element)
+    for (const node of nodes) if (!node.parentId && node.type === "text") node.clipContent = true;
   const backdrop = snapshot.element && cssColorHex(snapshot.backdrop || "");
   if (backdrop)
     for (const node of nodes)

@@ -93,6 +93,22 @@ export function loadLocalFonts(): Promise<FontEntry[]> {
   return local;
 }
 
+/**
+ * A family Verynize cannot offer (Wonder PM3 / PM4: "system-ui (unsupported)"): it is not in the font list (bundled,
+ * system, Google and installed fonts). Unknown until the list has loaded. `generic: false` also counts CSS generic
+ * keywords (system-ui, sans-serif…) as unsupported: on a live page they name whatever the browser picks, not a font
+ * a design can carry.
+ */
+export function isUnsupportedFont(
+  family: string | undefined,
+  fonts: FontEntry[],
+  { generic = true }: { generic?: boolean } = {},
+): boolean {
+  const key = (family ?? "").trim().toLowerCase();
+  if (!key || !fonts.length) return false;
+  return !fonts.some((f) => f.family.toLowerCase() === key && (generic || f.kind !== "generic"));
+}
+
 /** Weights available for a family (all weights when unknown). */
 export function weightsFor(family: string, fonts: FontEntry[]): number[] {
   const key = family.trim().toLowerCase();

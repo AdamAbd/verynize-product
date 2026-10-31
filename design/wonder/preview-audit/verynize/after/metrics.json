@@ -42,7 +42,7 @@
    "tooltip": "Reload⇧-click ignores cache"
   },
   "PF2-path-hover": {
-   "tooltip": "http://localhost:64145/"
+   "tooltip": "http://localhost:49163/"
   },
   "PF2-publish-hover": {
    "tooltip": "Publish to the web"
@@ -82,7 +82,7 @@
    "path": "/about/"
   },
   "PF3-expanded": {
-   "tab": "Egret · Preview"
+   "tab": "Junco · Preview"
   },
   "PF4-presets": {
    "items": [
@@ -99,12 +99,6 @@
     "MacBook Pro 16\"1728 × 1117",
     "Desktop1920 × 1080",
     "TV3840 × 2160"
-   ]
-  },
-  "PF4-resize": {
-   "viewport": [
-    402,
-    874
    ]
   },
   "PF5-context": {
@@ -134,7 +128,7 @@
    ]
   },
   "X3-terminal": {
-   "text": "Terminal Copy logs Hide terminal Serving HTTP on 127.0.0.1 port 64145 (http://127.0.0.1:64145/) ... 127.0.0.1 - - [31/Oct/2026 15:37:15] \"GET / HTTP/1.1\" 200 - 127.0.0.1 - - [31/Oct/2026 15:37:15] \"GET / HTTP/1.1\" 200 - 127.0.0.1 - - [31/Oct/2026 15:37:15] \"GET /bird.svg HTTP/1.1\" 200 - 127.0.0.1 - "
+   "text": "Terminal Copy logs Hide terminal Serving HTTP on 127.0.0.1 port 49163 (http://127.0.0.1:49163/) ... 127.0.0.1 - - [31/Oct/2026 15:51:39] \"GET / HTTP/1.1\" 200 - 127.0.0.1 - - [31/Oct/2026 15:51:39] \"GET / HTTP/1.1\" 200 - 127.0.0.1 - - [31/Oct/2026 15:51:39] \"GET /bird.svg HTTP/1.1\" 200 - 127.0.0.1 - "
   },
   "PF6-inspector": {
    "inspector": "P Share Variables Icons Properties Screen template MacBook Pro 14\" Position X Y ° Left Left Right Left & Right Center Scale Top Top Bottom Top & Bottom Center Scale Z Layout W px H px Appearance Opacity % Export"
@@ -153,14 +147,14 @@
    "label": "Stop preview"
   },
   "PS2-edit": {
-   "run": "python3 -m http.server 64145 --bind 127.0.0.1"
+   "run": "python3 -m http.server 49163 --bind 127.0.0.1"
   },
   "PS6-code": {
    "label": "Stop preview"
   },
   "PS6-show-preview": {
    "selected": [
-    "351cc003-a6a9-4768-9663-4a3c42ab37e5"
+    "e1da29aa-55d3-4a38-8bc0-19f93fdb9fe2"
    ]
   },
   "PM3-hover": {},
@@ -168,7 +162,7 @@
    "badge": "1432 Fill x 42.5 Hug"
   },
   "PM3-inspector": {
-   "inspector": "P Share Variables Icons Properties Position X Y Layout W px H px Padding px px Margin px px Appearance Opacity % Corner radius Typography Thin Extra Light Light Regular Medium Semi Bold Bold Extra Bold Black px Line height Letter spacing |A| px Text Fill 100 %"
+   "inspector": "P Share Variables Icons Properties Position X Y ° Left Left Right Left & Right Center Scale Top Top Bottom Top & Bottom Center Scale Z Layout W px H px Padding px px Margin px px Appearance Opacity % Corner radius Clip content Typography system-ui (unsupported) Thin Extra Light Light Regular Medium Semi Bold Bold Extra Bold Black px Line height Letter spacing |A| px Text Fill 100 %"
   },
   "PM3-edited": {
    "title": "Sunbird edited sandbox"
@@ -176,9 +170,15 @@
   "X2-changes": {
    "text": "Preview changes Not in your code yet h1 “Sunbird preview sandbox” Text “Sunbird preview sandbox” “Sunbird edited sandbox” Hide all changes Compare with the original Revert all changes Puts back the original values"
   },
+  "PF4-resize": {
+   "viewport": [
+    402,
+    874
+   ],
+   "crumbTruncated": true
+  },
   "PM5-context": {
    "mentions": [
-    "Egret",
     "h1 \"Sunbird edited…"
    ]
   },
@@ -200,12 +200,16 @@
   },
   "PP2-stopped": {},
   "PS5-paused": {
-   "card": "Ready to start your preview preview-sandbox · App Start this preview to connect to your local app. Last address: localhost:64145 Start preview",
+   "card": "Ready to start your preview preview-sandbox · App Start this preview to connect to your local app. Last address: localhost:49163 Start preview",
    "server": "stopped"
   }
  },
  "seams": {
   "expandOpensTab": true,
+  "phoneViewport": [
+   402,
+   874
+  ],
   "contextMenuShowsTerminal": true,
   "headerOpenInTab": true,
   "cmdAltPOpensTab": true,

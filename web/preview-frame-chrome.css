@@ -51,13 +51,14 @@
   align-items: center;
   gap: 6px;
   height: 18px;
-  margin: 0 0 6px 6px;
+  /* Room for the "N changes" badge at the right of this row (set by the chrome island); the text truncates. */
+  margin: 0 var(--pf-badge-space, 0px) 6px 6px;
   white-space: nowrap;
   font-size: 10px;
   color: var(--muted-foreground);
 }
 .canvas-preview.selected .pf-crumb { color: var(--primary-text); }
-.pf-crumb-icon { position: relative; display: block; }
+.pf-crumb-icon { position: relative; display: block; flex: none; }
 .pf-head .pf-crumb-icon .pf-svg { width: 12px; height: 12px; }
 .pf-dot {
   position: absolute;
@@ -74,6 +75,7 @@
 /* Wonder PS4: the breadcrumb dot stays gray on failure; only the card and tab carry red. */
 .pf-crumb-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pf-local {
+  flex: none;
   font-size: 10px;
   line-height: 14px;
   padding: 0 4px;
