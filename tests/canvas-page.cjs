@@ -1,9 +1,10 @@
 const {_electron}=require(process.cwd()+'/node_modules/@playwright/test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const os=require('node:os');
+const {waitForUiReady}=require('./helpers/ui-ready.cjs');
 (async()=>{
   const profile=await fs.mkdtemp(os.tmpdir()+'/bd-page-'),env={...process.env};delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1';
   const app=await _electron.launch({timeout:20000,env,args:['.',`--user-data-dir=${profile}`]});
   try{
-    const p=await app.firstWindow({timeout:15000});await p.waitForSelector('#canvas .layer');
+    const p=await app.firstWindow({timeout:15000});await waitForUiReady(p);await p.waitForSelector('#canvas .layer');
     // A new page is empty: no white artboard behind it.
     await p.locator('#add-page').click();
     assert.equal(await p.locator('#canvas .layer').count(),0);
