@@ -47,9 +47,9 @@ Why the hash, checked against the code:
 - No server ever needs the fragment. `cloud/rooms.js` `access()` reads the
   capability from `Authorization: Bearer` (and from `?token=` only on
   `/api/rooms/<id>/socket`, because browsers cannot set WebSocket headers; that
-  request URL is never a page URL). The editor page is a static asset served by
-  the Worker's `single-page-application` fallback (`cloudflare.config.ts`); it
-  takes no room parameters. `web/cloud-panel.js` reads `location.hash` once at
+  request URL is never a page URL). On the web the editor page is the client-only
+  shell of the Start app (`web-start/README.md`; before that, a static asset served
+  by the Worker's `single-page-application` fallback); it takes no room parameters. `web/cloud-panel.js` reads `location.hash` once at
   startup and joins through `request()` with the token in a header.
 - A token in the page query would leak. The editor page has no
   `Referrer-Policy` (only Worker-rendered pages, apps and room assets send
