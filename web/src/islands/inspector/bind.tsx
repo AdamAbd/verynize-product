@@ -118,8 +118,9 @@ export function BindButton(props: BindProps) {
           aria-label={`Apply variable to ${props.label.toLowerCase()}`}
           title="Apply variable"
           data-bind={props.field}
+          // Hover (or its own keyboard focus) reveals it; Wonder shows no diamond inside a focused field (B1).
           className={cn(
-            "flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/field:opacity-100 group-focus-within/field:opacity-100 data-[state=open]:opacity-100",
+            "flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/field:opacity-100 data-[state=open]:opacity-100",
             bound && "text-primary-text opacity-100",
           )}
         >
@@ -190,7 +191,12 @@ export function BoundChip({
           )}
         >
           {prefix ? <span className="flex shrink-0 items-center">{prefix}</span> : null}
-          <VariableChip name={name} missing={!variable} className="ml-0.75" />
+          {/* The chip box stays at x 40 (field-relative 28) and truncates like Wonder's "dimen…" (≈ 56 px). */}
+          <VariableChip
+            name={name}
+            missing={!variable}
+            className={cn(prefix ? "ml-1" : "ml-0.75", "max-w-14")}
+          />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="left" align="start" sideOffset={12} className="w-52">

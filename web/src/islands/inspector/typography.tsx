@@ -1,24 +1,32 @@
-// Typography (design/wonder 25–27): font family picker, weight names, size, line height, letter spacing,
-// alignment segments, text content and rich-range buttons.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+// Typography (design/wonder 25–27, properties-audit A10): font family picker, weight names, size, line height
+// (a ratio or Auto), letter spacing, horizontal + vertical alignment, and the Type settings popover (case, wrap,
+// whitespace, truncation, word break, indent, smoothing, decoration). Text is edited on the canvas.
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  ALargeSmall,
-  Baseline,
-  Bold,
   Check,
   ChevronDown,
   Diamond,
-  Italic,
-  Paintbrush,
-  SlidersVertical,
+  Minus,
+  Strikethrough,
   TextAlignCenter,
   TextAlignEnd,
   TextAlignJustify,
   TextAlignStart,
+  Underline,
   X,
 } from "lucide-react";
+import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui";
+import {
+  FontSizeIcon,
+  LineHeightIcon,
+  SlidersIcon,
+  TextAlignBottomIcon,
+  TextAlignMiddleIcon,
+  TextAlignTopIcon,
+  TextIndentIcon,
+} from "@/components/icons";
 import type { DesignDocument } from "@/lib/bridge";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,9 +41,9 @@ import {
   Field,
   IconAffix,
   IconButton,
+  NativeSelect,
   Section,
   Segmented,
-  type IconType,
 } from "./controls";
 import { notify } from "./legacy";
 import { WEIGHTS, fmt, pageNodes, patchNodes, setField, weightName, type Node } from "./model";
@@ -52,7 +60,7 @@ import {
 import { bindVariable, bindingsOf, variablesOf } from "./vars";
 
 const pickerTrigger =
-  "flex h-6 w-full min-w-0 items-center justify-between gap-1 rounded-md bg-input pr-2 pl-2 text-xs text-foreground shadow-field outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:ring-1 data-[state=open]:ring-primary";
+  "flex h-6 w-full min-w-0 items-center justify-between gap-1 rounded-md bg-input pr-2 pl-2 text-xs text-foreground shadow-field outline-none hover:ring-1 hover:ring-accent focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:ring-1 data-[state=open]:ring-primary";
 
 /** Family name rendered in its own typeface (dynamic font-family set through the DOM, no inline style props). */
 function FontName({ family, className }: { family: string; className?: string }) {
@@ -442,6 +450,41 @@ const ALIGN = [
   { value: "right", label: "Align right", icon: TextAlignEnd },
   { value: "justify", label: "Justify", icon: TextAlignJustify },
 ];
+const ALIGN_VERTICAL = [
+  { value: "top", label: "Align top", icon: TextAlignTopIcon },
+  { value: "center", label: "Align middle", icon: TextAlignMiddleIcon },
+  { value: "bottom", label: "Align bottom", icon: TextAlignBottomIcon },
+];
+
+/** Typography fields beyond the base model (all optional; absent = the canvas default). */
+type TypeNode = Omit<Node, "lineHeight"> & {
+  lineHeight: number | "auto";
+  textAlignVertical?: "top" | "center" | "bottom";
+  textTransform?: string;
+  textDecoration?: string;
+  textWrap?: string;
+  whiteSpace?: string;
+  wordBreak?: "normal" | "break-all";
+  truncate?: boolean;
+  noWrap?: boolean;
+  textIndent?: number;
+  fontSmoothing?: "antialiased" | "subpixel-antialiased";
+};
+
+/** Bindings of a node without `key` (typing a value detaches the property from its variable). */
+function withoutBinding(node: Node, key: string) {
+  const rest = Object.fromEntries(Object.entries(bindingsOf(node)).filter(([k]) => k !== key));
+  return Object.keys(rest).length ? rest : undefined;
+}
+
+/**
+ * Write one typography field to the text layers of the selection (one undo step). `undefined` / "" clears the
+ * field back to the canvas default, so untouched documents never gain new keys.
+ */
+function setTypeField(selection: string[], key: string, value: unknown) {
+  const next = value === "" ? undefined : value;
+  patchNodes(selection, (n) => (n.type === "text" ? { [key]: next } : {}));
+}
 
 export function TypographySection({
   doc,
@@ -452,9 +495,11 @@ export function TypographySection({
   node: Node;
   selection: string[];
 }) {
+  const text = node as unknown as TypeNode;
   const set = (key: string) => (value: string) => setField(selection, node, key, value);
   const [catalog, setCatalog] = useState<FontEntry[]>([]);
   const [installed, setInstalled] = useState<FontEntry[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     let live = true;
     void loadCatalog().then((fonts) => live && setCatalog(fonts));
@@ -466,204 +511,401 @@ export function TypographySection({
   const requestLocal = () => void loadLocalFonts().then(setInstalled);
   const fonts = useMemo(() => [...catalog, ...installed], [catalog, installed]);
   const weights = weightsFor(node.fontFamily, fonts);
-  const text = useRef<HTMLTextAreaElement>(null);
-  const [draft, setDraft] = useState<string | null>(null);
-  const commitText = () => {
-    if (draft === null) return;
-    const next = draft;
-    setDraft(null);
-    if (next !== node.text) setField(selection, node, "text", next);
-  };
-  const range = (style: "bold" | "italic" | "style") => {
-    const t = text.current;
-    if (!t || t.selectionStart === t.selectionEnd) {
-      notify("Select a range in the text field first.");
-      return;
+  const autoLeading = text.lineHeight === "auto";
+  // Line height: a ratio, or "Auto" (empty / "auto") for the font's own line height (CSS `normal`).
+  const commitLineHeight = (raw: string) => {
+    if (/^\s*(auto)?\s*$/i.test(raw)) {
+      patchNodes(selection, (n) =>
+        n.type === "text" ? { lineHeight: "auto", bindings: withoutBinding(n, "lineHeight") } : {},
+      );
+      return null;
     }
-    const start = t.selectionStart,
-      end = t.selectionEnd;
-    patchNodes([node.id], (n) => ({
-      textRuns: [
-        ...(n.textRuns || []),
-        style === "style"
-          ? {
-              start,
-              end,
-              bold: false,
-              italic: false,
-              color: /^#[0-9a-f]{6}/i.exec(n.color)?.[0] ?? "#000000",
-              fontSize: n.fontSize,
-            }
-          : { start, end, bold: style === "bold", italic: style === "italic" },
-      ],
-    }));
+    return setField(selection, node, "lineHeight", raw);
   };
   return (
-    <Section
-      id="typography-section"
-      title="Typography"
-      tools={
-        <IconButton
-          icon={SlidersVertical}
-          label="Edit text content"
-          onClick={() => text.current?.focus()}
-        />
-      }
-    >
-      <FontFamilyPicker
-        doc={doc}
-        node={node}
-        selection={selection}
-        fonts={fonts}
-        onLocalFonts={requestLocal}
-      />
-      <div className="grid grid-cols-2 gap-2">
-        <FontWeightPicker doc={doc} node={node} selection={selection} weights={weights} />
-        <BindableField
-          doc={doc}
-          node={node}
-          selection={selection}
-          field="fontSize"
-          label="Font size"
-          prefix={<IconAffix icon={ALargeSmall} />}
-        >
-          {(suffix) => (
-            <Field
-              name="fontSize"
-              label="Font size"
-              numeric
-              value={fmt(node.fontSize)}
-              onCommit={set("fontSize")}
-              prefix={<IconAffix icon={ALargeSmall} />}
-              suffix={<>px{suffix}</>}
+    <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+      {/* The settings popover opens beside the inspector, anchored to the whole section (Wonder A10). */}
+      <PopoverAnchor asChild>
+        <div>
+          <Section
+            id="typography-section"
+            title="Typography"
+            tools={
+              <PopoverTrigger asChild>
+                <IconButton
+                  id="type-settings-toggle"
+                  className="size-7"
+                  icon={SlidersIcon}
+                  label="Type settings"
+                  active={settingsOpen}
+                />
+              </PopoverTrigger>
+            }
+          >
+            <FontFamilyPicker
+              doc={doc}
+              node={node}
+              selection={selection}
+              fonts={fonts}
+              onLocalFonts={requestLocal}
             />
-          )}
-        </BindableField>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Caption label="Line height">
-          <BindableField
-            doc={doc}
-            node={node}
-            selection={selection}
-            field="lineHeight"
-            label="Line height"
-            prefix={<IconAffix icon={Baseline} />}
-          >
-            {(suffix) => (
-              <Field
-                name="lineHeight"
-                label="Line height"
-                numeric
-                step={0.05}
-                value={fmt(node.lineHeight)}
-                onCommit={set("lineHeight")}
-                prefix={<IconAffix icon={Baseline} />}
-                suffix={suffix}
-              />
-            )}
-          </BindableField>
-        </Caption>
-        <Caption label="Letter spacing">
-          <BindableField
-            doc={doc}
-            node={node}
-            selection={selection}
-            field="letterSpacing"
-            label="Letter spacing"
-            prefix={<Affix className="-mx-px w-3.5 text-2xs">|A|</Affix>}
-          >
-            {(suffix) => (
-              <Field
-                name="letterSpacing"
-                label="Letter spacing"
-                numeric
-                step={0.1}
-                value={fmt(node.letterSpacing)}
-                onCommit={set("letterSpacing")}
-                prefix={<Affix className="-mx-px w-3.5 text-2xs">|A|</Affix>}
-                suffix={<>px{suffix}</>}
-              />
-            )}
-          </BindableField>
-        </Caption>
-      </div>
-      <Caption label="Alignment">
-        <Segmented
-          label="Text alignment"
-          className="w-31"
-          value={node.textAlign}
-          onChange={set("textAlign")}
-          items={ALIGN}
-        />
-      </Caption>
-      <Caption label="Text">
-        <textarea
-          ref={text}
-          name="text"
-          aria-label="Text content"
-          rows={3}
-          value={draft ?? node.text}
-          spellCheck={false}
-          className="min-h-16 w-full resize-y rounded-md bg-input px-2 py-1 text-xs text-foreground shadow-field outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commitText}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              setDraft(null);
-              event.currentTarget.blur();
-            } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) commitText();
-          }}
-        />
-      </Caption>
-      <div className="flex items-center gap-1" role="group" aria-label="Text ranges">
-        <RangeButton
-          id="range-bold"
-          label="Bold selected range"
-          icon={Bold}
-          onClick={() => range("bold")}
-        />
-        <RangeButton
-          id="range-italic"
-          label="Italic selected range"
-          icon={Italic}
-          onClick={() => range("italic")}
-        />
-        <RangeButton
-          id="range-style"
-          label="Apply fill colour and size to selected range"
-          icon={Paintbrush}
-          onClick={() => range("style")}
-        />
-        <span className="ml-1 truncate text-2xs text-subtle-foreground">
-          Select text above, then style the range
-        </span>
-      </div>
-    </Section>
+            <div className="grid grid-cols-2 gap-2">
+              <FontWeightPicker doc={doc} node={node} selection={selection} weights={weights} />
+              <BindableField
+                doc={doc}
+                node={node}
+                selection={selection}
+                field="fontSize"
+                label="Font size"
+                prefix={<IconAffix icon={FontSizeIcon} />}
+              >
+                {(suffix) => (
+                  <Field
+                    name="fontSize"
+                    label="Font size"
+                    numeric
+                    value={fmt(node.fontSize)}
+                    onCommit={set("fontSize")}
+                    prefix={<IconAffix icon={FontSizeIcon} />}
+                    suffix={<>px{suffix}</>}
+                  />
+                )}
+              </BindableField>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Caption label="Line height">
+                <BindableField
+                  doc={doc}
+                  node={node}
+                  selection={selection}
+                  field="lineHeight"
+                  label="Line height"
+                  prefix={<IconAffix icon={LineHeightIcon} />}
+                >
+                  {(suffix) => (
+                    <Field
+                      name="lineHeight"
+                      label="Line height"
+                      numeric
+                      step={0.05}
+                      value={autoLeading ? "Auto" : fmt(text.lineHeight)}
+                      placeholder="Auto"
+                      onCommit={commitLineHeight}
+                      prefix={<IconAffix icon={LineHeightIcon} />}
+                      suffix={suffix}
+                    />
+                  )}
+                </BindableField>
+              </Caption>
+              <Caption label="Letter spacing">
+                <BindableField
+                  doc={doc}
+                  node={node}
+                  selection={selection}
+                  field="letterSpacing"
+                  label="Letter spacing"
+                  prefix={<Affix className="-mx-px w-3.5 text-2xs">|A|</Affix>}
+                >
+                  {(suffix) => (
+                    <Field
+                      name="letterSpacing"
+                      label="Letter spacing"
+                      numeric
+                      step={0.1}
+                      value={fmt(node.letterSpacing)}
+                      onCommit={set("letterSpacing")}
+                      prefix={<Affix className="-mx-px w-3.5 text-2xs">|A|</Affix>}
+                      suffix={<>px{suffix}</>}
+                    />
+                  )}
+                </BindableField>
+              </Caption>
+            </div>
+            <Caption label="Alignment">
+              <div className="grid grid-cols-2 gap-2">
+                <Segmented
+                  label="Text alignment"
+                  value={node.textAlign}
+                  onChange={set("textAlign")}
+                  items={ALIGN}
+                />
+                <Segmented
+                  label="Vertical text alignment"
+                  value={text.textAlignVertical ?? "top"}
+                  onChange={(v) =>
+                    setTypeField(selection, "textAlignVertical", v === "top" ? "" : v)
+                  }
+                  items={ALIGN_VERTICAL}
+                />
+              </div>
+            </Caption>
+          </Section>
+        </div>
+      </PopoverAnchor>
+      <PopoverContent
+        id="type-settings"
+        side="left"
+        align="start"
+        sideOffset={4}
+        collisionPadding={8}
+        aria-label="Type settings"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        <TypeSettings node={text} selection={selection} onClose={() => setSettingsOpen(false)} />
+      </PopoverContent>
+    </Popover>
   );
 }
 
-function RangeButton({
-  id,
-  label,
-  icon,
-  onClick,
+const CASES = [
+  { value: "", label: "No case", content: <Minus className="size-4" aria-hidden /> },
+  { value: "uppercase", label: "Uppercase", content: "AG" },
+  { value: "lowercase", label: "Lowercase", content: "ag" },
+  { value: "capitalize", label: "Capitalize", content: "Ag" },
+];
+const DECORATIONS = [
+  { value: "", label: "No decoration", content: <Minus className="size-4" aria-hidden /> },
+  { value: "underline", label: "Underline", content: <Underline className="size-4" aria-hidden /> },
+  {
+    value: "line-through",
+    label: "Strikethrough",
+    content: <Strikethrough className="size-4" aria-hidden />,
+  },
+];
+const WRAPS = [
+  { value: "", label: "Auto" },
+  { value: "balance", label: "Balance" },
+  { value: "pretty", label: "Pretty" },
+  { value: "nowrap", label: "No wrap" },
+];
+// "Normal" is the canvas default: the text keeps the line breaks and spaces it was typed with (pre-wrap).
+const WHITESPACES = [
+  { value: "", label: "Normal" },
+  { value: "normal", label: "Collapse" },
+  { value: "nowrap", label: "No wrap" },
+  { value: "pre", label: "Preserve" },
+  { value: "pre-line", label: "Pre-line" },
+  { value: "break-spaces", label: "Break spaces" },
+];
+const SMOOTHINGS = [
+  { value: "", label: "Default" },
+  { value: "antialiased", label: "Antialiased" },
+  { value: "subpixel-antialiased", label: "Subpixel" },
+];
+
+const PREVIEW =
+  "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.";
+
+/** Type settings popover (Wonder A10): preview, case, wrap, whitespace, truncation, word break, indent, smoothing, decoration. */
+function TypeSettings({
+  node,
+  selection,
+  onClose,
 }: {
-  id: string;
+  node: TypeNode;
+  selection: string[];
+  onClose: () => void;
+}) {
+  const put = (key: string) => (value: string) => setTypeField(selection, key, value);
+  const whiteSpace = node.whiteSpace ?? (node.noWrap ? "pre" : "");
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="-mt-1 flex h-6 items-center justify-between">
+        <h4 className="text-xs text-foreground">Type settings</h4>
+        <IconButton icon={X} label="Close type settings" onClick={onClose} />
+      </div>
+      <TypePreview node={node} />
+      <Caption label="Case">
+        <TextSegmented
+          name="textTransform"
+          label="Case"
+          value={node.textTransform && node.textTransform !== "none" ? node.textTransform : ""}
+          onChange={put("textTransform")}
+          items={CASES}
+        />
+      </Caption>
+      <div className="grid grid-cols-2 gap-2">
+        <Caption label="Wrap">
+          <NativeSelect
+            name="textWrap"
+            label="Wrap"
+            value={WRAPS.some((o) => o.value === node.textWrap) ? (node.textWrap ?? "") : ""}
+            options={WRAPS}
+            onChange={put("textWrap")}
+          />
+        </Caption>
+        <Caption label="Whitespace">
+          <NativeSelect
+            name="whiteSpace"
+            label="Whitespace"
+            value={whiteSpace}
+            options={WHITESPACES}
+            onChange={(value) =>
+              patchNodes(selection, (n) =>
+                n.type === "text" ? { whiteSpace: value || undefined, noWrap: undefined } : {},
+              )
+            }
+          />
+        </Caption>
+        <Caption label="Truncation">
+          <TextSegmented
+            name="truncate"
+            label="Truncation"
+            value={node.truncate ? "on" : "off"}
+            onChange={(value) => setTypeField(selection, "truncate", value === "on" || undefined)}
+            items={[
+              { value: "off", label: "Truncation off", content: "Off" },
+              { value: "on", label: "Truncation on", content: "On" },
+            ]}
+          />
+        </Caption>
+        <Caption label="Word Break">
+          <TextSegmented
+            name="wordBreak"
+            label="Word break"
+            value={
+              node.wordBreak === "normal" ? "off" : node.wordBreak === "break-all" ? "all" : "word"
+            }
+            onChange={(value) =>
+              setTypeField(
+                selection,
+                "wordBreak",
+                value === "off" ? "normal" : value === "all" ? "break-all" : "",
+              )
+            }
+            items={[
+              { value: "off", label: "Word break off", content: "Off" },
+              { value: "all", label: "Break all", content: "All" },
+              { value: "word", label: "Break words", content: "Word" },
+            ]}
+          />
+        </Caption>
+        <Caption label="Indent">
+          <Field
+            name="textIndent"
+            label="Indent"
+            numeric
+            value={fmt(node.textIndent ?? 0)}
+            prefix={<IconAffix icon={TextIndentIcon} />}
+            suffix="px"
+            onCommit={(raw) => {
+              const v = Number(raw.trim());
+              if (raw.trim() === "" || !Number.isFinite(v)) {
+                notify("Enter a number.");
+                return "Enter a number.";
+              }
+              setTypeField(selection, "textIndent", Math.max(-10000, Math.min(10000, v)) || "");
+              return null;
+            }}
+          />
+        </Caption>
+        <Caption label="Smoothing">
+          <NativeSelect
+            name="fontSmoothing"
+            label="Smoothing"
+            value={node.fontSmoothing ?? ""}
+            options={SMOOTHINGS}
+            onChange={put("fontSmoothing")}
+          />
+        </Caption>
+        <Caption label="Decoration">
+          <TextSegmented
+            name="textDecoration"
+            label="Decoration"
+            value={
+              DECORATIONS.some((d) => d.value === node.textDecoration)
+                ? (node.textDecoration ?? "")
+                : ""
+            }
+            onChange={put("textDecoration")}
+            items={DECORATIONS}
+          />
+        </Caption>
+      </div>
+    </div>
+  );
+}
+
+/** Sample text styled with the layer's family, weight and type settings (CSS set through the DOM, no style props). */
+function TypePreview({ node }: { node: TypeNode }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const s = el.style;
+    s.fontFamily = `"${String(node.fontFamily).replace(/"/g, "")}", var(--font-sans)`;
+    s.fontWeight = String(node.fontWeight || "400");
+    s.textTransform = node.textTransform || "";
+    s.textDecorationLine = node.textDecoration || "";
+    s.textIndent = node.textIndent ? `${node.textIndent}px` : "";
+    s.whiteSpace = node.truncate ? "nowrap" : node.whiteSpace || (node.noWrap ? "pre" : "");
+    s.textOverflow = node.truncate ? "ellipsis" : "";
+    s.overflowWrap = node.wordBreak === "normal" ? "normal" : "anywhere";
+    s.wordBreak = node.wordBreak === "break-all" ? "break-all" : "";
+    s.setProperty("text-wrap", node.textWrap || "");
+    s.setProperty(
+      "-webkit-font-smoothing",
+      node.fontSmoothing === "antialiased" ? "antialiased" : node.fontSmoothing ? "auto" : "",
+    );
+  }, [
+    node.fontFamily,
+    node.fontWeight,
+    node.textTransform,
+    node.textDecoration,
+    node.textIndent,
+    node.whiteSpace,
+    node.noWrap,
+    node.truncate,
+    node.wordBreak,
+    node.textWrap,
+    node.fontSmoothing,
+  ]);
+  return (
+    <div className="h-28 overflow-hidden rounded-lg border border-border bg-background px-3 py-2.5">
+      <p ref={ref} id="type-settings-preview" className="overflow-hidden text-sm/5 text-foreground">
+        {PREVIEW}
+      </p>
+    </div>
+  );
+}
+
+/** Segmented control with text or icon segments (Wonder's Type settings rows), on the Radix toggle group. */
+function TextSegmented({
+  name,
+  label,
+  value,
+  onChange,
+  items,
+}: {
+  name: string;
   label: string;
-  icon: IconType;
-  onClick: () => void;
+  value: string;
+  onChange: (value: string) => void;
+  items: { value: string; label: string; content: ReactNode }[];
 }) {
   return (
-    <IconButton
-      id={id}
-      icon={icon}
-      label={label}
-      className={cn("bg-input shadow-field")}
-      iconClassName="size-3.5"
-      // Keep the textarea selection: don't move focus on mousedown.
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onClick}
-    />
+    <ToggleGroupPrimitive.Root
+      type="single"
+      aria-label={label}
+      data-name={name}
+      // Radix treats "" as "nothing pressed", so the empty (default) value travels as "none".
+      value={value || "none"}
+      onValueChange={(next) => {
+        if (next) onChange(next === "none" ? "" : next);
+      }}
+      className="flex h-6 w-full items-stretch rounded-md bg-muted"
+    >
+      {items.map((item) => (
+        <ToggleGroupPrimitive.Item
+          key={item.value || "none"}
+          value={item.value || "none"}
+          aria-label={item.label}
+          title={item.label}
+          className="flex min-w-0 flex-1 items-center justify-center rounded-md text-xs text-subtle-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=on]:bg-accent data-[state=on]:text-foreground"
+        >
+          {item.content}
+        </ToggleGroupPrimitive.Item>
+      ))}
+    </ToggleGroupPrimitive.Root>
   );
 }

@@ -83,7 +83,8 @@ const path = require('node:path');
       d.pages[0].nodes = [{ id: 'svg', name: 'Tint sample', type: 'image', src, x: 100, y: 100, w: 64, h: 64, color: '#eeeeee' }];
       window.design.setDocument(d); window.design.setSelection(['svg']);
     }, svg);
-    await page.getByRole('button', { name: 'SVG color', exact: true }).click();
+    // The SVG colour is a Selection colors row (properties-audit A9, WP-6); the layer's own #eeeeee fill is another row.
+    await page.locator('#selection-colors-section [data-selection-color="#000000"]').getByRole('button', { name: /^Selection color \d+$/ }).click();
     await page.locator('#color-dialog').getByRole('tab', { name: 'Variables', exact: true }).click();
     await page.getByRole('option', { name: /accent/ }).click();
     await page.getByRole('button', { name: 'Close colour picker', exact: true }).click();
@@ -126,7 +127,7 @@ const path = require('node:path');
     assert.equal((await doc()).pages[0].nodes[0].src, svg);
     assert.match(await page.evaluate(() => window.design.exportHTML()), /mask-mode: alpha|mask-mode:alpha/);
     await page.evaluate(() => window.design.setSelection(['svg']));
-    await page.getByRole('button', { name: 'Restore original SVG color', exact: true }).click();
+    await page.getByRole('button', { name: 'Restore original SVG colors', exact: true }).click();
     assert.equal((await doc()).pages[0].nodes[0].svgColor, undefined);
     await imageLayer.locator('img').waitFor();
     await page.evaluate(() => {

@@ -83,9 +83,15 @@ const LOGO = svg(
     let target = "",
       defaultPath = "";
     // The Export section starts closed for every newly selected layer.
+    // Like Wonder (ref 50), the "Exported …" toast sits over the bottom of the inspector, where the Export section
+    // ends up; wait for the previous export's toast to leave before clicking under it.
     const openExport = async () => {
-      if (!(await page.locator("#artwork-scale").isVisible()))
+      if (!(await page.locator("#artwork-scale").isVisible())) {
+        // Sonner pauses its timers while the pointer is over a toast.
+        await page.mouse.move(400, 300);
+        await page.waitForSelector("[data-sonner-toast]", { state: "detached", timeout: 15000 });
         await page.locator("#export-section .insp-add").click();
+      }
     };
     const saveAs = async (file) => {
       target = path.join(out, file);
@@ -142,17 +148,18 @@ const LOGO = svg(
     assert.deepEqual(
       card.fills,
       [
-        { type: "solid", color: "#d9d9d9" },
+        { type: "solid", color: "#00000033" },
         { type: "solid", color: "#ff0000" },
       ],
-      "new paint goes on top",
+      "new paint goes on top: Wonder adds black at 20 % after the first paint",
     );
     await page.locator("[name=color]").click();
-    await page.locator("#color-dialog #paint-type").selectOption("linear");
+    // Wonder: three paint-type icons (solid, gradient, image) on the picker's tab row.
+    await page.locator("#color-dialog").getByRole("radio", { name: "Gradient" }).click();
     card = await node("card");
     assert.equal(card.fills[0].type, "linear");
     assert.equal(card.fills[0].stops.length, 2);
-    assert.equal(card.fills[0].stops[0].color, "#d9d9d9", "conversion keeps the colour");
+    assert.equal(card.fills[0].stops[0].color, "#00000033", "conversion keeps the colour");
     await closeDialog();
     await fill.getByRole("button", { name: "Edit linear paint" }).click();
     await page.locator("#color-dialog").getByRole("button", { name: "Add stop" }).click();
@@ -222,12 +229,149 @@ const LOGO = svg(
     assert.equal(await fill.locator("[data-paint]").count(), 0);
     await fill.getByRole("button", { name: "Add paint" }).click();
     card = await node("card");
-    assert.deepEqual([card.fills, card.color], [undefined, "#d9d9d9"], "re-added paint is the default");
+    assert.deepEqual(
+      [card.fills, card.color],
+      [undefined, "#ffffff"],
+      "re-added first paint is Wonder's white",
+    );
     await page.evaluate(() => window.design.runCommand("edit.undo"));
     await page.evaluate(() => window.design.runCommand("edit.undo"));
     assert.equal((await node("card")).color, "#ff0000", "undo restores the removed paint");
     console.log(
       "PASS paint stack: add, type conversion, stops add/position/remove, stop variable bind/follow/detach, reorder, hide, remove, collapse to single fill",
+    );
+
+    // --- Wonder parity: Background Fill slicing and P0 paint fixes (properties-audit README A1, B3, WP-1, WP-2) ---
+    // Geometry in inspector CSS px: x 0 is the panel's inner left edge (its 1 px border excluded).
+    const box = (loc) =>
+      loc.evaluate((e) => {
+        const panel = document.querySelector("#properties");
+        const left = panel.getBoundingClientRect().left + panel.clientLeft;
+        const r = e.getBoundingClientRect();
+        return { x: r.left - left, right: r.right - left, cx: (r.left + r.right) / 2 - left, y: r.top, h: r.height };
+      });
+    const visibleOpacity = (loc) => loc.evaluate((e) => getComputedStyle(e).opacity);
+    await setup([
+      { id: "card", name: "Card", type: "frame", x: 20, y: 20, w: 100, h: 80, color: "transparent", layout: "free" },
+    ]);
+    assert.equal(await fill.locator("[data-paint]").count(), 0);
+    assert.equal((await box(fill)).h, 32, "an empty fill is the 32 px header only");
+    assert.doesNotMatch(await fill.innerText(), /No paints/, "no placeholder text");
+    assert.equal(await fill.locator("[name=animated]").count(), 0, "Animated is not in the body");
+    // Header tools 8 px apart: the wavy square at 224, + at 256.
+    assert.equal((await box(fill.locator("[data-fill-animated]"))).cx, 224);
+    assert.equal((await box(fill.getByRole("button", { name: "Add paint" }))).cx, 256);
+    // Defaults: white first, then black at 20 %.
+    await fill.getByRole("button", { name: "Add paint" }).click();
+    assert.equal((await node("card")).color, "#ffffff");
+    await fill.getByRole("button", { name: "Add paint" }).click();
+    assert.deepEqual((await node("card")).fills, [
+      { type: "solid", color: "#00000033" },
+      { type: "solid", color: "#ffffff" },
+    ]);
+    assert.equal(await fill.getByRole("textbox", { name: "Fill hex colour" }).inputValue(), "000000");
+    assert.equal(await fill.getByRole("textbox", { name: "Fill opacity" }).inputValue(), "20");
+    const row0 = fill.locator("[data-paint='0']"),
+      row1 = fill.locator("[data-paint='1']");
+    const field0 = await box(row0.locator("[data-color-anchor]"));
+    assert.deepEqual([field0.x, field0.right, field0.h], [12, 204, 24], "field x 12–204, 24 tall");
+    assert.equal((await box(row0.locator("[data-paint-visibility]"))).cx, 224, "eye centre 224");
+    assert.equal((await box(row0.locator("[data-paint-remove]"))).cx, 256, "− centre 256");
+    assert.equal((await box(row1)).y - (await box(row0)).y, 33, "33 px row pitch");
+    assert.equal((await box(fill)).h, 32 + 5 + 24 + 9 + 24 + 12, "two rows: 5 px under the header, 12 above the divider");
+    // Hover drag grip in the left gutter; dragging the lower paint onto the upper one reorders the stack.
+    const grip = row1.locator("[data-paint-grip]");
+    await page.mouse.move(5, 5);
+    assert.equal(await visibleOpacity(grip), "0", "grip hidden until hover");
+    await row1.hover();
+    assert.equal(await visibleOpacity(grip), "1", "grip shows on hover");
+    const g = await grip.boundingBox();
+    assert.ok(g.x + g.width / 2 - (await box(fill)).x >= 3 - 1, "grip sits in the left gutter");
+    const top = await row0.boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, top.y + 4, { steps: 4 });
+    await page.mouse.up();
+    assert.deepEqual(
+      (await node("card")).fills.map((p) => p.color),
+      ["#ffffff", "#00000033"],
+      "drag grip reorders",
+    );
+    // Hidden paint: Wonder's closed-eye glyph.
+    await fill.locator('[data-paint-visibility="1"]').click();
+    assert.equal(await fill.locator('[data-paint-visibility="1"] svg.lucide-eye-closed').count(), 1);
+    // Animated lives behind the wavy-square header tool ([name=animated] kept).
+    await fill.locator("[data-fill-animated]").click();
+    await page.locator("#fill-animated [name=animated]").selectOption("aurora");
+    assert.equal((await node("card")).animated, "aurora");
+    assert.equal(await fill.locator("[data-fill-animated]").getAttribute("data-active"), "true");
+    await page.keyboard.press("Escape");
+
+    // P0 bug 1: a solid with a separate paint opacity shows the product, and edits fold it into the colour alpha.
+    await setup([
+      {
+        id: "card", name: "Card", type: "frame", x: 20, y: 20, w: 100, h: 80, color: "#ff0000", layout: "free",
+        fills: [
+          { type: "solid", color: "#ff0000", opacity: 50 },
+          { type: "linear", angle: 90, stops: [{ position: 0, color: "#0000ff" }, { position: 100, color: "#00ff00" }] },
+        ],
+      },
+    ]);
+    const opacity0 = fill.getByRole("textbox", { name: "Fill opacity" });
+    assert.equal(await opacity0.inputValue(), "50", "opacity 50 does not read 100 %");
+    await opacity0.fill("40");
+    await opacity0.press("Enter");
+    assert.deepEqual((await node("card")).fills[0], { type: "solid", color: "#ff000066" }, "40 % is the paint's alpha, not 40 % of 50 %");
+    assert.equal(await fill.locator("[data-paint='1'] input").count(), 0, "gradient row: no % field");
+    // Swatch of a translucent colour: Wonder's split swatch (opaque left, checker right).
+    assert.match(
+      await row0.locator("button[name=color] span").getAttribute("style"),
+      /linear-gradient\(to right, #ff0000 50%, #ff000066 50%\), repeating-conic-gradient/,
+    );
+
+    // B3 / P0 bugs 2 and 5: bound paint. No % at any alpha, hover-only unlink, picker plane renders, alpha edits the variable.
+    await setup([
+      { id: "card", name: "Card", type: "frame", x: 20, y: 20, w: 100, h: 80, color: "#172033", token: "brand", layout: "free" },
+    ]);
+    assert.equal(await row0.getByRole("textbox").count(), 0, "bound fill shows no hex or %");
+    const unlink = row0.getByRole("button", { name: "Detach variable" });
+    await page.mouse.move(5, 5);
+    assert.equal(await visibleOpacity(unlink), "0", "unlink hidden until hover");
+    await row0.hover();
+    assert.equal(await visibleOpacity(unlink), "1", "unlink shows on hover");
+    const u = await box(unlink);
+    assert.ok(u.cx > 180 && u.right <= 204, `unlink inside the field (${u.cx})`);
+    await page.locator("[name=color]").click();
+    await page.locator("#color-dialog").getByRole("tab", { name: "Custom" }).click();
+    const plane = await page
+      .locator("#color-dialog #color-field")
+      .evaluate((e) => getComputedStyle(e).backgroundImage);
+    assert.match(plane, /linear-gradient/, "picker plane renders for a bound paint");
+    assert.match(await page.locator("#color-dialog [data-bound-edit]").innerText(), /Editing variable brand/);
+    const alpha = page.getByRole("textbox", { name: "Opacity percent" });
+    await alpha.fill("50");
+    await alpha.press("Enter");
+    card = await node("card");
+    assert.deepEqual([card.token, card.fills], ["brand", undefined], "alpha edit keeps the binding");
+    assert.equal(
+      await page.evaluate(() => window.design.getDocument().tokens.brand),
+      "#17203380",
+      "translucency lives in the variable",
+    );
+    assert.equal(
+      await page.locator("#canvas [data-id=card]").evaluate((e) => getComputedStyle(e).backgroundColor),
+      "rgba(23, 32, 51, 0.5)",
+    );
+    assert.equal(await row0.locator("[data-paint-token=brand]").count(), 1, "chip stays");
+    assert.equal(await row0.getByRole("textbox").count(), 0, "still no % at alpha 50");
+    // Explicit detach from the picker keeps the resolved colour.
+    await page.locator("#color-dialog").getByRole("button", { name: "Detach variable" }).click();
+    card = await node("card");
+    assert.deepEqual([card.token, card.color], ["", "#17203380"]);
+    await closeDialog();
+    assert.equal(await fill.getByRole("textbox", { name: "Fill opacity" }).inputValue(), "50");
+    console.log(
+      "PASS Wonder fill parity: empty header only, Animated behind the header tool, defaults, 12–204 field, 224/256 tools, 33 px pitch, drag grip, opacity 50, no gradient %, bound fill unlink/plane/variable alpha",
     );
 
     // --- Rendered pixels: stack with per-paint opacity, hidden paint (native PNG export, 2×) ------------------
@@ -408,6 +552,72 @@ const LOGO = svg(
     });
     console.log("PASS Text Fill gradient clipped to text");
 
+    // --- Text Background Fill (properties-audit A10): a second stack behind the glyphs, stored in backgroundFills --
+    const bg = page.locator("#text-background-fill-section");
+    assert.equal(await bg.locator("h3").textContent(), "Background Fill");
+    assert.equal(
+      await page.evaluate(() => {
+        const a = document.querySelector("#fill-section"),
+          b = document.querySelector("#text-background-fill-section");
+        return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? "after" : "before";
+      }),
+      "after",
+      "Background Fill sits after Text Fill",
+    );
+    assert.equal(await bg.locator("[data-paint]").count(), 0);
+    assert.equal(
+      await bg.evaluate((e) => e.getBoundingClientRect().height),
+      32,
+      "an empty Background Fill is the 32 px header only",
+    );
+    await bg.getByRole("button", { name: "Add background paint" }).click();
+    let title = await node("title");
+    assert.deepEqual(title.backgroundFills, [{ type: "solid", color: "#ffffff" }], "Add defaults to white");
+    assert.equal(title.color, "#111111", "the text colour is untouched");
+    assert.equal(title.fills.length, 1, "the Text Fill stack is untouched");
+    assert.equal(await bg.locator("[data-paint-stack]").getAttribute("data-paint-target"), "backgroundFills");
+    assert.equal(await fill.locator("[data-paint-stack]").getAttribute("data-paint-target"), "fills");
+    assert.equal(await page.locator("[name=color]").count(), 1, "only the Text Fill row owns [name=color]");
+    const bgHex = bg.getByRole("textbox", { name: "Background fill hex colour" });
+    await bgHex.fill("ff0000");
+    await bgHex.press("Enter");
+    title = await node("title");
+    assert.deepEqual(
+      title.backgroundFills,
+      [{ type: "solid", color: "#ff0000" }],
+      "a single solid stays in backgroundFills (never collapsed into color/token)",
+    );
+    assert.equal(title.color, "#111111");
+    assert.equal(title.token ?? "", "");
+    assert.match(
+      await page.locator("#canvas [data-id=title]").evaluate((e) => e.style.backgroundImage),
+      /rgb\(255, 0, 0\)/,
+      "the background paint renders behind the glyphs",
+    );
+    await bg.getByRole("button", { name: "Add background paint" }).click();
+    assert.deepEqual((await node("title")).backgroundFills, [
+      { type: "solid", color: "#00000033" },
+      { type: "solid", color: "#ff0000" },
+    ]);
+    await bg.locator("[data-paint-remove='0']").click();
+    await bg.locator("[data-paint-remove='0']").click();
+    title = await node("title");
+    assert.equal(title.backgroundFills, undefined, "an empty stack writes backgroundFills: undefined");
+    assert.equal(
+      await page.evaluate(() => "backgroundFills" in JSON.parse(JSON.stringify(window.design.getDocument())).pages[0].nodes[0]),
+      false,
+      "and leaves nothing in the saved document",
+    );
+    assert.equal(title.color, "#111111");
+    assert.equal(await bg.locator("[data-paint]").count(), 0);
+    await page.evaluate(() => window.design.runCommand("edit.undo"));
+    assert.deepEqual((await node("title")).backgroundFills, [{ type: "solid", color: "#ff0000" }], "undo restores it");
+    await setup([
+      { id: "box", name: "Box", type: "frame", x: 20, y: 20, w: 100, h: 80, color: "#ffffff", layout: "free" },
+    ]);
+    assert.equal(await bg.count(), 0, "only text layers have a Background Fill under the fill");
+    console.log("PASS text Background Fill: own stack in backgroundFills, white default, no collapse, empty removes");
+
     // --- Multicolour SVG Colors, SVG-only export format, recoloured raster and vector output --------------------
     await setup([
       {
@@ -422,13 +632,14 @@ const LOGO = svg(
         src: LOGO,
       },
     ]);
-    const colors = page.locator("#svg-colors-section");
+    // The SVG Colors rows now live in Selection colors (properties-audit A9, WP-6).
+    const colors = page.locator("#selection-colors-section");
     assert.equal(
-      await colors.locator("[data-svg-paints]").getAttribute("data-svg-paints"),
+      await colors.locator("[data-selection-colors]").getAttribute("data-selection-colors"),
       "2",
       "one row per distinct paint",
     );
-    const hex = page.getByRole("textbox", { name: "SVG color 1 hex" });
+    const hex = page.getByRole("textbox", { name: "Selection color 1 hex" });
     await hex.fill("00ff00");
     await hex.press("Enter");
     assert.deepEqual((await node("logo")).svgPaints, { "#ff0000": "#00ff00" });
@@ -465,7 +676,7 @@ const LOGO = svg(
       [60, 20],
     ]);
     near(drawn.px[0], [0, 255, 0, 255], "SVG output draws the replacement");
-    await page.getByRole("button", { name: "Restore SVG color 1" }).click();
+    await page.getByRole("button", { name: "Restore original SVG colors" }).click();
     assert.equal((await node("logo")).svgPaints, undefined);
     console.log(
       "PASS multicolour SVG Colors: per-paint replacement, restore, SVG-only format, recoloured PNG and SVG output",
@@ -516,6 +727,8 @@ const LOGO = svg(
       near(corner.px[0], [255, 0, 0, 255], `${preset}: artwork fills the output`);
       near(corner.px[1], [255, 0, 0, 255], `${preset}: artwork fills the output height`);
     }
+    // The suffix lives in the Export options popover (the name field is full width, as in Wonder A7).
+    await page.getByRole("button", { name: "Export options" }).click();
     const suffix = page.getByRole("textbox", { name: "Export file suffix" });
     await suffix.fill("-hero");
     await suffix.press("Enter");

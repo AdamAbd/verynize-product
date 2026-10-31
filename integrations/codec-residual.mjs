@@ -45,6 +45,7 @@ const STROKE_KEYS = [
   "strokeToken",
   "strokeStyle",
   "strokeHidden",
+  "strokeHiddenSides",
 ];
 const OUTLINE_KEYS = [
   "outlineWidth",
@@ -56,9 +57,10 @@ const OUTLINE_KEYS = [
 ];
 function borderSig(node) {
   if (node.strokeHidden === true) return "0,0,0,0";
+  const hidden = Array.isArray(node.strokeHiddenSides) ? node.strokeHiddenSides : [];
   const widths =
     Array.isArray(node.strokeWidths) && node.strokeWidths.length === 4
-      ? node.strokeWidths
+      ? node.strokeWidths.map((v, i) => (hidden[i] === true ? 0 : v))
       : Array(4).fill(node.strokeWidth);
   return widths.map((v) => Math.max(0, Number(v) || 0)).join(",");
 }
@@ -203,9 +205,10 @@ export function residualOf(node) {
   }
   for (const [flag, keys] of [
     ["strokeHidden", STROKE_KEYS],
+    ["strokeHiddenSides", STROKE_KEYS],
     ["outlineHidden", OUTLINE_KEYS],
   ])
-    if (node[flag] === true)
+    if (node[flag] === true || (Array.isArray(node[flag]) && node[flag].includes(true)))
       for (const key of keys) if (node[key] !== undefined) r[key] = node[key];
   if (node.bindings && typeof node.bindings === "object" && Object.keys(node.bindings).length) {
     r.bindings = node.bindings;
@@ -283,7 +286,8 @@ export function applyResidual(node, attrs, { tokens = {}, warnings = [], where =
   if (r.shadows !== undefined) group(["shadows", "shadow"], shadowSig);
   if (r.filters !== undefined) group(["filters"], filterSig);
   if (r.masks !== undefined) group(["masks", "mask"], maskSig);
-  if (r.strokeHidden === true) group(STROKE_KEYS, borderSig);
+  if (r.strokeHidden === true || (Array.isArray(r.strokeHiddenSides) && r.strokeHiddenSides.includes(true)))
+    group(STROKE_KEYS, borderSig);
   if (r.outlineHidden === true) group(OUTLINE_KEYS, outlineSig);
   if (r.textRuns !== undefined && node.type === "text") {
     if (

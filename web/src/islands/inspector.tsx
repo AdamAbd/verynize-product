@@ -12,6 +12,16 @@ import { PanelSectionHeader, VariablesSection } from "./inspector/variables";
 import { IconsSection } from "./inspector/icons";
 import "./inspector/inspector.css";
 
+// Input modality for inspector.css: a pointer press hides the focus ring Radix restores on its trigger after a menu
+// closes; any navigation key (not Escape, which only closes the menu) brings keyboard rings back.
+const NAV_KEYS = new Set(["Tab", "Enter", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"]);
+const modality = (value: "pointer" | "keyboard") => {
+  if (document.documentElement.dataset.inputModality !== value)
+    document.documentElement.dataset.inputModality = value;
+};
+window.addEventListener("pointerdown", () => modality("pointer"), true);
+window.addEventListener("keydown", (event) => NAV_KEYS.has(event.key) && modality("keyboard"), true);
+
 function Island() {
   useLayoutEffect(detachLegacyForm, []);
   const doc = useDesign();

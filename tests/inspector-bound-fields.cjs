@@ -11,6 +11,7 @@ const path = require("node:path");
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), "inspector-bound-fields-"));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = "1";
   const app = await _electron.launch({
     env,
     args: [".", `--user-data-dir=${profile}`],
@@ -128,6 +129,18 @@ const path = require("node:path");
       `chip sits after the prefix (${geometry.left})`,
     );
     assert.notEqual(geometry.background, geometry.field, "chip fill differs from the field");
+    // Properties audit B5: a plain value after a prefix starts 24px into the field (Wonder x 36.5 with the field at 12),
+    // 4px before the chip box, and a long variable name truncates at about 56px ("dimen…").
+    const plain = await page.locator('[name="x"]').evaluate((input) => {
+      const shell = input.closest("[data-field-shell]").getBoundingClientRect();
+      return input.getBoundingClientRect().left - shell.left;
+    });
+    assert.ok(plain >= 23.5 && plain <= 24.5, `plain value starts 24px in (${plain})`);
+    assert.equal(
+      await chip('[data-bound="radius"]').evaluate((e) => getComputedStyle(e).maxWidth),
+      "56px",
+      "numeric chips truncate at 56px",
+    );
 
     // Colour fields: swatch + chip with the leaf of a folder name, no hex/opacity.
     const fill = page.locator("#fill-section [data-paint='0']");
@@ -225,11 +238,12 @@ const path = require("node:path");
     );
 
     // Detach (23): colour keeps its value and the hex field replaces the chip.
+    // Wonder A1/B3: the unlink is inside the bound row, on hover.
+    await page.locator("#fill-section [data-paint='0']").hover();
     await page
       .locator("#fill-section")
-      .getByRole("button", { name: "Apply variable", exact: true })
+      .getByRole("button", { name: "Detach variable", exact: true })
       .click();
-    await page.getByRole("menuitem", { name: "Detach variable", exact: true }).click();
     assert.equal(
       await chip("#fill-section [data-paint='0']").count(),
       0,

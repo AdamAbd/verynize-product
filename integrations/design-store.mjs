@@ -3,6 +3,8 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { validateEffects } from './node-style.mjs';
 import { paintError, eachPaintColor } from './node-style.mjs';
+import { typographyError } from './node-style.mjs';
+import { sizingError } from './node-style.mjs';
 import { validateAliases, dropAliases } from './variables.mjs';
 import { presetIds, shaderError } from './shaders.mjs';
 
@@ -86,6 +88,8 @@ export function validateDocument(document) {
   for(const page of document.pages) {
     requireString(page.id,'Page id'); requireString(page.name,'Page name');
     if(page.background!==undefined && (typeof page.background!=='string' || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(page.background))) throw new Error('Page background must be a six- or eight-digit hex colour');
+    // The Page row's eye (Wonder C8): hides the page background in the editor without forgetting the colour.
+    if(page.backgroundHidden!==undefined && page.backgroundHidden!==true) throw new Error('Page backgroundHidden must be true when set');
     if(ids.has(page.id)) throw new Error('Duplicate id'); ids.add(page.id);
     if(!Array.isArray(page.nodes) || page.nodes.length>5000 || (total+=page.nodes.length)>10000) throw new Error('Maximum 10000 nodes');
     const nodes=new Map();
@@ -97,7 +101,8 @@ export function validateDocument(document) {
       if(node.text!==undefined && (typeof node.text!=='string'||node.text.length>1000000))throw new Error('Invalid node text');
       if(node.textRuns!==undefined&&(!Array.isArray(node.textRuns)||node.textRuns.some(r=>!r||!Number.isInteger(r.start)||!Number.isInteger(r.end)||r.start<0||r.end<=r.start||r.end>(node.text||'').length||typeof r.bold!=='boolean'||typeof r.italic!=='boolean'||(r.color!==undefined&&!/^#[0-9a-f]{6}$/i.test(r.color))||(r.fontSize!==undefined&&(!Number.isFinite(r.fontSize)||r.fontSize<8||r.fontSize>200)))))throw new Error('Invalid text ranges');
       if(node.src && (!/^data:image\/(png|jpeg|webp|gif|svg\+xml);/i.test(node.src)) && !isRoomAssetUrl(node.src))throw new Error('Image source must be an embedded image or a room asset URL');
-      for(const key of ['fontSize','radius','gap','padding','columns','zIndex','rotation','opacity','strokeWidth','lineHeight','letterSpacing'])if(node[key]!==undefined&&!Number.isFinite(node[key]))throw new Error(`Invalid node ${key}`);
+      for(const key of ['fontSize','radius','gap','padding','columns','zIndex','rotation','opacity','strokeWidth','letterSpacing'])if(node[key]!==undefined&&!Number.isFinite(node[key]))throw new Error(`Invalid node ${key}`);
+      { const te = typographyError(node); if (te) throw new Error(te); } // line height (number | 'auto') + type settings, shared with validate() in web/app.js
       if(node.preview!==undefined){const v=node.preview;if(node.type!=='frame'||node.parentId||!v||typeof v!=='object'||Array.isArray(v)||typeof v.root!=='string'||v.root.length>4096||['name','chatId','url'].some(k=>v[k]!==undefined&&(typeof v[k]!=='string'||v[k].length>4096)))throw Error('Invalid preview configuration');if(v.url){let u;try{u=new URL(v.url)}catch{throw Error('Invalid preview URL')}if(!['http:','https:'].includes(u.protocol)||!['localhost','127.0.0.1','[::1]'].includes(u.hostname)||u.username||u.password)throw Error('Invalid preview URL')}}
       if(node.opacity!==undefined&&(node.opacity<0||node.opacity>100))throw Error('Invalid opacity');if(node.clipContent!==undefined&&typeof node.clipContent!=='boolean')throw Error('Invalid clipping');for(const key of ['locked','hidden','flipX','flipY','ellipse'])if(node[key]!==undefined&&typeof node[key]!=='boolean')throw new Error(`Invalid node ${key}`);
       if(node.type==='shader'){if(!presetIds.includes(node.shaderPreset||'aurora'))throw new Error('Invalid shader preset');for(const [key,max] of [['shaderSpeed',5],['shaderIntensity',2]])if(node[key]!==undefined&&(!Number.isFinite(node[key])||node[key]<0||node[key]>max))throw new Error('Invalid shader uniform '+key);}
@@ -107,6 +112,7 @@ export function validateDocument(document) {
       if (node.svgColor !== undefined && (node.type !== 'image' || typeof node.src !== 'string' || !/^data:image\/svg\+xml;base64,/.test(node.src) || typeof node.svgColor !== 'string' || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(node.svgColor))) throw new Error('Invalid SVG color');
       if (node.svgColorToken !== undefined && (typeof node.svgColorToken !== 'string' || !VARIABLE_NAME.test(node.svgColorToken) || node.svgColor === undefined)) throw new Error('Invalid SVG color variable');
       validateBindings(node.bindings);
+      { const sz = sizingError(node); if (sz) throw new Error(sz); } // wMode/hMode (fixed|hug|fill|auto|calc) + wCalc/hCalc, shared with validate() in web/app.js
       { const fx = validateEffects(node); if (fx) throw new Error(fx); } // structured effects, shared with validate() in web/app.js
       { const se = shaderError(node); if (se) throw new Error(se); } // shader preset/colours/sliders, shared with validate() in web/app.js
       { const pe = paintError(node); if (pe) throw new Error(pe); } // paint stack + SVG paints, shared with validate() in web/app.js

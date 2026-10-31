@@ -118,16 +118,33 @@ const PNG =
     assert.equal(await css("card", "border-top-color"), "rgb(51, 65, 85)");
     await setToken("brand/line", "#ff0000");
     assert.equal(await css("card", "border-left-color"), "rgb(255, 0, 0)");
-    await page.getByRole("button", { name: "Detach border colour variable" }).click();
+    // Wonder A2: the unlink sits inside the bound colour field and only shows on hover; no trailing buttons.
+    const detach = page.getByRole("button", { name: "Detach border colour variable" });
+    const opacity = () => detach.evaluate((el) => getComputedStyle(el).opacity);
+    await page.mouse.move(0, 0);
+    assert.equal(await opacity(), "0");
+    assert.equal(
+      await detach.evaluate((el) => !!el.closest("[data-bound-color=strokeColor]")),
+      true,
+      "unlink lives inside the colour field",
+    );
+    await page.locator("[data-bound-color=strokeColor]").hover();
+    await page.waitForFunction(
+      () =>
+        getComputedStyle(document.querySelector("[data-detach-token]")).opacity === "1",
+    );
+    await detach.click();
     n = await node("card");
     assert.deepEqual([n.strokeToken, n.strokeColor], [undefined, "#ff0000"]);
     assert.equal(await css("card", "border-top-color"), "rgb(255, 0, 0)");
     await undo();
     assert.equal((await node("card")).strokeToken, "brand/line");
 
-    // Independent border colours: one per side, each bindable; the uniform binding seeds the four sides.
-    await page.getByRole("button", { name: "Independent border colours" }).click();
+    // Independent sides (Wonder A2): four side entries, each with its own colour row and bindable; the uniform
+    // binding seeds the four sides.
+    await page.getByRole("button", { name: "Independent border sides" }).click();
     n = await node("card");
+    assert.deepEqual(n.strokeWidths, [4, 4, 4, 4]);
     assert.equal(n.strokeColors.length, 4);
     assert.deepEqual(n.strokeColors[0], { color: "#ff0000", token: "brand/line" });
     assert.equal(n.strokeToken, undefined);

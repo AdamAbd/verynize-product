@@ -31,17 +31,92 @@
   const ALIGN = ['flex-start', 'flex-end', 'center', 'stretch', 'baseline', 'start', 'end'];
   const JUSTIFY = ['flex-start', 'flex-end', 'center', 'space-between', 'space-around', 'space-evenly', 'start', 'end'];
 
-  /** Sizing modes: Fixed always; Hug for text and flow frames; Fill inside flow parents. */
+  /**
+   * Sizing modes (wMode / hMode): Fixed always (with wPct/hPct it is Relative, a percentage of the parent);
+   * Hug for text and flow frames; Fill inside flow parents; Auto (CSS `auto`) for text and frames; Calculate
+   * (a CSS calc() expression of px and % terms in wCalc / hCalc) for any layer.
+   */
   function sizingAllowed(n, parent, mode) {
-    if (!mode || mode === 'fixed') return true;
+    if (!mode || mode === 'fixed' || mode === 'calc') return true;
     if (mode === 'hug') return n.type === 'text' || (n.type === 'frame' && n.layout !== 'free');
     if (mode === 'fill') return !!parent && parent.type === 'frame' && parent.layout !== 'free';
+    if (mode === 'auto') return n.type === 'text' || n.type === 'frame';
     return false;
+  }
+  const SIZING_MODES = ['fixed', 'hug', 'fill', 'auto', 'calc'];
+  /** Block alignment (frame.justifyItems on a block frame) -> CSS justify-items. */
+  const BLOCK_ALIGN = {'flex-start': 'start', start: 'start', center: 'center', 'flex-end': 'end', end: 'end'};
+  /**
+   * Parse a Calculate expression ("270px", "100% - 20px", "(50% + 8px) * 2") into its linear form
+   * {pct, px, text}: the value is px + pct% of the parent, `text` the canonical spacing CSS calc() needs.
+   * Only px and % lengths, unitless factors, + - * / and parentheses; null when invalid.
+   */
+  function parseCalc(input) {
+    if (typeof input !== 'string' || !input.trim() || input.length > 200) return null;
+    const tokens = input.trim().replace(/^calc\((.*)\)$/i, '$1').match(/\d*\.?\d+(?:px|%)?|[-+*/()]|\S/gi) || [];
+    let i = 0;
+    const peek = () => tokens[i];
+    const out = [];
+    const unit = t => (/%$/.test(t) ? 'pct' : /px$/i.test(t) ? 'px' : 'n');
+    const factor = () => {
+      const t = tokens[i++];
+      if (t === undefined) return null;
+      if (t === '(') { out.push('('); const v = expr(); if (!v || tokens[i++] !== ')') return null; out.push(')'); return v; }
+      if (t === '-' || t === '+') { const at = out.length; const v = factor(); if (!v) return null; if (t === '-') { out.splice(at, 0, /^\d/.test(out[at]) ? '-' : '-1 * '); return {pct: -v.pct, px: -v.px, n: -v.n, kind: v.kind}; } return v; }
+      if (!/^\d*\.?\d+(?:px|%)?$/i.test(t)) return null;
+      const value = parseFloat(t), kind = unit(t);
+      out.push(kind === 'pct' ? value + '%' : kind === 'px' ? value + 'px' : String(value));
+      return {pct: kind === 'pct' ? value : 0, px: kind === 'px' ? value : 0, n: kind === 'n' ? value : 0, kind: kind === 'n' ? 'n' : 'len'};
+    };
+    const term = () => {
+      let a = factor();
+      while (a && (peek() === '*' || peek() === '/')) {
+        const op = tokens[i++]; out.push(' ' + op + ' ');
+        const b = factor(); if (!b) return null;
+        if (op === '*') {
+          if (a.kind === 'n') a = {pct: a.n * b.pct, px: a.n * b.px, n: a.n * b.n, kind: b.kind};
+          else if (b.kind === 'n') a = {pct: a.pct * b.n, px: a.px * b.n, n: 0, kind: 'len'};
+          else return null;
+        } else {
+          if (b.kind !== 'n' || !b.n) return null;
+          a = {pct: a.pct / b.n, px: a.px / b.n, n: a.n / b.n, kind: a.kind};
+        }
+      }
+      return a;
+    };
+    const expr = () => {
+      let a = term();
+      while (a && (peek() === '+' || peek() === '-')) {
+        const op = tokens[i++]; out.push(' ' + op + ' ');
+        const b = term(); if (!b || b.kind !== a.kind) return null;
+        const s = op === '-' ? -1 : 1;
+        a = {pct: a.pct + s * b.pct, px: a.px + s * b.px, n: a.n + s * b.n, kind: a.kind};
+      }
+      return a;
+    };
+    const v = expr();
+    if (!v || i !== tokens.length || v.kind !== 'len' || ![v.pct, v.px].every(Number.isFinite)) return null;
+    return {pct: v.pct, px: v.px, text: out.join('')};
+  }
+  /** Resolve a Calculate expression against the parent's size (px). */
+  const calcValue = (expr, base = 0) => { const c = parseCalc(expr); return c ? c.px + c.pct / 100 * (Number(base) || 0) : null; };
+  /** The CSS `calc()` for a Calculate expression, or '' when invalid. */
+  const calcCss = expr => { const c = parseCalc(expr); return c ? `calc(${c.text})` : ''; };
+  /** Shared sizing validation for web/app.js validate() and integrations/design-store.mjs validateDocument. */
+  function sizingError(n) {
+    for (const [mode, calc] of [['wMode', 'wCalc'], ['hMode', 'hCalc']]) {
+      if (n[mode] !== undefined && !SIZING_MODES.includes(n[mode])) return 'Invalid sizing mode';
+      if (n[calc] !== undefined && !parseCalc(n[calc])) return 'Invalid size expression';
+      if (n[mode] === 'calc' && n[calc] === undefined) return 'Invalid size expression';
+    }
+    if (n.type === 'frame' && n.justifyItems !== undefined && (typeof n.justifyItems !== 'string' || n.justifyItems.length > 40)) return 'Invalid node justifyItems';
+    return '';
   }
   function sizingMode(n, axis, parent) {
     const mode = n[axis === 'w' ? 'wMode' : 'hMode'] || 'fixed';
     // A Left & Right (Top & Bottom) constraint stretches the layer between both insets, in any parent.
     if (mode === 'fill' && anchored(n, parent) && pinnedBoth(n, axis)) return 'fill';
+    if (mode === 'calc' && !parseCalc(n[axis === 'w' ? 'wCalc' : 'hCalc'])) return 'fixed';
     return sizingAllowed(n, parent, mode) ? mode : 'fixed';
   }
   const inFlow = (n, parent) => !!parent && parent.layout !== 'free' && n.position !== 'absolute';
@@ -139,6 +214,8 @@
   //     [{color, token?} x4] (top, right, bottom, left) paints each border side separately.
   //   strokeHidden / outlineHidden: true hides the border / outline without discarding it (the inspector's
   //     eye toggle): nothing is drawn and the border takes no space.
+  //   strokeHiddenSides [bool x4] (top, right, bottom, left) hides single sides of a per-side border
+  //     (strokeWidths) the same way: the side keeps its width and colour but draws nothing.
   const BLEND_MODES = ['normal', 'darken', 'multiply', 'plus-darker', 'color-burn', 'lighten', 'screen', 'plus-lighter', 'color-dodge', 'overlay', 'soft-light', 'hard-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
   const FILTERS = {
     blur: {fn: 'blur', unit: 'px', min: 0, max: 1000, value: 4},
@@ -229,6 +306,7 @@
     if (!tokenName(n.strokeToken)) return 'Invalid border color variable';
     if (!isBool(n.strokeHidden)) return 'Invalid border visibility';
     if (!isBool(n.outlineHidden)) return 'Invalid outline visibility';
+    if (n.strokeHiddenSides !== undefined && (!Array.isArray(n.strokeHiddenSides) || n.strokeHiddenSides.length !== 4 || !n.strokeHiddenSides.every(v => typeof v === 'boolean'))) return 'Invalid border side visibility';
     if (n.strokeColors !== undefined && (!Array.isArray(n.strokeColors) || n.strokeColors.length !== 4 || !n.strokeColors.every(c => c && typeof c === 'object' && FX_HEX.test(String(c.color)) && tokenName(c.token)))) return 'Invalid border side colors';
     const list = (v, max) => v === undefined || (Array.isArray(v) && v.length <= max && v.every(item => item && typeof item === 'object' && !Array.isArray(item) && isBool(item.hidden)));
     if (!list(n.shadows, 20)) return 'Invalid shadows';
@@ -318,6 +396,15 @@
         if (e) return e;
       }
     }
+    if (n.backgroundFills !== undefined) {
+      // Text layers only: the Background Fill stack drawn behind the glyphs.
+      if (n.type !== "text" || !Array.isArray(n.backgroundFills) || n.backgroundFills.length > 16)
+        return "backgroundFills must be a list of at most 16 paints on a text layer";
+      for (const p of n.backgroundFills) {
+        const e = onePaintError(p);
+        if (e) return e;
+      }
+    }
     if (n.svgPaints !== undefined) {
       const map = n.svgPaints;
       if (
@@ -357,6 +444,11 @@
     if (!n || typeof n !== "object") return;
     if (Array.isArray(n.fills))
       for (const p of n.fills) {
+        if (p?.type === "solid") fn(p);
+        else if (Array.isArray(p?.stops)) for (const s of p.stops) if (s) fn(s);
+      }
+    if (Array.isArray(n.backgroundFills))
+      for (const p of n.backgroundFills) {
         if (p?.type === "solid") fn(p);
         else if (Array.isArray(p?.stops)) for (const s of p.stops) if (s) fn(s);
       }
@@ -576,7 +668,7 @@
     set('font-family', safe(n.fontFamily, 'system-ui'));
     set('font-weight', /^(normal|bold|[1-9][0-9]{0,2}|1000)$/.test(String(n.fontWeight)) ? String(n.fontWeight) : '400');
     set('text-align', pick(n.textAlign, ['left', 'center', 'right', 'justify', 'start', 'end'], 'left'));
-    set('line-height', String(num(n.lineHeight, 1.15)));
+    set('line-height', n.lineHeight === 'auto' ? 'normal' : String(num(n.lineHeight, 1.15)));
     set('letter-spacing', px(n.letterSpacing));
     // Rotation, then flips (negative scale) in the node's own frame: transform = rotate(r) scale(±1, ±1).
     const flip = (n.flipX === true || n.flipY === true) ? `scale(${n.flipX === true ? -1 : 1}, ${n.flipY === true ? -1 : 1})` : '';
@@ -617,6 +709,25 @@
         set("background-clip", "text");
       }
     }
+    // Text Background Fill (`backgroundFills`): box-clipped layers under any text-clipped Text Fill layers.
+    const backdrop =
+      n.type === "text" && Array.isArray(n.backgroundFills)
+        ? fillsCss({ fills: n.backgroundFills }, ctx.tokens)
+        : null;
+    if (backdrop?.layers.length) {
+      const glyphs = paints && !paints.solid ? paints.layers : [];
+      const layers = [...glyphs, ...backdrop.layers];
+      for (const [prop, key] of [
+        ["background-image", "image"],
+        ["background-size", "size"],
+        ["background-position", "position"],
+        ["background-repeat", "repeat"],
+      ])
+        set(prop, layers.map((l) => l[key]).join(", "));
+      const clip = layers.map((_, i) => (i < glyphs.length ? "text" : "border-box")).join(", ");
+      set("-webkit-background-clip", clip);
+      set("background-clip", clip);
+    }
     if (PALETTES[n.animated]) { set('background-image', `linear-gradient(120deg,${PALETTES[n.animated]})`); set('background-size', '250% 250%'); set('animation', 'design-gradient 8s ease infinite'); }
     if (safe(n.mask)) set('mask-image', safe(n.mask));
     if (parent?.layout === 'inline') { set('display', 'inline-block'); set('vertical-align', 'top'); }
@@ -642,6 +753,8 @@
         if (num(n.rows) >= 1) set('grid-template-rows', `repeat(${Math.min(100, Math.floor(num(n.rows)))}, minmax(0, 1fr))`);
         if (n.justifyItems !== undefined) set('justify-items', pick(n.justifyItems, ALIGN, 'stretch'));
       }
+      // Block alignment: children narrower than the frame sit left / centre / right (justify-items in block flow).
+      if (layout === 'block' && BLOCK_ALIGN[n.justifyItems]) set('justify-items', BLOCK_ALIGN[n.justifyItems]);
     }
 
     // Sizing modes (hug = fit content, fill = stretch into the parent).
@@ -649,10 +762,16 @@
     const flex = parent?.layout === 'flex', row = flex && parent.direction !== 'column';
     if (w === 'hug') set('width', n.type === 'text' && !parent ? 'max-content' : 'fit-content');
     if (h === 'hug') set('height', 'auto');
+    // Auto is CSS `auto` (fills a block parent, fits content in a flex row); Calculate is a calc() expression.
+    if (w === 'auto') set('width', n.type === 'text' && !parent ? 'max-content' : 'auto');
+    if (h === 'auto') set('height', 'auto');
+    if (w === 'calc') set('width', calcCss(n.wCalc));
+    if (h === 'calc') set('height', calcCss(n.hCalc));
     const insetSet = i => absoluteInFlow && Array.isArray(n.inset) && n.inset[i] !== null && n.inset[i] !== undefined;
     if (w === 'fill') {
       set('width', absoluteInFlow ? (insetSet(1) && insetSet(3) ? 'auto' : '100%') : parent.layout === 'inline' ? '100%' : 'auto'); set('min-width', '0');
       if (flow && row) { set('flex-grow', '1'); set('flex-basis', '0'); } else if (flow && flex) set('align-self', 'stretch');
+      else if (flow && parent.layout === 'block' && BLOCK_ALIGN[parent.justifyItems]) set('justify-self', 'stretch'); // Fill ignores the Block alignment
     }
     if (h === 'fill') {
       set('height', absoluteInFlow ? (insetSet(0) && insetSet(2) ? 'auto' : '100%') : flex ? 'auto' : '100%'); set('min-height', '0');
@@ -671,7 +790,7 @@
       }
       if (Array.isArray(n.translate)) set('translate', len(n.translate[0]) + ' ' + len(n.translate[1]));
     } else if (flow) {
-      set('flex-shrink', String(n.shrink ?? (w === 'hug' ? 1 : 0)));
+      set('flex-shrink', String(n.shrink ?? (w === 'hug' || w === 'auto' ? 1 : 0)));
       if (n.grow !== undefined) set('flex-grow', String(num(n.grow)));
       if (n.basis !== undefined) set('flex-basis', len(n.basis));
       if (n.alignSelf && n.alignSelf !== 'auto') set('align-self', pick(n.alignSelf, ALIGN, 'auto'));
@@ -694,7 +813,7 @@
     if (Array.isArray(n.cornerRadii) && n.cornerRadii.length === 4) set('border-radius', n.cornerRadii.map(px).join(' '));
     // Ellipse: any box type can be drawn as an ellipse inscribed in its bounds; it overrides corner radii.
     if (n.ellipse === true && n.type !== 'text') set('border-radius', '50%');
-    if (n.strokeHidden !== true && Array.isArray(n.strokeWidths) && n.strokeWidths.length === 4) set('border-width', n.strokeWidths.map(v => px(Math.max(0, num(v)))).join(' '));
+    if (n.strokeHidden !== true && Array.isArray(n.strokeWidths) && n.strokeWidths.length === 4) set('border-width', bordersOf(n).map(v => px(Math.max(0, v))).join(' '));
     if (['dashed', 'dotted', 'double'].includes(n.strokeStyle)) set('border-style', n.strokeStyle);
     if (num(n.ringWidth) > 0) {
       const ring = (n.ringInset ? 'inset ' : '') + `0 0 0 ${num(n.ringWidth)}px ${safe(n.ringColor, '#000000')}`;
@@ -729,9 +848,20 @@
       if (['uppercase', 'lowercase', 'capitalize'].includes(n.textTransform)) set('text-transform', n.textTransform);
       if (/^(none|underline|overline|line-through)( (underline|overline|line-through))*$/.test(String(n.textDecoration || ''))) set('text-decoration-line', n.textDecoration);
       if (['italic', 'normal'].includes(n.fontStyle)) set('font-style', n.fontStyle);
+      // Type settings (inspector): each field is absent by default, which keeps the base text CSS above.
+      // white-space before text-wrap: the white-space shorthand resets text-wrap-mode.
+      if (WHITE_SPACES.includes(n.whiteSpace)) set('white-space', n.whiteSpace);
+      if (n.wordBreak === 'normal') set('overflow-wrap', 'normal');
+      else if (n.wordBreak === 'break-all') set('word-break', 'break-all');
+      if (num(n.textIndent)) set('text-indent', px(n.textIndent));
+      if (n.fontSmoothing === 'antialiased') { set('-webkit-font-smoothing', 'antialiased'); set('-moz-osx-font-smoothing', 'grayscale'); }
+      else if (n.fontSmoothing === 'subpixel-antialiased') { set('-webkit-font-smoothing', 'auto'); set('-moz-osx-font-smoothing', 'auto'); }
+      // Vertical alignment inside a fixed-height box: align-content on the block container keeps runs inline.
+      if (n.textAlignVertical === 'center') set('align-content', 'center');
+      else if (n.textAlignVertical === 'bottom') set('align-content', 'flex-end');
       if (['wrap', 'nowrap', 'balance', 'pretty', 'stable'].includes(n.textWrap)) set('text-wrap', n.textWrap);
       if (n.truncate) { set('white-space', 'nowrap'); set('overflow', 'hidden'); set('text-overflow', 'ellipsis'); }
-      else if (n.noWrap) set('white-space', 'pre');
+      else if (n.noWrap && !WHITE_SPACES.includes(n.whiteSpace)) set('white-space', 'pre');
       if (num(n.lineClamp) > 0) { set('display', '-webkit-box'); set('-webkit-line-clamp', String(Math.floor(num(n.lineClamp)))); set('-webkit-box-orient', 'vertical'); set('overflow', 'hidden'); }
     }
     if (n.hidden) set('display', 'none');
@@ -760,13 +890,33 @@
 
   function bordersOf(n) {
     if (n?.strokeHidden === true) return [0, 0, 0, 0];
-    if (Array.isArray(n?.strokeWidths) && n.strokeWidths.length === 4) return n.strokeWidths.map(v => num(v));
+    if (Array.isArray(n?.strokeWidths) && n.strokeWidths.length === 4) {
+      const hidden = Array.isArray(n.strokeHiddenSides) && n.strokeHiddenSides.length === 4 ? n.strokeHiddenSides : [];
+      return n.strokeWidths.map((v, i) => (hidden[i] === true ? 0 : num(v)));
+    }
     const w = num(n?.strokeWidth); return [w, w, w, w];
   }
   /** Serialize declarations as a style attribute value (caller escapes for HTML). */
   const styleText = decls => (decls || []).map(([k, v]) => `${k}:${v}`).join(';');
   /** Apply declarations to a DOM element (browser). */
   function applyStyle(el, decls) { for (const [k, v] of decls || []) el.style.setProperty(k, v); }
+  // Typography fields beyond the base text properties (inspector Type settings). Every one is optional and
+  // absent by default, so older documents keep their rendering. Shared by validate() in web/app.js and
+  // validateDocument in integrations/design-store.mjs.
+  const TEXT_ALIGN_VERTICAL = ['top', 'center', 'bottom'];
+  const WHITE_SPACES = ['normal', 'nowrap', 'pre', 'pre-wrap', 'pre-line', 'break-spaces'];
+  const WORD_BREAKS = ['normal', 'break-all'];
+  const FONT_SMOOTHINGS = ['antialiased', 'subpixel-antialiased'];
+  function typographyError(n) {
+    if (!n || typeof n !== 'object') return '';
+    if (n.lineHeight !== undefined && n.lineHeight !== 'auto' && !Number.isFinite(n.lineHeight)) return 'Invalid line height';
+    if (n.textAlignVertical !== undefined && !TEXT_ALIGN_VERTICAL.includes(n.textAlignVertical)) return 'Invalid vertical text alignment';
+    if (n.whiteSpace !== undefined && !WHITE_SPACES.includes(n.whiteSpace)) return 'Invalid white space';
+    if (n.wordBreak !== undefined && !WORD_BREAKS.includes(n.wordBreak)) return 'Invalid word break';
+    if (n.textIndent !== undefined && (!Number.isFinite(n.textIndent) || Math.abs(n.textIndent) > 10000)) return 'Invalid text indent';
+    if (n.fontSmoothing !== undefined && !FONT_SMOOTHINGS.includes(n.fontSmoothing)) return 'Invalid font smoothing';
+    return '';
+  }
   /** Text runs -> [{text, style: [[prop, value]]}] segments (bold/italic/color/size). */
   function textSegments(n) {
     const text = String(n.text || ''), runs = Array.isArray(n.textRuns) ? n.textRuns : [];
@@ -787,5 +937,7 @@
   /** Index of the last in-flow (not hidden, not absolute) child in a list of siblings. */
   const lastInFlowId = children => children.filter(c => !c.hidden && c.position !== 'absolute').at(-1)?.id;
 
-  root.BetterNodeStyle = {nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss: safe, PALETTES, paintError, eachPaintColor, paintColor, fillsCss, svgPaintList, svgColorKey, recolorSvg, PAINT_TYPES, IMAGE_FITS, BLEND_MODES, FILTERS, SHADOW_TYPES, MASK_TYPES, MASK_MODES, MASK_REPEATS, MASK_COMPOSITES, OUTLINE_STYLES, effectsOf, validateEffects};
+  root.BetterNodeStyle = {nodeStyle, styleText, applyStyle, textSegments, sizingAllowed, sizingMode, inFlow, lastInFlowId, anchored, constraintsOf, anchorPatch, anchoredBox, safeCss: safe, PALETTES, paintError, eachPaintColor, paintColor, fillsCss, svgPaintList, svgColorKey, recolorSvg, PAINT_TYPES, IMAGE_FITS, BLEND_MODES, FILTERS, SHADOW_TYPES, MASK_TYPES, MASK_MODES, MASK_REPEATS, MASK_COMPOSITES, OUTLINE_STYLES, effectsOf, validateEffects, typographyError, TEXT_ALIGN_VERTICAL, WHITE_SPACES, WORD_BREAKS, FONT_SMOOTHINGS};
+  // Sizing modes (Relative / Auto / Calculate) and Block alignment.
+  Object.assign(root.BetterNodeStyle, {parseCalc, calcValue, calcCss, sizingError, SIZING_MODES, BLOCK_ALIGN});
 })(typeof globalThis !== 'undefined' ? globalThis : window);

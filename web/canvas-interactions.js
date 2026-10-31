@@ -9,7 +9,7 @@
   const BOARD = {x: 0, y: 0, w: 1000, h: 700};
   const DRAW_TOOLS = new Set(['frame', 'rectangle', 'ellipse', 'text', 'shader']);
   const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', eyedropper: 'eyedropper-tool', frame: 'add-frame', rectangle: 'rectangle', ellipse: 'add-ellipse', text: 'text', shader: 'add-shader'};
-  const STYLE_KEYS = ['color', 'token', 'gradient', 'radius', 'ellipse', 'strokeWidth', 'strokeColor', 'shadow', 'opacity', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'mask', 'animated', 'clipContent'];
+  const STYLE_KEYS = ['color', 'token', 'gradient', 'radius', 'ellipse', 'strokeWidth', 'strokeColor', 'shadow', 'opacity', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'textAlignVertical', 'textTransform', 'textDecoration', 'textWrap', 'whiteSpace', 'wordBreak', 'textIndent', 'fontSmoothing', 'truncate', 'mask', 'animated', 'clipContent'];
   const CLIP_MARKER = 'verynize/nodes';
   const FRAME_PRESETS = [
     ['Smartphone', [['iPhone 17', 402, 874], ['iPhone 18 Pro', 402, 874], ['iPhone Air', 420, 912], ['iPhone 18 Pro Max', 440, 956]]],
@@ -490,6 +490,7 @@
       track(e, ev => setCamera(start.cx + ev.clientX - start.x, start.cy + ev.clientY - start.y, cam.zoom), () => workspace.classList.remove('panning'));
     }
     wrap.addEventListener('pointerdown', e => {
+      if (textEdit?.el.contains(e.target)) return; // caret placement and selection inside the text editor
       closeMenu();
       if (e.target.closest('.frame-label')) return;
       if (space || tool === 'hand' || e.button === 1) { startPan(e); return; }
@@ -525,9 +526,155 @@
     wrap.addEventListener('dblclick', e => {
       const el = e.target.closest('#canvas .layer'); if (!el) return;
       const n = find(el.dataset.id);
-      if (n?.type === 'text' && !n.locked && sel().size === 1 && sel().has(n.id) && firstClickSelection.has(n.id)) editText();
+      if (textEdit?.el.contains(e.target)) return; // native word selection inside the editor
+      if (n?.type === 'text' && !n.locked && sel().size === 1 && sel().has(n.id) && firstClickSelection.has(n.id)) editText({x: e.clientX, y: e.clientY});
     });
-    function editText() { const t = $('#inspector')?.elements.text; if (t) { t.focus(); t.select(); } }
+    // ---------- In-canvas text editing (double-click, Enter, or a text layer drawn with the Text tool) ----------
+    // The layer element itself becomes editable (plaintext-only: Enter types a newline, paste is plain text), so the
+    // text keeps its exact canvas rendering while it is typed. Runs are rebuilt as spans that carry their style in
+    // data attributes; typing inside a styled run extends it, and ⌘B / ⌘I toggle bold / italic on the selected
+    // characters. Escape, ⌘Enter, blur or a press anywhere else commits text + runs as one undo step.
+    let textEdit = null;
+    const runStyle = s => (s.bold ? 'b' : '') + (s.italic ? 'i' : '') + '|' + (s.color || '') + '|' + (s.fontSize || '');
+    function charStylesOf(n) {
+      const text = String(n.text || ''), runs = Array.isArray(n.textRuns) ? n.textRuns : [];
+      return Array.from({length: text.length}, (_, i) => {
+        const s = {};
+        for (const r of runs) if (r.start <= i && i < r.end) { if (r.bold) s.bold = true; if (r.italic) s.italic = true; if (r.color) s.color = r.color; if (Number.isFinite(r.fontSize)) s.fontSize = r.fontSize; }
+        return s;
+      });
+    }
+    function runsFrom(styles) {
+      const runs = [];
+      for (let i = 0; i < styles.length;) {
+        const key = runStyle(styles[i]); let j = i + 1;
+        while (j < styles.length && runStyle(styles[j]) === key) j++;
+        const s = styles[i];
+        if (key !== '||') runs.push({start: i, end: j, bold: !!s.bold, italic: !!s.italic, ...(s.color ? {color: s.color} : {}), ...(s.fontSize ? {fontSize: s.fontSize} : {})});
+        i = j;
+      }
+      return runs;
+    }
+    function fillEditor(el, text, styles) {
+      const spans = [];
+      for (let i = 0; i < text.length;) {
+        const key = runStyle(styles[i] || {}); let j = i + 1;
+        while (j < text.length && runStyle(styles[j] || {}) === key) j++;
+        const s = styles[i] || {}, span = document.createElement('span');
+        span.textContent = text.slice(i, j);
+        if (s.bold) { span.dataset.runBold = ''; span.style.fontWeight = '700'; }
+        if (s.italic) { span.dataset.runItalic = ''; span.style.fontStyle = 'italic'; }
+        if (s.color) { span.dataset.runColor = s.color; span.style.color = s.color; }
+        if (s.fontSize) { span.dataset.runSize = String(s.fontSize); span.style.fontSize = s.fontSize + 'px'; }
+        spans.push(span); i = j;
+      }
+      el.replaceChildren(...spans);
+    }
+    // Text units in document order: text nodes and <br> (one newline each). Selection handles are skipped.
+    function editorUnits(el) {
+      const out = [];
+      const walk = (node, style) => {
+        for (const child of node.childNodes) {
+          if (child.nodeType === Node.TEXT_NODE) out.push({node: child, len: child.data.length, text: child.data, style});
+          else if (child.nodeType === Node.ELEMENT_NODE && !child.classList.contains('handle')) {
+            if (child.tagName === 'BR') { out.push({node: child, len: 1, text: '\n', style}); continue; }
+            const d = child.dataset, s = {...style};
+            if ('runBold' in d) s.bold = true; if ('runItalic' in d) s.italic = true;
+            if (d.runColor) s.color = d.runColor; if (d.runSize) s.fontSize = Number(d.runSize);
+            if (child.tagName === 'DIV' && out.length) out.push({node: child, len: 1, text: '\n', style});
+            walk(child, s);
+          }
+        }
+      };
+      walk(el, {});
+      return out;
+    }
+    function readEditor(el) {
+      let text = ''; const styles = [];
+      for (const u of editorUnits(el)) { text += u.text; for (let i = 0; i < u.len; i++) styles.push(u.style); }
+      // A trailing newline the browser keeps only to show an empty last line.
+      return {text, styles};
+    }
+    function editorOffset(el, container, offset) {
+      let count = 0; const point = document.createRange();
+      try { point.setStart(container, offset); } catch { return 0; }
+      for (const u of editorUnits(el)) {
+        if (u.node === container) return count + (u.node.nodeType === Node.TEXT_NODE ? offset : 0);
+        if (point.comparePoint(u.node, 0) < 0) count += u.len; else break;
+      }
+      return count;
+    }
+    function selectEditorRange(el, start, end) {
+      const units = editorUnits(el), at = pos => {
+        let count = 0;
+        for (const u of units) { if (u.node.nodeType === Node.TEXT_NODE && pos <= count + u.len) return [u.node, pos - count]; count += u.len; }
+        return [el, el.childNodes.length];
+      };
+      const r = document.createRange(); r.setStart(...at(start)); r.setEnd(...at(end));
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    }
+    function toggleRun(prop) {
+      const s = textEdit, selection = getSelection(); if (!s || !selection.rangeCount) return;
+      const r = selection.getRangeAt(0); if (!s.el.contains(r.startContainer) || !s.el.contains(r.endContainer)) return;
+      const a = editorOffset(s.el, r.startContainer, r.startOffset), b = editorOffset(s.el, r.endContainer, r.endOffset);
+      if (a === b) return;
+      const {text, styles} = readEditor(s.el), on = !styles.slice(a, b).every(st => st[prop]);
+      for (let i = a; i < b; i++) { const next = {...styles[i]}; if (on) next[prop] = true; else delete next[prop]; styles[i] = next; }
+      fillEditor(s.el, text, styles); selectEditorRange(s.el, a, b);
+    }
+    function editText(point) {
+      const list = selectedNodes(), n = list.length === 1 ? list[0] : null;
+      if (!n || n.type !== 'text' || n.locked || n.hidden || textEdit?.id === n.id) return;
+      finishText(true);
+      const el = elementOf(n.id); if (!el) return;
+      fillEditor(el, String(n.text || ''), charStylesOf(n));
+      try { el.contentEditable = 'plaintext-only'; } catch {}
+      if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
+      el.spellcheck = false; el.dataset.textEditing = '';
+      el.style.setProperty('user-select', 'text'); el.style.setProperty('-webkit-user-select', 'text'); el.style.setProperty('cursor', 'text');
+      const onKey = e => {
+        if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) { e.preventDefault(); e.stopPropagation(); finishText(true); return; }
+        const mod = IS_MAC ? e.metaKey : e.ctrlKey, key = e.key.toLowerCase();
+        if (mod && !e.altKey && !e.shiftKey && (key === 'b' || key === 'i')) { e.preventDefault(); e.stopPropagation(); toggleRun(key === 'b' ? 'bold' : 'italic'); }
+      };
+      const onBlur = () => { if (textEdit?.el === el && document.activeElement !== el) finishText(true); };
+      const outside = e => { if (textEdit?.el === el && !el.contains(e.target)) finishText(true); };
+      el.addEventListener('keydown', onKey); el.addEventListener('blur', onBlur);
+      document.addEventListener('pointerdown', outside, true);
+      textEdit = {id: n.id, el, cleanup: () => { el.removeEventListener('keydown', onKey); el.removeEventListener('blur', onBlur); document.removeEventListener('pointerdown', outside, true); }};
+      showHover(null);
+      el.focus({preventScroll: true});
+      const selection = getSelection();
+      const caret = point && document.caretRangeFromPoint?.(point.x, point.y);
+      if (caret && el.contains(caret.startContainer)) {
+        selection.removeAllRanges(); selection.addRange(caret);
+        // A double-click selects the word under the pointer, as in other editors.
+        try { selection.modify('move', 'backward', 'word'); selection.modify('extend', 'forward', 'word'); } catch {}
+      } else selectEditorRange(el, 0, readEditor(el).text.length);
+    }
+    function finishText(commit = true) {
+      const s = textEdit; if (!s) return;
+      textEdit = null; s.cleanup();
+      const {text, styles} = readEditor(s.el);
+      s.el.removeAttribute('contenteditable'); delete s.el.dataset.textEditing;
+      for (const k of ['user-select', '-webkit-user-select', 'cursor']) s.el.style.removeProperty(k);
+      if (document.activeElement === s.el) s.el.blur();
+      const n = find(s.id);
+      if (commit && n) {
+        const runs = runsFrom(styles);
+        if (text !== String(n.text || '') || JSON.stringify(runs) !== JSON.stringify(runsFrom(charStylesOf(n)))) {
+          try { if (window.design?.updateNodes) { window.design.updateNodes([s.id], {text, textRuns: runs}); return; } } catch (error) { footer(error.message || String(error)); }
+        }
+      }
+      ed.render(); // back to the canonical layer DOM (run spans, selection handles)
+    }
+    // A render while editing (collaboration, autosave, inspector) rebuilds the layer: keep the live editor in place.
+    function keepTextEditor() {
+      if (!textEdit || textEdit.el.isConnected) return;
+      const fresh = elementOf(textEdit.id);
+      if (fresh && find(textEdit.id)) { fresh.replaceWith(textEdit.el); textEdit.el.focus({preventScroll: true}); }
+      else { textEdit.cleanup(); textEdit = null; }
+    }
 
     function guideTargets(moving) {
       const first = find(moving[0]); if (!first) return [];
@@ -756,7 +903,7 @@
       const n = find(id); if (!n || n.locked) return;
       let total = Number(n.rotation) || 0, ancestor = n;
       while (ancestor.parentId) { ancestor = find(ancestor.parentId); if (!ancestor) break; total += Number(ancestor.rotation) || 0; }
-      const s = {x: n.x, y: n.y, w: n.w, h: n.h}, start = {x: e.clientX, y: e.clientY}, g = gesture(), scaling = tool === 'scale';
+      const s = {x: n.x, y: n.y, w: n.w, h: n.h, wPct: n.wPct, hPct: n.hPct}, start = {x: e.clientX, y: e.clientY}, g = gesture(), scaling = tool === 'scale';
       const content = scaling ? [...ed.descendants(id)].map(find).filter(Boolean).map(d => ({d, x: d.x, y: d.y, w: d.w, h: d.h, fontSize: d.fontSize, radius: d.radius, gap: d.gap, padding: d.padding, strokeWidth: d.strokeWidth})) : [];
       track(e, ev => {
         g.commit();
@@ -769,8 +916,11 @@
         n.w = w; n.h = h;
         // A dragged size replaces a variable-bound W/H: keep the new value, drop the binding (undo restores both).
         unbindKeys(n, [w !== s.w && 'w', h !== s.h && 'h']);
-        if (n.wMode === 'hug' || n.wMode === 'fill') n.wMode = 'fixed';
-        if (n.hMode === 'hug' || n.hMode === 'fill') n.hMode = 'fixed';
+        // A dragged size is Fixed (Hug / Fill / Auto / Calculate end); a Relative (%) size keeps its mode and scales.
+        if (n.wMode && n.wMode !== 'fixed') { n.wMode = 'fixed'; delete n.wCalc; }
+        if (n.hMode && n.hMode !== 'fixed') { n.hMode = 'fixed'; delete n.hCalc; }
+        if (s.wPct !== undefined && s.w) n.wPct = Math.round(s.wPct * w / s.w * 100) / 100;
+        if (s.hPct !== undefined && s.h) n.hPct = Math.round(s.hPct * h / s.h * 100) / 100;
         if (!isFlow(parent)) {
           if (ev.altKey) { n.x = s.x - dw / 2; n.y = s.y - dh / 2; }
           else { n.x = s.x + (sx * dw * Math.cos(a) - sy * dh * Math.sin(a) - dw) / 2; n.y = s.y + (sx * dw * Math.sin(a) + sy * dh * Math.cos(a) - dh) / 2; }
@@ -1271,6 +1421,9 @@
       {id: 'transform.flipV', label: 'Flip vertical', section: 'Transform', keys: ['shift+v'], when: needsSelection, run: () => flip('y')},
       {id: 'transform.rotate90', label: 'Rotate 90° right', section: 'Transform', keys: ['alt+shift+r'], when: needsSelection, run: () => rotate90(1)},
       {id: 'transform.rotate90ccw', label: 'Rotate 90° left', section: 'Transform', keys: ['alt+shift+l'], when: needsSelection, run: () => rotate90(-1)},
+      // Scale ½× / 2× (formerly in the inspector's Layer section): the legacy form buttons keep the one-undo-step scaling.
+      {id: 'transform.scaleDown', label: 'Scale ½×', section: 'Transform', keys: [], when: needsSelection, run: () => $('#scale-down')?.click()},
+      {id: 'transform.scaleUp', label: 'Scale 2×', section: 'Transform', keys: [], when: needsSelection, run: () => $('#scale-up')?.click()},
       {id: 'arrange.forward', label: 'Bring forward', section: 'Transform', keys: ['mod+]'], when: needsSelection, run: () => arrange('forward')},
       {id: 'arrange.backward', label: 'Send backward', section: 'Transform', keys: ['mod+['], when: needsSelection, run: () => arrange('backward')},
       {id: 'arrange.front', label: 'Bring to front', section: 'Transform', keys: ['mod+alt+]'], when: needsSelection, run: () => arrange('front')},
@@ -1333,7 +1486,7 @@
       const el = e.target.closest('#canvas .layer');
       if (el) { const id = resolveHit(el.dataset.id); if (!sel().has(id)) select([id]); }
       menu = document.createElement('div'); menu.id = 'canvas-menu'; menu.setAttribute('role', 'menu');
-      const groups = [['edit.copy', 'edit.cut', 'edit.paste', 'edit.duplicate', 'edit.delete'], ['edit.copyPng', 'edit.copyCode', 'edit.copyStyle', 'edit.pasteStyle'], ['select.all', 'select.inverse', 'select.matching'], ['arrange.front', 'arrange.forward', 'arrange.backward', 'arrange.back'], ['transform.flipH', 'transform.flipV', 'transform.rotate90'], ['transform.frame', 'transform.unframe', 'transform.autoLayout', 'transform.removeAutoLayout'], ['layer.visibility', 'layer.lock'], ['view.fit', 'view.selection']];
+      const groups = [['edit.copy', 'edit.cut', 'edit.paste', 'edit.duplicate', 'edit.delete'], ['edit.copyPng', 'edit.copyCode', 'edit.copyStyle', 'edit.pasteStyle'], ['select.all', 'select.inverse', 'select.matching'], ['arrange.front', 'arrange.forward', 'arrange.backward', 'arrange.back'], ['transform.flipH', 'transform.flipV', 'transform.rotate90', 'transform.scaleDown', 'transform.scaleUp'], ['transform.frame', 'transform.unframe', 'transform.autoLayout', 'transform.removeAutoLayout'], ['layer.visibility', 'layer.lock'], ['view.fit', 'view.selection']];
       for (const group of groups) {
         const items = group.map(id => commands.find(c => c.id === id)).filter(c => c.id === 'edit.paste' ? !!clipboard : (!c.when || c.when()));
         if (!items.length) continue;
@@ -1391,7 +1544,7 @@
     let synced = new WeakMap();
     const sameBox = (a, n) => ['x', 'y', 'w', 'h'].every(k => Math.abs((Number(a[k]) || 0) - (Number(n[k]) || 0)) < 0.01);
     const anchoredLayer = n => !!n.parentId && !!NS()?.anchored(n, find(n.parentId));
-    function bordersOf(p) { if (p.strokeHidden === true) return [0, 0, 0, 0]; return Array.isArray(p.strokeWidths) && p.strokeWidths.length === 4 ? p.strokeWidths.map(v => Math.max(0, Number(v) || 0)) : Array(4).fill(Math.max(0, Number(p.strokeWidth) || 0)); }
+    function bordersOf(p) { if (p.strokeHidden === true) return [0, 0, 0, 0]; return Array.isArray(p.strokeWidths) && p.strokeWidths.length === 4 ? p.strokeWidths.map((v, i) => (p.strokeHiddenSides?.[i] === true ? 0 : Math.max(0, Number(v) || 0))) : Array(4).fill(Math.max(0, Number(p.strokeWidth) || 0)); }
     // The parent's padding box (CSS containing block of an absolute child) and the x/y offset of that box in the
     // child's coordinate convention: free parents measure x/y inside the border, flow parents from the border box.
     function containing(n) {
@@ -1401,7 +1554,7 @@
       return {cb: {w: Math.max(0, w), h: Math.max(0, h)}, dx: isFlow(p) ? b[3] : 0, dy: isFlow(p) ? b[0] : 0};
     }
     // The layer's own size where its sizing mode decides it (hug reads the rendered box).
-    function ownSize(n) { const el = elementOf(n.id); return {w: n.wMode === 'hug' && el ? el.offsetWidth : Number(n.w) || 0, h: n.hMode === 'hug' && el ? el.offsetHeight : Number(n.h) || 0}; }
+    function ownSize(n) { const measured = m => m === 'hug' || m === 'auto' || m === 'calc', el = elementOf(n.id); return {w: measured(n.wMode) && el ? el.offsetWidth : Number(n.w) || 0, h: measured(n.hMode) && el ? el.offsetHeight : Number(n.h) || 0}; }
     function applyPatch(n, patch) { for (const [k, v] of Object.entries(patch)) { if (v === null || v === undefined) delete n[k]; else n[k] = v; } }
     function reanchor(n, constraints = NS().constraintsOf(n)) {
       const {cb, dx, dy} = containing(n), size = ownSize(n);
@@ -1439,6 +1592,7 @@
 
     // ---------- Render integration ----------
     function afterRender() {
+      keepTextEditor();
       syncAnchored();
       const pageId = ed.page().id;
       if (lastPage !== pageId) {
