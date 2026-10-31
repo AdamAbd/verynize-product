@@ -43,6 +43,8 @@ export type TreeNode = Pick<LayerNode, "id" | "name" | "type" | "parentId" | "hi
   layout?: string;
   direction?: string;
   ellipse?: boolean;
+  /** A live preview frame (preview audit PF7): drawn with a browser-window icon. */
+  preview?: true;
 };
 
 export function useTreeNodes(): TreeNode[] {
@@ -57,6 +59,7 @@ export function useTreeNodes(): TreeNode[] {
       layout: typeof n.layout === "string" ? n.layout : undefined,
       direction: typeof n.direction === "string" ? n.direction : undefined,
       ellipse: n.ellipse === true || undefined,
+      preview: n.preview ? (true as const) : undefined,
     })),
   );
 }
