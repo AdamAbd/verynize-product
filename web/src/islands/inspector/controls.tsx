@@ -112,6 +112,7 @@ export function OptionalSection({
   addWhenPresent,
   addLabel,
   addDisabled,
+  bodyClassName,
   children,
 }: {
   title: string;
@@ -128,6 +129,8 @@ export function OptionalSection({
   /** Label of the `+` while present (default "Add <title>"). */
   addLabel?: string;
   addDisabled?: boolean;
+  /** Extra classes for the body (e.g. Export's 11px bottom padding). */
+  bodyClassName?: string;
   children: ReactNode;
 }) {
   const plus = useRef<HTMLButtonElement>(null);
@@ -176,7 +179,7 @@ export function OptionalSection({
       {/* Wonder's optional body: first row 36px below the section top (31px header + 5), 12px bottom padding. */}
       <div
         hidden={!present}
-        className={cn(present ? "flex" : "hidden", "flex-col gap-2 px-3 pt-1.25 pb-3")}
+        className={cn(present ? "flex" : "hidden", "flex-col gap-2 px-3 pt-1.25 pb-3", bodyClassName)}
       >
         {children}
       </div>
@@ -524,11 +527,20 @@ function swatchBackground(color: string) {
   return `linear-gradient(to right, ${opaque} 50%, ${toHex(c)} 50%), ${SWATCH_CHECKER}`;
 }
 
-export function Swatch({ color, className }: { color: string; className?: string }) {
+/** `checker`: a fully transparent paint (the hidden page background), drawn as the checker alone. */
+export function Swatch({
+  color,
+  className,
+  checker,
+}: {
+  color: string;
+  className?: string;
+  checker?: boolean;
+}) {
   const ref = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
-    if (ref.current) ref.current.style.background = swatchBackground(color);
-  }, [color]);
+    if (ref.current) ref.current.style.background = checker ? SWATCH_CHECKER : swatchBackground(color);
+  }, [color, checker]);
   return (
     <span
       ref={ref}

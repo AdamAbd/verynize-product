@@ -913,13 +913,13 @@ function PageSection({ doc }: { doc: DesignDocument }) {
               className="flex size-4 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
               onClick={() => setOpen(!open)}
             >
-              <Swatch color={color} className="size-4 rounded-sm ring-swatch-ring" />
+              <Swatch color={color} checker={hidden} className="size-4 rounded-sm ring-swatch-ring" />
             </button>
             <Field
               label="Page hex colour"
               value={hexLabel(color)}
               className="h-5 flex-1 bg-transparent px-0 shadow-none focus-within:ring-0"
-              inputClassName="uppercase"
+              inputClassName={cn("uppercase", hidden && "text-muted-foreground")}
               onCommit={(value) => {
                 const hex =
                   parseHex(value, color) ?? (parseColor(value) ? toHex(parseColor(value)!) : null);
@@ -939,9 +939,14 @@ function PageSection({ doc }: { doc: DesignDocument }) {
                 <RotateCcw className="size-3.5" aria-hidden />
               </button>
             ) : null}
-            {/* Page backgrounds are opaque hex colours; the opacity is shown, not edited. */}
-            <span className="shrink-0 select-none tabular-nums" title="Page colour opacity">
-              100 <span className="text-muted-foreground">%</span>
+            {/* Page backgrounds are opaque hex colours; the opacity is shown, not edited. The eye hides the page
+                background: Wonder (H8-eye-hidden) then reads 0 %, dims the field and keeps the hex. */}
+            <span
+              className={cn("shrink-0 select-none tabular-nums", hidden && "text-muted-foreground")}
+              title="Page colour opacity"
+              data-page-opacity={hidden ? 0 : 100}
+            >
+              {hidden ? 0 : 100} <span className="text-muted-foreground">%</span>
             </span>
           </div>
         </ColorPopover>

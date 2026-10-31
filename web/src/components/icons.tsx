@@ -476,7 +476,33 @@ export function SlidersIcon(props: IconProps) {
 }
 
 /** Border "individual sides" tool (Wonder A2): two nested rounded squares. */
-export function BorderSidesIcon(props: IconProps) {
+/** Edges [top, right, bottom, left] of the Sides glyph's outer square, then the corner after each edge. */
+const SIDE_EDGES = ["M7.25 3.75H16.75", "M20.25 7.25V16.75", "M16.75 20.25H7.25", "M3.75 16.75V7.25"];
+const SIDE_CORNERS = [
+  "M16.75 3.75A3.5 3.5 0 0 1 20.25 7.25",
+  "M20.25 16.75A3.5 3.5 0 0 1 16.75 20.25",
+  "M7.25 20.25A3.5 3.5 0 0 1 3.75 16.75",
+  "M3.75 7.25A3.5 3.5 0 0 1 7.25 3.75",
+];
+
+/**
+ * Border "Sides" tool. With `sides` (some but not all borders drawn) it becomes Wonder's partial glyph
+ * (H4-plus-all): the sides in use solid, the others dotted, no inner square.
+ */
+export function BorderSidesIcon({ sides, ...props }: IconProps & { sides?: boolean[] }) {
+  if (sides) {
+    const solid: string[] = [];
+    const dotted: string[] = [];
+    SIDE_EDGES.forEach((edge, i) => (sides[i] ? solid : dotted).push(edge));
+    // A corner belongs to the solid stroke when either side meeting there is drawn.
+    SIDE_CORNERS.forEach((corner, i) => (sides[i] || sides[(i + 1) % 4] ? solid : dotted).push(corner));
+    return (
+      <Glyph {...props} data-sides={sides.map(Number).join("")}>
+        {dotted.length ? <path d={dotted.join("")} strokeDasharray="1 2.5" /> : null}
+        {solid.length ? <path d={solid.join("")} /> : null}
+      </Glyph>
+    );
+  }
   return (
     <Glyph {...props}>
       <rect x="3.75" y="3.75" width="16.5" height="16.5" rx="3.5" />
