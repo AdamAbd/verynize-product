@@ -112,3 +112,28 @@ test('JSX codec writes effects as Tailwind classes and reads them back', () => {
   const before = decls(node), after = decls(frame);
   for (const prop of ['mix-blend-mode', 'outline', 'outline-offset', 'box-shadow', 'filter', 'backdrop-filter']) assert.equal(after[prop], before[prop], prop);
 });
+
+test('shape masks ("Use as mask"): an inset() rectangle as an alpha SVG layer stretched over the box', () => {
+  const masks = [{ type: 'shape', shape: 'inset(25% 25% 50% 25%)' }];
+  const svgOf = value => Buffer.from(value.match(/^url\("data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)"\)$/)[1], 'base64').toString();
+  const css = decls(rect({ masks }));
+  assert.equal(svgOf(css['mask-image']), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><rect x="25" y="25" width="50" height="25"/></svg>');
+  assert.deepEqual([css['mask-mode'], css['mask-repeat'], css['mask-size'], css['mask-position']], ['alpha', 'no-repeat', '100% 100%', undefined]);
+  // CSS shorthand: one value applies to every side; a mask larger than the box keeps all of it.
+  assert.match(svgOf(effectsOf(rect({ masks: [{ type: 'shape', shape: 'inset(-50%)' }] })).masks[0]), /<rect x="-50" y="-50" width="200" height="200"\/>/);
+  // Stacks with the other masks.
+  assert.equal(effectsOf(rect({ masks: [{ type: 'linear' }, ...masks] })).masks.length, 2);
+  assert.doesNotThrow(() => validateDocument(doc([rect({ masks })])));
+  for (const bad of [[{ type: 'shape' }], [{ type: 'shape', shape: 'inset(10px)' }], [{ type: 'shape', shape: 'circle(50%)' }], [{ type: 'shape', shape: 'inset(1% 2% 3% 4% 5%)' }], [{ type: 'linear', shape: 'inset(0%)' }]])
+    assert.throws(() => validateDocument(doc([rect({ masks: bad })])), undefined, JSON.stringify(bad));
+  assert.match(exportHTML(doc([rect({ masks })])), /mask-image:url\((&quot;|")data:image\/svg\+xml;base64,/);
+});
+
+test('JSX codec round-trips a shape mask through the side channel', () => {
+  const node = { ...rect({ layout: 'block', masks: [{ type: 'shape', shape: 'inset(-50% -50% -50% -50%)' }] }), type: 'frame' };
+  const source = doc([node]); ensureShortIds(source);
+  const code = serializeNode(node, indexPage(source.pages[0]), {});
+  assert.match(code, /\[mask-image:url\(/);
+  const back = createArtboards(doc([]), 'p', code).document.pages[0].nodes[0];
+  assert.deepEqual(back.masks, node.masks);
+});
