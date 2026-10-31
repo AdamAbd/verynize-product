@@ -895,3 +895,28 @@ Both sides were captured again for every item in §8 "Top remaining gaps" and "A
 3. **H6**: replace the "Animated fill" popover with a Shader-mode toggle.
 4. **G1**: type-to-bind suggestion list for numeric fields and the Min/Max rows.
 5. **H1** label, **H7** semantics, **H8** alpha/checkerboard, **H4** split order, **G2** styled menus, **G4** edge padding, **G5** track editor.
+
+### Status after the fix pass (2026-10-31)
+
+Fixed in five parallel slices and merged on `feat/wonder-parity-followup`. After-fix proof: `verynize/after/<id>.png`, paired against Wonder in `pairs-after/` (Wonder left, Verynize after-fix right; `python3 make-pairs.py` rebuilds both `pairs/` and `pairs-after/`). Each slice was captured from its own branch before the merge.
+
+| Id | Status | After-fix proof |
+|---|---|---|
+| D1 | **closed**: the Frame button and F arm the tool without creating a layer. Properties lists Wonder's 7 categories and 26 presets. A preset creates a named, centred frame; a click creates 100×100. The floating popover is gone (`insert.frame` is still a command). Category icons are the closest lucide glyphs. | [collapsed](pairs-after/D1-collapsed.png), [phone](pairs-after/D1-phone.png), [click](pairs-after/D1-click-created.png), [preset](pairs-after/D1-preset-created.png) |
+| D2 | **closed**: new frames get radius 0 on every creation path. Rectangles stay at 12, because Wonder's rectangle default was not captured. | [click](pairs-after/D2-click.png), [corner](pairs-after/D2-corner-zoom.png) |
+| H6 | **closed**: "Shader mode" pressed toggle; the fill becomes a shader (`shaderFill`, validated in both validators). Old `animated` docs still load. Wonder's own preset catalogue ("Specular Lines 6" …) is not in Verynize. | [tooltip](pairs-after/H6-tooltip.png), [open](pairs-after/H6-open.png) |
+| G1 | **closed** for W/H, gap and Min/Max rows. Padding and radius are left out (unproven). | [suggestions](pairs-after/G1-width-suggestions.png), [enter](pairs-after/G1-width-enter.png), [min](pairs-after/G1-min-width.png) |
+| H1 | **closed**: "Resize to fill ⌘⇧⌥F", and the shortcut works. | [tooltip](pairs-after/H1-tooltip.png) |
+| H7 | **closed** (label and flag only): "Automatic positioning" no longer touches the row count. The flag (`autoPosition`) changes no CSS, because the child-placement effect is unproven. | [tooltip](pairs-after/H7-wrap-tooltip.png), [off](pairs-after/H7-wrap-off.png) |
+| G5 | **closed**: "Grid settings" with per-track Fill · fr rows (`columnSizes`/`rowSizes`) and one outline per track. A hover "−" per track was added; Wonder shows none. | [editor](pairs-after/G5-track-editor.png), [4×2](pairs-after/G5-four-two.png) |
+| G4 / H9 | **closed**: all 18 cells match Wonder's bar positions (0 px difference). Custom tooltip; only "Align bottom right" wording is proven. | [row-11](pairs-after/G4-row-11-verified.png), [hover](pairs-after/H9-hover-verified.png) |
+| H4 | **closed**: All → Top + Right → Bottom → Left, then disabled. | [plus](pairs-after/H4-plus-all.png), [four](pairs-after/H4-four-plus.png) |
+| H8 | **closed**: hidden page = checkerboard canvas, dimmed field, "0 %", hex kept. Reset is unchanged (unproven). | [hidden](pairs-after/H8-eye-hidden.png) |
+| G2 | **closed**: styled menus with Wonder's lists, ✓ and separators; the section is 136 px. The format menu is 134 px tall vs 128, from the shared menu padding. | [scale](pairs-after/G2-scale-menu.png), [format](pairs-after/G2-format-menu.png) |
+
+Left alone (not proven in Wonder): H3 source layer, colour modes, Reset page colour, top-level constraint list, padding/radius autocomplete, and Wonder's grid size picker popup.
+
+Validation on the merged branch:
+- `build:ui`, `lint:ui`, `typecheck:ui` and `check` are clean.
+- `npm test` passes every suite up to `tests/desktop-onboarding.mjs`, which fails on the claude "missing" status. It fails the same way on `staging` (523017f), so it comes from this machine, not from this change.
+- `tests/desktop-workspaces.mjs` passes when run separately.
