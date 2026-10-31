@@ -82,6 +82,12 @@ async function runTurn(threadId, turnId, text, images) {
   notify('item/completed', { threadId, turnId, item: { type: 'commandExecution', id: 'cmd-1', command: 'ls', cwd: '/tmp', status: declined ? 'declined' : 'completed', aggregatedOutput: declined ? '' : 'hello.txt\n', exitCode: declined ? null : 0 } });
   notify('item/started', { threadId, turnId, item: { type: 'mcpToolCall', id: 'mcp-1', server: 'verynize', tool: 'get_design_context', arguments: { pageId: 'page-1' }, status: 'inProgress' } });
   notify('item/completed', { threadId, turnId, item: { type: 'mcpToolCall', id: 'mcp-1', server: 'verynize', tool: 'get_design_context', arguments: { pageId: 'page-1' }, status: 'completed', result: { content: [{ type: 'text', text: 'page ok' }] }, error: null } });
+  // "Set up the Preview" (tests/preview-header.cjs): a propose_preview call as auto mode reports it (saved, not started).
+  if (/Set up the Preview/.test(text)) {
+    const saved = { saved: true, savedBy: 'auto', name: 'App', command: ['python3', '-m', 'http.server', '8000'], port: 8000, started: false };
+    notify('item/started', { threadId, turnId, item: { type: 'mcpToolCall', id: 'mcp-preview', server: 'verynize', tool: 'propose_preview', arguments: { command: saved.command, port: 8000 }, status: 'inProgress' } });
+    notify('item/completed', { threadId, turnId, item: { type: 'mcpToolCall', id: 'mcp-preview', server: 'verynize', tool: 'propose_preview', arguments: { command: saved.command, port: 8000 }, status: 'completed', result: { content: [{ type: 'text', text: JSON.stringify(saved) }] }, error: null } });
+  }
   // "markdown sample" gets a fixed Markdown reply (tests/chat-markdown.cjs).
   const reply = /markdown sample/.test(text) ? MARKDOWN_SAMPLE : `Reply to ${JSON.stringify(text.slice(-300))} images=${images.length} declined=${declined}`;
   for (const part of [reply.slice(0, 9), reply.slice(9)]) notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg-1', delta: part });

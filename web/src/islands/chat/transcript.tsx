@@ -38,6 +38,7 @@ import { ChatActionButton, ChatIconButton, ChatPillButton, ChatSuggestionButton 
 import { Markdown, openAppLink } from "./markdown";
 import { ChatMenu, ChatMenuContent, ChatMenuItem, ChatMenuNote, ChatMenuSeparator, ChatMenuTrigger } from "./menu";
 import { MentionIcon } from "./mention-popover";
+import { PREVIEW_SETUP_REQUEST, PreviewSavedCard, savedPreview } from "./preview-setup";
 import { QuestionCard } from "./question-card";
 import { ChatTip } from "./tip";
 import { usageSummary } from "./usage-ring";
@@ -574,10 +575,18 @@ function UserMessage({ message, index, busy }: { message: ChatMessage; index: nu
     requestAnimationFrame(() => editButton.current?.querySelector("button")?.focus());
   };
   const mentions = message.mentions ?? [];
+  // The Preview's setup request is an app action, not typed text: logo + purple label, no context chips (PS2).
+  const setupRequest = message.text === PREVIEW_SETUP_REQUEST && !editing;
   return (
     <article className={cn(hook.userMessage, "group/msg relative m-0 flex w-full max-w-none flex-col items-end rounded-none border-0 bg-transparent p-0 text-base leading-5.25 text-foreground")}>
       <div className={cn("relative max-w-full rounded-2xl bg-input px-3 py-2", editing && "w-full")}>
-        {(!!message.images?.length || !!message.canvas || mentions.length > 0) && (
+        {setupRequest ? (
+          <div data-preview-request className={cn(hook.messageContent, "flex items-center gap-1.5 text-preview-request")}>
+            <LogoIcon className="size-3.5 shrink-0" />
+            {message.text}
+          </div>
+        ) : null}
+        {!setupRequest && (!!message.images?.length || !!message.canvas || mentions.length > 0) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {message.canvas && (
               <span className={cn(USER_CHIP)}>
@@ -599,7 +608,7 @@ function UserMessage({ message, index, busy }: { message: ChatMessage; index: nu
             ))}
           </div>
         )}
-        {editing ? (
+        {setupRequest ? null : editing ? (
           <EditBox
             initial={message.text}
             onCancel={close}
@@ -637,7 +646,8 @@ type Block =
   | { type: "permission"; key: string; item: Indexed }
   | { type: "question"; key: string; item: Indexed }
   | { type: "error"; key: string; text?: string }
-  | { type: "notice"; key: string; part: ChatPart };
+  | { type: "notice"; key: string; part: ChatPart }
+  | { type: "preview"; key: string; part: ChatPart };
 
 /** Visible blocks of a running turn: text, "Ran N commands" + live step, pending approvals, errors. */
 function runningBlocks(parts: ChatPart[], nesting: Nesting): Block[] {
@@ -654,6 +664,7 @@ function runningBlocks(parts: ChatPart[], nesting: Nesting): Block[] {
       }
       if (part.state === "running") last.live = { part, index };
       else last.done.push({ part, index });
+      if (savedPreview(part)) blocks.push({ type: "preview", key: `${key}-preview`, part });
     } else if (part.kind === "permission") blocks.push({ type: "permission", key, item: { part, index } });
     else if (part.kind === "question") blocks.push({ type: "question", key, item: { part, index } });
     else if (part.kind === "error") blocks.push({ type: "error", key, text: part.text });
@@ -728,6 +739,7 @@ function AssistantMessage({
           if (block.type === "text") return <Markdown key={block.key} text={block.text} />;
           if (block.type === "error") return <ErrorRow key={block.key} text={block.text} />;
           if (block.type === "notice") return <NoticeRow key={block.key} part={block.part} />;
+          if (block.type === "preview") return <PreviewSavedCard key={block.key} part={block.part} />;
           if (block.type === "question") return question(block.item.part, block.item.index, block.key);
           if (block.type === "permission")
             return block.item.part.state === "pending" ? (
@@ -772,6 +784,7 @@ function AssistantMessage({
           (p.kind === "text" && p.text?.trim()) ||
           p.kind === "error" ||
           p.kind === "question" ||
+          !!savedPreview(p) ||
           (p.kind === "autonomy" && !!p.text) ||
           (p.kind === "policy" && (p as ChatPart & { decision?: string }).decision === "limit"),
       );
@@ -788,6 +801,8 @@ function AssistantMessage({
             <NoticeRow key={partIndex} part={part} />
           ) : part.kind === "question" ? (
             question(part, partIndex, partIndex)
+          ) : part.kind === "tool" ? (
+            <PreviewSavedCard key={partIndex} part={part} />
           ) : (
             <Markdown key={partIndex} text={part.text ?? ""} />
           ),

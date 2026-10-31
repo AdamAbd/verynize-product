@@ -24,6 +24,12 @@ import { BindableField } from "./bind";
 import { CORNER_KEYS } from "./vars";
 import { ExportSection } from "./export-section";
 import { FramePresetsSection, useCanvasTool } from "./frame-presets";
+import {
+  isPreviewFrame,
+  PreviewAppearanceSection,
+  PreviewLayoutSection,
+  PreviewTemplateSection,
+} from "./preview-frame";
 import { FillTools, PaintStack, hasPaintRows } from "./paints";
 import { parseColor, toHex } from "./color";
 import {
@@ -65,7 +71,7 @@ import {
 type Props = { doc: DesignDocument; node: Node; selection: string[] };
 
 /* ---------- Position ---------- */
-const ALIGN_GROUPS: { id: string; label: string; icon: IconType }[][] = [
+export const ALIGN_GROUPS: { id: string; label: string; icon: IconType }[][] = [
   [
     { id: "left", label: "Align left", icon: AlignLeftBarsIcon },
     { id: "center", label: "Align horizontal centers", icon: AlignCenterXBarsIcon },
@@ -78,7 +84,7 @@ const ALIGN_GROUPS: { id: string; label: string; icon: IconType }[][] = [
   ],
 ];
 
-function ToolGroup({ children, disabled }: { children: ReactNode; disabled?: boolean }) {
+export function ToolGroup({ children, disabled }: { children: ReactNode; disabled?: boolean }) {
   return (
     <div
       role="group"
@@ -93,7 +99,7 @@ function ToolGroup({ children, disabled }: { children: ReactNode; disabled?: boo
   );
 }
 
-function ToolButton({
+export function ToolButton({
   id,
   label,
   icon: Icon,
@@ -417,7 +423,7 @@ function shared(doc: DesignDocument, selection: string[], key: string) {
 }
 
 /* ---------- Appearance ---------- */
-function InspectorCheckbox({
+export function InspectorCheckbox({
   name,
   label,
   checked,
@@ -1022,11 +1028,22 @@ export function PropertiesBody({
   const filtersMixed = many && mixedFilters(doc, selection);
   // Wonder D1: the armed Frame tool with nothing selected offers frame presets in place of the Page section.
   const framePresets = useCanvasTool() === "frame" && !node;
+  // Preview audit PF6: a live preview frame gets a viewport inspector (Screen template, Position, Layout,
+  // Appearance, Export) without the ordinary frame sections.
+  const preview = !many && isPreviewFrame(node);
+  const plain = node && !preview ? node : undefined;
   return (
     <>
+      {node && preview ? <PreviewTemplateSection node={node} /> : null}
       {node ? <PositionSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <LayoutSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <AppearanceSection doc={doc} node={node} selection={selection} /> : null}
+      {node && preview ? (
+        <PreviewLayoutSection doc={doc} node={node} selection={selection} />
+      ) : null}
+      {node && preview ? (
+        <PreviewAppearanceSection doc={doc} node={node} selection={selection} />
+      ) : null}
+      {plain ? <LayoutSection doc={doc} node={plain} selection={selection} /> : null}
+      {plain ? <AppearanceSection doc={doc} node={plain} selection={selection} /> : null}
       {node?.type === "text" ? (
         <TypographySection
           key={"typography-" + node.id}
@@ -1044,12 +1061,12 @@ export function PropertiesBody({
           onReplace={() => replaceFills(node, selection)}
         />
       ) : null}
-      <FillSection doc={doc} node={fillsMixed ? undefined : node} selection={selection} />
+      <FillSection doc={doc} node={fillsMixed ? undefined : plain} selection={selection} />
       {node?.type === "text" && !fillsMixed ? (
         <TextBackgroundFillSection doc={doc} node={node} selection={selection} />
       ) : null}
-      {node ? <BorderSection doc={doc} node={node} selection={selection} /> : null}
-      {node ? <OutlineSection doc={doc} node={node} selection={selection} /> : null}
+      {plain ? <BorderSection doc={doc} node={plain} selection={selection} /> : null}
+      {plain ? <OutlineSection doc={doc} node={plain} selection={selection} /> : null}
       {node && shadowsMixed ? (
         <MixedSection
           id="shadow-mixed-section"
@@ -1057,8 +1074,8 @@ export function PropertiesBody({
           label="Click to replace box shadows"
           onReplace={() => replaceList(node, selection, "shadows")}
         />
-      ) : node ? (
-        <ShadowSection key={"shadow-" + node.id} doc={doc} node={node} selection={selection} />
+      ) : plain ? (
+        <ShadowSection key={"shadow-" + plain.id} doc={doc} node={plain} selection={selection} />
       ) : null}
       {node && filtersMixed ? (
         <MixedSection
@@ -1070,16 +1087,16 @@ export function PropertiesBody({
         >
           <SelectionFilters doc={doc} selection={selection} />
         </MixedSection>
-      ) : node ? (
+      ) : plain ? (
         <>
-          <FilterSection doc={doc} node={node} selection={selection} />
+          <FilterSection doc={doc} node={plain} selection={selection} />
           <SelectionFilters doc={doc} selection={selection} standalone />
         </>
       ) : null}
-      {node ? (
-        <MaskSection key={"mask-" + node.id} doc={doc} node={node} selection={selection} />
+      {plain ? (
+        <MaskSection key={"mask-" + plain.id} doc={doc} node={plain} selection={selection} />
       ) : null}
-      {node ? <SelectionColorsSection doc={doc} node={node} selection={selection} /> : null}
+      {plain ? <SelectionColorsSection doc={doc} node={plain} selection={selection} /> : null}
       {node ? <ExportSection doc={doc} node={node} selection={selection} /> : null}
       {framePresets ? <FramePresetsSection /> : null}
       {!node && !framePresets ? <PageSection doc={doc} /> : null}

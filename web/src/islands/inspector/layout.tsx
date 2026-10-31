@@ -121,7 +121,7 @@ const calcApi = () => (window as unknown as { BetterNodeStyle: CalcApi }).Better
 
 /* ---------- Shared rows ---------- */
 /** Two field columns plus Wonder's 24px trailing tool column. */
-function Row({
+export function Row({
   children,
   tool,
   className,
@@ -179,7 +179,7 @@ function NumberField({
  * The unit at the end of a field doubles as its menu trigger (Wonder B2 / C7): "px ▾", "Hug ▾", "Auto ▾". The
  * chevron flips while the menu is open and the field shows its purple ring (focus-within on the shell).
  */
-function UnitTrigger({
+export function UnitTrigger({
   label,
   unit,
   ...props
@@ -349,7 +349,7 @@ function commitSize(
 }
 
 /** The limit glyphs turned a quarter for the height limits (Wonder B2-max-height-added). */
-const SizeMinHIcon = ({ className }: { className?: string }) => (
+export const SizeMinHIcon = ({ className }: { className?: string }) => (
   <SizeMinIcon className={cn(className, "rotate-90")} aria-hidden />
 );
 const SizeMaxHIcon = ({ className }: { className?: string }) => (
