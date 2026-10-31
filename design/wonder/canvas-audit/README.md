@@ -88,23 +88,37 @@ Menu style in Wonder: 176 px wide, 25 px row pitch, 4 px inset, radius ≈ 12, b
 
 ## Status after the fix pass (2026-10-31)
 
-Five slices were implemented in parallel and merged on `feat/canvas-parity`. After-fix proof is in `verynize/after/<id>.png` and is paired against Wonder in `pairs-after/`. Each slice was captured on its own branch before the merge, so a shot may show another slice's area still in its old state; for example, the TR2 shot still shows the old toolbar.
+All slices are merged on `feat/canvas-parity`. **Every after-fix shot was retaken from the merged build** with [verynize/capture-after.cjs](verynize/capture-after.cjs) and is paired against Wonder in `pairs-after/` (103 pairs). [verynize/after/REVIEW.md](verynize/after/REVIEW.md) gives a verdict per pair: 42 match, 47 are close, 9 still differ, and 9 have a Wonder shot that does not show the state its name claims.
 
 | Area | Status | Proof |
 |---|---|---|
-| CM1–CM10 context menus | **closed**: Radix menu per target, with Copy as / Select layer / Arrange / Layout submenus, Show/Unlock labels, Hide label (`labelHidden`, validated and round-tripped), label menu, layer and page row menus, Paste listed but disabled. Set as file thumbnail and Use as mask are omitted: Verynize has no thumbnail picker and no layer masks. | [frame](pairs-after/CM2-frame.png), [empty](pairs-after/CM1-empty.png), [row](pairs-after/CM7-row.png) |
-| K2 / TR6 clipboard | **closed**: Paste here, Paste to replace ⌘⇧R, Paste over selection ⌘⇧V, Copy link, Copy prompt ⌘⇧⌥C. ⌘D offsets right by width + 40. Copies get the next free name ("Frame 3"). | [paste here](pairs-after/K2-paste-here.png), [duplicate](pairs-after/K2-duplicate.png) |
-| TR1 / TR2 / T4 / S4 transform | **closed**: rotate zones (Shift snaps to 15°), edge resize, proportional Scale, `W x H` badge, ⊕ add-to-chat chip, one union box around a multi-selection. | [rotate](pairs-after/TR2-rotate.png), [chrome](pairs-after/S4-frame.png), [scale](pairs-after/T4-scale.png) |
-| T1 / T5 / T6 / K1 / TX1 | **closed**: Wonder's 6-tool toolbar, Help menu, zoom menu, shortcut drawer, ⌘K command palette (a focused terminal keeps ⌘K), empty Hug text in Inter 12. | [help](pairs-after/T5-help.png), [shortcuts](pairs-after/K1-shortcuts.png), [text](pairs-after/TX1-click.png) |
-| TR4 / TR5 / TR8 / L1 / L2 | **closed**: blue guides and distance chips, tick layout marks, Wonder tooltip strings, inline page rename, page drag-reorder. | [guide](pairs-after/TR4-guide.png), [distances](pairs-after/TR5-alt-parent.png), [page rename](pairs-after/L2-rename.png) |
+| CM1–CM10 context menus | **closed**: Radix menu per target, with Copy as / Select layer / Arrange / Layout submenus, Show/Unlock labels, Hide label (`labelHidden`), label menu, row menus, and Paste listed but disabled when there is nothing to paste. | [frame](pairs-after/CM2-frame.png), [empty](pairs-after/CM1-empty.png), [row](pairs-after/CM7-row.png) |
+| P4 Set as file thumbnail | **closed**: last item in every layer menu; "Thumbnail updated" toast; `thumbnailNodeId` (validated in both validators); the Files card draws that layer and falls back when it is deleted. | [menu](pairs-after/P4-thumbnail-menu-before.png), [card](pairs-after/P4-files-after.png) |
+| P5 Use as mask | **closed** for two siblings: the bottom shape becomes `{type: "shape", shape: "inset(…)"}` on the top layer, with no wrapper. Detach mask as shape and Remove mask are in the menu and the inspector. Only rectangles are supported (the only case Wonder proves). | [menu](pairs-after/P5-mask-menu.png), [result](pairs-after/P5-mask-result.png), [detach](pairs-after/P5-detach-mask.png) |
+| K2 / TR6 / P1 / P3 clipboard | **closed**: Paste here (top-left at the click, top level; confirmed in P3), Paste to replace ⌘⇧R, Paste over selection ⌘⇧V, Copy link. Menu Paste on a frame pastes a centred child (P3). Copy prompt and Copy as code follow Wonder's structure with Verynize links and MCP tools (P1); texts are in `verynize/after/P1-*.txt`. ⌘D offsets right by width + 40; copies get the next free name. | [paste here](pairs-after/K2-paste-here.png), [menu paste](pairs-after/P3-context-paste-result.png) |
+| P2 / K1 command palette | **closed**: 672×480, sectioned, with Recent; layer matches; label-ranked results that keep the active row in view while typing. A focused terminal keeps ⌘K. | [empty](pairs-after/P2-empty.png), [select](pairs-after/P2-select.png) |
+| TR1 / TR2 / T4 / S4 transform | **closed**: rotate zones, edge resize, proportional Scale, `W x H` badge, ⊕ chip, one union box around a multi-selection. | [rotate](pairs-after/TR2-rotate.png), [chrome](pairs-after/S4-frame.png) |
+| T1 / T5 / T6 / TX1 | **closed**: Wonder's 6-tool toolbar, Help menu (placeholder URLs on `verynize.example` in `help-links.ts`), zoom menu, empty Hug text in Inter 12. | [help](pairs-after/T5-help.png), [text](pairs-after/TX1-click.png) |
+| TR4 / TR5 / TR8 / L1 / L2 | **closed**: blue guides and distance chips, tick layout marks, Wonder tooltip strings, inline page rename, page drag-reorder. | [guide](pairs-after/TR4-guide.png), [rename](pairs-after/L2-rename.png) |
 
-Validation on the merged branch:
-- `build:ui`, `lint:ui`, `typecheck:ui` and `check` are clean.
-- `npm test` passes every suite except `tests/desktop-onboarding.mjs`. That test fails the same way on `staging` and comes from this machine. `tests/desktop-workspaces.mjs` passes when run separately.
-- `eval/run-fidelity.mjs`: 30/30.
+### Remaining differences
 
-Integration fixes made during the merge:
-- A right-click on the new resize and rotate zones opens the layer menu.
-- The palette ranks results by label, so "select all" picks Select all.
-- A focused terminal keeps ⌘K.
-- `labelHidden` round-trips through the codec.
+From REVIEW.md, not fixed yet:
+- **CM5:** Use as mask is offered only for exactly 2 siblings; Wonder also shows it for 4.
+- **CM9:** the label menu still has Select layer ›.
+- **L2:** Rename from a page menu makes that page active.
+- **T4:** Wonder switches the inspector to a Scale section.
+- **TR7:** Wonder keeps a dragged flex child in its slot and shows a purple drop column.
+- **CM6 / S2:** no outline on a selected hidden layer, and no dashed parent guides on a selected child.
+- **Toolbar:** the Design toggle is not highlighted while that view is active.
+- **Small items:**
+  - no Paste styles in the menus;
+  - Delete is disabled when only one page exists;
+  - a detached mask shape has Clip content off;
+  - the rotation field is truncated;
+  - Alt distances show decimals;
+  - zoom to selection is 572 % vs Wonder's 538 %;
+  - the text caret is purple, and line height reads 1.15 instead of Auto;
+  - hovering a frame outlines its children.
+
+Validation is recorded in the PR (#12).

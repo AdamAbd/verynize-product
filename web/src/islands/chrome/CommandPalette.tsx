@@ -3,7 +3,7 @@
 // The empty state lists the commands run from here most recently (Recent) and three Application commands; typing
 // searches every section, with layer matches first. ↓ ↑ move, ↵ runs the active row and closes, Esc closes and keeps
 // the canvas selection. A focused terminal, the code workspace and the Files home keep their own ⌘K.
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Dialog } from "radix-ui";
 import { Command as Cmdk } from "cmdk";
 import {
@@ -398,6 +398,18 @@ function Palette() {
   const layers = useMemo(layerCommands, []);
   const [query, setQuery] = useState("");
   const searching = query.trim().length > 0;
+  const listRef = useRef<HTMLDivElement>(null);
+  // Each keystroke re-ranks the rows: start from the top and keep the active row in view (otherwise the list keeps the
+  // previous query's scroll offset and the best match can sit off-screen).
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const list = listRef.current;
+      if (!list) return;
+      list.scrollTop = 0;
+      list.querySelector("[cmdk-item][data-selected=true]")?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [query]);
   const byId = useMemo(() => new Map(commands.map((c) => [c.id, c])), [commands]);
   const recent = useMemo(
     () =>
@@ -455,7 +467,7 @@ function Palette() {
                 </button>
               ) : null}
             </div>
-            <Cmdk.List className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            <Cmdk.List ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
               <Cmdk.Empty className="py-6 text-center text-muted-foreground">No results</Cmdk.Empty>
               {searching ? (
                 sections.map((section) => {

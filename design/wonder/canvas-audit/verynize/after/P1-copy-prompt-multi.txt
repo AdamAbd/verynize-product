@@ -1,16 +1,16 @@
 Implement this Verynize design.
 
 Design to implement (each link ends in the Verynize page id and the element id: verynize://node/<document>/<pageId>/<elementId>):
-  verynize://node/Sunbird/page-1/lod.him
-  verynize://node/Sunbird/page-1/lod.kiz
+  verynize://node/Sunbird/p1/lod.mun
+  verynize://node/Sunbird/p1/lod.mek
   Read each element through the Verynize MCP server: get_element_code with that pageId and element id (omit document to read the design open in Verynize), and get_design_context for its tokens and fonts.
   (If you don't have the Verynize MCP installed yet, see "Run and configure" in docs/figcraft-reference.md of the Verynize repository: with the app open, connect to the url and token in ~/Library/Application Support/Verynize/mcp.json.)
 
-Inline snapshot (fallback, captured at 2026-10-31T05:15:38.434Z):
+Inline snapshot (fallback, captured at 2026-10-31T05:39:20.941Z):
 ```tsx
 /**
  * Made with Verynize
- * verynize://node/Sunbird/page-1/lod.him
+ * verynize://node/Sunbird/p1/lod.mun
  * Oct 31, 2026
  */
 /* @verynize {"name":"Sunbird","page":{"name":"Page 1"}} */
@@ -29,7 +29,7 @@ export default function CanvasAu() {
 ```tsx
 /**
  * Made with Verynize
- * verynize://node/Sunbird/page-1/lod.kiz
+ * verynize://node/Sunbird/p1/lod.mek
  * Oct 31, 2026
  */
 /* @verynize {"name":"Sunbird","page":{"name":"Page 1"}} */
@@ -37,7 +37,7 @@ export default function Frame() {
   return (
     <>
       <style>{"* { box-sizing: border-box; }"}</style>
-      <div data-node-label="Frame" className="absolute left-[49px] top-[40px] layout-free w-[100px] h-[80px]" data-vn='{"gap":16,"padding":16}'></div>
+      <div data-node-label="Frame" className="absolute left-[49px] top-[40px] layout-free w-[100px] h-[80px] bg-white overflow-hidden" data-vn='{"gap":16,"padding":16}'></div>
     </>
   );
 }
