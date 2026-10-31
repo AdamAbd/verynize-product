@@ -1,5 +1,5 @@
 // Image nodes may reference room asset URLs (cloud/assets.js) instead of embedding data URIs.
-// validateDocument mirrors validate() in web/app.js; both accept only the exact asset URL form.
+// validateDocument is the shared schema (web/document-core.js), used by the canvas too; it accepts only the exact asset URL form.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isRoomAssetUrl, validateDocument } from "./design-store.mjs";

@@ -1,5 +1,5 @@
 // Structured effects (blend, outline, shadows, filters, masks): one CSS mapping for canvas and export,
-// shared validation (design-store validateDocument mirrors web/app.js validate()), and the JSX codec.
+// shared validation (validateDocument, web/document-core.js, shared with the canvas), and the JSX codec.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { nodeStyle, effectsOf, validateEffects, BLEND_MODES } from './node-style.mjs';
@@ -69,7 +69,7 @@ test('gradient masks: linear / radial / conic with alpha, rotation, invert and v
   assert.equal(decls(rect({ masks: [masks[2]] }))['mask-image'], undefined);
 });
 
-test('validateDocument enforces the effect schema (mirrors web/app.js validate)', () => {
+test('validateDocument enforces the effect schema (shared with the canvas)', () => {
   assert.doesNotThrow(() => validateDocument(doc([rect({ blendMode: 'luminosity', outlineWidth: 2, outlineColor: '#000000', shadows: [{ type: 'drop', x: 0, y: 0, blur: 1, spread: 0, color: '#000000' }], filters: [{ type: 'invert', value: 1 }], masks: [{ type: 'linear' }] })])));
   for (const bad of [{ blendMode: 'burn' }, { outlineWidth: -1 }, { outlineColor: 'red' }, { shadows: {} }, { shadows: [{ type: 'box', x: 0, y: 0, blur: -1, spread: 0, color: '#000000' }] },
     { shadows: [{ type: 'drop', inset: true, x: 0, y: 0, blur: 0, spread: 0, color: '#000000' }] }, { filters: [{ type: 'blur', value: 1, backdrop: 'yes' }] }, { masks: [{ type: 'linear', alpha: 101 }] }])

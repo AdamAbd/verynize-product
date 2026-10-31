@@ -2,6 +2,7 @@
 // desktop/agent-live-status.cjs), the context breakdown of an open run, and the account usage of Settings › Usage
 // (desktop/agent-usage.cjs). Provider checks run only when a popover opens, never on mount.
 import { useSyncExternalStore } from "react";
+import { platform } from "@/lib/platform";
 
 export type McpStatus = "connected" | "starting" | "failed" | "needs-auth" | "disabled" | "not-started";
 export type McpServer = { name: string; status: McpStatus; error?: string; builtIn?: boolean };
@@ -25,19 +26,7 @@ export type AccountUsage = {
 };
 export type LayerUsage = { thisWeek: number; lastWeek: number; total: number; weekStart: number; resetsAt: number };
 
-type AgentEvent = { type?: string; chatId?: string; agent?: string; servers?: unknown; partial?: boolean };
-type DesktopApi = {
-  onAgentEvent?(callback: (event: AgentEvent) => void): () => void;
-  agentLiveStatus?: {
-    mcp(options: { agent: string; chatId?: string | null }): Promise<Omit<McpSnapshot, "at">>;
-    context(options: { chatId?: string | null }): Promise<ContextBreakdown | null>;
-  };
-  agentUsage?: {
-    read(options: { agent: "claude" | "codex"; refresh?: boolean }): Promise<AccountUsage>;
-    layers(): Promise<LayerUsage>;
-  };
-};
-export const desktopApi = () => (window as unknown as { desktop?: DesktopApi }).desktop;
+export const desktopApi = () => platform.desktop;
 
 /* ---------- MCP status per chat ---------- */
 const mcp = new Map<string, McpSnapshot>();
@@ -75,7 +64,7 @@ function attach() {
       for (const s of servers) byName.set(s.name, s);
       next = [...byName.values()];
     }
-    mcp.set(event.chatId, { agent: event.agent || previous?.agent || "", live: true, servers: ordered(next), at: Date.now() });
+    mcp.set(event.chatId, { agent: (typeof event.agent === "string" && event.agent) || previous?.agent || "", live: true, servers: ordered(next), at: Date.now() });
     notify();
   });
 }

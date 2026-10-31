@@ -1,7 +1,6 @@
 // Room assets in local workerd with a real (Miniflare) R2 bucket and D1: registration, signed
 // upload, dedupe, validation, signed reads, role enforcement, published snapshots and restart.
-import { Miniflare } from "miniflare";
-import { ASSET_SECRET, cloudOptions, passwordUser } from "./cloud-harness.mjs";
+import { ASSET_SECRET, Miniflare, cloudOptions, passwordUser } from "./cloud-harness.mjs";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";

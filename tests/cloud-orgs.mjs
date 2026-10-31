@@ -2,12 +2,11 @@
 // organization roles granting room roles (owner/admin -> owner, member -> the default room role),
 // live socket updates when members, roles or the default change, leaving, moving rooms between
 // organizations, listings, and guards (forged headers, reserved slugs, deleting non-empty orgs).
-import { Miniflare } from "miniflare";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions, passwordUser, signIn } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions, passwordUser, signIn } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-orgs-"));
 const mf = new Miniflare(await cloudOptions(path.join(dir, "state")));

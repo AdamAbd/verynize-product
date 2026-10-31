@@ -1,12 +1,11 @@
 // Operation-based merging: the shared engine (web/cloud-ops.js) and the room Durable Object on
 // local workerd, including concurrent clients over WebSockets, duplicate batches and restarts.
-import { Miniflare } from "miniflare";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import "../web/cloud-ops.js";
-import { cloudOptions } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 
 const Ops = globalThis.VerynizeOps;
 const node = (id, extra = {}) => ({

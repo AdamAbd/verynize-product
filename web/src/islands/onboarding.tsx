@@ -7,10 +7,10 @@ import { cloudAccount } from "@/lib/cloud-account";
 import { AccountStep } from "./onboarding/account-step";
 import { AgentsStep } from "./onboarding/agents-step";
 import "./onboarding/onboarding.css";
+import { can, platform } from "@/lib/platform";
 
 const DONE_KEY = "verynize.onboarding";
 type Step = "account" | "agents" | "done";
-type OnboardingDesktop = { onboardingState?(): Promise<{ skip: boolean }> };
 
 const finished = () => {
   try {
@@ -23,8 +23,8 @@ const finished = () => {
 function Onboarding() {
   const [step, setStep] = useState<Step | null>(null);
   useEffect(() => {
-    const desktop = (window as unknown as { desktop?: OnboardingDesktop }).desktop;
-    if (!desktop?.onboardingState) return setStep("done");
+    const desktop = platform.desktop;
+    if (!desktop || !can("onboarding")) return setStep("done");
     // "Sign in" entries (workspace switcher, Settings) open it again at any time.
     const reopen = () => setStep(cloudAccount()?.get() ? "agents" : "account");
     window.addEventListener("bd:open-onboarding", reopen);

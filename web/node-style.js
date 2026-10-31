@@ -103,7 +103,7 @@
   const calcValue = (expr, base = 0) => { const c = parseCalc(expr); return c ? c.px + c.pct / 100 * (Number(base) || 0) : null; };
   /** The CSS `calc()` for a Calculate expression, or '' when invalid. */
   const calcCss = expr => { const c = parseCalc(expr); return c ? `calc(${c.text})` : ''; };
-  /** Shared sizing validation for web/app.js validate() and integrations/design-store.mjs validateDocument. */
+  /** Sizing validation, called by validateDocument in web/document-core.js (canvas and headless store). */
   function sizingError(n) {
     for (const [mode, calc] of [['wMode', 'wCalc'], ['hMode', 'hCalc']]) {
       if (n[mode] !== undefined && !SIZING_MODES.includes(n[mode])) return 'Invalid sizing mode';
@@ -417,7 +417,7 @@
       if (p[k] !== undefined && !inRange(p[k], 1, 1e5)) return "Invalid image paint size";
     return "";
   }
-  /** Validation shared by validate() in web/app.js and validateDocument in integrations/design-store.mjs. */
+  /** Validation called by validateDocument in web/document-core.js (canvas and headless store). */
   function paintError(n) {
     if (n.fills !== undefined) {
       if (!Array.isArray(n.fills) || n.fills.length > 16)
@@ -932,8 +932,8 @@
   /** Apply declarations to a DOM element (browser). */
   function applyStyle(el, decls) { for (const [k, v] of decls || []) el.style.setProperty(k, v); }
   // Typography fields beyond the base text properties (inspector Type settings). Every one is optional and
-  // absent by default, so older documents keep their rendering. Shared by validate() in web/app.js and
-  // validateDocument in integrations/design-store.mjs.
+  // absent by default, so older documents keep their rendering. Checked by validateDocument in
+  // web/document-core.js.
   const TEXT_ALIGN_VERTICAL = ['top', 'center', 'bottom'];
   const WHITE_SPACES = ['normal', 'nowrap', 'pre', 'pre-wrap', 'pre-line', 'break-spaces'];
   const WORD_BREAKS = ['normal', 'break-all'];

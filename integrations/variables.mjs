@@ -3,8 +3,9 @@
 // layer. Colour variables live in `document.tokens` ({name: '#hex'}), typed ones in `document.variables`
 // ({name: {type, value}}). Aliases live in `document.aliases` ({name: targetName}); the aliased entry
 // always stores the resolved literal value too, so every reader that ignores aliases (canvas, codecs,
-// HTML/CSS export) keeps rendering the right value. Mirrored by web/src/islands/inspector/vars.ts and
-// validate() in web/app.js; keep the three consistent.
+// HTML/CSS export) keeps rendering the right value. Alias validation and resolution on load live in
+// web/document-core.js (shared with the canvas); web/src/islands/inspector/vars.ts mirrors the editing rules.
+import { validateAliases, variableKind } from "./document-core.mjs";
 
 const NAME = /^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,99}$/;
 const RESERVED = ["__proto__", "prototype", "constructor"];
@@ -12,11 +13,7 @@ const validName = (name) => typeof name === "string" && NAME.test(name) && !RESE
 const own = (object, key) => !!object && Object.hasOwn(object, key);
 
 /** 'color' for a colour variable, the variable type for a typed one, null when the name is unknown. */
-export function variableKind(document, name) {
-  if (own(document.tokens, name)) return "color";
-  if (own(document.variables, name)) return document.variables[name]?.type ?? null;
-  return null;
-}
+export { variableKind };
 
 /**
  * The variable whose literal value `name` shows: follows the alias chain while each target exists and
@@ -53,27 +50,7 @@ export function aliasCycle(document, name, target) {
 }
 
 /** Throws on malformed aliases, type mismatches and cycles. Aliases to deleted variables are tolerated. */
-export function validateAliases(document) {
-  if (document.aliases === undefined) return;
-  const aliases = document.aliases;
-  if (!aliases || typeof aliases !== "object" || Array.isArray(aliases))
-    throw new Error("aliases must be an object");
-  const entries = Object.entries(aliases);
-  if (entries.length > 500) throw new Error("At most 500 variable aliases");
-  for (const [name, target] of entries) {
-    if (!validName(name) || !validName(target) || name === target)
-      throw new Error(`Invalid variable alias ${JSON.stringify(name)}`);
-    const a = variableKind(document, name),
-      b = variableKind(document, target);
-    if (a && b && a !== b)
-      throw new Error(`Variable ${name} can only reference a variable of the same type`);
-    const seen = new Set([name]);
-    for (let current = target; own(aliases, current); current = aliases[current]) {
-      if (seen.has(current)) throw new Error(`Variable alias ${name} forms a cycle`);
-      seen.add(current);
-    }
-  }
-}
+export { validateAliases };
 
 /** Copy each alias' resolved value into the aliased variable (in place). */
 export function syncAliases(document) {

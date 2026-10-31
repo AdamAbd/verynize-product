@@ -1,7 +1,7 @@
 // One SQLite Durable Object per shared design room: capability links with roles, account
 // members, operation-based merging, revision-checked snapshots (legacy clients), WebSocket
 // presence, comments and frozen public snapshots.
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject, acceptWebSocket } from "#cloud-runtime";
 import "../web/cloud-ops.js";
 import {
   json,
@@ -418,8 +418,7 @@ export class DesignRoom extends DurableObject {
           ? (this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
               ?.last_batch ?? 0)
           : 0;
-        const [clientSocket, server] = Object.values(new WebSocketPair());
-        this.ctx.acceptWebSocket(server);
+        const { socket: server, response } = acceptWebSocket(this.ctx);
         const id = crypto.randomUUID();
         server.serializeAttachment({
           id,
@@ -434,7 +433,7 @@ export class DesignRoom extends DurableObject {
         server.send(JSON.stringify({ type: "welcome", id, protocol: Ops.PROTOCOL, role, acked }));
         server.send(JSON.stringify({ type: "snapshot", ...this.snapshot(), acked }));
         this.broadcast({ type: "presence", peers: this.peers() });
-        return new Response(null, { status: 101, webSocket: clientSocket });
+        return response;
       }
       if (action === "/room" && method === "GET")
         return json({ ...this.snapshot(), role, protocol: Ops.PROTOCOL, title: this.title() });

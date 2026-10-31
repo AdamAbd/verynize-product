@@ -1,5 +1,5 @@
-// "Set as file thumbnail" (Wonder P4): `document.thumbnailNodeId` is validated by the headless store (mirroring
-// validate() in web/app.js), may dangle after its layer is deleted, and syncs through cloud rooms as a doc-level key.
+// "Set as file thumbnail" (Wonder P4): `document.thumbnailNodeId` is validated by the headless store (with
+// the shared schema in web/document-core.js), may dangle after its layer is deleted, and syncs through cloud rooms as a doc-level key.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateDocument, applyOperations } from './design-store.mjs';

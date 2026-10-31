@@ -2,6 +2,7 @@
 // user's MP3), desktop notifications when a chat finishes or needs the user, and verynize:// design links.
 // web/settings.js forwards agent events here through window.verynizeAlerts.
 import { preferencesApi, type Preferences } from "./api";
+import { platform } from "@/lib/platform";
 
 type AgentEvent = { type: string; chatId?: string; code?: number; stopped?: boolean; toolName?: string };
 
@@ -15,11 +16,7 @@ export type AppPreferencesApi = {
   onOpenLink(callback: (url: string) => void): () => void;
 };
 
-type DesktopShape = {
-  appPreferences?: AppPreferencesApi;
-  notifyTask?(options: { title: string; body: string }): Promise<boolean>;
-};
-const desktop = () => (window as unknown as { desktop?: DesktopShape }).desktop;
+const desktop = () => platform.desktop;
 export const appPreferencesApi = () => desktop()?.appPreferences;
 
 const prefs = (): Partial<Preferences> => preferencesApi()?.get() ?? {};
@@ -119,7 +116,7 @@ const NEEDS_YOU = new Set(["permission-request", "question-request"]);
 function handleAgentEvent(event: AgentEvent): boolean {
   const p = prefs();
   const notify = (title: string, body: string) => {
-    if (p.notifications && !document.hasFocus()) void desktop()?.notifyTask?.({ title, body }).catch(() => {});
+    if (p.notifications && !document.hasFocus()) void desktop()?.notifyTask({ title, body }).catch(() => {});
   };
   if (event.type === "done") {
     if (event.stopped) return true;

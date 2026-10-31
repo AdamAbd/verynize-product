@@ -5,22 +5,17 @@ import { CheckIcon, PencilIcon, PlusIcon, ShieldCheckIcon, Trash2Icon, XIcon } f
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Card, Row, Section, SettingsButton, TextField } from "./controls";
+import { platform } from "@/lib/platform";
 
 export type DesignPreference = { id: string; text: string; created?: string | null; updated?: string | null };
-type PreferencesIpc = {
+export type PreferencesIpc = {
   list(): Promise<DesignPreference[]>;
   save(text: string): Promise<DesignPreference>;
   update(id: string, text: string): Promise<DesignPreference>;
   remove(id: string): Promise<unknown>;
 };
 export type AllowRule = string | ({ id?: string; label?: string; rule?: string; pattern?: string; tool?: string; agent?: string; description?: string } & Record<string, unknown>);
-type DesktopApi = {
-  designPreferences?: Partial<PreferencesIpc>;
-  listAllowRules?: () => Promise<AllowRule[]>;
-  removeAllowRule?: (rule: unknown) => Promise<unknown>;
-};
-
-const desktop = () => (window as unknown as { desktop?: DesktopApi }).desktop;
+const desktop = () => platform.desktop;
 export const MAX_PREFERENCE_LENGTH = 280;
 /** How many design preferences the runtime keeps (desktop enforces the same limit). */
 export const MAX_PREFERENCES = 50;
@@ -41,7 +36,7 @@ function CharCounter({ length, id }: { length: number; id?: string }) {
 }
 
 export function preferencesIpc(): PreferencesIpc | null {
-  const ipc = desktop()?.designPreferences;
+  const ipc: Partial<PreferencesIpc> | undefined = desktop()?.designPreferences;
   return ipc && (["list", "save", "update", "remove"] as const).every((k) => typeof ipc[k] === "function") ? (ipc as PreferencesIpc) : null;
 }
 export const allowRulesAvailable = () => typeof desktop()?.listAllowRules === "function";

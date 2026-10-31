@@ -4,10 +4,14 @@ const fs=require('node:fs');
 const {promises:fsp}=fs;
 const {pathToFileURL}=require('node:url');
 const engine=()=>import(pathToFileURL(path.join(__dirname,'../integrations/design-store.mjs')).href);
+// A file the store refuses (strict schema, size, JSON) is never modified and nothing opens: the error names the file,
+// the first problem and how many there are.
+async function unopened(file,error){let count=0;try{const {documentProblems}=await import(pathToFileURL(path.join(__dirname,'../integrations/document-core.mjs')).href);count=documentProblems(JSON.parse(await fsp.readFile(file,'utf8'))).length;}catch{}
+ throw Object.assign(new Error(`${path.basename(file)} was not opened and is unchanged: ${error.message}${count>1?` (${count} problems)`:''}`),{code:error.code});}
 class DesignFileSession {
  constructor(onChange=()=>{}){this.onChange=onChange;this.selected=null;this.watcher=null;this.timer=null;this.lastNotified=null;this.generation=0;} 
  async target(file){const suffix='.verynize.json';const base=path.basename(file);if(!base.endsWith(suffix))throw Error('Choose a .verynize.json filename');const name=base.slice(0,-suffix.length);const {DesignStore}=await engine();const store=await DesignStore.open(path.dirname(file));store.file(name);return {store,name,path:store.file(name)};}
- async open(file){const generation=++this.generation;const target=await this.target(file);const state=await target.store.read(target.name);if(generation!==this.generation)throw Error('Document switched while opening.');this.select(target,state.revision);return {path:target.path,...state};}
+ async open(file){const generation=++this.generation;const target=await this.target(file);const state=await target.store.read(target.name).catch(error=>unopened(target.path,error));if(generation!==this.generation)throw Error('Document switched while opening.');this.select(target,state.revision);return {path:target.path,...state};}
  select(target,revision){this.close();this.selected={...target,revision};this.lastNotified=revision;this.watcher=fs.watch(target.store.root,(_event,file)=>{if(!file||file.toString()===path.basename(target.path)){clearTimeout(this.timer);this.timer=setTimeout(()=>this.changed(),80);}});this.watcher.on('error',error=>this.onChange({path:target.path,error:error.message}));}
  async changed(){const target=this.selected;if(!target)return;try{const state=await target.store.read(target.name);if(this.selected!==target||state.revision===this.lastNotified)return;this.lastNotified=state.revision;this.onChange({path:target.path,...state});}catch(error){if(this.selected===target)this.onChange({path:target.path,error:error.message});}}
  async reload(){if(!this.selected)throw Error('No design file is open');const target=this.selected,state=await target.store.read(target.name);if(this.selected!==target)throw Error('Document switched while reloading.');target.revision=state.revision;this.lastNotified=state.revision;return {path:target.path,...state};}

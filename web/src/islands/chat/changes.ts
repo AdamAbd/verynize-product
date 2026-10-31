@@ -2,6 +2,7 @@
 // project's change summary fresh (on mount, focus, agent tool results and finished turns).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { legacySet } from "@/lib/bridge";
+import { can, platform } from "@/lib/platform";
 
 export type ChangedFile = {
   path: string;
@@ -30,8 +31,8 @@ export type FileDiff = { file: string; status: string; diff: string; truncated: 
 export type PullRequest = { number: number; url: string; state: string; title: string; isDraft: boolean; base: string; head: string };
 export type PullRequestStatus = { gh: "ready" | "missing" | "unauthenticated" | "unsupported"; pr: PullRequest | null; message?: string };
 
-type Root = { root?: string };
-type GitApi = {
+export type Root = { root?: string };
+export type GitApi = {
   gitChanges(options: Root): Promise<ChangesSummary>;
   gitDiff(options: Root & { file: string }): Promise<FileDiff>;
   gitCommit(options: Root & { message: string }): Promise<{ commit: string; branch: string | null; message: string; files: number }>;
@@ -43,11 +44,9 @@ type GitApi = {
   onAgentEvent(callback: (event: { type: string; chatId?: string }) => void): () => void;
 };
 
-const desktop = () => (window as unknown as { desktop?: Partial<GitApi> }).desktop;
-/** The git API, or null in the web build / older preloads. */
+/** The git API, or null in the web build. */
 export function gitApi(): GitApi | null {
-  const api = desktop();
-  return api && typeof api.gitChanges === "function" ? (api as GitApi) : null;
+  return can("git") ? platform.desktop : null;
 }
 
 /** IPC errors arrive as "Error invoking remote method 'desktop:x': Error: message"; keep the message. */
