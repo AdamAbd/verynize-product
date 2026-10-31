@@ -82,7 +82,9 @@ const path = require("node:path");
     };
     const menuAfterLayout = async () => {
       const list = await items();
-      return list.slice(list.lastIndexOf("Layout") + 1);
+      // Up to the closing group ("|", Set as file thumbnail).
+      const rest = list.slice(list.lastIndexOf("Layout") + 1);
+      return rest.includes("|") ? rest.slice(0, rest.indexOf("|")) : rest;
     };
     // One rendered pixel at a window point (CSS px), as [r, g, b].
     const pixel = async (x, y) => {
