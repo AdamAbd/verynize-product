@@ -1006,7 +1006,7 @@
     // Name labels above top-level frames (artboards); drag a label to move its frame.
     function drawFrameLabels() {
       frameLabels.replaceChildren();
-      for (const n of ed.nodes().filter(n => !n.parentId && n.type === 'frame' && !n.hidden && !n.preview)) {
+      for (const n of ed.nodes().filter(n => !n.parentId && n.type === 'frame' && !n.hidden && !n.preview && !n.labelHidden)) {
         const r = worldRect(n.id); if (!r || (sel().has(n.id) && sel().size === 1)) continue;
         const label = document.createElement('span'); label.className = 'frame-label' + (sel().has(n.id) ? ' selected' : ''); label.textContent = n.name; label.dataset.id = n.id;
         label.style.left = toScreenX(r.x) + 'px'; label.style.top = toScreenY(r.y) - 18 + 'px';
@@ -1466,27 +1466,20 @@
 
     // ---------- Context menu ----------
     function closeMenu() { menu?.remove(); menu = null; }
+    // The menu itself is the React context menu (web/src/islands/context-menu): this only retargets the selection like a
+    // click would (a child of a selected frame, a frame label, or a locked layer, which is not hit-tested) and hands over.
     wrap.addEventListener('contextmenu', e => {
+      if (textEdit?.el.contains(e.target)) return;
       e.preventDefault(); closeMenu();
-      const el = e.target.closest('#canvas .layer');
-      if (el) { const id = resolveHit(el.dataset.id); if (!sel().has(id)) select([id]); }
-      menu = document.createElement('div'); menu.id = 'canvas-menu'; menu.setAttribute('role', 'menu');
-      const groups = [['edit.copy', 'edit.cut', 'edit.paste', 'edit.duplicate', 'edit.delete'], ['edit.copyPng', 'edit.copyCode', 'edit.copyStyle', 'edit.pasteStyle'], ['select.all', 'select.inverse', 'select.matching'], ['arrange.front', 'arrange.forward', 'arrange.backward', 'arrange.back'], ['transform.flipH', 'transform.flipV', 'transform.rotate90', 'transform.scaleDown', 'transform.scaleUp'], ['transform.frame', 'transform.unframe', 'transform.autoLayout', 'transform.removeAutoLayout'], ['layer.visibility', 'layer.lock'], ['view.fit', 'view.selection']];
-      for (const group of groups) {
-        const items = group.map(id => commands.find(c => c.id === id)).filter(c => c.id === 'edit.paste' ? !!clipboard : (!c.when || c.when()));
-        if (!items.length) continue;
-        if (menu.childElementCount) menu.append(document.createElement('hr'));
-        for (const c of items) {
-          const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'menuitem'); b.dataset.command = c.id;
-          const label = document.createElement('span'); label.textContent = c.label; const keys = document.createElement('kbd'); keys.textContent = c.keys[0] ? shortcutText(c.keys[0]) : '';
-          b.append(label, keys); b.onclick = () => { closeMenu(); c.run(); }; menu.append(b);
-        }
-      }
-      document.body.append(menu);
-      const r = menu.getBoundingClientRect();
-      menu.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + 'px'; menu.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + 'px';
+      const label = e.target.closest('.frame-label'), el = e.target.closest('#canvas .layer');
+      const under = [...canvas.querySelectorAll('.layer[data-id]')].filter(l => { const r = l.getBoundingClientRect(); return r.width && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; }).map(l => l.dataset.id).reverse();
+      const locked = under.find(id => find(id)?.locked), above = locked && (!el || under.indexOf(locked) < under.indexOf(el.dataset.id));
+      const target = label ? label.dataset.id : above ? locked : el ? clickTarget(el.dataset.id) : null;
+      if (target && !sel().has(target)) select([target]);
+      window.dispatchEvent(new CustomEvent('bd:canvas-menu', {detail: {x: e.clientX, y: e.clientY, point: screenToWorld(e.clientX, e.clientY), target, under}}));
     });
-    document.addEventListener('pointerdown', e => { if (menu && !menu.contains(e.target)) closeMenu(); }, true);
+    // Whether the in-app clipboard holds layers (the context menus list Paste disabled otherwise).
+    window.BetterCanvas.canPaste = () => !!clipboard;
 
     // ---------- Toolbar wiring (runs after the shell has built the toolbar) ----------
     function wireToolbar() {
