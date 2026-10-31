@@ -173,7 +173,8 @@ export function layerMenu(surface: "canvas" | "row", under: string[] = []): Entr
   if (!multi) copy.push(commandItem(have, "clipboard.copyLink", "Copy link to selection"));
 
   const pasting: Entry[] = [
-    commandItem(have, "edit.paste", "Paste", "⌘V", { disabled: paste }),
+    // Menu Paste puts the clipboard inside a selected frame, centred (Wonder P3); ⌘V keeps the canvas paste.
+    commandItem(have, "edit.paste", "Paste", "⌘V", { disabled: paste, arg: { menu: true } }),
     commandItem(have, "clipboard.pasteToReplace", "Paste to replace", "⌘⇧R", { disabled: paste }),
     commandItem(have, "clipboard.pasteOverSelection", "Paste over selection", "⌘⇧V", {
       disabled: paste,

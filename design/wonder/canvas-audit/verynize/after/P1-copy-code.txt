@@ -1,0 +1,20 @@
+/**
+ * Made with Verynize
+ * verynize://node/Sunbird/page-1/lod
+ * Oct 31, 2026
+ */
+/* @verynize {"name":"Sunbird","page":{"name":"Page 1"}} */
+export default function Frame() {
+  return (
+    <>
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin />
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap" rel="stylesheet" />
+      <style>{"* { box-sizing: border-box; }"}</style>
+      <div data-node-label="Frame" data-canvas-x="0" data-canvas-y="0" className="layout-free w-[420px] h-[391.18px] bg-white" data-vn='{"gap":16,"padding":16}'>
+        <div data-node-label="Frame" className="absolute left-[49px] top-[40px] layout-free w-[100px] h-[80px]" data-vn='{"gap":16,"padding":16}'></div>
+        <p data-node-label="Canvas au" className="absolute left-[59px] top-[160px] text-black text-xs leading-[1.15] font-['Inter']">Canvas au</p>
+      </div>
+    </>
+  );
+}
