@@ -46,7 +46,8 @@ export type Node = LayerNode & {
   /** Property → variable name (see vars.ts). */
   bindings?: Record<string, string>;
 };
-export type SizingMode = "fixed" | "hug" | "fill";
+/** Stored sizing modes (wMode / hMode); the inspector adds "relative" for a Fixed size with wPct / hPct. */
+export type SizingMode = "fixed" | "hug" | "fill" | "auto" | "calc";
 
 export const pageNodes = (doc: DesignDocument) => activePage(doc).nodes as Node[];
 
@@ -73,9 +74,10 @@ export function descendants(doc: DesignDocument, id: string): Set<string> {
 }
 
 export function sizingAllowed(node: Node, parent: Node | undefined, mode: SizingMode): boolean {
-  if (mode === "fixed") return true;
+  if (mode === "fixed" || mode === "calc") return true;
   if (mode === "hug")
     return node.type === "text" || (node.type === "frame" && node.layout !== "free");
+  if (mode === "auto") return node.type === "text" || node.type === "frame";
   return !!parent && parent.type === "frame" && parent.layout !== "free";
 }
 
@@ -176,8 +178,11 @@ export function setField(
       const node = n as Node;
       const patch: Record<string, unknown> = scalarOverrides(node, key);
       if (key === "text") patch.textRuns = [];
-      if (key === "w" && node.wMode && node.wMode !== "fixed") patch.wMode = "fixed";
-      if (key === "h" && node.hMode && node.hMode !== "fixed") patch.hMode = "fixed";
+      // Typing a W/H is a Fixed size (Relative and Calculate end).
+      if (key === "w" && ((node.wMode && node.wMode !== "fixed") || node.wPct !== undefined))
+        Object.assign(patch, { wMode: "fixed", wPct: undefined, wCalc: undefined });
+      if (key === "h" && ((node.hMode && node.hMode !== "fixed") || node.hPct !== undefined))
+        Object.assign(patch, { hMode: "fixed", hPct: undefined, hCalc: undefined });
       // Typing a value detaches the property from its variable (a uniform radius also replaces any
       // per-corner radius bindings).
       const detach =

@@ -1,9 +1,14 @@
-// Export section (design/wonder/2026-10-30 21, 22, 41): file name + suffix, scope, size preset and format.
+// Export section (design/wonder/2026-10-30 21, 22, 41; properties-audit A7): a full-width file name, then size
+// preset and format in two columns, then the Export button, as in Wonder. The file suffix follows the size
+// ("@2x"); a custom suffix and the Selection / Page scope live in the "Export options" popover, whose trigger
+// sits inside the name field and shows on hover (or while an option differs from its default).
 // SVG is offered only when every exported layer is an SVG image; Code exports Tailwind JSX or HTML + CSS.
 import { useEffect, useState } from "react";
+import { SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import type { DesignDocument } from "@/lib/bridge";
-import { Field, NativeSelect, OptionalSection } from "./controls";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Caption, Field, NativeSelect, OptionalSection } from "./controls";
 import {
   CODE_FLAVORS,
   EXPORT_SCALES,
@@ -36,10 +41,12 @@ export function ExportSection({
   const [suffix, setSuffix] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
+  const [options, setOptions] = useState(false);
   useEffect(() => {
     setOpen(false);
     setName(null);
     setStatus("");
+    setOptions(false);
   }, [node.id]);
   const exported = exportedNodes(doc, selection, scope === "selection");
   const formats = exportFormats(exported.length > 0 && exported.every(isSvgNode));
@@ -48,6 +55,7 @@ export function ExportSection({
   const unscaled = UNSCALED.has(active);
   const fileName = name ?? node.name;
   const fileSuffix = suffix ?? (unscaled ? "" : defaultSuffix(scale));
+  const customised = suffix !== null || scope !== "selection";
   const label =
     active === "CODE"
       ? (CODE_FLAVORS.find((f) => f.value === flavor)?.label ?? "Code")
@@ -78,22 +86,71 @@ export function ExportSection({
     }
   };
   return (
-    <OptionalSection id="export-section" title="Export" open={open} onOpenChange={setOpen}>
-      <div className="grid grid-cols-3 gap-2">
-        <Field
-          label="Export file name"
-          className="col-span-2"
-          value={fileName}
-          onCommit={(value) => setName(value.trim() || null)}
-        />
-        <Field
-          label="Export file suffix"
-          value={fileSuffix}
-          placeholder="Suffix"
-          onCommit={(value) => setSuffix(value.trim())}
-        />
-      </div>
-      <div className="grid grid-cols-3 gap-2">
+    <OptionalSection
+      id="export-section"
+      title="Export"
+      present={open}
+      onAdd={() => setOpen(true)}
+      onRemove={() => setOpen(false)}
+    >
+      {/* The options popover is anchored to the whole name field so it opens beside the panel. */}
+      <Popover open={options} onOpenChange={setOptions} modal={false}>
+        <PopoverAnchor asChild>
+          <div className="flex min-w-0 flex-col">
+            <Field
+              label="Export file name"
+              value={fileName}
+              onCommit={(value) => setName(value.trim() || null)}
+              suffix={
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    id="artwork-options"
+                    aria-label="Export options"
+                    title="Export options"
+                    data-custom={customised || undefined}
+                    className="-mr-1 flex size-5 items-center justify-center rounded-sm text-muted-foreground opacity-0 group-hover/field:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring data-custom:opacity-100 data-[state=open]:opacity-100"
+                  >
+                    <SlidersHorizontal className="size-3.5" aria-hidden />
+                  </button>
+                </PopoverTrigger>
+              }
+            />
+          </div>
+        </PopoverAnchor>
+        <PopoverContent
+          side="left"
+          align="start"
+          sideOffset={20}
+          collisionPadding={8}
+          className="w-56"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <div className="flex flex-col gap-2">
+            <Caption label="Suffix">
+              <Field
+                label="Export file suffix"
+                value={fileSuffix}
+                placeholder="None"
+                onCommit={(value) => setSuffix(value.trim())}
+              />
+            </Caption>
+            <Caption label="Export">
+              <NativeSelect
+                id="artwork-scope"
+                label="Export scope"
+                value={scope}
+                onChange={setScope}
+                options={[
+                  { value: "selection", label: "Selection" },
+                  { value: "page", label: "Whole page" },
+                ]}
+              />
+            </Caption>
+          </div>
+        </PopoverContent>
+      </Popover>
+      <div className="grid grid-cols-2 gap-2">
         <NativeSelect
           id="artwork-scale"
           label="Export size"
@@ -112,27 +169,16 @@ export function ExportSection({
           onChange={(value) => setFormat(value as ExportFormat)}
           options={formats}
         />
-        {active === "CODE" ? (
-          <NativeSelect
-            id="artwork-code"
-            label="Code flavor"
-            value={flavor}
-            onChange={(value) => setFlavor(value as CodeFlavor)}
-            options={CODE_FLAVORS}
-          />
-        ) : (
-          <NativeSelect
-            id="artwork-scope"
-            label="Export scope"
-            value={scope}
-            onChange={setScope}
-            options={[
-              { value: "selection", label: "Selection" },
-              { value: "page", label: "Page" },
-            ]}
-          />
-        )}
       </div>
+      {active === "CODE" ? (
+        <NativeSelect
+          id="artwork-code"
+          label="Code flavor"
+          value={flavor}
+          onChange={(value) => setFlavor(value as CodeFlavor)}
+          options={CODE_FLAVORS}
+        />
+      ) : null}
       <button
         type="button"
         id="artwork-download"

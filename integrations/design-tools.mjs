@@ -180,7 +180,8 @@ const layoutFields = {
   cornerRadii: z.array(px.nullable()).length(4).describe('[topLeft, topRight, bottomRight, bottomLeft]').optional(),
   strokeWidths: z.array(px).length(4).describe('[top, right, bottom, left]').optional(), strokeStyle: z.enum(['solid', 'dashed', 'dotted']).optional(),
   ringWidth: px.optional(), ringColor: z.string().max(200).optional(), ringInset: z.boolean().optional(),
-  wMode: z.enum(['fixed', 'hug', 'fill']).optional(), hMode: z.enum(['fixed', 'hug', 'fill']).optional(),
+  wMode: z.enum(['fixed', 'hug', 'fill', 'auto', 'calc']).optional(), hMode: z.enum(['fixed', 'hug', 'fill', 'auto', 'calc']).optional(),
+  wCalc: z.string().max(200).describe('Calculate expression of px and % terms, e.g. "100% - 24px" (with wMode "calc")').optional(), hCalc: z.string().max(200).optional(),
   wPct: z.number().finite().min(0).max(1000).optional(), hPct: z.number().finite().min(0).max(1000).optional(),
   minW: sizeLimit.optional(), maxW: sizeLimit.optional(), minH: sizeLimit.optional(), maxH: sizeLimit.optional(),
   aspectRatio: z.number().positive().max(100).optional(),
@@ -757,7 +758,7 @@ export function toolTable(backend, context = {}) {
     run: async ({ name }) => { const state = await readPrepared(backend, name); return { document: state.document, revision: state.revision, live: !!state.live }; },
   };
   t.apply_operations = {
-    description: 'Low-level fallback: atomically apply page/node/token operations to the raw document. Requires the revision from read_document; a failed batch changes nothing. Node ids here are the long internal ids. Nodes accept the full codec model: per-side padding (paddingTop/Right/Bottom/Left), gapX/gapY, cornerRadii, strokeWidths, wMode/hMode (fixed|hug|fill), wPct/hPct, min/max sizes, margin, position + inset + translate, flex item fields and text fields; legacy numeric padding/gap/radius still work. Prefer create_artboard/update_elements.',
+    description: 'Low-level fallback: atomically apply page/node/token operations to the raw document. Requires the revision from read_document; a failed batch changes nothing. Node ids here are the long internal ids. Nodes accept the full codec model: per-side padding (paddingTop/Right/Bottom/Left), gapX/gapY, cornerRadii, strokeWidths, wMode/hMode (fixed|hug|fill|auto|calc, calc with wCalc/hCalc expressions), wPct/hPct, min/max sizes, margin, position + inset + translate, flex item fields and text fields; legacy numeric padding/gap/radius still work. Prefer create_artboard/update_elements.',
     inputSchema: { name: documentArg, revision: z.string().regex(/^[a-f0-9]{64}$/), operations },
     run: async ({ name, revision, operations: ops }) => {
       const out = await backend.transact(name, (document, meta) => { if (meta.revision !== revision) throw new Error('Revision conflict; read the document again before editing'); const next = applyOperations(document, ops); ensureShortIds(next); return { document: next, result: null }; });

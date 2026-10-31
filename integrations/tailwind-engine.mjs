@@ -53,7 +53,7 @@ export function compileClass(cls) {
       }
       if (node.kind === 'at-rule') { extras.push(node.name); continue; }
       if (node.kind !== 'rule') continue;
-      const target = /[>~+]|:where\(|:is\(/.test(node.selector) ? childDecls : decls;
+      const target = /(?<!\\)[>~+]|:where\(|:is\(/.test(node.selector) ? childDecls : decls; // an escaped \+ (w-[calc(50%_+_8px)]) is part of the class name
       for (const child of node.nodes || []) if (child.kind === 'declaration' && child.value !== undefined) target.push({ property: child.property, value: child.value, important: !!child.important });
     }
     result = decls.length || childDecls.length ? { kind: 'ok', decls, childDecls, extras } : { kind: extras.length ? 'unsupported' : 'invalid', extras };

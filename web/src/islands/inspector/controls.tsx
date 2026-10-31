@@ -12,9 +12,10 @@ import {
   type RefObject,
 } from "react";
 import { ChevronDown } from "lucide-react";
-import { PlusIcon } from "@/components/icons";
+import { PlusIcon, RemoveIcon } from "@/components/icons";
 import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
+import { parseColor, toHex } from "./color";
 
 /**
  * Add a plain (non-Tailwind) hook class that tests and legacy selectors rely on (e.g. `.insp-display`).
@@ -87,49 +88,95 @@ export function Section({
         {tools ? <div className="flex items-center gap-2">{tools}</div> : null}
       </div>
       {children ? (
-        <div className={cn("flex flex-col gap-2 px-3 pt-1 pb-2.75", bodyClassName)}>{children}</div>
+        <div className={cn("flex flex-col gap-2 px-3 pt-1.25 pb-2.75", bodyClassName)}>
+          {children}
+        </div>
       ) : null}
     </section>
   );
 }
 
-/** Wonder's optional sections (Border, Shadow, Mask, Export…): a 31px row with `+` that reveals the body. */
+/**
+ * Wonder's optional sections (Border, Outline, Export, Layer…). `present` comes from the document (or, for
+ * UI-only panels, from local state): without it the 31px header shows only `+` (`.insp-add`), which calls
+ * `onAdd` — data sections write their default there so the canvas changes at once. With it the header shows
+ * `tools` and, when `onRemove` is given, a header `−`; data sections put their eye / `−` on the item row.
+ */
 export function OptionalSection({
   title,
   id,
-  open,
-  onOpenChange,
+  present,
+  onAdd,
+  onRemove,
+  tools,
+  addWhenPresent,
+  addLabel,
+  addDisabled,
   children,
 }: {
   title: string;
   id: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  present: boolean;
+  onAdd: () => void;
+  onRemove?: () => void;
+  tools?: ReactNode;
+  /**
+   * Keep the header `+` (still `.insp-add`, after `tools`) while the section has a value, as Wonder's Border
+   * does to add another side; `onAdd` is called in both states. `addDisabled` greys it out (all sides exist).
+   */
+  addWhenPresent?: boolean;
+  /** Label of the `+` while present (default "Add <title>"). */
+  addLabel?: string;
+  addDisabled?: boolean;
   children: ReactNode;
 }) {
   const plus = useRef<HTMLButtonElement>(null);
   useHookClass(plus, "insp-add");
+  const name = title.toLowerCase();
+  const add = (
+    <IconButton
+      icon={PlusIcon}
+      label={present && addLabel ? addLabel : "Add " + name}
+      ref={plus}
+      disabled={present && addDisabled}
+      // Wonder's disabled `+` is a flat grey glyph, not a faded one.
+      className="disabled:text-subtle-foreground disabled:opacity-100"
+      onClick={onAdd}
+    />
+  );
   return (
-    <section id={id} className="border-b border-border">
+    <section id={id} className="border-b border-border" data-present={present || undefined}>
       <div
         className="flex h-7.75 items-center justify-between gap-2 px-3"
         onClick={(event) => {
-          if (!(event.target as HTMLElement).closest("button")) onOpenChange(!open);
+          if (!present && !(event.target as HTMLElement).closest("button")) onAdd();
         }}
       >
         <h3 className="truncate text-xs text-foreground-3">{title}</h3>
-        <IconButton
-          icon={PlusIcon}
-          label={(open ? "Hide " : "Add ") + title.toLowerCase()}
-          aria-expanded={open}
-          ref={plus}
-          iconClassName={cn("transition-transform", open && "rotate-45")}
-          onClick={() => onOpenChange(!open)}
-        />
+        {present ? (
+          tools || onRemove || addWhenPresent ? (
+            <div className="flex items-center gap-2">
+              {tools}
+              {onRemove ? (
+                <IconButton
+                  icon={RemoveIcon}
+                  label={"Remove " + name}
+                  data-section-remove
+                  onClick={onRemove}
+                />
+              ) : null}
+              {addWhenPresent ? add : null}
+            </div>
+          ) : null
+        ) : (
+          add
+        )}
       </div>
+      {/* The body stays mounted while absent (hidden), so ids such as #artwork-scale keep resolving. */}
+      {/* Wonder's optional body: first row 36px below the section top (31px header + 5), 12px bottom padding. */}
       <div
-        hidden={!open}
-        className={cn(open ? "flex" : "hidden", "flex-col gap-2 px-3 pt-1 pb-2.75")}
+        hidden={!present}
+        className={cn(present ? "flex" : "hidden", "flex-col gap-2 px-3 pt-1.25 pb-3")}
       >
         {children}
       </div>
@@ -155,24 +202,34 @@ export function Caption({
 }
 
 /* ---------- Field shell ---------- */
-const fieldBox =
-  "group/field flex h-6 min-w-0 items-center gap-1 rounded-md bg-input px-2 text-xs text-foreground shadow-field focus-within:ring-1 focus-within:ring-ring";
+/**
+ * The one field shell every inspector control shares (design/wonder 22/43, 2026-10-30/05–06): 24px tall, 6px radius,
+ * #2b2b2b fill, 8px side insets. With a prefix the left inset is 6px and the prefix sits in a 14px slot, so values
+ * start 25px in whether the prefix is a letter (X, W) or an icon. The value takes the free width (`min-w-0`); unit,
+ * dropdown and variable slots never shrink, so a long number truncates instead of running under the unit.
+ */
+export const fieldShell =
+  "group/field relative flex h-6 min-w-0 items-center gap-1.25 rounded-md bg-input px-2 text-xs text-foreground shadow-field focus-within:ring-1 focus-within:ring-ring";
+const fieldBox = fieldShell;
+/** Left inset used when the field starts with a prefix slot. */
+// Properties audit B5: after a prefix the value starts 4px later, at x 36.5 like Wonder (was 38 with gap-1.25).
+export const fieldPrefixInset = "gap-1 pl-1.5";
 
-/** 14px field-prefix icon (opacity, radius, rotation, line height…), measured on design/wonder 22/25. Overhangs its
- * 12px slot by 1px each side so values line up with letter prefixes (X, Y, W…). */
+/** 14px field-prefix icon (opacity, radius, rotation, gap, padding…) in the 14px prefix slot. */
 export function IconAffix({ icon: Icon }: { icon: IconType }) {
   return (
-    <span className="-mx-px flex w-3.5 shrink-0 select-none items-center justify-center text-muted-foreground">
+    <span className="flex w-3.5 shrink-0 select-none items-center justify-center text-muted-foreground">
       <Icon className="size-3.5" aria-hidden />
     </span>
   );
 }
 
+/** Letter prefix (X, Y, W, H, Z…) in the same 14px slot as IconAffix. */
 export function Affix({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <span
       className={cn(
-        "flex w-3 shrink-0 select-none items-center justify-center text-muted-foreground",
+        "flex w-3.5 shrink-0 select-none items-center justify-center text-muted-foreground",
         className,
       )}
     >
@@ -280,7 +337,7 @@ export function Field({
     target.addEventListener("pointercancel", up);
   };
   return (
-    <div className={cn(fieldBox, disabled && "opacity-50", className)}>
+    <div data-field-shell className={cn(fieldBox, prefix && fieldPrefixInset, className)}>
       {prefix ? (
         <span
           className={cn("flex shrink-0 items-center", scrub && !disabled && "cursor-ew-resize")}
@@ -302,8 +359,10 @@ export function Field({
         autoComplete="off"
         spellCheck={false}
         className={cn(
-          "h-full w-full min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none",
-          prefix ? "pl-1" : "",
+          "h-full w-full min-w-0 flex-1 truncate bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground disabled:text-muted-foreground",
+          numeric && "tabular-nums",
+          // Wonder (A9 multi-select): "Mixed" reads as a value (#E8E8E8), not as a muted placeholder.
+          placeholder === "Mixed" && "placeholder:text-foreground",
           inputClassName,
         )}
         onChange={(event) => setDraft(event.target.value)}
@@ -311,7 +370,10 @@ export function Field({
         onKeyDown={onKeyDown}
       />
       {suffix ? (
-        <span className="flex shrink-0 select-none items-center text-muted-foreground">
+        <span
+          data-field-suffix
+          className="relative flex shrink-0 select-none items-center gap-1 text-muted-foreground"
+        >
           {suffix}
         </span>
       ) : null}
@@ -349,7 +411,10 @@ export function NativeSelect({
   return (
     <div
       className={cn(
-        bare ? "relative flex h-6 items-center" : cn(fieldBox, "relative pr-0"),
+        bare
+          ? "relative flex h-6 shrink-0 items-center"
+          : // Disabled field (properties-audit B4/C1): #242424 fill, #828282 value, dim caret.
+            cn(fieldBox, "pr-0 has-disabled:bg-field-disabled", prefix && fieldPrefixInset),
         className,
       )}
     >
@@ -362,8 +427,9 @@ export function NativeSelect({
         value={value}
         disabled={disabled}
         className={cn(
-          "h-full w-full min-w-0 cursor-default appearance-none truncate bg-transparent pr-5 text-xs text-foreground outline-none disabled:text-muted-foreground",
-          bare && "pr-4 text-right text-muted-foreground",
+          "h-full min-w-0 cursor-default appearance-none truncate bg-transparent text-xs text-foreground outline-none disabled:text-field-disabled-foreground",
+          // A bare select (unit / sizing mode inside a field) is as wide as its current label.
+          bare ? "field-sizing-content pr-4 text-muted-foreground" : "w-full pr-6",
           selectClassName,
         )}
         onChange={(event) => onChange(event.target.value)}
@@ -383,7 +449,8 @@ export function NativeSelect({
         aria-hidden
         className={cn(
           "pointer-events-none absolute size-3 text-muted-foreground",
-          bare ? "right-0" : "right-2",
+          !bare && disabled && "text-disabled-glyph",
+          bare ? "right-0" : "right-2.5",
         )}
       />
     </div>
@@ -400,6 +467,7 @@ export function Segmented({
   itemClassName,
   dataKey,
   hook,
+  deselectable,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -411,6 +479,8 @@ export function Segmented({
   dataKey?: string;
   /** Plain hook class for selectors (e.g. `insp-display`). */
   hook?: string;
+  /** Pressing the active item clears the value (`onChange("")`), e.g. the flex distribution row. */
+  deselectable?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   useHookClass(root, hook ?? "insp-segmented");
@@ -420,8 +490,8 @@ export function Segmented({
       type="single"
       aria-label={label}
       value={value}
-      onValueChange={(next) => next && onChange(next)}
-      className={cn("flex h-6 w-full items-stretch overflow-hidden rounded-md bg-muted", className)}
+      onValueChange={(next) => (next || deselectable) && onChange(next)}
+      className={cn("flex h-6 w-full items-stretch rounded-md bg-muted", className)}
     >
       {items.map(({ value: v, label: l, icon: Icon }) => (
         <ToggleGroupPrimitive.Item
@@ -431,7 +501,8 @@ export function Segmented({
           title={l}
           {...(dataKey ? { [`data-${dataKey}`]: v } : {})}
           className={cn(
-            "flex flex-1 items-center justify-center rounded-md text-subtle-foreground hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=on]:bg-accent data-[state=on]:text-foreground",
+            // Wonder's active segment: #363636 with a faint 1px edge and a soft drop (22, 2026-10-30/05).
+            "flex min-w-0 flex-1 items-center justify-center rounded-md text-subtle-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=on]:bg-accent data-[state=on]:text-foreground",
             itemClassName,
           )}
         >
@@ -443,10 +514,20 @@ export function Segmented({
 }
 
 /* ---------- Colour swatch (dynamic colour set through the DOM, no inline style props) ---------- */
+const SWATCH_CHECKER =
+  "repeating-conic-gradient(var(--accent) 0% 25%, var(--muted) 0% 50%) 50% / 8px 8px";
+/** A translucent colour shows Wonder's split swatch: opaque on the left, the colour over a checker on the right. */
+function swatchBackground(color: string) {
+  const c = color ? parseColor(color) : null;
+  if (!c || c.a >= 1) return color || "transparent";
+  const opaque = toHex({ ...c, a: 1 });
+  return `linear-gradient(to right, ${opaque} 50%, ${toHex(c)} 50%), ${SWATCH_CHECKER}`;
+}
+
 export function Swatch({ color, className }: { color: string; className?: string }) {
   const ref = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
-    if (ref.current) ref.current.style.background = color || "transparent";
+    if (ref.current) ref.current.style.background = swatchBackground(color);
   }, [color]);
   return (
     <span

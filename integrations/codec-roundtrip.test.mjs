@@ -107,15 +107,19 @@ const SINK_JSX = `
     <img data-node-label="Photo" src="${PNG}" className="absolute left-[300px] top-[20px] w-[90px] h-[60px] object-cover" />
     <img data-node-label="Vector" src="${SVG}" className="absolute left-[400px] top-[20px] w-[40px] h-[40px]" />
     <Shader data-node-label="Glow" preset="waves" speed={2} intensity={1.5} className="absolute left-[450px] top-[100px] w-[120px] h-[90px]" />
+    <p data-node-label="Type" className="absolute left-[24px] top-[100px] w-[200px] h-[80px] content-center whitespace-pre-line break-all -indent-[6px] antialiased leading-[normal] text-nowrap">Centred\nlines</p>
   </div>
   <div data-node-label="Row" className="flex items-baseline gap-3 min-h-[40px] max-w-[800px]">
     <p data-node-label="Grow" className="flex-1 truncate font-['Inter'] font-[450]">Grows and truncates</p>
     <div data-node-label="Badge" className="absolute top-0 right-[-4px] w-[10px] h-[10px] rounded-full bg-red-500" />
     <span data-node-label="Pill" className="shrink-0 basis-[120px] self-center mx-auto px-2 py-0.5 rounded-md bg-gradient-to-r from-indigo-500 to-pink-500 text-white text-xs whitespace-nowrap">Pill</span>
     <div data-node-label="Fixed pct" className="w-[25%] h-[20px] min-w-[40px] max-h-[30px] bg-zinc-300 animate-[aurora] [mask-image:linear-gradient(black,transparent)]" />
+    <div data-node-label="Calc" className="w-[calc(50%_-_12px)] h-[calc(10px_*_2)] bg-zinc-400" />
+    <p data-node-label="Auto" className="w-auto h-auto text-xs">Auto sized</p>
   </div>
   <div data-node-label="Flow" className="space-y-2 inline-flow">
     <p data-node-label="Inline A" className="text-xs tracking-[0.5px] normal-case">Inline flow</p>
+    <p data-node-label="Inline B" className="h-[48px] content-end whitespace-normal break-normal indent-4 subpixel-antialiased">Type settings</p>
   </div>
   <hr data-node-label="Rule" className="h-px bg-zinc-200 w-full" />
 </section>
@@ -173,6 +177,11 @@ function buildSink() {
       { start: 6, end: 11, bold: false, italic: false, fontSize: 30 },
     ],
     shadows: [{ type: "text", x: 1, y: 1, blur: 2, spread: 0, color: "#22d3ee", token: "glow" }],
+    // Text Background Fill (properties-audit A10, WP-6).
+    backgroundFills: [
+      { type: "solid", color: "#4f46e5", token: "brand", opacity: 80 },
+      { type: "linear", angle: 45, stops: [{ position: 0, color: "#000000" }, { position: 100, color: "#ffffff" }] },
+    ],
   });
   Object.assign(by("Cell A"), {
     filters: [
@@ -240,8 +249,20 @@ function buildSink() {
       { color: "#ff00ff" },
       { color: "#22d3ee", token: "glow" },
     ],
+    // The right side is hidden with its own eye (inspector side entry): it draws nothing, data-vn keeps it.
+    strokeHiddenSides: [false, true, false, false],
   });
   Object.assign(by("Inline A"), { name: "  Inline A ", textDecoration: "line-through" });
+  // A border and an outline hidden with the inspector's eye: nothing drawn, both kept.
+  Object.assign(by("CTA"), {
+    strokeWidth: 3,
+    strokeColor: "#ff0000",
+    strokeStyle: "dashed",
+    strokeHidden: true,
+    outlineWidth: 2,
+    outlineColor: "#00ff00",
+    outlineHidden: true,
+  });
   Object.assign(by("Second"), { variantClasses: "md:p-8 hover:opacity-90 dark:bg-black" });
   reflow(page, null, [], doc);
   return validateDocument(doc);

@@ -4,6 +4,7 @@
 import { compileClass, sortClasses, resolveValue } from './tailwind-engine.mjs';
 import { lengthOf, cssColorToHex, normalizeColorsIn, splitTop, matchMedia } from './codec-css.mjs';
 import { BLEND_MODES, FILTERS } from './node-style.mjs';
+import { parseCalc } from './node-style.mjs';
 
 const FILTER_TYPES = { blur: 'blur', brightness: 'brightness', contrast: 'contrast', grayscale: 'grayscale', 'hue-rotate': 'hueRotate', invert: 'invert', saturate: 'saturate', sepia: 'sepia' };
 
@@ -154,6 +155,8 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
     else if (p === 'justify-items' && ALIGN[d.resolved] && ALIGN[d.resolved] !== 'auto') set('justifyItems', ALIGN[d.resolved]);
     else if (p === 'place-content' && JUSTIFY[d.resolved]) { set('justifyContent', JUSTIFY[d.resolved]); }
     else if (p === 'align-content' && d.resolved === 'normal') { /* default */ }
+    // On a text layer align-content places the lines in a fixed-height box (vertical text alignment).
+    else if (p === 'align-content' && ['start', 'flex-start', 'center', 'end', 'flex-end'].includes(d.resolved)) set('textAlignVertical', d.resolved === 'center' ? 'center' : /end$/.test(d.resolved) ? 'bottom' : 'top');
     else ignore(d.cls, `${p}:${d.resolved} is not supported`);
   }
   // gap
@@ -230,6 +233,10 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
     if (v === 'auto') { out[key] = { auto: true }; return; }
     if (/^(fit-content|max-content|min-content)$/.test(v)) { out[key] = { fit: true }; return; }
     if (v === 'none' && key.startsWith('max')) return;
+    // A width/height calc() of px and % terms is kept as a Calculate expression (wCalc / hCalc).
+    // Only an authored calc() (w-[calc(…)]) is one: theme fractions such as w-1/2 also resolve to calc() but stay a %.
+    const calc = (key === 'w' || key === 'h') && /^calc\(/i.test(v) && /\[calc\(/i.test(decl.cls || '') ? parseCalc(v) : null;
+    if (calc) { out[key] = { calc: calc.text, ...(calc.pct ? { frac: calc.pct / 100 } : {}), ...(calc.px || !calc.pct ? { px: calc.px } : {}) }; return; }
     const l = len(decl, property); if (!l) return;
     out[key] = l.frac !== undefined ? (l.px ? { frac: l.frac, px: l.px } : { frac: l.frac }) : { px: Math.max(0, l.px) };
   };
@@ -411,7 +418,7 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
   if ((d = take('font-size'))) { const v = px(d, 'font size'); if (v !== null) { const clamped = Math.min(200, Math.max(8, v)); if (clamped !== v) out.warnings.push(`${d.cls}: font size clamped to ${clamped}px`); set('fontSize', clamped); } }
   if ((d = take('line-height'))) {
     const l = lengthOf(d.resolved);
-    if (d.resolved === 'normal') set('lineHeight', 1.2);
+    if (d.resolved === 'normal') set('lineHeight', 'auto'); // leading-[normal]: the font's own line height (inspector "Auto")
     else if (l?.n !== undefined && l.px === undefined) set('lineHeight', round(l.n));
     else if (l?.frac !== undefined && !l.px) set('lineHeight', round(l.frac));
     else if (l?.px !== undefined && l.frac === undefined) set('lineHeightPx', l.px);
@@ -431,9 +438,21 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
   if ((d = take('text-transform'))) { if (['uppercase', 'lowercase', 'capitalize', 'none'].includes(d.resolved)) set('textTransform', d.resolved === 'none' ? '' : d.resolved); }
   if ((d = take('text-decoration-line'))) { if (['underline', 'line-through', 'overline', 'none'].includes(d.resolved)) set('textDecoration', d.resolved === 'none' ? '' : d.resolved); else ignore(d.cls, 'unsupported text decoration'); }
   if ((d = take('text-overflow'))) { if (d.resolved === 'ellipsis') set('truncate', true); }
-  if ((d = take('white-space'))) { if (d.resolved === 'nowrap') set('noWrap', true); else if (d.resolved === 'normal' || /^pre/.test(d.resolved)) set('noWrap', false); }
+  if ((d = take('white-space'))) {
+    if (d.resolved === 'nowrap') set('noWrap', true);
+    else if (['normal', 'pre', 'pre-wrap', 'pre-line', 'break-spaces'].includes(d.resolved)) { set('noWrap', false); set('whiteSpace', d.resolved === 'pre-wrap' ? '' : d.resolved); } // pre-wrap is the canvas default
+  }
+  {
+    // Word break (inspector Off / All / Word): break-normal states both properties; Word is the canvas default.
+    const wrapAt = take('overflow-wrap'), breakAt = take('word-break');
+    if (breakAt?.resolved === 'break-all') set('wordBreak', 'break-all');
+    else if (wrapAt?.resolved === 'normal') set('wordBreak', 'normal');
+    else if (wrapAt && ['anywhere', 'break-word'].includes(wrapAt.resolved)) set('wordBreak', '');
+  }
+  if ((d = take('text-indent'))) { const v = px(d, 'text indent'); if (v !== null) set('textIndent', v); }
+  if ((d = take('-webkit-font-smoothing'))) { if (d.resolved === 'antialiased') set('fontSmoothing', 'antialiased'); else if (d.resolved === 'auto') set('fontSmoothing', 'subpixel-antialiased'); }
   if ((d = take('-webkit-line-clamp'))) { const n = Number(d.resolved); if (Number.isInteger(n) && n > 0) set('lineClamp', n); else if (d.resolved === 'unset' || d.resolved === 'none') set('lineClamp', 0); }
-  if (decls.has('text-wrap')) { const v = resolve(decls.get('text-wrap').value).value; if (v === 'balance' || v === 'pretty') set('textWrap', v); }
+  if (decls.has('text-wrap')) { const v = resolve(decls.get('text-wrap').value).value; if (v === 'balance' || v === 'pretty' || v === 'nowrap') set('textWrap', v); else if (v === 'wrap') set('textWrap', ''); }
   if ((d = take('object-fit'))) { if (['cover', 'contain', 'fill', 'none', 'scale-down'].includes(d.resolved)) set('objectFit', d.resolved); }
   // Arbitrary properties that map to node fields.
   if ((d = take('mask-image')) || (d = take('-webkit-mask-image'))) { if (d.resolved === 'none') set('mask', ''); else if (SAFE_CSS(d.resolved)) set('mask', normalizeColorsIn(d.resolved)); else { const layers = maskLayersOf(d.resolved); if (layers) { set('mask', ''); set('maskLayers', layers); } else ignore(d.cls, 'unsafe mask'); } }
