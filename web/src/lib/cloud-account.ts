@@ -35,6 +35,8 @@ type CloudAccountApi = {
   forgotPassword(o: { server: string; email: string }): Promise<void>;
   signOut(everywhere?: boolean): Promise<void>;
   request<T = unknown>(path: string, options?: RequestInit): Promise<T>;
+  /** Authenticated request to the account's server returning the raw Response (streamed bodies, status codes). */
+  fetch(path: string, options?: RequestInit): Promise<Response>;
   activeOrganization(): string | null;
   setActiveOrganization(id: string): void;
 };

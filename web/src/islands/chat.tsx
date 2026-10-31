@@ -3,8 +3,10 @@
 // and portals the dock header into #agent-chat-dock. Chat state stays in desktop-panel.js (window.agentWorkspace).
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
+import { installAgentTransport, useAgentTransport } from "@/lib/agent-transport";
 import { hideLegacy } from "@/lib/bridge";
 import { mountIsland } from "@/lib/mount";
+import { WebChatGate } from "./chat/web-gate";
 import { PreviewSetup } from "./chat/preview-setup";
 import { Composer } from "./chat/composer";
 import { DockHeader } from "./chat/header";
@@ -29,8 +31,12 @@ function headerContainer(): HTMLElement | null {
   return el;
 }
 
+// The chat runs turns through the platform's AgentService (IPC on the desktop, the model API on the web).
+installAgentTransport();
+
 function Island() {
   const state = useChatState();
+  const transport = useAgentTransport();
   const header = headerContainer();
 
   // ⌘L / Ctrl+L focuses the composer while the chat dock is open.
@@ -46,13 +52,16 @@ function Island() {
   }, []);
 
   if (!state) return null;
+  // Web: until the model API can run a turn (signed in, enabled on this server, a cloud room open) the composer is
+  // replaced by what is missing. A running turn keeps the composer so it can still be stopped.
+  const gated = transport.runtime === "web" && transport.state !== "ready" && !state.busy;
   return (
     <>
       {header && createPortal(<DockHeader state={state} />, header)}
-      <Transcript state={state} />
+      <Transcript state={gated ? { ...state, suggestions: [] } : state} />
       <QueueList state={state} />
       <PreviewSetup state={state} />
-      <Composer state={state} />
+      {gated ? <WebChatGate transport={transport} /> : <Composer state={state} />}
     </>
   );
 }
