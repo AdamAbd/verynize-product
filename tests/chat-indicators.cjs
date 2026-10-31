@@ -2,6 +2,7 @@
 // Runs against tests/fixtures/fake-codex.cjs with a fixture HOME (never the real ~/.claude or ~/.codex); provider
 // account usage is stubbed in the main process, so nothing touches the network.
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -18,6 +19,7 @@ const path = require('node:path');
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await page.evaluate(() => window.agentWorkspace.openChat());
     await page.evaluate(() => window.agentWorkspace.setDefaults({ agent: 'codex', access: 'edit' }));

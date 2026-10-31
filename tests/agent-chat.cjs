@@ -2,6 +2,7 @@
 // JSON-RPC fake). Covers quick chats in a scratch folder, streaming text, tool cards, per-turn
 // canvas context, session resume, permission cards, stop, transcript branching and persistence.
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -21,6 +22,7 @@ const path = require('node:path');
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle',{state:'attached'});
     await page.evaluate(() => window.agentWorkspace.openChat());
     const completed = n => page.waitForFunction(n => window.agentWorkspace.getUsage().completed === n && !window.agentWorkspace.isBusy(), n, { timeout: 15000 });
@@ -92,6 +94,7 @@ const path = require('node:path');
     assert.equal(await page.evaluate(() => window.agentWorkspace.getDefaults().model), 'fixture-model');
     assert.equal(await page.evaluate(() => window.agentWorkspace.getDefaults().access), 'ask');
     await page.reload();
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle',{state:'attached'});
     await page.evaluate(() => window.agentWorkspace.openProject());
     await page.locator('#code-add-repository').click();
@@ -223,6 +226,7 @@ const path = require('node:path');
     const storedKey = await ws(() => window.agentWorkspace.getState().projectKey);
     await page.evaluate(([key, id]) => { const list = JSON.parse(localStorage.getItem(key)); list.find(c => c.id === id).toolsVersion = 'stale-tools'; localStorage.setItem(key, JSON.stringify(list)); }, ['better-agent-chats:' + storedKey, chatId]);
     await page.reload();
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await page.evaluate(() => window.agentWorkspace.openProject());
     await page.locator('#code-add-repository').click();

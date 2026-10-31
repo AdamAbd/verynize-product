@@ -7,6 +7,7 @@
 // review card in edit access.
 // PREVIEW_HEADER_SHOTS=/dir saves 1440×870 screenshots of the states.
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -37,6 +38,7 @@ process.on('SIGTERM',()=>process.exit(0));
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`, '--force-device-scale-factor=2', '--force-color-profile=srgb'], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 870));
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     const shot = async name => { if (shots) { await fs.mkdir(shots, { recursive: true }); await page.waitForTimeout(250); await page.screenshot({ path: path.join(shots, `${name}.png`) }); } };
@@ -207,12 +209,14 @@ process.on('SIGTERM',()=>process.exit(0));
 
     // The intro returns after a reload until "Don't show this again".
     await page.reload();
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await page.evaluate(() => { window.agentWorkspace.setCodeMode(false); window.agentWorkspace.openChat(); });
     await intro.waitFor();
     await intro.getByRole('button', { name: 'Don’t show this again' }).click();
     await intro.waitFor({ state: 'hidden' });
     await page.reload();
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await page.evaluate(() => { window.agentWorkspace.setCodeMode(false); window.agentWorkspace.openChat(); });
     await page.locator('#chat-start-preview').waitFor();

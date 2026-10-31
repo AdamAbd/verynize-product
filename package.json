@@ -27,7 +27,7 @@
     "lint": "vp lint",
     "format": "vp fmt",
     "format:check": "vp fmt --check",
-    "test:ux": "node tests/wonder-shell.cjs && node tests/settings.cjs && node tests/views-templates.cjs && node --test tests/views-store.cjs && node tests/document-lifecycle.cjs && node tests/cloud-async.cjs && node tests/shell-router.cjs",
+    "test:ux": "node tests/wonder-shell.cjs && node tests/settings.cjs && node tests/views-templates.cjs && node --test tests/views-store.cjs && node tests/document-lifecycle.cjs && node tests/cloud-async.cjs && node tests/shell-router.cjs && node tests/ui-ready.cjs",
     "build:ui": "node scripts/build-ui.cjs",
     "lint:ui": "vp lint web/src",
     "typecheck:ui": "tsc -p tsconfig.json",

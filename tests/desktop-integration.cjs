@@ -1,4 +1,5 @@
 const {_electron:electron}=require('@playwright/test');
+const {waitForUiReady}=require('./helpers/ui-ready.cjs');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
 const os=require('node:os');
@@ -11,7 +12,7 @@ const http=require('node:http');
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const app=await electron.launch({env,args:['.',`--user-data-dir=${path.join(root,'profile')}`]});
  try{
-  const page=await app.firstWindow();await page.waitForSelector('#project-toggle',{state:'attached'});
+  const page=await app.firstWindow();await waitForUiReady(page);await page.waitForSelector('#project-toggle',{state:'attached'});
   await fs.writeFile(path.join(root,'sample.txt'),'hello');
   await app.evaluate(({dialog},root)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[root]})},root);
   // App menu › Code workspace, then add the folder as a repository (Code workspace sidebar).
