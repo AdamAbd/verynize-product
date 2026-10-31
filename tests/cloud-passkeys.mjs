@@ -1,12 +1,11 @@
 // Passkeys on local workerd: registration and sign-in ceremonies produced by a software
 // authenticator written here (WebCrypto keys, CBOR/COSE encoding, real signatures), plus the
 // handoff used by the desktop app and the failure cases the verifier must reject.
-import { Miniflare } from "miniflare";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions, signIn } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions, signIn } from "./cloud-harness.mjs";
 
 const b64 = (bytes) => Buffer.from(bytes).toString("base64url");
 const sha256 = async (bytes) => new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));

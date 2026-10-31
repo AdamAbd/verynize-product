@@ -1,14 +1,13 @@
 // Cloud files against local workerd: a room is a file that the desktop reopens after a restart,
 // the Files home lists workspace rooms and rooms shared with you, and edits made while the server
 // is down survive an app restart and reach the room exactly once (persistent outbox).
-import { Miniflare } from "miniflare";
 import { _electron as electron } from "@playwright/test";
 import { waitForUiReady } from "./helpers/ui-ready.cjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions, passwordUser } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions, passwordUser } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-cloud-files-"));
 const options = await cloudOptions(path.join(dir, "state"));

@@ -30,18 +30,8 @@ import {
   type PreviewTab,
 } from "./store";
 import "./preview-tab.css";
+import { platform } from "@/lib/platform";
 
-type Desktop = {
-  previewNavigate?(options: { direction: string; target: string }): Promise<unknown>;
-  previewLocation?(options: { target: string }): Promise<{ url: string }>;
-  previewOpenBrowser?(options: { target: string }): Promise<unknown>;
-  previewElementAt?(point: { x: number; y: number; target: string }): Promise<unknown>;
-  captureLivePreview?(options: {
-    url: string;
-    region?: unknown;
-    target: string;
-  }): Promise<{ document?: { pages: { nodes: { id: string; parentId: string | null }[] }[] } }>;
-};
 type LivePreview = {
   pickRegion?(
     host: HTMLElement,
@@ -51,7 +41,7 @@ type LivePreview = {
   editMode?(): void;
   openPublish?(frameId: string): void;
 };
-const desktop = () => (window as unknown as { desktop?: Desktop }).desktop;
+const desktop = () => platform.desktop;
 const livePreview = () => (window as unknown as { livePreview?: LivePreview }).livePreview;
 
 const SANDBOX = "allow-scripts allow-forms allow-same-origin allow-downloads";

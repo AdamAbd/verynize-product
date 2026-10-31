@@ -46,7 +46,7 @@
   }
   async function toggle(entry) {
     activate(entry);
-    const api = window.desktop?.devServer;
+    const api = window.verynizePlatform.can('devServer') ? window.desktop.devServer : null;
     if (!api || !entry.node.preview.root) { paint(entry, 'error', 'Connect this preview to a repository through chat.'); return; }
     // Each start is an attempt; results and status polls from an older attempt never repaint a newer one.
     const attempt = entry.attempt = (entry.attempt || 0) + 1;
@@ -240,7 +240,7 @@
   window.design.setSelection(window.design.getSelection());
   setInterval(async () => {
     for (const entry of entries.values()) {
-      if (!entry.node.preview.root || !window.desktop?.devServer || !entry.el.isConnected) continue;
+      if (!entry.node.preview.root || !window.verynizePlatform.can('devServer') || !entry.el.isConnected) continue;
       try { const seq = entry.paintSeq, state = await window.desktop.devServer.status({root: entry.node.preview.root}); if (!entry.el.isConnected) continue;
         // A repaint while this status was in flight (a click, a start result) wins over it.
         if (entry.paintSeq !== seq) continue;
@@ -310,7 +310,7 @@
   }
   $('capture-web-form').onsubmit = async event => {
     event.preventDefault();
-    if (!window.desktop?.captureRemoteProbe) { say('Open the desktop app to capture web pages.'); return; }
+    if (!window.verynizePlatform.can('webCapture')) { say('Open the desktop app to capture web pages.'); return; }
     const {width, height} = viewport();
     loaded = null; $('capture-web-full').disabled = true; $('capture-web-stage').hidden = true; $('capture-web-stage').querySelector('.capture-picker')?.cancel();
     $('capture-web-load').disabled = true; say('Loading page in an isolated session…');

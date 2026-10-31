@@ -1,4 +1,5 @@
 // Typed access to the integrated-terminal part of `window.desktop` (desktop/preload.cjs, desktop/terminal.cjs).
+import { can, platform } from "@/lib/platform";
 
 export type TerminalSession = { id: string; shell: string; cwd: string };
 export type TerminalDataEvent = { id: string; data: string };
@@ -16,10 +17,7 @@ export type TerminalBridge = {
 
 /** The desktop terminal API, or null outside the Electron app (or in a build without terminal support). */
 export function terminalBridge(): TerminalBridge | null {
-  const desktop = (window as unknown as { desktop?: Partial<TerminalBridge> }).desktop;
-  return desktop && typeof desktop.terminalCreate === "function" && typeof desktop.onTerminalData === "function"
-    ? (desktop as TerminalBridge)
-    : null;
+  return can("terminal") ? platform.desktop : null;
 }
 
 /** Largest single terminalWrite the main process accepts is 64 KB; pastes are split below that. */

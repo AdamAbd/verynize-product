@@ -182,7 +182,7 @@
     // comment (the layer links and the date), Google Fonts links and a box-sizing reset (Wonder P1-copy-code.txt).
     const today = () => new Date().toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
     async function snippet(nodes) {
-      if (!window.desktop?.exportCode) return '';
+      if (!window.verynizePlatform.can('codeExport')) return '';
       try {
         const result = await window.desktop.exportCode({flavor: 'tailwind', document: structuredClone(ed.design), pageId: ed.page().id, nodeIds: nodes.map(n => n.id), name: nodes[0].name, snippet: {links: nodes.map(linkTo), date: today()}});
         return String(result?.content || '').trim();

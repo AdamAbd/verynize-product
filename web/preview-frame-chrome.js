@@ -203,7 +203,7 @@
   /** The saved start/setup commands for the starting card (the process status arrives only once it runs). */
   function loadStartConfig(entry) {
     const key = entry.attemptAt || 0;
-    if (entry.startConfigKey === key || !entry.node.preview.root || !window.desktop?.devServer) return;
+    if (entry.startConfigKey === key || !entry.node.preview.root || !window.verynizePlatform.can('devServer')) return;
     entry.startConfigKey = key;
     void window.desktop.devServer.status({root: entry.node.preview.root}).then(status => {
       entry.startConfig = {config: status.config || null, detected: status.detected || null};
@@ -319,7 +319,7 @@
   async function refreshLogs(entry) {
     const pre = entry.chrome.terminal.querySelector('pre');
     let text = '';
-    if (!window.desktop?.devServer) text = 'Logs are available in the Verynize desktop app.';
+    if (!window.verynizePlatform.can('devServer')) text = 'Logs are available in the Verynize desktop app.';
     else if (!entry.node.preview.root) text = 'Connect this preview to a repository to see its logs.';
     else {
       try {
@@ -389,7 +389,7 @@
     const say = text => { $pub('status').textContent = text; placePublish(); };
     const entry = pubEntry;
     if (!entry) return;
-    if (!window.desktop?.cloudAppPublish) return say('Publishing runs in the Verynize desktop app.');
+    if (!window.verynizePlatform.can('publishApps')) return say('Publishing runs in the Verynize desktop app.');
     if (!window.cloudAccount?.get?.()) return say('Sign in to your Verynize account (Share › Account) to publish.');
     const ws = window.agentWorkspace?.getState?.();
     if (ws?.activeRoot && ws.activeRoot !== entry.node.preview.root) return say('Open this preview’s chat to publish its app.');

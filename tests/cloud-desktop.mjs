@@ -1,5 +1,5 @@
-import { Miniflare } from 'miniflare';
-import { cloudOptions } from './cloud-harness.mjs';
+import { Miniflare as Workerd } from 'miniflare';
+import { Miniflare, cloudOptions } from './cloud-harness.mjs';
 import {_electron as electron} from '@playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
@@ -43,7 +43,7 @@ const apps=[];let legacyMf;try{const server=(await mf.ready).origin;const env={.
  await loser.locator('#cloud-publish').click();await loser.waitForFunction(()=>document.getElementById('cloud-public').textContent.includes('public='));const publicLink=await loser.locator('#cloud-public').textContent();const publicId=new URLSearchParams(new URL(publicLink).hash.slice(1)).get('public');assert.equal((await fetch(server+'/api/public/'+publicId)).status,200);await loser.locator('#cloud-unpublish').click();await loser.waitForFunction(()=>document.getElementById('cloud-status').textContent.includes('removed'));assert.equal((await fetch(server+'/api/public/'+publicId)).status,404);
  // Servers without operation support (the previous Worker) keep the snapshot protocol: simultaneous edits retain the losing client's work and require explicit resolution.
  const legacyOptions=await cloudOptions(path.join(dir,'legacy'));const legacyConfig=legacyOptions.workers[0].config;legacyConfig.manifest={mainModule:'worker.js',modules:{'worker.js':{type:'esm',contents:await fs.readFile(new URL('./fixtures/cloud-worker-v1.js',import.meta.url),'utf8')}}};legacyConfig.env={ROOM_CREATION:legacyConfig.env.ROOM_CREATION,ROOMS:legacyConfig.env.ROOMS};legacyConfig.exports={DesignRoom:{type:'durable-object',storage:'sqlite'}};
- legacyMf=new Miniflare(legacyOptions);const legacyServer=(await legacyMf.ready).origin;const panel=(page,open)=>page.evaluate(open=>{const d=document.getElementById('cloud-dialog');if(open&&!d.open)d.showModal();if(!open&&d.open)d.close()},open);
+ legacyMf=new Workerd(legacyOptions);const legacyServer=(await legacyMf.ready).origin;const panel=(page,open)=>page.evaluate(open=>{const d=document.getElementById('cloud-dialog');if(open&&!d.open)d.showModal();if(!open&&d.open)d.close()},open);
  await panel(a,true);await a.locator('#cloud-leave').click();await a.locator('#cloud-server').fill(legacyServer);await a.locator('#cloud-create').click();await a.waitForFunction(server=>document.getElementById('cloud-invite').value.startsWith(server)&&document.getElementById('cloud-invite').value.includes('token='),legacyServer);const legacyInvite=await a.locator('#cloud-invite').inputValue();
  await panel(b,true);await b.locator('#cloud-invite').fill(legacyInvite);await b.locator('#cloud-connect').click();await b.waitForFunction(()=>document.getElementById('cloud-status').textContent.includes('Connected'));await a.waitForFunction(()=>document.getElementById('cloud-presence').textContent==='2 connected');await panel(a,false);await panel(b,false);
  await a.locator('.app-menu-trigger:visible').first().click();await b.locator('.app-menu-trigger:visible').first().click();await Promise.all([a.locator('#rectangle').click(),b.locator('#rectangle').click()]);await Promise.race([a.waitForFunction(()=>!document.getElementById('cloud-conflict').hidden),b.waitForFunction(()=>!document.getElementById('cloud-conflict').hidden)]);

@@ -1,6 +1,6 @@
 // Published applications: one SQLite Durable Object per app holding immutable, versioned
 // static builds (HTML/JS/CSS/assets uploaded from the desktop after a local build).
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject } from "#cloud-runtime";
 import { rpcFail, bytesHex } from "./http.js";
 
 const CHUNK = 1024 * 1024;

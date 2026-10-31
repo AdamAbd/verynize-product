@@ -7,9 +7,10 @@ import { cn } from "@/lib/utils";
 import { agentWorkspace, settingsApi } from "./api";
 import { Card, PageHeader, Row, Section, SettingsButton } from "./controls";
 import { desktopApi, errorText, type Profile } from "./workspace-ipc";
+import { can, platform } from "@/lib/platform";
 
 type Limit = { id: string; label: string; usedPercent: number; resetsAt?: number };
-type ProviderUsage = {
+export type ProviderUsage = {
   agent: "claude" | "codex";
   status: "ready" | "signed-out" | "unavailable" | "missing" | "error";
   message?: string;
@@ -28,25 +29,21 @@ type ProviderUsage = {
   resetCredits?: number;
   updatedAt?: number;
 };
-type LayerUsage = {
+export type LayerUsage = {
   thisWeek: number;
   lastWeek: number;
   total: number;
   weekStart: number;
   resetsAt: number;
 };
-type UsageIpc = {
+export type UsageIpc = {
   read(options: { agent: "claude" | "codex"; refresh?: boolean; profile?: string }): Promise<ProviderUsage>;
   layers(): Promise<LayerUsage>;
 };
 
-const usageIpc = () =>
-  (window as unknown as { desktop?: { agentUsage?: Partial<UsageIpc> } }).desktop?.agentUsage;
+const usageIpc = (): Partial<UsageIpc> | undefined => platform.desktop?.agentUsage;
 const openExternal = (url: string) => {
-  const open = (
-    window as unknown as { desktop?: { openExternal?: (url: string) => Promise<unknown> } }
-  ).desktop?.openExternal;
-  if (open) void open(url);
+  if (can("externalLinks")) void platform.desktop?.openExternal(url);
   else window.open(url, "_blank", "noopener");
 };
 
