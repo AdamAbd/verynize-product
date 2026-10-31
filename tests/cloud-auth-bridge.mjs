@@ -2,12 +2,11 @@
 // rooms, profiles and invitations made for their email, legacy magic-link accounts link by verified
 // email, sockets accept the bearer token, sign-out ends both kinds of session, and the emailed
 // links land on the server's verification and password-reset pages. Local workerd, built bundle.
-import { Miniflare } from "miniflare";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions, signIn } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions, signIn } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-auth-bridge-"));
 const mf = new Miniflare(await cloudOptions(path.join(dir, "state")));

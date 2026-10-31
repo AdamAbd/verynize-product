@@ -1,8 +1,7 @@
 // Two Electron clients in one room: an image inserted by one client is uploaded to the room's R2
 // asset store and the other client receives only its URL (never the data URI). The image renders
 // in both editors and a raster export inlines it for the offline renderer.
-import { Miniflare } from "miniflare";
-import { cloudOptions } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 import { _electron as electron } from "@playwright/test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";

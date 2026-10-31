@@ -1,12 +1,11 @@
 // Better Auth on D1 (cloud/auth.js): email + password sign-up, required email verification,
 // bearer sessions for the cookie-less desktop, password reset, organizations, per-IP rate limits
 // and persistence across a restart, on local workerd with the built Worker bundle.
-import { Miniflare } from "miniflare";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-auth-"));
 const options = await cloudOptions(path.join(dir, "state"));

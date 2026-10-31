@@ -1,5 +1,4 @@
-import { Miniflare } from 'miniflare';
-import { cloudOptions } from './cloud-harness.mjs';
+import { Miniflare, cloudOptions } from './cloud-harness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
