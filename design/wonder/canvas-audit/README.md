@@ -1,0 +1,87 @@
+# Canvas parity: Verynize vs Wonder (2026-10-31)
+
+Gap analysis of canvas behaviour: context menus, toolbar, selection, transform, camera, keyboard and clipboard, text, and the Layers and Pages panels. It is documentation only; no app source was changed.
+
+## Method
+
+| Side | Captured by | Evidence |
+|---|---|---|
+| Wonder | A Codex computer-use agent (gpt-6-astra) on the live app, in the scratch file "Sunbird". Uses `cliclick` and `screencapture -x` at 2×, full window 2880×1740. | [wonder/notes.md](wonder/notes.md) (steps, exact strings, measurements, verdict per id), [manifest.json](wonder/manifest.json) (SHA-256), [measurements.json](wonder/measurements.json) |
+| Verynize | Claude (Opus) with Playwright `_electron`: 1440×870 at 2×, temp profile, fixture document. | [verynize/notes.md](verynize/notes.md) (source `file:line` and fix sketch per id), [verynize/capture.cjs](verynize/capture.cjs), [metrics.json](verynize/metrics.json) |
+
+- **Pairs.** `pairs/<id>-<state>.png` puts Wonder on the left and Verynize on the right. Rebuild them with `python3 design/wonder/canvas-audit/make-pairs.py`.
+  - The script pairs each Verynize shot with Wonder's verified retake (`-verified`, `-confirmed`, `-ready`, `-menu`, `-retry`, `-focused`, `-final`).
+  - It skips the first attempts that the Wonder notes exclude as evidence. Several of those are byte-identical stale-page frames; filenames alone are not proof.
+- **Checklist.** Ids come from [CHECKLIST.md](CHECKLIST.md). X1–X3 are extra findings from the Wonder pass.
+
+## Context menus: the menu depends on the target
+
+| Target | Wonder (proof) | Verynize now |
+|---|---|---|
+| Empty canvas (CM1) | Select all ⌘A, then Paste here, then Hide left sidebar and Hide right sidebar. [pair](pairs/CM1-empty.png) | Select all, Select inverse, Zoom to fit, Zoom to selection |
+| Frame (CM2) | **Add context ⌘L** · Copy ⌘C, Copy as ›, Copy link to selection · Select layer ›, Paste ⌘V, Paste to replace ⌘⇧R, Paste over selection ⌘⇧V, Duplicate ⌘D · Hide ⌘⇧H, Lock ⌘⇧L, Hide label · Arrange › · Layout › · Set as file thumbnail. [pair](pairs/CM2-frame.png) | One flat 36-item list without submenus (`web/canvas-interactions.js:1499-1519`). The size badge draws over the menu. |
+| Copy as › | Copy as code ⌘⇧C, Copy as PNG, Copy prompt ⌘⇧⌥C, Copy styles ⌘⌥C. [pair](pairs/CM2-copy-as.png) | Flat items, no Copy prompt |
+| Arrange › | Bring to front ⌥⌘], Bring forward ⌘], Send backward ⌘[, Send to back ⌥⌘[ · Flip horizontal ⇧H, Flip vertical ⇧V. [pair](pairs/CM2-arrange.png) | Flat; adds Rotate 90° and Scale ½× / 2× |
+| Layout › | Frame selection ⌘G, Add auto layout ⇧A. [pair](pairs/CM2-layout.png) | Flat; adds Unframe and Remove auto layout |
+| Select layer › | The layers under the cursor. [pair](pairs/CM2-select-layer.png) | Missing |
+| Text (CM3) | The frame menu without Hide label. [pair](pairs/CM3-text.png) | The same flat list |
+| Multi-select (CM5) | Adds **Use as mask** after Layout; one bounding box around the whole selection. [pair](pairs/CM5-multi.png) | Flat list; box around the first node only |
+| Hidden / locked (CM6) | Show ⌘⇧H / Unlock ⌘⇧L. [pair](pairs/CM6-hidden.png), [pair](pairs/CM6-locked.png) | Fixed "Show/hide" and "Lock/unlock"; right-clicking a locked layer selects the artboard |
+| Layer row (CM7) | The frame menu without Select layer. [pair](pairs/CM7-row.png) | Rename, Lock, Hide |
+| Page row (CM8) | Rename F2 · Delete (red). [pair](pairs/CM8-page.png) | Rename page, Delete page (with icons) |
+| Artboard label (CM9) | The frame menu. [pair](pairs/CM9-label.png) | The empty-canvas menu; the frame is not selected |
+| Paste state (CM10) | Paste stays listed. [pair](pairs/CM10-copied.png) | Paste is hidden when nothing has been copied |
+
+Menu style in Wonder: 176 px wide, 25 px row pitch, 4 px inset, radius ≈ 12, background rgb(28,28,28), highlighted row rgb(76,48,91). Verynize's menu is 210 px wide on #262626.
+
+## Everything else
+
+| Id | Wonder | Verynize | Verdict |
+|---|---|---|---|
+| T1 toolbar | 6 tools (Move V, Scale K, Hand H · Frame F, Shader S, Text T), plus Details, Design and `+` ("Save or choose a view"). [pair](pairs/T1-move.png) | 8 tools: adds Eyedropper and Ellipse buttons; `+` tooltip is "Views" | **Gap, P2** |
+| T2 / T3 | `+` = saved views (Save current view, Reset to Design, Details ⌥1, Design ⌥2, Canvas ⌥0). Details hides the left sidebar. [pair](pairs/T2-plus.png) | Match | **Match** |
+| T4 Scale | Scales proportionally (100×70 → 150×105, 150 %). [pair](pairs/T4-scale.png) | Takes the larger axis factor: a small drag made 1440×72 → 2597.9×129.9 | **Gap, P1** |
+| T5 `?` | Help menu: Docs, Keyboard shortcuts, Restart onboarding, Give feedback, Contact us, Discord, Export diagnostic logs · What's new. [pair](pairs/T5-help.png) | Shortcut popover with 19 rows | **Gap, P2** |
+| T6 zoom label | Zoom to 50 %, Zoom to 100 % ⇧0, Zoom to 200 % · Zoom in ⌘+, Zoom out ⌘−, Zoom to fit ⇧1. [pair](pairs/T6-zoom.png) | Different order; adds Snap and Saved views; no 50 % or 200 % items | **Gap, P2** |
+| S1 hover | Purple outline and name, no handles. [pair](pairs/S1-hover.png) | Close | **Match** (nested hover unverified) |
+| S2 click / Esc | Click selects the inner frame (deep); Esc deselects everything. [pair](pairs/S2-escape.png) | Same | **Match** (the checklist's "one level up" is refuted) |
+| S4 chrome | Badge `300 x 270` with no "Fixed"; Hug shown as `59.39 Hug x 14.5 Hug`; ⊕ add-to-chat chip at the top-right; one box around a multi-selection. [pair](pairs/S4-frame.png) | Badge `1440 × 900`; no ⊕ chip; multi-selection box covers the first node only | **Gap, P1** |
+| TR1 resize | Edge and corner resize, Shift keeps aspect, Alt resizes from the centre. [pair](pairs/TR1-corner.png) | Corners only, no edge handles; Alt also turns on the distance guides | **Gap, P2** |
+| TR2 rotate | Drag just outside a corner rotates (−47.19°); the label, handles and badge rotate with it. [pair](pairs/TR2-rotate.png) | Missing: the drag starts a marquee | **Gap, P1** |
+| TR3 nudge | 1 / 10 px | Same | **Match** |
+| TR4 guides | Thin **blue** centre guide. [pair](pairs/TR4-guide.png) | Pink guides | **Gap, P2** (equal spacing unverified) |
+| TR5 Alt distances | Blue labels, dashed lines, node to node. [pair](pairs/TR5-alt-parent.png) | Red lines, one parent distance | **Gap, P2** |
+| TR6 Alt-drag | Duplicates, renaming the copy "Frame 3". [pair](pairs/TR6-alt-duplicate.png) | Duplicates with the same name | **Gap, P2** |
+| TR7 / TR8 | Layout marks: blue padding, orange gap. Reparenting on canvas is unproven. [pair](pairs/TR8-gap-padding.png) | Coloured bands and a slot bar | Close; editing unverified |
+| V1–V4 camera | ⇧0, ⇧1 and ⇧2 work (fit 113 %, selection 538 %); no rulers or grid. [pair](pairs/V3-selection.png) | Same commands; stops 5–3200 % | **Match** (Wonder's full stop table is unverified) |
+| K1 shortcuts | A searchable right-hand drawer with sections APPLICATION … TEXT EDITING and a pinned Command palette ⌘K (full transcript in the Wonder notes). [pair](pairs/K1-shortcuts.png) | `?` popover; ⌘K opens Files | **Gap, P1** |
+| K2 clipboard | **Paste here** pastes at the cursor; ⌘D offsets to the right with a gap. [pair](pairs/K2-paste-here.png) | No Paste here or Paste to replace; ⌘⇧V is Paste in place; ⌘D offsets +20/+20 | **Gap, P1** |
+| K3 | ⌘G wraps the selection in a Frame; hide and lock work. [pair](pairs/K3-frame-selection.png) | Same | **Match** |
+| TX1 text | Click: empty text, Hug × Hug, Inter Regular 12, colour 000000 (FFFFFF on dark). Drag: fixed box at the gesture size. [pair](pairs/TX1-click.png) | "Your next idea", 240×60, system-ui 24 | **Gap, P1** |
+| L1 layers | Eye and lock on hover; tooltip "Lock layer"; drag reparents. [pair](pairs/L1-hover.png) | Close; native "Lock" tooltip | **Gap, P2** |
+| L2 pages | Inline rename; drag-reorder with a purple insertion line. [pair](pairs/L2-rename.png) | Rename opens a modal; pages cannot be reordered; no delete confirmation | **Gap, P2** |
+| X3 eyedropper | Circular magnifier with a pixel grid and the RGB readout; clicking copies the hex (toast). | Eyedropper is a toolbar button | Compare when implementing |
+
+## Fix list (by user impact)
+
+1. **Context menu per target** (CM1–CM10): use a Radix context menu, which also fixes the badge drawing over it, with Wonder's groups and the Copy as / Select layer / Arrange / Layout submenus.
+   - Hide label only on top-level frames; Use as mask only for multi-selections.
+   - Show/Unlock labels follow the layer's state.
+   - Layer rows get the same model without Select layer; the artboard label opens the frame menu.
+2. **Clipboard commands** (K2): Paste here at the cursor, Paste to replace ⌘⇧R, Paste over selection ⌘⇧V, Copy link to selection, Copy prompt.
+3. **Rotate from outside the corners** (TR2), with the label, handles and badge rotating along.
+4. **Selection chrome** (S4): the ⊕ add-to-chat chip, one box around a multi-selection, and `W x H` badge text.
+5. **Text defaults** (TX1): click makes empty Hug text in Inter 12; drag makes a fixed box.
+6. **Scale tool** (T4): proportional scaling.
+7. **Shortcut drawer and ⌘K command palette** (K1, T5): `?` becomes the Help menu.
+8. Polish: toolbar tool set (T1), zoom menu (T6), guide and distance colours (TR4/TR5), copy naming on Alt-drag (TR6), edge resize handles (TR1), inline page rename and reorder (L2), Wonder's tooltip strings (L1).
+
+**Not proven in Wonder; leave alone:**
+- the menu for a non-frame child (CM4) and a truly empty internal clipboard (CM10);
+- the remaining tooltip texts (T1);
+- Shift add/remove (S3) and the Fill badge (S4);
+- equal-spacing snapping (TR4) and child-to-parent distance numbers (TR5);
+- reparenting by drag on the canvas (TR7) and editing the layout handles (TR8);
+- the zoom stop table, Space-pan and wheel/pinch zoom (V1/V2);
+- what each paste mode and each Copy as option actually puts on the clipboard (K2);
+- unframe and delete (K3).
