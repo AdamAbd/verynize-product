@@ -78,3 +78,5 @@
 /* Hidden page background (Wonder H8): the page is transparent, shown as a checkerboard (tokens in globals.css);
    outranks the chrome island's body.bd-chrome>main>#workspace background. */
 html>body>main>#workspace.page-transparent{background-color:var(--page-checker-a);background-image:repeating-conic-gradient(var(--page-checker-b) 0% 25%,var(--page-checker-a) 0% 50%);background-size:12px 12px}
+/* A new empty text layer (Text tool, Wonder TX1) hugs nothing: keep one caret-wide line so the caret shows. */
+#canvas .layer[data-text-editing]:empty{min-width:1px;min-height:1lh}

@@ -180,7 +180,7 @@ export function TitleBar() {
 
       <div className={cn("min-w-4 self-stretch", codeMode ? "shrink-0" : "flex-1")} />
 
-      <Tip label="Search" shortcut="⌘K" side="bottom">
+      <Tip label="Search files" side="bottom">
         <button
           type="button"
           id="shell-search"
