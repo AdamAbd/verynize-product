@@ -1,0 +1,8 @@
+/*
+ * The selection size badge is created by web/app.js with an inline `z-index: 10000`, which painted it over every
+ * portalled menu (#bd-portal is z-index 1000; Wonder canvas audit CM2). It only has to clear the canvas overlay
+ * (z-index 5), so keep it at the value web/wonder-shell.css already intends.
+ */
+#selection-measure {
+  z-index: 20 !important;
+}

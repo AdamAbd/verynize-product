@@ -419,3 +419,18 @@ html[data-ui-theme="light"] {
   --terminal-bright-white: #1c1c1c;
 }
 /* </terminal-tokens> */
+
+/* <context-menu-tokens> (canvas, layer-row and page-row context menus; Wonder canvas-audit CM1–CM10) */
+:root {
+  --context-menu: #1c1c1c; /* menu surface, rgb(28,28,28) */
+  --context-menu-highlight: #4c305b; /* highlighted row, rgb(76,48,91) */
+}
+html[data-ui-theme="light"] {
+  --context-menu: #ffffff;
+  --context-menu-highlight: #ecdaf6;
+}
+@theme inline {
+  --color-context-menu: var(--context-menu);
+  --color-context-menu-highlight: var(--context-menu-highlight);
+}
+/* </context-menu-tokens> */

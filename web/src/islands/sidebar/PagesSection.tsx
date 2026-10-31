@@ -1,15 +1,10 @@
 // "Pages" section: add page (`#add-page`, taken over from the legacy panel), page rows, rename/delete.
 import { useRef } from "react";
-import { File, Pencil, Trash2 } from "lucide-react";
+import { File } from "lucide-react";
 import { PlusIcon } from "@/components/icons";
 import { design } from "@/lib/bridge";
 import { useDocSummary, type PageInfo } from "./hooks";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { PageRowMenu, RowMenuRoot, RowMenuTrigger } from "../context-menu/RowMenus";
 import { cn } from "@/lib/utils";
 import { IconButton, SectionHeader } from "./parts";
 import { runLegacy, useTakeOver } from "./legacy";
@@ -23,8 +18,8 @@ function withPage(id: string, command: "rename-page" | "delete-page") {
 
 function PageRow({ page, active, canDelete }: { page: PageInfo; active: boolean; canDelete: boolean }) {
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
+    <RowMenuRoot>
+      <RowMenuTrigger asChild>
         <button
           type="button"
           data-page-id={page.id}
@@ -40,22 +35,13 @@ function PageRow({ page, active, canDelete }: { page: PageInfo; active: boolean;
           <File className="size-4 shrink-0 text-foreground" />
           <span className="ml-2.5 truncate">{page.name}</span>
         </button>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-44">
-        <ContextMenuItem onSelect={() => withPage(page.id, "rename-page")}>
-          <Pencil />
-          Rename page
-        </ContextMenuItem>
-        <ContextMenuItem
-          variant="destructive"
-          disabled={!canDelete}
-          onSelect={() => withPage(page.id, "delete-page")}
-        >
-          <Trash2 />
-          Delete page
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+      </RowMenuTrigger>
+      <PageRowMenu
+        canDelete={canDelete}
+        onRename={() => withPage(page.id, "rename-page")}
+        onDelete={() => withPage(page.id, "delete-page")}
+      />
+    </RowMenuRoot>
   );
 }
 

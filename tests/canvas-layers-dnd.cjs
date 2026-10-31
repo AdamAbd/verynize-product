@@ -128,12 +128,15 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal((await node('a')).x, 150, 'a mirrored to the right'); assert.equal((await node('b')).x, 0, 'b mirrored to the left');
     assert.equal((await node('b')).flipX, true);
     await undo();
-    // Rotate 90° from the context menu.
+    // Rotate 90° left the context menu (Wonder's Arrange submenu only flips); it stays a command with ⌥⇧R.
     await page.evaluate(() => window.design.setSelection(['b']));
     const bc = await canvasRect('b');
     await page.mouse.click(bc.left + 10, bc.top + 10, {button: 'right'});
-    for (const id of ['transform.flipH', 'transform.flipV', 'transform.rotate90', 'edit.copyPng', 'edit.copyCode', 'select.inverse', 'select.matching']) assert.ok(await page.locator(`#canvas-menu [data-command="${id}"]`).isVisible(), id + ' in context menu');
-    await page.locator('#canvas-menu [data-command="transform.rotate90"]').click();
+    await page.locator('#canvas-menu [data-command="menu.arrange"]').hover();
+    await page.locator('[data-submenu="menu.arrange"]').waitFor({timeout: 3000});
+    for (const id of ['transform.flipH', 'transform.flipV']) assert.ok(await page.locator(`[data-submenu="menu.arrange"] [data-command="${id}"]`).isVisible(), id + ' in the Arrange submenu');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.design.runCommand('transform.rotate90'));
     assert.equal((await node('b')).rotation, 90, 'rotate 90°');
     await page.keyboard.press('Alt+Shift+KeyR');
     assert.equal((await node('b')).rotation, 180, '⌥⇧R rotates again');
