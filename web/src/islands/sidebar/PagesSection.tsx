@@ -1,7 +1,13 @@
 // "Pages" section: add page (`#add-page`, taken over from the legacy panel), page rows, rename/delete.
 // Rename is inline in the row (double-click, or the legacy `#rename-page` command, which this section intercepts while the
 // list is visible); rows reorder by drag (page-drag.ts).
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { File } from "lucide-react";
 import { PlusIcon } from "@/components/icons";
 import { design, legacy } from "@/lib/bridge";
@@ -13,10 +19,10 @@ import { pageDragJustEnded, usePageDrag, type PageDrop } from "./page-drag";
 import { runLegacy, useTakeOver } from "./legacy";
 import { contract } from "./contract";
 
-/** Legacy rename/delete act on the active page, so activate the row's page first. */
-function withPage(id: string, command: "rename-page" | "delete-page") {
+/** Legacy delete acts on the active page, so activate the row's page first. */
+function deletePage(id: string) {
   design().setActivePage(id);
-  runLegacy(command);
+  runLegacy("delete-page");
 }
 
 /** Start an inline rename once open menus have closed (they return focus to their trigger, which would blur the field). */
@@ -54,17 +60,18 @@ function PageRow({
   );
   if (renaming)
     return (
-      <div data-page-id={page.id} data-page-name={page.name} className={cn(rowClass, "hover:bg-transparent", active && "bg-transparent")}>
+      <div
+        data-page-id={page.id}
+        data-page-name={page.name}
+        className={cn(rowClass, "hover:bg-transparent", active && "bg-transparent")}
+      >
         <File className="size-4 shrink-0 text-foreground" />
         <div className="ml-2.5 flex min-w-0 flex-1">
           <InlineRename
             value={page.name}
             label="Page name"
             className="-ml-1.5 h-5 bg-page-rename selection:bg-selection"
-            onCommit={(name) => {
-              design().setActivePage(page.id);
-              design().updatePage({ name });
-            }}
+            onCommit={(name) => design().updatePage({ name }, page.id)}
             onDone={() => onRename(null)}
           />
         </div>
@@ -94,8 +101,10 @@ function PageRow({
       </RowMenuTrigger>
       <PageRowMenu
         canDelete={canDelete}
-        onRename={() => withPage(page.id, "rename-page")}
-        onDelete={() => withPage(page.id, "delete-page")}
+        // Wonder L2-rename-field / L2-renamed-confirmed: renaming another page from its menu keeps the current page
+        // active, so the row is renamed by id without switching pages.
+        onRename={() => afterMenusClose(() => onRename(page.id))}
+        onDelete={() => deletePage(page.id)}
       />
     </RowMenuRoot>
   );
@@ -132,7 +141,12 @@ export function PagesSection({ open, onToggle }: { open: boolean; onToggle: () =
     const original = el.onclick;
     el.onclick = function (this: GlobalEventHandlers, event: PointerEvent) {
       const list = listRef.current;
-      if (listVisible.current && list && list.getClientRects().length && !document.body.classList.contains("left-collapsed")) {
+      if (
+        listVisible.current &&
+        list &&
+        list.getClientRects().length &&
+        !document.body.classList.contains("left-collapsed")
+      ) {
         const id = design().getDocument().activePage;
         afterMenusClose(() => setRenaming(id));
         return;
@@ -151,7 +165,12 @@ export function PagesSection({ open, onToggle }: { open: boolean; onToggle: () =
           <PlusIcon className="size-4" />
         </IconButton>
       </SectionHeader>
-      <div ref={listRef} id="bd-page-list" hidden={!open} className="relative flex flex-col gap-0.5 px-1.5 pb-1.5">
+      <div
+        ref={listRef}
+        id="bd-page-list"
+        hidden={!open}
+        className="relative flex flex-col gap-0.5 px-1.5 pb-1.5"
+      >
         {doc.pages.map((page) => (
           <PageRow
             key={page.id}

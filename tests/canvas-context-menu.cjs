@@ -164,7 +164,9 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     const labelBox = await label.boundingBox();
     await rightClick({x: labelBox.x + 6, y: labelBox.y + labelBox.height / 2});
     assert.deepEqual(await selection(), ['side'], 'the label selects its frame');
-    assert.deepEqual(await items(), FRAME_MENU, 'label menu = frame menu');
+    // Wonder CM9-label: the row menu (no Select layer; Copy link to selection is followed directly by Paste).
+    const ROW_MENU = without(FRAME_MENU, 'Select layer').filter((x, i, list) => !(x === '|' && list[i + 1] === 'Paste'));
+    assert.deepEqual(await items(), ROW_MENU, 'label menu has no Select layer');
     await item('menu.hideLabel').click();
     assert.equal((await node('side')).labelHidden, true, 'Hide label');
     await page.evaluate(() => window.design.setSelection([]));
@@ -179,6 +181,13 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await page.evaluate(() => window.design.runCommand('edit.copy'));
     await rightClick(await at('a'));
     assert.equal(await disabled('edit.paste'), false, 'Paste is enabled once layers are copied');
+    assert.ok(!(await items()).includes('Paste styles'), 'no Paste styles before Copy styles (Wonder CM2/CM5/CM10)');
+    await close();
+    // Paste styles ⌘⌥V follows Paste once styles are copied (Wonder P3-inside-menu, P5-mask-menu).
+    await page.evaluate(() => window.design.runCommand('edit.copyStyle'));
+    await rightClick(await at('a'));
+    { const list = await items(); assert.deepEqual(list.slice(list.indexOf('Paste'), list.indexOf('Paste') + 3), ['Paste', 'Paste styles', 'Paste to replace'], 'Paste styles after Paste'); }
+    assert.equal(await page.locator('[data-bd-context-menu] [data-command="edit.pasteStyle"]').first().textContent().then(t => t.includes('⌘⌥V')), true, 'Paste styles shortcut');
     const before = (await activeNodes()).length;
     await item('edit.paste').click();
     await page.waitForTimeout(100);

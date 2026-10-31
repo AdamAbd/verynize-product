@@ -1,7 +1,10 @@
 // "Use as mask" (Wonder canvas audit P5, design/wonder/canvas-audit/wonder/P5-*.png):
-// - Two sibling layers selected → the bottom one is consumed: its rectangle becomes a shape mask on the top one,
+// - Two or more sibling layers selected → the bottom one is consumed: its rectangle becomes a shape mask on the top one,
 //   stored as `inset(T% R% B% L%)` of the top layer's box (P5-mask-inspector shows `inset(-50% -50% -50% -5…` for a
 //   200×200 source under a centred 100×100 target). No wrapper or group is created; the source layer is removed.
+// - CM5-multi-verified shows the item for four selected top-level siblings, but Wonder's result for more than two was
+//   not captured. Assumption: the bottom-most selected sibling's shape becomes the mask of every other selected
+//   sibling (each gets its own inset() relative to its own box), and the bottom-most layer is consumed.
 // - "Detach mask as shape" recreates the geometry as a plain white Frame right below the layer (P5-detach-mask:
 //   the source's fill is not restored) and drops the mask. "Remove mask" only clears it (P5-remove-result).
 // Every operation is one undo step. Rendering and validation live in web/node-style.js (mask type `shape`).
@@ -43,17 +46,21 @@ function boxOf(node: LayerNode, nodes: LayerNode[]): Box {
   };
 }
 
-/** The selection as [top, bottom] when it is exactly two siblings (Wonder offers Use as mask only then). */
-export function maskPair(): [MaskedNode, MaskedNode] | null {
+/**
+ * The selection as { targets, source } when it is two or more siblings: `source` is the bottom-most selected layer,
+ * `targets` the others (Wonder offers Use as mask for any multi-selection of siblings, CM5-multi-verified / P5).
+ */
+export function maskGroup(): { targets: MaskedNode[]; source: MaskedNode } | null {
   const ids = design().getSelection();
-  if (ids.length !== 2) return null;
+  if (ids.length < 2) return null;
   const nodes = activePage(design().getDocument())?.nodes ?? [];
   const index = ids.map((id) => nodes.findIndex((n) => n.id === id));
   if (index.some((i) => i < 0)) return null;
-  const [a, b] = index.map((i) => nodes[i] as MaskedNode);
-  if ((a.parentId ?? null) !== (b.parentId ?? null)) return null;
-  // Later layers paint above earlier siblings.
-  return index[0] > index[1] ? [a, b] : [b, a];
+  const parent = nodes[index[0]].parentId ?? null;
+  if (index.some((i) => (nodes[i].parentId ?? null) !== parent)) return null;
+  // Later layers paint above earlier siblings, so the lowest index is the bottom-most.
+  const sorted = [...index].sort((a, b) => a - b).map((i) => nodes[i] as MaskedNode);
+  return { source: sorted[0], targets: sorted.slice(1) };
 }
 
 /** Index of the layer's first shape mask, or -1. */
@@ -67,27 +74,33 @@ function commit(doc: ReturnType<ReturnType<typeof design>["getDocument"]>, selec
   design().setSelection(selection);
 }
 
-/** Turn the bottom sibling into a shape mask on the top sibling and remove the bottom layer (one undo step). */
+/**
+ * Turn the bottom-most selected sibling into a shape mask on every other selected sibling and remove it (one undo
+ * step). The remaining siblings stay selected.
+ */
 export function useAsMask(): boolean {
-  const pair = maskPair();
-  if (!pair) return false;
-  const [top, bottom] = pair;
+  const group = maskGroup();
+  if (!group) return false;
+  const { source, targets } = group;
   const doc = design().getDocument();
   const page = activePage(doc);
-  const t = boxOf(top, page.nodes);
-  const b = boxOf(bottom, page.nodes);
-  if (!(t.w > 0 && t.h > 0)) return false;
-  const inset = [
-    ((b.y - t.y) / t.h) * 100,
-    ((t.x + t.w - (b.x + b.w)) / t.w) * 100,
-    ((t.y + t.h - (b.y + b.h)) / t.h) * 100,
-    ((b.x - t.x) / t.w) * 100,
-  ].map((v) => Math.min(99999, Math.max(-99999, round(v))));
-  const shape = `inset(${inset.map((v) => `${v}%`).join(" ")})`;
-  const target = page.nodes.find((n) => n.id === top.id) as MaskedNode;
-  target.masks = [...(target.masks ?? []), { type: "shape", shape }];
+  const b = boxOf(source, page.nodes);
+  const boxes = targets.map((top) => boxOf(top, page.nodes));
+  if (!boxes.every((t) => t.w > 0 && t.h > 0)) return false;
+  targets.forEach((top, i) => {
+    const t = boxes[i];
+    const inset = [
+      ((b.y - t.y) / t.h) * 100,
+      ((t.x + t.w - (b.x + b.w)) / t.w) * 100,
+      ((t.y + t.h - (b.y + b.h)) / t.h) * 100,
+      ((b.x - t.x) / t.w) * 100,
+    ].map((v) => Math.min(99999, Math.max(-99999, round(v))));
+    const shape = `inset(${inset.map((v) => `${v}%`).join(" ")})`;
+    const target = page.nodes.find((n) => n.id === top.id) as MaskedNode;
+    target.masks = [...(target.masks ?? []), { type: "shape", shape }];
+  });
   // The consumed layer goes, with anything inside it.
-  const gone = new Set([bottom.id]);
+  const gone = new Set([source.id]);
   for (let grew = true; grew;) {
     grew = false;
     for (const n of page.nodes)
@@ -97,7 +110,10 @@ export function useAsMask(): boolean {
       }
   }
   page.nodes = page.nodes.filter((n) => !gone.has(n.id));
-  commit(doc, [top.id]);
+  commit(
+    doc,
+    targets.map((n) => n.id),
+  );
   return true;
 }
 

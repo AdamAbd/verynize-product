@@ -1,5 +1,6 @@
-// "Use as mask" (Wonder canvas audit P5): offered only for exactly two sibling layers; the bottom sibling becomes a
-// shape mask (inset() of the top layer's box) on the top sibling and disappears, without a wrapper, in one undo step.
+// "Use as mask" (Wonder canvas audit P5, CM5-multi-verified): offered for two or more sibling layers; the bottom-most
+// sibling becomes a shape mask (inset() of each other layer's box) on every other selected sibling and disappears,
+// without a wrapper, in one undo step.
 // The mask clips the canvas pixels; the inspector shows it as an inset() row; "Detach mask as shape" recreates the
 // geometry as a white Frame below the layer and "Remove mask" only clears it (menu and inspector, each undoable).
 const { _electron } = require("@playwright/test");
@@ -134,11 +135,11 @@ const path = require("node:path");
     const YELLOW = await pixel(...outside);
     assert.ok(YELLOW[2] < YELLOW[0] - 60, `the source paints before the conversion (${YELLOW})`);
 
-    // The item only shows for exactly two siblings.
+    // The item needs two or more siblings.
     for (const [ids, label] of [
       [["target"], "a single layer"],
       [["target", "kid"], "layers with different parents"],
-      [["source", "target", "art"], "three layers"],
+      [["source", "target", "kid"], "three layers, one with another parent"],
     ]) {
       await select(ids);
       await rightClick(ids[0] === "kid" ? "kid" : "target");
@@ -207,6 +208,37 @@ const path = require("node:path");
     assert.equal(all.length, before);
     assert.ok(all.some((n) => n.id === "source"));
     assert.equal(all.find((n) => n.id === "target").masks, undefined);
+    near(await pixel(...outside), YELLOW, "undo restores the source");
+
+    // Three siblings (Wonder CM5-multi-verified offers the item for four): the bottom-most selected one masks each of
+    // the others, relative to each one's own box, and is consumed; one undo step restores everything.
+    await select(["art", "target", "source"]);
+    await rightClick("target");
+    if ((await selection()).length !== 3) await select(["art", "target", "source"]);
+    assert.deepEqual(await menuAfterLayout(), ["Use as mask"], "Use as mask for three siblings");
+    await item("menu.useAsMask").click();
+    all = await nodes();
+    assert.equal(all.length, before - 1, "only the bottom-most sibling is removed");
+    assert.equal(
+      all.find((n) => n.id === "source"),
+      undefined,
+    );
+    assert.deepEqual(all.find((n) => n.id === "target").masks, [
+      { type: "shape", shape: "inset(-50% -50% -50% -50%)" },
+    ]);
+    // art: 300×300 at (400, 0); source 200×200 at (100, 100).
+    assert.deepEqual(all.find((n) => n.id === "art").masks, [
+      { type: "shape", shape: "inset(33.333% 133.333% 0% -100%)" },
+    ]);
+    assert.ok(
+      all.some((n) => n.id === "kid"),
+      "children of a masked layer stay",
+    );
+    assert.deepEqual((await selection()).toSorted(), ["art", "target"]);
+    await undo();
+    all = await nodes();
+    assert.equal(all.length, before, "one undo step");
+    assert.ok(["target", "art"].every((id) => all.find((n) => n.id === id).masks === undefined));
     near(await pixel(...outside), YELLOW, "undo restores the source");
 
     // A smaller bottom sibling clips the top one: only the mask's rectangle paints.
@@ -351,7 +383,7 @@ const path = require("node:path");
     assert.deepEqual(rejected, [true, true, true, true]);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS use as mask: two-sibling menu item, conversion without wrapper, clipped pixels, inset field, undo, detach (menu + inspector), remove (menu + inspector), reload, validation",
+      "PASS use as mask: two- and three-sibling menu item, conversion without wrapper, clipped pixels, inset field, undo, detach (menu + inspector), remove (menu + inspector), reload, validation",
     );
   } finally {
     await app.close();

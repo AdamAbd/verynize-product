@@ -1544,10 +1544,11 @@
       const locked = under.find(id => find(id)?.locked), above = locked && (!el || under.indexOf(locked) < under.indexOf(el.dataset.id));
       const target = chrome || (label ? label.dataset.id : above ? locked : el ? clickTarget(el.dataset.id) : null);
       if (target && !sel().has(target)) select([target]);
-      window.dispatchEvent(new CustomEvent('bd:canvas-menu', {detail: {x: e.clientX, y: e.clientY, point: screenToWorld(e.clientX, e.clientY), target, under}}));
+      window.dispatchEvent(new CustomEvent('bd:canvas-menu', {detail: {x: e.clientX, y: e.clientY, point: screenToWorld(e.clientX, e.clientY), target, under, label: !!label}}));
     });
     // Whether the in-app clipboard holds layers (the context menus list Paste disabled otherwise).
     window.BetterCanvas.canPaste = () => !!clipboard;
+    window.BetterCanvas.canPasteStyle = () => !!styleClipboard; // the menus list Paste styles only after Copy styles
 
     // ---------- Toolbar wiring (runs after the shell has built the toolbar) ----------
     function wireToolbar() {
