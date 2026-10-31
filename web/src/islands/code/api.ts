@@ -14,8 +14,15 @@ export type DevServerStatus = {
   error?: string;
   tail?: string;
   detected?: { command: string[] } | null;
-  config?: { command: string[]; setup?: string[]; url?: string } | null;
+  config?: PreviewConfig | null;
+  /** Setup job of this root while it runs. */
+  setup?: { state: string; tail?: string } | null;
+  /** The saved setup changed or did not finish: the next start runs it first. */
+  setupPending?: boolean;
 };
+export type PreviewCommand = { name: string; command: string[]; url?: string };
+export type PreviewConfig = { command: string[]; setup?: string[]; setupSteps?: string[][]; stopSteps?: string[][]; commands?: PreviewCommand[]; url?: string };
+export type PreviewConfigInput = { root?: string; command?: string[]; commands?: PreviewCommand[]; setup?: string[] | string[][]; stop?: string[][]; url?: string };
 export type ProjectFile = { path: string; size: number };
 export type ChangedFile = { path: string; status: string };
 
@@ -29,7 +36,7 @@ export type DesktopApi = {
     removeChatWorktree(options: { repoId: string; chatId: string; force?: boolean }): Promise<boolean>;
     activate(root: string | null): Promise<unknown>;
   };
-  devServer?: { dismissProposal(options: {root: string; saved?: boolean}): Promise<unknown>; configure(options: {root?: string; command: string[]; setup?: string[]; url?: string}): Promise<DevServerStatus>; setup(options?: {root?: string}): Promise<{exitCode: number; output?: string; setup?: string[]; recovery?: string}>; status(options?: {root?: string}): Promise<DevServerStatus>; start(options?: {root?: string}): Promise<DevServerStatus>; stop(options?: {root?: string}): Promise<DevServerStatus> };
+  devServer?: { dismissProposal(options: {root: string; saved?: boolean}): Promise<unknown>; configure(options: PreviewConfigInput): Promise<DevServerStatus>; setup(options?: {root?: string}): Promise<{exitCode: number; output?: string; setup?: string[]; recovery?: string}>; status(options?: {root?: string}): Promise<DevServerStatus>; start(options?: {root?: string}): Promise<DevServerStatus>; stop(options?: {root?: string}): Promise<DevServerStatus> };
   listFiles?(): Promise<ProjectFile[]>;
   readFile?(path: string): Promise<string>;
   writeFile?(path: string, text: string): Promise<boolean>;
