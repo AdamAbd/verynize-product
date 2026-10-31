@@ -75,6 +75,11 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
 
 - **Layout state** lives in `body` classes: `left-collapsed`, `right-collapsed` (any island may toggle them; the chrome
   island owns the grid CSS that reacts to them), plus legacy `agent-chat-open`, `files-view`, `settings-open`.
+- **Panel widths** are drag-resizable (chrome `chrome/panel-resize.tsx`): read the live `--panel-left-width`,
+  `--panel-right-width` (track width incl. the 1px edge) and `--chat-dock-width` (utility `pl-chat-dock` / spacing
+  `chat-dock`) instead of hard-coding 280/281/499px. Edge strips are `[data-panel-resize=left|right|chat]`
+  (`role=separator`); saved widths are in `localStorage` `verynize.panelWidths`; `html[data-panel-reflow]` is set while
+  a width changes so the canvas pans with its moving left edge.
 - **Main menu**: the chrome island owns the app menu. Anyone opens it with
   `window.dispatchEvent(new CustomEvent("bd:open-app-menu", { detail: { anchor: buttonElement } }))`. Every visible
   trigger button must have class `app-menu-trigger` (tests click `.app-menu-trigger:visible` then a command id such as
