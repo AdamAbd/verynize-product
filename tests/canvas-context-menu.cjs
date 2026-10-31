@@ -5,7 +5,7 @@ const {_electron} = require('@playwright/test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
-const FRAME_MENU = ['Add context', '|', 'Copy', 'Copy as', 'Copy link to selection', '|', 'Select layer', 'Paste', 'Paste to replace', 'Paste over selection', 'Duplicate', '|', 'Hide', 'Lock', 'Hide label', '|', 'Arrange', '|', 'Layout'];
+const FRAME_MENU = ['Add context', '|', 'Copy', 'Copy as', 'Copy link to selection', '|', 'Select layer', 'Paste', 'Paste to replace', 'Paste over selection', 'Duplicate', '|', 'Hide', 'Lock', 'Hide label', '|', 'Arrange', '|', 'Layout', '|', 'Set as file thumbnail'];
 const without = (list, ...drop) => list.filter(x => !drop.includes(x));
 
 (async () => {
@@ -133,7 +133,8 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await page.evaluate(() => window.design.setSelection(['a', 'b']));
     await rightClick(await at('b'));
     assert.deepEqual(await selection(), ['a', 'b'], 'right-click inside a multi-selection keeps it');
-    assert.deepEqual(await items(), without(FRAME_MENU, 'Copy link to selection', 'Hide label'), 'multi-selection menu order');
+    // Two siblings: Use as mask follows Layout (Wonder CM5-multi-verified, P5-mask-menu).
+    { const multi = without(FRAME_MENU, 'Copy link to selection', 'Hide label'); multi.splice(multi.lastIndexOf('|'), 0, 'Use as mask'); assert.deepEqual(await items(), multi, 'multi-selection menu order (Use as mask after Layout, before Set as file thumbnail)'); }
     await close();
 
     // CM6: a locked layer is targeted although it is not hit-tested; its menu says Unlock.
@@ -163,7 +164,9 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     const labelBox = await label.boundingBox();
     await rightClick({x: labelBox.x + 6, y: labelBox.y + labelBox.height / 2});
     assert.deepEqual(await selection(), ['side'], 'the label selects its frame');
-    assert.deepEqual(await items(), FRAME_MENU, 'label menu = frame menu');
+    // Wonder CM9-label: the row menu (no Select layer; Copy link to selection is followed directly by Paste).
+    const ROW_MENU = without(FRAME_MENU, 'Select layer').filter((x, i, list) => !(x === '|' && list[i + 1] === 'Paste'));
+    assert.deepEqual(await items(), ROW_MENU, 'label menu has no Select layer');
     await item('menu.hideLabel').click();
     assert.equal((await node('side')).labelHidden, true, 'Hide label');
     await page.evaluate(() => window.design.setSelection([]));
@@ -178,6 +181,13 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await page.evaluate(() => window.design.runCommand('edit.copy'));
     await rightClick(await at('a'));
     assert.equal(await disabled('edit.paste'), false, 'Paste is enabled once layers are copied');
+    assert.ok(!(await items()).includes('Paste styles'), 'no Paste styles before Copy styles (Wonder CM2/CM5/CM10)');
+    await close();
+    // Paste styles ⌘⌥V follows Paste once styles are copied (Wonder P3-inside-menu, P5-mask-menu).
+    await page.evaluate(() => window.design.runCommand('edit.copyStyle'));
+    await rightClick(await at('a'));
+    { const list = await items(); assert.deepEqual(list.slice(list.indexOf('Paste'), list.indexOf('Paste') + 3), ['Paste', 'Paste styles', 'Paste to replace'], 'Paste styles after Paste'); }
+    assert.equal(await page.locator('[data-bd-context-menu] [data-command="edit.pasteStyle"]').first().textContent().then(t => t.includes('⌘⌥V')), true, 'Paste styles shortcut');
     const before = (await activeNodes()).length;
     await item('edit.paste').click();
     await page.waitForTimeout(100);

@@ -199,9 +199,9 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     // ---- 9. Copy as code / PNG ----
     await page.evaluate(() => window.design.setSelection(['a']));
     await page.keyboard.press('Meta+Shift+KeyC');
-    await page.waitForFunction(() => /Copied selection as HTML/.test(document.querySelector('#workspace footer, footer')?.textContent || ''));
+    await page.waitForFunction(() => /Copied selection as code/.test(document.querySelector('#workspace footer, footer')?.textContent || ''));
     const code = await app.evaluate(({clipboard}) => clipboard.readText());
-    assert.match(code, /<!doctype html>/i); assert.match(code, /data-id="a"/);
+    assert.match(code, /^\/\*\*\n \* Made with Verynize\n/); assert.match(code, /export default function [\s\S]*className=/); // Tailwind TSX (Wonder P1-copy-code.txt)
     assert.ok(await page.evaluate(() => window.design.runCommand('edit.copyPng')));
     await page.waitForFunction(() => /PNG/.test(document.querySelector('#workspace footer, footer')?.textContent || ''));
     const footerText = await page.evaluate(() => document.querySelector('#workspace footer, footer').textContent);

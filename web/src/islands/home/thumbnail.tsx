@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { library, type LibraryFile } from "./library";
 
-/** Fits the legacy miniature (makeThumbnail in wonder-shell.js) into the box, centred on the page content. */
+/**
+ * Fits the legacy miniature (makeThumbnail in wonder-shell.js) into the box, centred on the page content.
+ * A layer chosen with "Set as file thumbnail" (`document.thumbnailNodeId`, Wonder P4) is drawn alone and covers the
+ * box, centred: Wonder's Files card crops a 420×391 frame to the 286×174 card (P4-files-after).
+ */
 export function Thumbnail({
   file,
   className,
@@ -23,7 +27,10 @@ export function Thumbnail({
     const roots = (page?.nodes ?? []).filter((n) => !n.parentId).slice(0, 35);
     const legacy = library().thumbnail(file.id);
     const artboard = legacy?.querySelector<HTMLElement>(".thumbnail-artboard");
-    if (!artboard || !roots.length) {
+    const chosen = coverTarget(file, legacy);
+    if (chosen) box.dataset.thumbnailNode = chosen.id;
+    else delete box.dataset.thumbnailNode;
+    if (!artboard || (!roots.length && !chosen)) {
       setEmpty(true);
       box.replaceChildren();
       return;
@@ -41,13 +48,20 @@ export function Thumbnail({
       position: "absolute",
       left: "0",
       top: "0",
-      width: `${maxX}px`,
-      height: `${maxY}px`,
+      width: `${chosen ? chosen.w : maxX}px`,
+      height: `${chosen ? chosen.h : maxY}px`,
       transformOrigin: "0 0",
       background: "transparent",
       pointerEvents: "none",
     });
     const fit = () => {
+      if (chosen) {
+        const scale = Math.max(box.clientWidth / chosen.w, box.clientHeight / chosen.h);
+        const tx = (box.clientWidth - chosen.w * scale) / 2;
+        const ty = (box.clientHeight - chosen.h * scale) / 2;
+        artboard.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+        return;
+      }
       const pad = compact ? 4 : 20;
       const scale = Math.min(
         (box.clientWidth - pad * 2) / width,
@@ -71,6 +85,17 @@ export function Thumbnail({
       {empty && <EmptyMark compact={compact} />}
     </div>
   );
+}
+
+/** The layer the legacy miniature drew alone (`data-thumbnail-node`), or null when it drew the active page. */
+function coverTarget(file: LibraryFile, legacy: HTMLElement | null) {
+  const id = legacy?.dataset.thumbnailNode;
+  if (!id) return null;
+  for (const page of file.document.pages) {
+    const node = page.nodes.find((n) => n.id === id);
+    if (node) return { id, w: Math.max(1, node.w), h: Math.max(1, node.h) };
+  }
+  return null;
 }
 
 /* Faint outlined app mark, like Wonder's empty file thumbnail. */

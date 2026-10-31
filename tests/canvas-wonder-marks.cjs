@@ -107,7 +107,10 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal((await doc()).pages.find(p => p.id === 'pg2').name, 'Page 2', 'Escape cancels');
     await undo();
     assert.equal((await doc()).pages.find(p => p.id === 'pg3').name, 'Page 3', 'rename is one undo step');
-    // The row context menu's Rename opens the same inline field.
+    // The row context menu's Rename opens the same inline field and keeps the current page active (Wonder
+    // L2-rename-field / L2-renamed-confirmed: Page 1 stays active while Page 3 is renamed).
+    const firstPage = (await doc()).pages[0].id;
+    await page.evaluate(id => window.design.setActivePage(id), firstPage);
     await pageRow('pg2').click({button: 'right'});
     await page.getByRole('menuitem', {name: /Rename/}).click();
     await field.waitFor();
@@ -116,6 +119,12 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.keyboard.type('Second'); await page.keyboard.press('Enter');
     await field.waitFor({state: 'detached'});
     assert.equal((await doc()).pages.find(p => p.id === 'pg2').name, 'Second', 'context-menu rename commits inline');
+    assert.equal((await doc()).activePage, firstPage, 'renaming another page from its menu does not switch pages');
+    assert.equal(await pageRow(firstPage).getAttribute('aria-current'), 'page');
+    await page.evaluate(() => window.design.runCommand('edit.undo')); // ⌘Z
+    assert.deepEqual([(await doc()).pages.find(p => p.id === 'pg2').name, (await doc()).activePage], ['Page 2', firstPage], 'one undo step, same page');
+    await page.evaluate(() => window.design.runCommand('edit.redo'));
+    assert.equal((await doc()).pages.find(p => p.id === 'pg2').name, 'Second');
 
     // ---- L2: drag to reorder with a purple insertion line; persisted in pages[], one undo step ----
     const order = async () => (await doc()).pages.map(p => p.id);

@@ -41,8 +41,10 @@ export type DesignApi = {
   addNode(type: string, extra?: Partial<LayerNode>): string;
   /** Replace the file's icon library (validated, one undo step); an empty list removes it. */
   setIcons(icons: DesignIcon[]): boolean;
-  /** Patch the active page (validated, one undo step); `undefined` values remove the key. */
-  updatePage(patch: Partial<Omit<DesignPage, "id" | "nodes">>): boolean;
+  /** Patch the page `id` (default: the active page; validated, one undo step); `undefined` values remove the key. */
+  updatePage(patch: Partial<Omit<DesignPage, "id" | "nodes">>, id?: string): boolean;
+  /** Set (or with an empty id clear) the file's thumbnail layer, `document.thumbnailNodeId` (validated, one undo step). */
+  setThumbnail(id: string): boolean;
   setActivePage(id: string): void;
   canUndo(): boolean;
   canRedo(): boolean;

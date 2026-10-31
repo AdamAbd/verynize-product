@@ -172,6 +172,15 @@ const ENTRIES: Record<(typeof SECTION_ORDER)[number], Entry[]> = {
   ],
 };
 
+/** The drawer section a registry command is listed in, as a title ("EDIT" → "Edit"); Select all is under Edit. */
+export function sectionOfCommand(id: string): string | undefined {
+  for (const title of SECTION_ORDER) {
+    if (ENTRIES[title].some((entry) => "command" in entry && entry.command === id))
+      return title.charAt(0) + title.slice(1).toLowerCase();
+  }
+  return undefined;
+}
+
 /** Every section with its rows, from the live registry. Registry commands that have a binding but no entry above
  * (added later) are appended to their registry section with the registry label. */
 export function shortcutSections(commands: RegistryCommand[]): ShortcutSection[] {

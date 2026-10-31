@@ -141,37 +141,98 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.deepEqual((await nodesOf()).map(n => n.id), ['src', 'host', 'r1', 'keep', 'r2'], 'one undo step restores');
     console.log('PASS ⌘⇧R replaces each selected layer');
 
-    // ---- Copy link to selection: verynize://node/<document>/<page>/<short id>, opens the layer again ----
-    await seed([frame('art', 'Landing', 0, 0, 600, 400), rect('cta', 20, 20, 100, 40, {parentId: 'art'})], ['cta']);
+    // ---- Menu Paste (layer context menu): into the selected frame, centred (Wonder P3-context-paste-result) ----
+    await seed([rect('src', 2000, 0, 100, 100, {color: '#ffffff'}), frame('target', 'Target', 0, 0, 300, 300), rect('inside', 10, 10, 20, 20, {parentId: 'target'})], ['src']);
+    await page.keyboard.press('Meta+KeyC');
+    await page.evaluate(() => window.design.setSelection(['target']));
+    const targetAt = await screen(250, 250);
+    await page.mouse.click(targetAt.x, targetAt.y, {button: 'right'});
+    await page.waitForSelector('#canvas-menu');
+    await page.locator('[data-bd-context-menu] [data-command="edit.paste"]').first().click();
+    await page.waitForFunction(() => window.design.getDocument().pages[0].nodes.length === 4);
+    list = await nodesOf();
+    const child = list.at(-1);
+    assert.equal(child.parentId, 'target', 'a child of the targeted frame');
+    assert.deepEqual([child.x, child.y, child.w, child.h], [100, 100, 100, 100], 'Wonder: W100 H100 X100 Y100 in a 300 × 300 frame');
+    assert.deepEqual(list.filter(n => n.parentId === 'target').map(n => n.id), ['inside', child.id], 'on top of the frame\'s children');
+    assert.deepEqual(await selection(), [child.id]);
+    await page.keyboard.press('Meta+KeyZ');
+    assert.equal((await nodesOf()).length, 3, 'menu Paste is one undo step');
+    // Not a frame: the canvas paste (same parent rules as ⌘V).
+    await page.evaluate(() => window.design.setSelection(['inside']));
+    assert.equal(await run('edit.paste', {menu: true}), true);
+    assert.equal((await nodesOf()).at(-1).parentId, null, 'a rectangle target keeps the canvas paste');
+    console.log('PASS menu Paste centres the clipboard inside the selected frame');
+
+    // ---- Copy link to selection: verynize://node/<document>/<page>/<short id>, one per line, opens the layer again ----
+    await seed([frame('art', 'Landing', 0, 0, 600, 400), rect('cta', 20, 20, 100, 40, {parentId: 'art'}), {id: 'label', name: 'Canvas au', type: 'text', text: 'Canvas au', x: 59, y: 160, w: 60, h: 15, fontFamily: 'Inter', fontSize: 12, color: '#000000', parentId: 'art'}], ['cta']);
     await clearClipboard();
     assert.equal(await run('clipboard.copyLink'), true);
     const pageId = (await page.evaluate(() => window.design.getDocument().activePage));
+    const linkPattern = `verynize://node/[^/\\s]+/${encodeURIComponent(pageId)}/[a-z]{3,4}(?:\\.[a-z]{3,4})*`;
     const link = await readClipboard();
-    assert.match(link, new RegExp(`^verynize://node/[^/]+/${encodeURIComponent(pageId)}/[a-z]{3,4}\\.[a-z]{3,4}$`), link);
+    assert.match(link, new RegExp(`^${linkPattern}$`), link);
     await page.evaluate(() => window.design.setSelection([]));
     assert.equal(await page.evaluate(l => window.agentWorkspace.openLink(l), link), true);
     assert.deepEqual(await selection(), ['cta'], 'the link resolves to the layer');
+    await page.evaluate(() => window.design.setSelection(['cta', 'label']));
+    await run('clipboard.copyLink');
+    assert.match(await readClipboard(), new RegExp(`^${linkPattern}\\n${linkPattern}$`), 'one link per line');
     console.log('PASS Copy link to selection:', link);
 
-    // ---- ⌘⇧⌥C Copy prompt: names, link and the Tailwind JSX of the selection ----
-    await page.evaluate(() => window.design.setSelection(['art']));
-    await clearClipboard();
-    await page.keyboard.press('Meta+Shift+Alt+KeyC');
-    await page.waitForFunction(() => /Landing/.test(document.querySelector('#workspace footer, footer')?.textContent || ''), null, {timeout: 10000}).catch(() => {});
-    let prompt = '';
-    for (let i = 0; i < 50 && !prompt.includes('```'); i++) { prompt = await readClipboard(); await page.waitForTimeout(100); }
-    assert.match(prompt, /^Implement this design from Verynize/);
-    assert.match(prompt, /"Landing"/); assert.match(prompt, /verynize:\/\/node\//);
-    assert.match(prompt, /```jsx\n[\s\S]*className=[\s\S]*```$/, 'Tailwind JSX from the codec');
-    console.log('PASS ⌘⇧⌥C copies a prompt');
+    // ---- ⌘⇧⌥C Copy prompt: Wonder's sections (P1-copy-prompt*.txt) with Verynize links and MCP tools ----
+    async function copiedPrompt(ids, blocks) {
+      await page.evaluate(ids => window.design.setSelection(ids), ids);
+      await clearClipboard();
+      await page.keyboard.press('Meta+Shift+Alt+KeyC');
+      let text = '';
+      for (let i = 0; i < 80 && (text.match(/```tsx/g) || []).length < blocks; i++) { await page.waitForTimeout(100); text = await readClipboard(); }
+      return text;
+    }
+    const lines = text => text.split('\n');
+    function assertPrompt(text, count) {
+      const all = lines(text);
+      assert.equal(all[0], 'Implement this Verynize design.');
+      assert.equal(all[1], '');
+      assert.equal(all[2], 'Design to implement (each link ends in the Verynize page id and the element id: verynize://node/<document>/<pageId>/<elementId>):');
+      for (let i = 0; i < count; i++) assert.match(all[3 + i], new RegExp(`^  ${linkPattern}$`), 'link ' + i);
+      assert.match(all[3 + count], /^ {2}Read each element through the Verynize MCP server: get_element_code with that pageId and element id/);
+      assert.match(all[4 + count], /^ {2}\(If you don't have the Verynize MCP installed yet, see .*docs\/figcraft-reference\.md/);
+      assert.equal(all[5 + count], '');
+      assert.match(all[6 + count], /^Inline snapshot \(fallback, captured at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z\):$/);
+      assert.equal((text.match(/^```tsx\n\/\*\*\n \* Made with Verynize\n \* verynize:\/\/node\/[^\n]+\n \* [A-Z][a-z]{2} \d{1,2}, \d{4}\n \*\/\n/gm) || []).length, count, 'one TSX block per layer with a Made with Verynize header');
+      assert.equal((text.match(/<style>\{"\* \{ box-sizing: border-box; \}"\}<\/style>/g) || []).length, count);
+      assert.equal(all.at(-2), 'How to implement it:');
+      assert.match(all.at(-1), /^Treat the design as .*compare what you built with the design\.$/);
+      assert.ok(!/wonder/i.test(text), 'no Wonder names');
+    }
+    let prompt = await copiedPrompt(['art'], 1);
+    assertPrompt(prompt, 1);
+    assert.match(prompt, /export default function Landing\(\) \{[\s\S]*className=/, 'Tailwind TSX from the codec');
+    assert.match(prompt, /fonts\.googleapis\.com\/css2\?family=Inter:wght@400&display=swap/, 'Google Fonts link for Inter');
+    console.log('PASS ⌘⇧⌥C copies the frame prompt');
+    prompt = await copiedPrompt(['label'], 1);
+    assertPrompt(prompt, 1);
+    assert.match(prompt, />Canvas au<\/p>/, 'the text layer alone');
+    assert.ok(!/Landing/.test(prompt), 'not its frame');
+    console.log('PASS Copy prompt for a text layer');
+    prompt = await copiedPrompt(['label', 'cta'], 2);
+    assertPrompt(prompt, 2);
+    const order = [...prompt.matchAll(/^ \* (verynize:\/\/node\/\S+)$/gm)].map(m => m[1]);
+    assert.deepEqual(order, lines(prompt).slice(3, 5).map(l => l.trim()), 'snapshots follow the link order');
+    assert.equal((prompt.match(/fonts\.googleapis\.com\/css2/g) || []).length, 1, 'font links only in the text block');
+    assert.ok(prompt.indexOf('>Canvas au</p>') < prompt.indexOf('data-node-label="cta"'), 'blocks in selection order (text first)');
+    console.log('PASS Copy prompt for a multi-selection');
 
-    // ---- Copy as code ⌘⇧C and Copy styles / Paste styles shortcuts ----
+    // ---- Copy as code ⌘⇧C (Wonder P1-copy-code.txt) and Copy styles / Paste styles shortcuts ----
     await seed([rect('s', 0, 0, 100, 80, {color: '#123456', radius: 7}), rect('d', 200, 0)], ['s']);
     await clearClipboard();
     await page.keyboard.press('Meta+Shift+KeyC');
     let code = '';
     for (let i = 0; i < 50 && !code; i++) { code = await readClipboard(); await page.waitForTimeout(100); }
-    assert.match(code, /<html|<div/i, 'Copy as code writes code');
+    assert.match(code, /^\/\*\*\n \* Made with Verynize\n \* verynize:\/\/node\/\S+\n \* [A-Z][a-z]{2} \d{1,2}, \d{4}\n \*\/\n/, 'Made with Verynize header');
+    assert.match(code, /export default function S\(\) \{\n {2}return \(\n {4}<>\n {6}<style>\{"\* \{ box-sizing: border-box; \}"\}<\/style>\n {6}<div [^\n]*className="[^"]*bg-\[#123456\]/, 'fragment, reset, Tailwind classes');
+    assert.match(code, /<\/>\n {2}\);\n\}$/, 'ends with the component, no trailing newline');
     await page.keyboard.press('Meta+Alt+KeyC');
     await page.evaluate(() => window.design.setSelection(['d']));
     await page.keyboard.press('Meta+Alt+KeyV');
