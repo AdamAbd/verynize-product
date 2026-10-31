@@ -158,7 +158,9 @@ function registerArtworkExport(handle,parent){
   const code=await import(pathToFileURL(path.join(__dirname,'../integrations/export-code.mjs')).href);
   if(options.flavor==='css'){if(typeof options.html!=='string'||Buffer.byteLength(options.html)>20*1024*1024)throw Error('Export HTML must be under 20 MB');return {content:code.cssCode(options.html,options.tokens||{}),extension:'html'};}
   if(!Array.isArray(options.nodeIds)||options.nodeIds.length>5000)throw Error('Invalid export selection');
-  return {content:code.tailwindCode(options.document,options.pageId,options.nodeIds,options.name),extension:'jsx'};
+  // snippet {links, date}: the clipboard form (Copy as code / Copy prompt) with its "Made with Verynize" comment.
+  const s=options.snippet,snippet=s&&typeof s==='object'?{links:(Array.isArray(s.links)?s.links:[]).filter(l=>typeof l==='string').slice(0,200).map(l=>l.slice(0,2000)),date:typeof s.date==='string'?s.date.slice(0,100):''}:null;
+  return {content:code.tailwindCode(options.document,options.pageId,options.nodeIds,options.name,{snippet}),extension:'jsx'};
  });
  handle('saveExport',async options=>{
   const {name,extension,bytes}=saveRequest(options);
