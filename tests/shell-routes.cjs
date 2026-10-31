@@ -240,11 +240,14 @@ const os = require("node:os");
     await reload();
     await page.waitForTimeout(500);
     assert.equal((await expectShell("/editor")).index, at.index, "a reload of /editor stays there");
+    // A fresh load of /editor (a same-URL goto would be a reload, so leave it first), like the desktop launch.
+    await page.evaluate(() => window.shellNavigation.navigate({ to: "/" }));
+    await expectShell("/");
     await page.goto("app://verynize/editor");
     await ready();
+    const launched = await page.evaluate(() => history.length);
     at = await expectShell("/code");
-    await back();
-    await expectShell("/editor");
+    assert.equal(at.length, launched, "/code replaced the launch entry");
     assert.deepEqual(errors, []);
     console.log(
       "PASS shell routes: /code route (switch, setCodeMode, showHome), settings over code, Back/Forward across home/editor/code/settings, reload on every route, Escape over home closes settings only, requests while closing settings, reload while closing, room fragment through code/settings/reload, pre-router request, code mode restored on launch",
