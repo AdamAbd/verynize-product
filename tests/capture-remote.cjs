@@ -314,7 +314,8 @@ s.__reactFiber$fixture={_debugSource:{fileName:'/repo/src/components/Fiber.jsx',
     await page.evaluate((target) => window.livePreview.show(target), url);
     await page.locator("#live-frame").waitFor();
     await page.frameLocator("#live-frame").locator("#cta").waitFor();
-    await page.locator("#live-pick").click();
+    // The frame toolbar no longer has a region button (Wonder parity); the picker stays reachable through the API.
+    await page.evaluate(() => { void window.livePreview.captureRegion(); });
     const wrap = await page.locator("#live-preview .live-frame-wrap").boundingBox();
     const frameScale = await page
       .locator("#live-frame")
@@ -375,7 +376,7 @@ s.__reactFiber$fixture={_debugSource:{fileName:'/repo/src/components/Fiber.jsx',
     );
     assert.ok(JSON.stringify(live.children).includes("Get started"));
     // Escape cancels the picker without capturing.
-    await page.locator("#live-pick").click();
+    await page.evaluate(() => { void window.livePreview.captureRegion(); });
     await page.locator("#live-preview .capture-picker").waitFor();
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("#live-preview .capture-picker").count(), 0);
