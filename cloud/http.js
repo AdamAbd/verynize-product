@@ -39,7 +39,13 @@ export const bytesHex = async (bytes) =>
 export function sameDigest(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
   const encoder = new TextEncoder();
-  return crypto.subtle.timingSafeEqual(encoder.encode(a), encoder.encode(b));
+  const left = encoder.encode(a),
+    right = encoder.encode(b);
+  // Workers provide crypto.subtle.timingSafeEqual; other runtimes compare every byte.
+  if (crypto.subtle.timingSafeEqual) return crypto.subtle.timingSafeEqual(left, right);
+  let difference = left.length ^ right.length;
+  for (let i = 0; i < left.length; i++) difference |= left[i] ^ right[i];
+  return difference === 0;
 }
 
 /** Read a request body as bytes with a hard size limit (streams; never trusts Content-Length alone). */

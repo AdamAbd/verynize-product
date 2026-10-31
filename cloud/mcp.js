@@ -10,7 +10,7 @@
 // against a cloud backend: list = the account's rooms, read = a room snapshot, transact = the pure
 // transform, diffed to operations with VerynizeOps and applied by DesignRoom.agentApply with the
 // caller's role. Tools that need the desktop app or this computer are absent from tools/list.
-import "./mcp-env.js";
+import "#mcp-env";
 import "../web/cloud-ops.js";
 import { z } from "zod";
 import {
@@ -26,7 +26,7 @@ import { SHELL_TOOL_NAMES } from "../integrations/shell-tools.mjs";
 import { validateDocument } from "../integrations/design-store.mjs";
 import { fetchImageAsDataUrl } from "../integrations/images.mjs";
 import { provideIconSets } from "../integrations/assets.mjs";
-import { loadIconSets } from "./mcp-env.js";
+import { loadIconSets } from "#mcp-env";
 import { corsHeaders, readJson, roleRank, atLeast, rpc, HttpError } from "./http.js";
 import {
   addRoom,
