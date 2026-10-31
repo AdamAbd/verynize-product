@@ -41,9 +41,10 @@ const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z
 const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|\[::\])(?::\d{2,5})?(?:\/[^\s'"`<>)\]]*)?/i;
 
 const extraDirs = () => ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local/bin'), path.join(os.homedir(), '.vite-plus/bin'), path.join(os.homedir(), '.bun/bin'), path.join(os.homedir(), '.volta/bin'), path.join(os.homedir(), 'Library/pnpm')];
-/** Child environment: the app's env plus the usual tool directories (GUI apps get a short PATH). */
+/** Child environment: the app's env plus the usual tool directories (GUI apps get a short PATH). Python writes
+ * unbuffered so a piped `python3 -m http.server` shows its "Serving HTTP on …" line (logs and URL detection). */
 function childEnv(extra = {}) {
-  const env = { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', NO_COLOR: '1', ...extra };
+  const env = { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', NO_COLOR: '1', PYTHONUNBUFFERED: '1', ...extra };
   delete env.ELECTRON_RUN_AS_NODE;
   const dirs = [...String(env.PATH || '').split(path.delimiter).filter(Boolean)];
   for (const dir of extraDirs()) if (!dirs.includes(dir)) dirs.push(dir);

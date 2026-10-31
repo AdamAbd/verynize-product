@@ -315,3 +315,17 @@ test('a stop command that hangs is ended by its timeout as a whole process group
   assert.ok(Date.now() - started < 8000, 'bounded by the timeout');
   assert.ok(await waitGone(Number(await fs.readFile(path.join(root, 'hang.pid'), 'utf8'))));
 });
+
+test('a piped python3 -m http.server prints its address at once and is detected without a saved URL', { skip: !require('node:child_process').spawnSync('python3', ['--version']).stdout?.length && 'python3 not available' }, async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'bd-dev-python-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'index.html'), '<h1>Static site</h1>');
+  const net = require('node:net');
+  const port = await new Promise(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+  const manager = new ProcessManager();
+  t.after(() => manager.stopAll());
+  const status = await manager.start(root, { command: ['python3', '-m', 'http.server', String(port), '--bind', '127.0.0.1'], waitMs: 15000 });
+  assert.equal(status.state, 'running', JSON.stringify(status));
+  assert.match(status.tail, /Serving HTTP on 127\.0\.0\.1 port \d+/, 'unbuffered Python output reaches the log');
+  assert.match(status.url, new RegExp(`:${port}/`));
+});

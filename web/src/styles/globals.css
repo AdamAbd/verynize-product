@@ -340,6 +340,12 @@ html[data-ui-theme="light"] {
   --radius-preview-settings: 16px;
   --color-preview-running: #9fecb1; /* running dot next to the pause glyph (X5) */
   /* </preview-header-tokens> */
+  /* <preview-parity-tokens> */
+  /* Final preview parity pass (design/wonder/preview-audit/README.md). */
+  --color-preview-mode-label: color-mix(in srgb, var(--foreground) 81%, var(--background)); /* idle Navigate/Edit/Capture #c0c0c0 (PM1) */
+  --color-preview-path-edit: color-mix(in srgb, var(--background) 86%, black); /* path editor well #181818 (PF2-path) */
+  --color-preview-request: color-mix(in srgb, var(--primary-text) 60%, var(--foreground)); /* "Set up the Preview" #d8a1fa (PS2) */
+  /* </preview-parity-tokens> */
 }
 
 /*

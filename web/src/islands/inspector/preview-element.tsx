@@ -50,6 +50,18 @@ export function usePreviewElement() {
   return useSyncExternalStore(subscribe, snapshot, () => null);
 }
 
+type LivePreviewApi = { getSelectionState?(): { mode?: string } | null };
+const inEditMode = () =>
+  (window as unknown as { livePreview?: LivePreviewApi }).livePreview?.getSelectionState?.()?.mode === "edit";
+function subscribeMode(callback: () => void) {
+  window.addEventListener("bd:preview-state", callback);
+  return () => window.removeEventListener("bd:preview-state", callback);
+}
+/** The selected preview frame is in Edit mode. Until an element is picked, Wonder leaves Properties empty (PM3-hover). */
+export function usePreviewEditMode() {
+  return useSyncExternalStore(subscribeMode, inEditMode, () => false);
+}
+
 const r2 = (v: number) => String(Math.round(v * 100) / 100);
 const px = (value: string | undefined) => {
   const n = parseFloat(value ?? "");

@@ -86,7 +86,9 @@
     window.design.setSelection(ids);
     const x = Math.min(...nodes.map(n => n.x)), y = Math.min(...nodes.map(n => n.y)), w = Math.max(...nodes.map(n => n.x + n.w)) - x, h = Math.max(...nodes.map(n => n.y + n.h)) - y;
     const rect = document.getElementById('canvas-wrap').getBoundingClientRect(), cam = window.design.getCamera();
-    window.design.setCamera(rect.width / 2 - (x + w / 2) * cam.zoom, rect.height / 2 - (y + h / 2) * cam.zoom, cam.zoom);
+    // Pan sideways to the capture (Wonder PM4-result keeps the vertical position when the layer is already in view).
+    const top = y * cam.zoom + cam.y, inView = top >= 0 && top + h * cam.zoom <= rect.height;
+    window.design.setCamera(rect.width / 2 - (x + w / 2) * cam.zoom, inView ? cam.y : rect.height / 2 - (y + h / 2) * cam.zoom, cam.zoom);
   }
   async function capture(entry, region = null, element = null) {
     activate(entry);
@@ -191,7 +193,8 @@
     const chat = info.chatId && s.conversationId === info.chatId ? s : null;
     const branch = chat?.branch ? String(chat.branch).split('/').pop() : '';
     const title = (s.conversations || []).find(c => c.id === info.chatId)?.title || '';
-    return branch || (title && !/^New (quick )?chat$/.test(title) ? title : '') || preview.name;
+    // Capitalised like the breadcrumb and Wonder's layer (branch adamabd/dipper → "Dipper").
+    return (branch && branch[0].toUpperCase() + branch.slice(1)) || (title && !/^New (quick )?chat$/.test(title) ? title : '') || preview.name;
   }
   function ensure(options = {}) {
     const info = {...project(), ...options};
@@ -225,7 +228,7 @@
   window.livePreview = {show, hide, reveal, ensure, renderNode, getSelectionState:selectionState,navigateMode,editMode,setMode,captureMode:()=>setMode('capture'),captureElement:path=>{const entry=selected();return entry?capture(entry,null,path):Promise.resolve();},captureSelected:()=>{const entry=selected();return entry?capture(entry):Promise.resolve();},captureRegion:()=>{const entry=selected()||current();return entry?pickAndCapture(entry):Promise.resolve();},pickRegion,insertCaptured,sendAllInput,openInBrowser, nodeElement: id => entries.get(id)?.el, getURL: () => current()?.url || '', getNodeId: () => activeId,
     // Internal surface for the frame chrome module (web/preview-frame-chrome.js); not a stable API.
     frameInternals: {entries, toggle, navigate, activate, paint, valid, cleanError, current, setChrome(next) { chrome = next; for (const entry of entries.values()) { chrome.mount(entry); chrome.update(entry); chrome.paint(entry); } }}};
-  window.addEventListener('bd:preview-setup-state', event => {for(const entry of entries.values())if(entry.node.preview.root===event.detail.root){entry.settingUp=event.detail.state==='setting-up';if(event.detail.state!=='failed'){entry.attemptAt=Date.now();entry.status=null;}paint(entry,event.detail.state==='failed'?'error':'starting',event.detail.message||'');}});
+  window.addEventListener('bd:preview-setup-state', event => {for(const entry of entries.values())if(entry.node.preview.root===event.detail.root){entry.settingUp=event.detail.state==='setting-up';if(event.detail.state!=='failed'){entry.attemptAt=Date.now();entry.status=null;}else if(event.detail.status)entry.status=event.detail.status;paint(entry,event.detail.state==='failed'?'error':'starting',event.detail.message||'');}});
   window.design.subscribe(doc => {
     const alive = new Set(doc.pages.find(p => p.id === doc.activePage).nodes.filter(n => n.preview).map(n => n.id));
     for (const [id, entry] of entries) if (!alive.has(id)) { releaseInput(entry);entry.frame.removeAttribute('src'); entries.delete(id); if (id === activeId) activeId = null; }

@@ -176,6 +176,8 @@ function previewDom(options) {
     const { el, before, cleanup } = editing;
     cleanup();
     el.removeAttribute("contenteditable");
+    el.removeAttribute("data-verynize-editing");
+    document.getElementById("verynize-edit-style")?.remove();
     window.getSelection()?.removeAllRanges();
     const after = el.textContent;
     return { path: pathOf(el), before, after, element: describe(el) };
@@ -251,6 +253,13 @@ function previewDom(options) {
         throw Error("Double-click a text element to edit its text");
       const before = el.textContent;
       el.setAttribute("contenteditable", "plaintext-only");
+      // Wonder PM3: no page focus ring around the edited text, and a pale purple word selection.
+      el.setAttribute("data-verynize-editing", "");
+      document.getElementById("verynize-edit-style")?.remove();
+      const style = document.createElement("style");
+      style.id = "verynize-edit-style";
+      style.textContent = "[data-verynize-editing]{outline:none!important}[data-verynize-editing]::selection{background:rgba(162,69,211,.3)}";
+      (document.head || document.documentElement).append(style);
       el.focus({ preventScroll: true });
       const range =
         typeof options.x === "number" && document.caretRangeFromPoint

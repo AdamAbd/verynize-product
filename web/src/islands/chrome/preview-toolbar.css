@@ -13,7 +13,7 @@
   border: 1px solid var(--toolbar-edge);
   border-radius: 14px;
   background: var(--background);
-  color: var(--muted-foreground);
+  color: var(--color-preview-mode-label);
   box-shadow: var(--shadow-toolbar);
   white-space: nowrap;
   pointer-events: auto;
@@ -41,8 +41,10 @@
   opacity: 0.4;
   cursor: default;
 }
+/* Wonder PM1: a hovered or open control gets the #222 pill and full-strength text. */
 #preview-toolbar button:hover:not(:disabled),
 #preview-toolbar button[data-state="open"] {
+  background: var(--card);
   color: var(--foreground);
 }
 #preview-toolbar button[aria-pressed="true"] {

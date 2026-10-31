@@ -87,10 +87,12 @@ function findNode(frameId: string): PreviewNode | null {
   return null;
 }
 
-/** Worktree (or repository) folder name, as Wonder titles the tab after the chat's worktree. */
+/** Worktree (or repository) folder name, capitalised as Wonder titles the tab after the chat's worktree ("Dipper"). */
 function tabName(node: PreviewNode): string {
   const root = node.preview?.root?.replace(/\/+$/, "") ?? "";
-  return root.split("/").pop() || node.preview?.name || node.name.replace(/ · Preview$/, "") || "Preview";
+  const folder = root.split("/").pop();
+  if (folder) return folder[0].toUpperCase() + folder.slice(1);
+  return node.preview?.name || node.name.replace(/ · Preview$/, "") || "Preview";
 }
 
 /** State the canvas frame paints (web/live-preview.js `data-preview-state`), used when no root can be polled. */

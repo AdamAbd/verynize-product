@@ -207,7 +207,8 @@ export async function startPreview(state: ChatState): Promise<DevServerStatus | 
     } else if (next.state !== "starting") {
       const message = next.error || next.tail?.split("\n").slice(-2).join(" ") || "The app did not start.";
       setStatus(message);
-      window.dispatchEvent(new CustomEvent("bd:preview-setup-state", { detail: { root, state: "failed", message } }));
+      // The frame card shows the exit code and command from this status (header-started runs too).
+      window.dispatchEvent(new CustomEvent("bd:preview-setup-state", { detail: { root, state: "failed", message, status: next } }));
     }
     return next;
   } catch (error) {

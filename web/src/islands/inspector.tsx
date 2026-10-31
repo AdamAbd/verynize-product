@@ -10,7 +10,7 @@ import { primaryNode } from "./inspector/model";
 import { PropertiesBody } from "./inspector/properties";
 import { PanelSectionHeader, VariablesSection } from "./inspector/variables";
 import { IconsSection } from "./inspector/icons";
-import { PreviewElementBody, usePreviewElement } from "./inspector/preview-element";
+import { PreviewElementBody, usePreviewEditMode, usePreviewElement } from "./inspector/preview-element";
 import "./inspector/inspector.css";
 
 // Input modality for inspector.css: a pointer press hides the focus ring Radix restores on its trigger after a menu
@@ -29,6 +29,7 @@ function Island() {
   const selection = useSelection();
   const node = primaryNode(doc, selection);
   const previewElement = usePreviewElement();
+  const previewEditing = usePreviewEditMode();
   const selected = !!node;
   // Variables start collapsed and Properties expanded; with nothing selected Properties shows the page settings.
   // The user can still toggle either; the automatic state is re-applied when the selection empties or fills.
@@ -73,7 +74,7 @@ function Island() {
         >
           {previewElement ? <PreviewElementBody element={previewElement.element} /> : null}
           {/* Stays mounted while a preview element is shown: app.js toggles #shader-settings on every render. */}
-          <div hidden={!!previewElement}>
+          <div hidden={!!previewElement || previewEditing}>
             <PropertiesBody doc={doc} node={node} selection={selection} />
           </div>
         </div>
