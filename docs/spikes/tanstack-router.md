@@ -7,6 +7,11 @@ top-level shell (see "Shell state model" below): `/` is the Files home,
 settings overlay over one of them. The canvas, document, other islands and the
 settings and code-mode UI remain legacy-owned; only the choice of view moved.
 
+In the web app (TanStack Start, `web-start/`) the same module runs hosted: it
+uses Start's router and history instead of creating its own, and Start's route
+components apply the area (`web-start/README.md`, "One router"). Everything
+below holds in both modes; "the router" is Start's router there.
+
 Opening another file while already in the editor does not create another route
 entry. History is view history, not file history: Back returns to the previous
 view, not the previous document. `window.shellRouter` exposes the imperative
