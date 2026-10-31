@@ -1,6 +1,6 @@
 # Cloudflare deployment
 
-To run the same backend on your own server or in Docker instead, see [self-hosting.md](self-hosting.md).
+To run the same backend on your own server or in Docker instead, see [self-hosting.md](self-hosting.md); on Vercel, see [deployment-vercel.md](deployment-vercel.md).
 
 The application now uses a Worker with SQLite Durable Objects, a room-creation rate limiter, and static web assets. `cloudflare.config.ts` declares the entrypoint and bindings. `vite.config.ts` supplies `web/` through the Cloudflare Vite plugin. No Wrangler configuration is used.
 

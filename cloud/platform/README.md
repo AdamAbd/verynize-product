@@ -1,11 +1,12 @@
 # Cloud platform layer
 
-The collaboration backend (`cloud/*.js`) is one codebase that runs on two runtimes:
+The collaboration backend (`cloud/*.js`) is one codebase that runs on three runtimes:
 
 - **Cloudflare** (`cloud/worker.js` deployed with `cf deploy`): Durable Objects, D1, R2, rate-limit and send-email bindings.
 - **Node** (`server/node.mjs`, VPS or Docker; [docs/self-hosting.md](../../docs/self-hosting.md)): the implementations in `cloud/platform/node/`.
+- **Vercel** (`api/server.mjs`, Vercel Functions with Fluid compute, several instances; [docs/deployment-vercel.md](../../docs/deployment-vercel.md)): the implementations in `cloud/platform/vercel/`, backed by libSQL (Turso), Redis and S3-compatible storage.
 
-The Worker code talks to its runtime only through `env` (the bindings) and the `#cloud-runtime` module. Each binding is an interface: the subset of the Cloudflare API the code uses. On Cloudflare the binding itself is the implementation, so nothing changes there; on Node, `cloud/platform/node/env.js` builds an object with the same shape. `cloud/worker.js` keeps its default export `{ fetch }` and the named exports `DesignRoom`, `AccountDirectory` and `PublishedApp`.
+The Worker code talks to its runtime only through `env` (the bindings) and the `#cloud-runtime` module. Each binding is an interface: the subset of the Cloudflare API the code uses. On Cloudflare the binding itself is the implementation, so nothing changes there; on Node and Vercel, `cloud/platform/node/env.js` and `cloud/platform/vercel/env.js` build an object with the same shape. `cloud/worker.js` keeps its default export `{ fetch }` and the named exports `DesignRoom`, `AccountDirectory` and `PublishedApp`.
 
 ## Runtime-selected modules (package.json `imports`)
 
@@ -14,7 +15,7 @@ The Worker code talks to its runtime only through `env` (the bindings) and the `
 | `#cloud-runtime` | `cloud/platform/cloudflare/runtime.js` | `cloud/platform/node/runtime.js`                      |
 | `#mcp-env`       | `cloud/mcp-env.js` (bundled resources) | `cloud/platform/node/mcp-env.js` (reads node_modules) |
 
-`#cloud-runtime` exports `DurableObject` (the base class of the three actors) and `acceptWebSocket(ctx) -> {socket, response}`, which accepts the WebSocket upgrade of the request an actor is handling. A bundler that builds `cloud/worker.js` for workerd must resolve the `workerd` condition (the Cloudflare Vite plugin does).
+Vercel uses the default (Node) modules: its actors are constructed with a context of the same shape. `#cloud-runtime` exports `DurableObject` (the base class of the three actors) and `acceptWebSocket(ctx) -> {socket, response}`, which accepts the WebSocket upgrade of the request an actor is handling. A bundler that builds `cloud/worker.js` for workerd must resolve the `workerd` condition (the Cloudflare Vite plugin does).
 
 ## Interfaces and implementations
 
@@ -28,6 +29,19 @@ The Worker code talks to its runtime only through `env` (the bindings) and the `
 | **Mailer** (`env.EMAIL`, `env.SMTP_MAILER`)                                     | `send({from: {email, name}, to, subject, text, html})`; `cloud/mail.js` picks it with `EMAIL_PROVIDER` (`cloudflare`, `smtp`, `webhook`, `outbox`).                                                                                  | send-email binding            | `node/mailer.js`: SMTP through nodemailer. Dev: `outbox` (stored, read at `/api/dev/outbox`)                                                                     |
 | **RateLimiter** (`env.ROOM_CREATION`, `env.AUTH_LIMIT`, `env.MCP_LIMIT`)        | `limit({key})` → `{success}`                                                                                                                                                                                                         | rate-limit binding            | `node/rate-limit.js`: fixed windows in memory                                                                                                                    |
 | **StaticAssets** (`env.ASSETS`)                                                 | `fetch(request)` → the web app file, SPA fallback to `index.html`                                                                                                                                                                    | Workers static assets         | `node/static-assets.js`: `web/` without `web/src`, served before the Worker except on Worker-first paths (`/api/*`, `/u/*`, `/apps/*`, `/passkey`, `/account/*`) |
+
+### Vercel implementations
+
+| Interface                             | `cloud/platform/vercel/`                                                                                                                                                                                                                                                                                |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Database** (`env.DB`)               | `libsql-d1.js`: the D1 API over `@libsql/client` (Turso over HTTP, or a `file:` URL locally); `batch` is one write transaction; migrations recorded in `d1_migrations`, each file applied once even when instances start together.                                                                      |
+| **Actor namespace / RoomCoordinator** | `actors.js`: any instance runs any actor, one turn at a time per actor everywhere, under a Redis lease with a fencing token (`redis.js`).                                                                                                                                                               |
+| **Actor storage**                     | `actor-store.js`: the synchronous `ctx.storage.sql` runs on an in-memory SQLite copy; changed rows (captured by temporary triggers) are committed to the shared `actor_heads`/`actor_rows` tables in one batch conditional on the lease's fence. Persist-before-ack: nothing leaves before that commit. |
+| **Socket hub**                        | `actors.js` + `handler.js`: sockets accepted with `upgradeWebSocket` (`@vercel/functions`) stay on their instance; the registry and attachments are a Redis hash; sends are published on the owning instance's channel in commit order.                                                                 |
+| **BlobStore**                         | `S3BlobStore` (`node/blob-store.js`); `FileBlobStore` for local multi-process tests only.                                                                                                                                                                                                               |
+| **Mailer**                            | As on Node (SMTP, webhook; `outbox` for tests).                                                                                                                                                                                                                                                         |
+| **RateLimiter**                       | `redis.js` `RedisRateLimiter`: fixed windows counted in Redis, shared by all instances.                                                                                                                                                                                                                 |
+| **StaticAssets**                      | The Vercel CDN (`dist/vercel-web`, `vercel.json` rewrites); `local-server.js` reproduces the routing locally.                                                                                                                                                                                           |
 
 ## Durable Object semantics on Node
 
@@ -43,7 +57,7 @@ What the rooms rely on, and how `node/actors.js` and `node/sql-storage.js` keep 
 
 ## Notes for a multi-instance target (Vercel or several Node processes)
 
-The Node implementation is single-process: actors live in memory and the rate limiter counts locally. A serverless or multi-instance target needs:
+The Node implementation is single-process: actors live in memory and the rate limiter counts locally. `cloud/platform/vercel/` implements the requirements below (a lease that moves to the instance with the event, fenced commits on the shared database, Redis fan-out); [docs/deployment-vercel.md](../../docs/deployment-vercel.md) explains the choice, the guarantees and the tests (`npm run test:cloud:vercel`). The same runtime serves several Node processes behind a load balancer (`server/vercel-local.mjs`). A serverless or multi-instance target needs:
 
 - **Single writer per room (must not be shared).** All mutations of one room (`/create`, `PUT /room`, `/ops`, socket `ops`/`update`, `agentApply`, token and member changes) must be serialized by one owner with a consistent view of the room's storage, and the ack must follow the durable write. Options: route every request and socket of a room to the instance that owns it (consistent hashing plus a lease, e.g. a Redis `SET NX PX` lease renewed by the owner, with forwarding from other instances), or keep the per-room actor on a stateful host (Cloudflare Durable Objects, a small Node room service) and call it over HTTP/RPC from stateless functions. Optimistic concurrency on a shared database is not enough on its own: `applyBatch` reads `last_batch` and stamps and writes several rows, so two writers would need a serializable transaction per batch plus a fan-out channel.
 - **Fan-out (can be shared).** Broadcasts (`ops`, `snapshot`, `presence`, `role`, `revoked`, `comment`) go to every socket of the room. With sockets spread over instances, the owner publishes each message after commit (Redis pub/sub or streams keyed by room) and every instance relays it to its local sockets. Presence and attachments then live with the instance holding the socket, and `getWebSockets()`/`peers()` become a query over the shared presence set.
