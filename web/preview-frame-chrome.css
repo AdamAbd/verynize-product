@@ -71,7 +71,7 @@
 }
 .pf-head[data-state="running"] .pf-dot { background: var(--pf-green); }
 .pf-head[data-state="starting"] .pf-dot { background: var(--pf-yellow); }
-.pf-head[data-state="error"] .pf-dot { background: var(--pf-red); }
+/* Wonder PS4: the breadcrumb dot stays gray on failure; only the card and tab carry red. */
 .pf-crumb-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pf-local {
   font-size: 10px;
