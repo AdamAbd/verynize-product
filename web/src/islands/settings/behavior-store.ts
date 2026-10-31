@@ -3,6 +3,7 @@
 // per-repository modes) and the chat island (expanded agent work) read the same values synchronously.
 // Changes are announced with the `verynize:agent-behavior` window event.
 import { useSyncExternalStore } from "react";
+import { platform } from "@/lib/platform";
 
 export type Access = "ask" | "edit" | "auto" | "full";
 export type AgentBehavior = {
@@ -52,8 +53,7 @@ export const DEFAULT_BEHAVIOR: AgentBehavior = {
   repoModes: {},
 };
 
-export const behaviorIpc = () =>
-  (window as unknown as { desktop?: { agentBehavior?: BehaviorIpc } }).desktop?.agentBehavior ?? null;
+export const behaviorIpc = (): BehaviorIpc | null => platform.desktop?.agentBehavior ?? null;
 
 let current: AgentBehavior = DEFAULT_BEHAVIOR;
 let loaded = false;

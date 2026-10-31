@@ -964,7 +964,7 @@
   });
   $("cloud-leave").onclick = () => disconnect(undefined, true);
   const openLink = (event) => {
-    if (window.desktop?.openExternal) {
+    if (window.verynizePlatform.can("externalLinks")) {
       event.preventDefault();
       window.desktop.openExternal(event.currentTarget.href).catch((e) => status(e.message));
     }
@@ -1435,7 +1435,7 @@
   });
   $("cloud-profile-open").onclick = action(async () => {
     const href = `${account.server}/u/${account.account.handle}`;
-    if (window.desktop?.openExternal) await window.desktop.openExternal(href);
+    if (window.verynizePlatform.can("externalLinks")) await window.desktop.openExternal(href);
     else window.open(href, "_blank", "noopener");
   });
   async function signOut(everywhere) {
@@ -1508,7 +1508,8 @@
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   async function openPasskeyPage(server, hash) {
     const url = `${server}/passkey#${hash}`;
-    if (window.desktop?.cloudPasskeyOpen) await window.desktop.cloudPasskeyOpen({ url });
+    if (window.verynizePlatform.can("passkeyWindow"))
+      await window.desktop.cloudPasskeyOpen({ url });
     else window.open(url, "verynize-passkey", "popup,width=440,height=520");
   }
   const closePasskeyPage = () => window.desktop?.cloudPasskeyClose?.().catch(() => {});
@@ -1572,7 +1573,8 @@
       server = base();
     const email = $("cloud-email").value.trim();
     // Embedded windows have no passkey chooser, so the desktop names the account by email.
-    if (window.desktop && !email) throw Error("Enter your email, then sign in with a passkey");
+    if (window.verynizePlatform.kind === "desktop" && !email)
+      throw Error("Enter your email, then sign in with a passkey");
     const handoff = await request(
       "/api/auth/handoff",
       { method: "POST", body: "{}" },
@@ -1590,7 +1592,10 @@
         body: JSON.stringify({
           id: handoff.id,
           secret: handoff.secret,
-          label: window.desktop ? "Verynize desktop (passkey)" : "Verynize web (passkey)",
+          label:
+            window.verynizePlatform.kind === "desktop"
+              ? "Verynize desktop (passkey)"
+              : "Verynize web (passkey)",
         }),
       });
       const data = await response.json();
@@ -1663,7 +1668,7 @@
     $("cloud-app-status").textContent = text;
   };
   async function detectApp() {
-    if (!window.desktop?.cloudAppDetect) {
+    if (!window.verynizePlatform.can("publishApps")) {
       $("cloud-app-project").textContent = "App publishing runs in the Verynize desktop app.";
       return;
     }
@@ -1721,7 +1726,7 @@
     if ($("cloud-app-section").open) detectApp();
   });
   $("cloud-app-publish").onclick = action(async () => {
-    if (!window.desktop?.cloudAppPublish)
+    if (!window.verynizePlatform.can("publishApps"))
       throw Error("App publishing runs in the Verynize desktop app");
     if (!account) throw Error("Sign in (Account) before publishing an app");
     appStatus("Building and uploading…");

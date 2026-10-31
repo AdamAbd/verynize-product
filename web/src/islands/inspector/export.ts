@@ -4,6 +4,7 @@
 // Sizes: 0.5×–4×, a target height (720p–2160p) or a 512 px width/height. Saved through the native save dialog.
 // The artwork HTML comes from app.js `exportArtwork({format: "HTML"})`, so every format renders the same markup.
 import type { DesignDocument } from "@/lib/bridge";
+import { platform } from "@/lib/platform";
 
 export type ExportFormat = "SVG" | "PNG" | "JPG" | "WEBP" | "PDF" | "CODE";
 export type CodeFlavor = "tailwind" | "css";
@@ -73,31 +74,11 @@ export const isSvgNode = (n: ExportNode) =>
   n.type === "image" && !n.icon && typeof n.src === "string" && SVG_SRC.test(n.src);
 
 type Artwork = { content?: string; dataURL?: string; width: number; height: number; mime?: string };
-type DesktopExport = {
-  renderDesign(options: {
-    html: string;
-    width: number;
-    height: number;
-    scale: number;
-  }): Promise<{ dataURL: string; width: number; height: number }>;
-  renderPDF?(options: {
-    html: string;
-    width: number;
-    height: number;
-    title?: string;
-  }): Promise<{ dataURL: string; width: number; height: number }>;
-  saveExport?(options: {
-    name: string;
-    data: string;
-    extension: string;
-  }): Promise<{ path: string; name: string; bytes: number } | null>;
-  exportCode?(options: Record<string, unknown>): Promise<{ content: string; extension: string }>;
-};
 type Paints = {
   recolorSvg(src: string, map: Record<string, string>): string;
   svgPaintList(src: string): string[];
 };
-const desktop = () => (window as unknown as { desktop?: DesktopExport }).desktop;
+const desktop = () => platform.desktop;
 const paints = () => (window as unknown as { BetterNodeStyle: Paints }).BetterNodeStyle;
 const artwork = (options: { format: string; scale?: number; selectionOnly: boolean }) =>
   (window.design.exportArtwork as (o: typeof options) => Promise<Artwork>)(options);

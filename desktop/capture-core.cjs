@@ -596,7 +596,7 @@ async function embedImage(url, policy, budget) {
   return "data:" + mime + ";base64," + bytes.toString("base64");
 }
 
-/** Document-safe @font-face descriptors (mirrors the fontFaces validation in web/app.js). */
+/** Document-safe @font-face descriptors (mirrors the fontFaces validation in web/document-core.js). */
 function fontDescriptor(face) {
   const family =
     String(face.family)

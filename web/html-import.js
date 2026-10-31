@@ -2,7 +2,7 @@
 // importer (desktop/html-import.cjs -> integrations/codec-html.mjs): stylesheets relative to the file,
 // the CSS cascade for the chosen viewport, :root variables. The browser build keeps the in-page importer.
 (() => {
-  const native = window.desktop;
+  const native = window.verynizePlatform.can("htmlImport") ? window.desktop : null;
   const apply = document.getElementById("apply"),
     source = document.getElementById("source"),
     status = document.getElementById("status"),

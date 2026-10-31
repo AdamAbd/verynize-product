@@ -1,6 +1,7 @@
-// Typed access to the desktop APIs the Code workspace uses (desktop/preload.cjs) and to the chat workspace
+// Types of the desktop APIs the Code workspace uses (typed in @/lib/desktop-api) and access to the chat workspace
 // (web/desktop-panel.js, typed in ../chat/store).
 import { workspace } from "../chat/store";
+import { platform } from "@/lib/platform";
 
 export { workspace };
 export type Repository = { id: string; name: string; root: string; addedAt: number; git?: boolean };
@@ -26,28 +27,8 @@ export type PreviewConfigInput = { root?: string; command?: string[]; commands?:
 export type ProjectFile = { path: string; size: number };
 export type ChangedFile = { path: string; status: string };
 
-export type DesktopApi = {
-  repositories?: {
-    list(): Promise<{ repositories: Repository[]; active: { root: string } | null }>;
-    addLocal(): Promise<Repository | null>;
-    create(options: { name: string; repository?: string }): Promise<Repository | null>;
-    archive(id: string): Promise<boolean>;
-    createChatWorktree(options: { repoId: string; chatId: string }): Promise<Worktree>;
-    removeChatWorktree(options: { repoId: string; chatId: string; force?: boolean }): Promise<boolean>;
-    activate(root: string | null): Promise<unknown>;
-  };
-  devServer?: { dismissProposal(options: {root: string; saved?: boolean}): Promise<unknown>; configure(options: PreviewConfigInput): Promise<DevServerStatus>; setup(options?: {root?: string}): Promise<{exitCode: number; output?: string; setup?: string[]; recovery?: string}>; status(options?: {root?: string}): Promise<DevServerStatus>; start(options?: {root?: string}): Promise<DevServerStatus>; stop(options?: {root?: string}): Promise<DevServerStatus> };
-  listFiles?(): Promise<ProjectFile[]>;
-  readFile?(path: string): Promise<string>;
-  writeFile?(path: string, text: string): Promise<boolean>;
-  readMemory?(): Promise<string>;
-  writeMemory?(text: string): Promise<boolean>;
-  gitChanges?(options: { root?: string }): Promise<{ files: ChangedFile[] }>;
-  gitBranchChanges?(options: { root?: string }): Promise<{ base: string | null; files: ChangedFile[] }>;
-  previewApp?(options: { url: string }): Promise<unknown>;
-};
 
-export const desktop = () => (window as unknown as { desktop?: DesktopApi }).desktop;
+export const desktop = () => platform.desktop;
 
 /** "Error invoking remote method 'desktop:x': Error: message" → "message". */
 export function errorMessage(error: unknown): string {

@@ -2,6 +2,7 @@
 // email + password session shared by onboarding, the workspace switcher and Settings › Members.
 // Organizations are Better Auth's (cloud/auth.js); room access follows them (cloud/orgs.js).
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { platform } from "@/lib/platform";
 
 export type CloudProfile = {
   id: string;
@@ -180,8 +181,7 @@ export const organizationsChanged = () => reloadOrganizations();
 
 /** Sign-in entry: the desktop onboarding, or the Share panel's account section on the web. */
 export function openSignIn() {
-  if ((window as unknown as { desktop?: unknown }).desktop)
-    window.dispatchEvent(new Event("bd:open-onboarding"));
+  if (platform.kind === "desktop") window.dispatchEvent(new Event("bd:open-onboarding"));
   else {
     document.getElementById("cloud-toggle")?.click();
     const section = document.getElementById("cloud-account-section") as HTMLDetailsElement | null;
