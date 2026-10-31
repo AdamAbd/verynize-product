@@ -1,6 +1,7 @@
 // Wonder canvas parity (design/wonder/canvas-audit): toolbar tool set (T1), zoom label menu (T6), `?` help menu (T5),
 // keyboard shortcuts drawer (K1), ⌘K command palette and the Text tool defaults (TX1).
 const {_electron} = require(process.cwd() + '/node_modules/@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -16,6 +17,7 @@ const nodes = [
   const app = await _electron.launch({timeout: 20000, env, args: ['.', `--user-data-dir=${profile}`]});
   try {
     const p = await app.firstWindow({timeout: 15000});
+    await waitForUiReady(p);
     await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 870));
     await p.waitForSelector('#canvas .layer');
     const errors = []; p.on('pageerror', e => errors.push(e.message));
@@ -131,7 +133,7 @@ const nodes = [
     await p.locator('#help-onboarding').click();
     await p.locator('#onboarding').waitFor();
     await p.evaluate(() => { localStorage.setItem('verynize.onboarding', 'done'); });
-    await p.reload(); await p.waitForSelector('#canvas .layer'); await seed();
+    await p.reload(); await waitForUiReady(p); await p.waitForSelector('#canvas .layer'); await seed();
     assert.equal(await p.locator('#onboarding').count(), 0);
 
     // ---- K1: shortcut drawer from the help menu, searchable.

@@ -4,6 +4,7 @@
 // worktree, switching chats switches the tree root, the list survives a reload and Design returns to the canvas.
 // CODE_WORKSPACE_SHOT=/path.png saves a screenshot of the populated workspace.
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -31,6 +32,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await page.setViewportSize({ width: 1440, height: 870 });
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     const state = () => page.evaluate(() => window.agentWorkspace.getState());
@@ -159,6 +161,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     // First preview requests the LLM setup flow; manual configuration remains available.
     await page.addInitScript(() => window.addEventListener('bd:setup-preview', event => { event.stopImmediatePropagation(); window.previewSetupRequested = true; }, {capture: true, once: true}));
     await page.reload();
+    await waitForUiReady(page);
     await page.locator(`#code-file-tree[data-root="${first.chatRoot}"]`).waitFor();
     await page.locator('#code-start-preview').click();
     assert.equal(await page.evaluate(() => window.previewSetupRequested), true);
@@ -190,6 +193,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
       const beforeAccept = await page.evaluate(() => window.desktop.devServer.status());
       assert.deepEqual(beforeAccept.config.command, ['npm','run','dev'], 'proposal does not overwrite accepted configuration');
       await page.reload();
+      await waitForUiReady(page);
       await page.locator('#preview-proposal').waitFor();
       assert.match(await page.locator('#preview-proposal').textContent(), /Proposed Preview configuration/);
       await page.locator('#preview-proposal').getByRole('button',{name:'Edit',exact:true}).click();
@@ -243,6 +247,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     assert.equal(await page.locator('#code-workspace').isVisible(), false);
     assert.equal(await page.locator('#canvas').isVisible(), true);
     await page.reload();
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await page.getByRole('radio', { name: 'Code' }).click();
     await page.locator('[data-repository="site"]').waitFor();

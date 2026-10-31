@@ -20,7 +20,7 @@ const {onWindowClosed}=require('./window-cleanup.cjs');
  *       ask_agent tool (second opinion / design review); calling startBridge again (or
  *       setBridgeOptions) replaces the options. Without it ask_agent reports unavailable.
  *   setBridgeOptions({askAgent, shellExec, confirmExec})             update options at any time
- *   registerWindow(win, {designFiles, entryURL})                     per editor BrowserWindow
+ *   registerWindow(win, {designFiles, trusted})                      per editor BrowserWindow (trusted(event): IPC sender guard)
  *   getBridgeInfo() -> {url, token, file, documentsRoot, toolsVersion} | null   null until started
  *   toolsVersion: TOOLS_VERSION of integrations/design-tools.mjs (also in mcp.json and pushed to
  *   editor windows as the 'info' bridge op -> window.verynizeTools).
@@ -56,7 +56,7 @@ const agentUsage = require('./agent-usage.cjs'); // Settings › Usage: AI-gener
 
 const load = file => import(pathToFileURL(path.join(__dirname, '../integrations', file)).href);
 const SUFFIX = '.verynize.json';
-const windows = new Map(); // webContents.id -> {win, designFiles, entryURL, pending}
+const windows = new Map(); // webContents.id -> {win, designFiles, trusted, pending}
 let info = null, server = null, starting = null, lastFocused = null;
 const bridgeOptions = { askAgent: null, shellExec: true, confirmExec: null };
 function setBridgeOptions(options = {}) {
@@ -72,15 +72,15 @@ function announce(entry) {
   request(entry, 'info', { toolsVersion: info.toolsVersion, serverVersion: info.serverVersion }, 5000).catch(() => {});
 }
 
-function registerWindow(win, { designFiles = null, entryURL } = {}) {
-  const entry = { win, designFiles, entryURL, pending: new Map() };
+function registerWindow(win, { designFiles = null, trusted = null } = {}) {
+  const entry = { win, designFiles, trusted, pending: new Map() };
   const id = win.webContents.id;
   windows.set(id, entry);
   lastFocused = id;
   win.on('focus', () => { lastFocused = id; });
   win.webContents.on('did-finish-load', () => announce(entry));
   win.webContents.ipc.on('bd:mcp-reply', (event, requestId, payload) => {
-    if (event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame || (entryURL && event.senderFrame.url !== entryURL)) return;
+    if (event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame || (trusted && !trusted(event))) return;
     const pending = entry.pending.get(requestId);
     if (!pending || !payload || typeof payload !== 'object') return;
     entry.pending.delete(requestId); clearTimeout(pending.timer);
@@ -93,6 +93,19 @@ function activeEditor() {
   const live = [...windows.values()].filter(e => !e.win.isDestroyed() && !e.win.webContents.isLoading());
   const focused = BrowserWindow.getFocusedWindow();
   return live.find(e => focused && e.win === focused) || live.find(e => e.win.webContents.id === lastFocused) || live[0] || null;
+}
+
+// The renderer can answer MCP calls a moment before its window finishes loading (custom-protocol
+// loads settle later than file:// did); wait briefly for a loading editor instead of failing.
+async function editorReady(timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const entry = activeEditor();
+    if (entry) return entry;
+    const loading = [...windows.values()].some(e => !e.win.isDestroyed() && e.win.webContents.isLoading());
+    if (!loading || Date.now() >= deadline) return null;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
 }
 
 function request(entry, op, args = {}, timeoutMs = 10000) {
@@ -122,7 +135,7 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
   };
   // Decide whether a call targets the open editor document or a stored file.
   const route = async ref => {
-    const entry = activeEditor();
+    const entry = await editorReady();
     if (!entry) return { live: false };
     let state; try { state = await editorState(entry); } catch { return { live: false }; }
     const openName = nameFromPath(state.file?.nativePath);
@@ -140,10 +153,10 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
   const withName = document => (typeof document.name === 'string' && document.name.trim() ? document : { ...document, name: 'Untitled' });
   return {
     mode: 'live',
-    shell: agentShell.createShell({ activeEditor, request, options: () => bridgeOptions }),
+    shell: agentShell.createShell({ activeEditor: editorReady, request, options: () => bridgeOptions }),
     async list() {
       const saved = await storeBackend.list();
-      const entry = activeEditor(); let editor = null;
+      const entry = await editorReady(); let editor = null;
       if (entry) try { const state = await editorState(entry); editor = { title: state.document.name, document: nameFromPath(state.file?.nativePath), fileId: state.file?.id || null, path: state.file?.nativePath || null, activePage: state.document.activePage, focused: true, libraryFiles: (state.files || []).slice(0, 200) }; } catch {}
       return { documents: saved.documents, editor, documentsRoot: store.root, headless: !editor };
     },
@@ -174,11 +187,11 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
     },
     async create(name, title, { open = true } = {}) {
       const created = await storeBackend.create(name, title);
-      if (open && activeEditor()) return { ...created, ...(await this.open({ name })), revision: created.revision };
+      if (open && await editorReady()) return { ...created, ...(await this.open({ name })), revision: created.revision };
       return created;
     },
     async open({ name, fileId }) {
-      const entry = activeEditor();
+      const entry = await editorReady();
       if (!entry) throw new Error('No editor window is open');
       if (fileId) { await request(entry, 'openFile', { fileId }, 15000); return { opened: true, fileId, live: true }; }
       const file = store.file(name);
@@ -198,7 +211,7 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
     },
     async screenshot(ref, pageId, nodeId, scale, state) {
       if (state.live) {
-        const entry = activeEditor();
+        const entry = await editorReady();
         try {
           const result = entry && await request(entry, 'screenshot', { pageId, nodeId, scale }, 60000);
           if (result?.dataURL?.startsWith('data:image/png;base64,')) return { data: result.dataURL.slice('data:image/png;base64,'.length), mimeType: 'image/png', width: result.width, height: result.height, source: 'editor', ...(validBounds(result.bounds) ? { bounds: result.bounds } : {}), ...(result.fonts ? { fonts: result.fonts } : {}) };

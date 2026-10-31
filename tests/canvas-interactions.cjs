@@ -1,5 +1,6 @@
 // Canvas parity: camera, tools, selection, smart guides, clipboard, structure commands, sizing modes.
 const {_electron} = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
@@ -10,6 +11,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
   const app = await _electron.launch({env, args: ['.', `--user-data-dir=${dir}`], timeout: 20000});
   try {
     const page = await app.firstWindow({timeout: 20000});
+    await waitForUiReady(page);
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.waitForSelector('#canvas .layer');
@@ -392,7 +394,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal((await node('label')).parentId !== null, true, 'context menu runs commands');
 
     // Documents and saved views stay compatible after reload.
-    await page.reload(); await page.waitForSelector('#canvas .layer');
+    await page.reload(); await waitForUiReady(page); await page.waitForSelector('#canvas .layer');
     assert.ok((await nodesOf()).some(n => n.id === 'label'));
     assert.deepEqual(errors, []);
     console.log('PASS canvas interactions: cursor-anchored zoom, stops, fit, space/H pan, draw tools + presets, marquee, shift toggle, parent-first selection, hover outlines, click/cmd drill-in, artboard marquee, auto-layout drag reorder + re-parent, live nesting into clipping frames with frame guides, Enter/Tab navigation, edge + equal-gap snapping with guides, Alt distances, clipboard + style, frame/unframe, auto layout, z-order, lock/hide, Fill/Hug sizing, context menu');

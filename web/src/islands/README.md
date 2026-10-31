@@ -65,6 +65,18 @@ The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; isla
   `[data-org-member=<email>]`, `[data-org-member-role=<email>]`, `#members-invite*`, `#members-room-role`, `#members-leave`,
   `[data-accept-invitation]`, `#onboarding[data-step]`, `#onboarding-*`, `[data-agent=<id>] [data-status]`. The legacy Share
   dialog already uses `data-member` / `data-remove-member`, so organization rows must not.
+- **UI ready** (`web/src/lib/bridge.ts` + `mount.tsx`): `<html data-ui-ready="true">` is set and `bd:ui-ready` fires on
+  `window`, once per page load, when every island started with `mountIsland()` has committed its first render AND no
+  `takeOver()` id is still pending (until claimed, an id such as `#files-home` or `#add-page` resolves to the hidden
+  legacy element parked in `#bd-legacy-dock`). It means "the shell's taken-over controls are claimed", not "every lazy
+  panel exists": content an island renders on demand (menus, dialogs, settings pages, onboarding steps) is not covered.
+  An id that the island only renders on demand must be taken over with `takeOver(id, { deferred: true })` (e.g. home's
+  `#folder-breadcrumb`); never take over an id the island never renders — it would hold the signal back forever.
+  The signal has no timeout fallback: after 5 s without it, a `[bd] UI not ready` console warning names what is stuck,
+  and `window.__bdPendingTakeovers()` returns `{ islands, ids, deferred }` (uncommitted islands, blocking pending ids,
+  deferred pending ids). It also works for an island built alone (`node scripts/build-ui.cjs <area>`): then only that
+  island is counted. Electron tests call `waitForUiReady(page)` from `tests/helpers/ui-ready.cjs` after launch and after
+  every reload, before clicking shell controls (`tests/ui-ready.cjs` is the regression test).
 - **Zoom menu**: tests click `#zoom-menu-button` then `#zoom-in`, `#zoom-out`, `#zoom-fit`, `#zoom-reset`, `#snap`,
   `#saved-views-open` (chrome island). `#zoom-reset` text must keep the zoom percentage (tests parse it).
 - **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask-0-css]`, `[name=layout]`,

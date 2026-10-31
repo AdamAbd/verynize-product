@@ -1,4 +1,5 @@
 const {_electron} = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -12,6 +13,7 @@ const http = require('node:http');
   const app = await _electron.launch({env,args:['.',`--user-data-dir=${profile}`]});
   try {
     const page = await app.firstWindow();
+    await waitForUiReady(page);
     await page.waitForFunction(() => !!window.livePreview?.getSelectionState);
     await page.evaluate(url => window.livePreview.show(url), `http://127.0.0.1:${server.address().port}/`);
     const toolbar = page.locator('#preview-toolbar');

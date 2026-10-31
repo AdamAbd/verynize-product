@@ -4,6 +4,7 @@
 // (invite, pending invitations, role change, default room access, invitations for you, leave).
 import { Miniflare } from "miniflare";
 import { _electron as electron } from "@playwright/test";
+import { waitForUiReady } from './helpers/ui-ready.cjs';
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -39,6 +40,7 @@ try {
     timeout: 20000,
   });
   const page = await app.firstWindow({ timeout: 20000 });
+  await waitForUiReady(page);
   await page.waitForFunction(() => !!window.cloudAccount && !!window.fileLibrary);
   page.on("dialog", (dialog) => dialog.accept());
   await page.evaluate(() => {

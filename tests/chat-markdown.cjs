@@ -2,6 +2,7 @@
 // tests/fixtures/fake-codex.cjs, whose "markdown sample" reply has a GFM table, task list, fenced code, line breaks,
 // a bare verynize:// URL, a web autolink, a javascript: link and raw HTML.
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -18,6 +19,7 @@ const path = require('node:path');
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await page.setViewportSize({ width: 1440, height: 870 });
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await page.evaluate(() => window.agentWorkspace.openChat());
