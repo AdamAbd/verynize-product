@@ -457,7 +457,7 @@ export function Composer({ state }: { state: ChatState }) {
               onRemove={() => ws?.removeMention?.(mention.id)}
               removable={!!ws?.removeMention}
             >
-              {mention.label}
+              {mention.type === "element" ? <span className="text-primary-text">{mention.label}</span> : mention.label}
             </Chip>
           ))}
           {state.attachments.map((item, index) => (

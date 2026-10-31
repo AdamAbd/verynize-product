@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('desktop',{
  previewInspect:options=>call('previewInspect',options),
  previewEdit:options=>call('previewEdit',options),
  previewClearData:options=>call('previewClearData',options),
+ previewDom:options=>call('previewDom',options),
  captureLivePreview:options=>call('captureLivePreview',options),
  // Web page capture and region picking (desktop/capture-remote.cjs, desktop/preview.cjs previewElementAt).
  captureRemote:options=>call('captureRemote',options),captureRemoteProbe:options=>call('captureRemoteProbe',options),previewElementAt:point=>call('previewElementAt',point),

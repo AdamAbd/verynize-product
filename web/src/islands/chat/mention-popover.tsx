@@ -2,7 +2,7 @@
 // turns the token into a mention chip (workspace.addMention). Listens on the adopted #project-prompt directly, in the
 // capture phase, so Enter/Escape never reach the legacy handlers while the list is open.
 import { useEffect, useRef, useState } from "react";
-import { BoxIcon, FrameIcon, ImageIcon, SparklesIcon, SquareIcon, TypeIcon } from "lucide-react";
+import { BoxIcon, FrameIcon, ImageIcon, SparklesIcon, SquareIcon, TargetIcon, TypeIcon } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { legacySet } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,8 @@ import { workspace, type ChatMention } from "./store";
 const TOKEN = /(?:^|\s)@([^\s@]{0,40})$/;
 
 export function MentionIcon({ type, className }: { type?: string; className?: string }) {
+  // A DOM element picked in a live preview's Edit mode (Wonder PM5): purple target.
+  if (type === "element") return <TargetIcon className={cn("size-3.5 shrink-0 text-primary-text", className)} />;
   const Icon = type === "frame" ? FrameIcon : type === "text" ? TypeIcon : type === "image" ? ImageIcon : type === "shader" ? SparklesIcon : type === "rectangle" ? SquareIcon : BoxIcon;
   return <Icon className={cn("size-3.5 shrink-0 text-muted-foreground", className)} />;
 }

@@ -37,6 +37,7 @@ function editPreviewElement(options) {
   for (const [key, value] of Object.entries(options.styles || {})) element.style[key] = value;
   return { applied: true, undoAvailable: true };
 }
+const {previewDom,domRequest}=require('./preview-dom.cjs');
 const {snapshotDocument,finishSnapshot,probeInteractions,elementAtPoint,validRegion,captureModel}=require('./capture-core.cjs');
 function registerPreview(handle, parent) {
   const windows = new Set();
@@ -57,7 +58,9 @@ function registerPreview(handle, parent) {
 
     finally { if(capture&&!window.isDestroyed())window.destroy(); }
   });
-  handle('captureLivePreview',async ({url,region=null,target}={})=>captureLiveFrame(parent,{url:localURL(url),region,name:frameName(target)}));
+  handle('captureLivePreview',async ({url,region=null,element=null,target}={})=>captureLiveFrame(parent,{url:localURL(url),region,element,name:frameName(target)}));
+  // Edit / Capture modes (web/preview-edit.js): hit testing, element info, staged DOM edits, direct text editing.
+  handle('previewDom',async options=>previewFrame(parent).executeJavaScript('('+previewDom.toString()+')('+JSON.stringify(domRequest(options))+')'));
   // Region picker hover highlight: the element box under a point of the embedded preview viewport.
   handle('previewElementAt',async ({x,y,target}={})=>{if(!Number.isFinite(x)||!Number.isFinite(y))throw Error('A viewport point is required');return previewFrame(parent,frameName(target)).executeJavaScript('('+elementAtPoint.toString()+')('+JSON.stringify({x,y})+')');});
   require('./capture-remote.cjs').registerRemoteCapture(handle,parent);
@@ -140,14 +143,15 @@ function registerPreview(handle, parent) {
     } finally {window.destroy();}
   });
 }
-async function captureLiveFrame(parent,{url,region=null,name=PREVIEW_FRAME}={}){
+async function captureLiveFrame(parent,{url,region=null,element=null,name=PREVIEW_FRAME}={}){
+  if(element!==null&&(typeof element!=='string'||!element||element.length>1000))throw Error('Invalid element path');
   const frame=parent.webContents.mainFrame.frames.find(candidate=>candidate.name===name);
   if(!frame||frame.parent!==parent.webContents.mainFrame)throw Error('Open the running app preview first');
   const actual=new URL(localURL(frame.url));
   if(url){const expected=new URL(localURL(url));if(actual.origin!==expected.origin)throw Error('Preview navigated to a different origin; load it explicitly before capturing');}
   const viewport=await frame.executeJavaScript('({width:innerWidth,height:innerHeight})');
   if(region&&!validRegion(region,viewport.width,viewport.height))throw Error('Capture region must lie inside the live viewport');
-  const snapshot=await frame.executeJavaScript('('+snapshotDocument.toString()+')('+JSON.stringify(region)+')');
+  const snapshot=await frame.executeJavaScript('('+snapshotDocument.toString()+')('+JSON.stringify(element?null:region)+(element?','+JSON.stringify({root:element}):'')+')');
   if(frame.url!==actual.href)throw Error('Preview navigated during capture; retry after loading completes');
   return finishSnapshot(snapshot,actual.origin);
 }
