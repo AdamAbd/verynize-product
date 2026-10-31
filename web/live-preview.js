@@ -168,6 +168,14 @@
     return entry;
   }
   function focus(entry){const rect=document.getElementById('canvas-wrap').getBoundingClientRect(),zoom=Math.max(.05,Math.min((rect.width-100)/entry.node.w,(rect.height-140)/entry.node.h,1));window.design.setCamera(50-entry.node.x*zoom,60-entry.node.y*zoom,zoom);}
+  // The worktree's branch (last segment) when the chat has one, else its title once renamed, else the app name.
+  function layerName(info, preview) {
+    const s = window.agentWorkspace?.getState?.() || {};
+    const chat = info.chatId && s.conversationId === info.chatId ? s : null;
+    const branch = chat?.branch ? String(chat.branch).split('/').pop() : '';
+    const title = (s.conversations || []).find(c => c.id === info.chatId)?.title || '';
+    return branch || (title && !/^New (quick )?chat$/.test(title) ? title : '') || preview.name;
+  }
   function ensure(options = {}) {
     const info = {...project(), ...options};
     let doc = window.design.getDocument();
@@ -175,8 +183,11 @@
     if (found) { window.design.setActivePage(found.page.id); activeId = found.node.id; if (!entries.has(activeId)) window.design.setSelection([activeId]); activate(entries.get(activeId));focus(entries.get(activeId)); return activeId; }
     const nodes = doc.pages.find(p => p.id === doc.activePage).nodes;
     const right = nodes.length ? Math.max(...nodes.map(n => n.x + n.w)) + 100 : 80;
-    const preview = {root: info.root, name: info.name || 'Local app', chatId: info.chatId || '', ...(info.url ? {url: valid(info.url)} : {})};
-    const id = window.design.addNode('frame', {name: `${preview.name} · Preview`, parentId: null, x: right, y: 100, w: 1200, h: 800, color: '#191919', radius: 8, padding: 0, preview});
+    // Preview audit PF4/PF7: new frames open at the default screen template (MacBook Pro 14", window.previewPresets)
+    // and the layer is named after the chat's worktree.
+    const size = window.previewPresets?.find(p => p.default) || {name: 'MacBook Pro 14"', w: 1512, h: 982};
+    const preview = {root: info.root, name: info.name || 'Local app', chatId: info.chatId || '', template: size.name, ...(info.url ? {url: valid(info.url)} : {})};
+    const id = window.design.addNode('frame', {name: layerName(info, preview), parentId: null, x: right, y: 100, w: size.w, h: size.h, color: '#191919', radius: 8, padding: 0, preview});
     activate(entries.get(id));focus(entries.get(id));
     return id;
   }

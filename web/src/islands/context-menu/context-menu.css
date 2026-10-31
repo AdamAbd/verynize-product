@@ -6,3 +6,20 @@
 #selection-measure {
   z-index: 20 !important;
 }
+
+/*
+ * Preview frame menu (preview audit PF5). Wonder's menu is 176 px wide with every label whole except "Clear preview
+ * data (including logins)", which truncates. Inter 13 px is a little wider than Wonder's face, so labels sit 4 px from
+ * their shortcut with a 6 px right inset (Wonder: 6 / 8), the long clear label is capped, and the menu takes the width
+ * of its widest whole row ("Paste over selection ⌘⇧V", ≈181 px) instead of truncating it.
+ */
+@layer utilities {
+  /* Utilities are !important in this build; inside their layer the id selector wins. */
+  #canvas-menu[data-target="preview"] [role="menuitem"] {
+    column-gap: 4px !important;
+    padding-right: 6px !important;
+  }
+  #canvas-menu[data-target="preview"] [data-command="preview.clearDataAndLogins"] > span:first-child {
+    max-width: 150px !important;
+  }
+}

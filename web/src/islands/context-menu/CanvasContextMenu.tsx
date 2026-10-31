@@ -7,6 +7,7 @@ import { design, useDesign, useSelection, useWindowEvent } from "@/lib/bridge";
 import { MenuEntries } from "./entries";
 import { addContext, emptyCanvasMenu, layerMenu, type Point } from "./model";
 import { Menu, MenuContent } from "./parts";
+import { previewMenu, selectedPreview } from "./preview-menu";
 import "./context-menu.css";
 
 type Detail = { x: number; y: number; point: Point | null; target: string | null; under: string[] };
@@ -15,17 +16,23 @@ type Detail = { x: number; y: number; point: Point | null; target: string | null
 function LayerEntries({ under }: { under: string[] }) {
   useDesign();
   useSelection();
-  return <MenuEntries entries={layerMenu("canvas", under)} />;
+  const preview = selectedPreview();
+  return <MenuEntries entries={preview ? previewMenu(preview, under) : layerMenu("canvas", under)} />;
 }
 
 export function CanvasContextMenu() {
   const trigger = useRef<HTMLSpanElement>(null);
-  const [state, setState] = useState<(Detail & { serial: number }) | null>(null);
+  const [state, setState] = useState<(Detail & { serial: number; preview: boolean }) | null>(null);
 
   const onMenu = useCallback((event: Event) => {
     const detail = (event as CustomEvent<Detail>).detail;
     if (!detail) return;
-    setState((prev) => ({ ...detail, under: detail.under ?? [], serial: (prev?.serial ?? 0) + 1 }));
+    setState((prev) => ({
+      ...detail,
+      under: detail.under ?? [],
+      preview: !!detail.target && !!selectedPreview(),
+      serial: (prev?.serial ?? 0) + 1,
+    }));
     // Radix opens a context menu at the pointer of the `contextmenu` event its trigger receives.
     trigger.current?.dispatchEvent(
       new MouseEvent("contextmenu", {
@@ -48,7 +55,7 @@ export function CanvasContextMenu() {
         <MenuContent
           key={state.serial}
           id="canvas-menu"
-          data-target={state.target ? "layer" : "canvas"}
+          data-target={state.target ? (state.preview ? "preview" : "layer") : "canvas"}
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
           {state.target ? (
