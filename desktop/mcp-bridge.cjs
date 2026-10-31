@@ -20,7 +20,7 @@ const {onWindowClosed}=require('./window-cleanup.cjs');
  *       ask_agent tool (second opinion / design review); calling startBridge again (or
  *       setBridgeOptions) replaces the options. Without it ask_agent reports unavailable.
  *   setBridgeOptions({askAgent, shellExec, confirmExec})             update options at any time
- *   registerWindow(win, {designFiles, entryURL})                     per editor BrowserWindow
+ *   registerWindow(win, {designFiles, trusted})                      per editor BrowserWindow (trusted(event): IPC sender guard)
  *   getBridgeInfo() -> {url, token, file, documentsRoot, toolsVersion} | null   null until started
  *   toolsVersion: TOOLS_VERSION of integrations/design-tools.mjs (also in mcp.json and pushed to
  *   editor windows as the 'info' bridge op -> window.verynizeTools).
@@ -56,7 +56,7 @@ const agentUsage = require('./agent-usage.cjs'); // Settings › Usage: AI-gener
 
 const load = file => import(pathToFileURL(path.join(__dirname, '../integrations', file)).href);
 const SUFFIX = '.verynize.json';
-const windows = new Map(); // webContents.id -> {win, designFiles, entryURL, pending}
+const windows = new Map(); // webContents.id -> {win, designFiles, trusted, pending}
 let info = null, server = null, starting = null, lastFocused = null;
 const bridgeOptions = { askAgent: null, shellExec: true, confirmExec: null };
 function setBridgeOptions(options = {}) {
@@ -72,15 +72,15 @@ function announce(entry) {
   request(entry, 'info', { toolsVersion: info.toolsVersion, serverVersion: info.serverVersion }, 5000).catch(() => {});
 }
 
-function registerWindow(win, { designFiles = null, entryURL } = {}) {
-  const entry = { win, designFiles, entryURL, pending: new Map() };
+function registerWindow(win, { designFiles = null, trusted = null } = {}) {
+  const entry = { win, designFiles, trusted, pending: new Map() };
   const id = win.webContents.id;
   windows.set(id, entry);
   lastFocused = id;
   win.on('focus', () => { lastFocused = id; });
   win.webContents.on('did-finish-load', () => announce(entry));
   win.webContents.ipc.on('bd:mcp-reply', (event, requestId, payload) => {
-    if (event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame || (entryURL && event.senderFrame.url !== entryURL)) return;
+    if (event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame || (trusted && !trusted(event))) return;
     const pending = entry.pending.get(requestId);
     if (!pending || !payload || typeof payload !== 'object') return;
     entry.pending.delete(requestId); clearTimeout(pending.timer);

@@ -1500,7 +1500,7 @@
   $("cloud-signout").onclick = action(() => signOut(false));
   $("cloud-signout-all").onclick = action(() => signOut(true));
   // ---- passkeys ---------------------------------------------------------------------------------
-  // The ceremony runs on the server's /passkey page (a file:// renderer cannot be a WebAuthn relying
+  // The ceremony runs on the server's /passkey page (the app://verynize renderer cannot be the server's WebAuthn relying
   // party). Sign-in uses a handoff: this window keeps the secret and claims the session afterwards.
   let passkeyRun = 0;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
