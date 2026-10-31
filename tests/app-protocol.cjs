@@ -318,11 +318,16 @@ async function migrationChecks(profile) {
   } finally {
     await app.close();
   }
-  // Third launch: the marker short-circuits, no hidden window.
+  // Third launch: probe for downgrade edits, but do not recopy unchanged storage.
   const again = await launch(profile);
   try {
-    const page = await again.firstWindow();
-    assert.equal(page.url(), ENTRY, "no migration window once the marker exists");
+    const page = await editor(again);
+    assert.equal(page.url(), ENTRY, "editor opens after the downgrade probe");
+    const record = JSON.parse(await fs.readFile(marker, "utf8"));
+    assert.equal(record.unchanged, true);
+    assert.equal(record.copied, 0);
+    assert.equal(record.replaced, 0);
+    assert.equal(record.outbox, 0);
   } finally {
     await again.close();
   }
