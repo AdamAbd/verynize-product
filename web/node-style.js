@@ -223,6 +223,9 @@
   //           src? (image: embedded data URL), css? (custom: a CSS gradient), mode? ('alpha'|'luminance'),
   //           repeat?, x?/y? (position %), size? ('auto'|'cover'|'contain'|'<n>%'|'<n>px'), composite?}]
   //     -> mask-image layers plus mask-mode / mask-repeat / mask-position / mask-size / mask-composite lists
+  //   masks [{type: 'shape', shape: 'inset(T% R% B% L%)', hidden?, composite?}]: a shape mask made by "Use as mask"
+  //     (Wonder P5): the consumed sibling's rectangle, as CSS inset() percentages of this layer's box (negative =
+  //     outside it). Rendered as an SVG rectangle mask layer stretched over the box; the other mask options do not apply.
   //   outlineToken / strokeToken bind the outline / border colour to a Colors variable; strokeColors
   //     [{color, token?} x4] (top, right, bottom, left) paints each border side separately.
   //   strokeHidden / outlineHidden: true hides the border / outline without discarding it (the inspector's
@@ -241,13 +244,21 @@
     sepia: {fn: 'sepia', unit: '', min: 0, max: 1, value: 1},
   };
   const SHADOW_TYPES = ['box', 'drop', 'text'];
-  const MASK_TYPES = ['linear', 'radial', 'conic', 'image', 'custom'];
+  const MASK_TYPES = ['linear', 'radial', 'conic', 'image', 'custom', 'shape'];
   const MASK_MODES = ['auto', 'alpha', 'luminance'];
   const MASK_REPEATS = ['repeat', 'no-repeat', 'repeat-x', 'repeat-y', 'space', 'round'];
   const MASK_COMPOSITES = ['add', 'subtract', 'intersect', 'exclude'];
   const MASK_SIZE = /^(auto|cover|contain|\d{1,5}(\.\d{1,3})?(px|%)( \d{1,5}(\.\d{1,3})?(px|%))?)$/;
   const MASK_IMAGE = /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
   const MASK_CSS = /^(repeating-)?(linear|radial|conic)-gradient\([^;{}<>\\]{1,2000}\)$/i;
+  const MASK_SHAPE = /^inset\(-?\d{1,5}(\.\d{1,3})?%( -?\d{1,5}(\.\d{1,3})?%){0,3}\)$/;
+  /** inset() percentages as [top, right, bottom, left] (CSS shorthand: 1–4 values), or null. */
+  function maskInset(shape) {
+    if (typeof shape !== 'string' || !MASK_SHAPE.test(shape)) return null;
+    const v = shape.slice(6, -1).split(' ').map(parseFloat);
+    return [v[0], v[1] ?? v[0], v[2] ?? v[0], v[3] ?? v[1] ?? v[0]];
+  }
+  const toBase64 = text => (typeof btoa === 'function' ? btoa(text) : Buffer.from(text).toString('base64'));
   const OUTLINE_STYLES = ['solid', 'dashed', 'dotted'];
   const FX_HEX = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
   const FX_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,99}$/;
@@ -265,6 +276,11 @@
   function maskCss(m) {
     if (m.type === 'image') return `url("${m.src}")`;
     if (m.type === 'custom') return m.css;
+    if (m.type === 'shape') {
+      const [t, r, b, l] = maskInset(m.shape), w = Math.max(0, 100 - l - r), h = Math.max(0, 100 - t - b);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><rect x="${r3(l)}" y="${r3(t)}" width="${r3(w)}" height="${r3(h)}"/></svg>`;
+      return `url("data:image/svg+xml;base64,${toBase64(svg)}")`;
+    }
     const a = Math.min(100, Math.max(0, num(m.alpha, 100))) / 100, solid = `rgba(0, 0, 0, ${r3(a)})`, clear = 'rgba(0, 0, 0, 0)';
     const [from, to] = m.invert === true ? [clear, solid] : [solid, clear];
     if (m.type === 'radial') return `radial-gradient(${from}, ${to})`;
@@ -288,7 +304,7 @@
       filter: filters.filter(f => f.backdrop !== true).map(filterCss),
       backdrop: filters.filter(f => f.backdrop === true).map(filterCss),
       masks: masks.map(maskCss),
-      maskLayers: masks.map(m => ({
+      maskLayers: masks.map(m => m.type === 'shape' ? {mode: 'alpha', repeat: 'no-repeat', position: '0% 0%', size: '100% 100%', composite: pick(m.composite, MASK_COMPOSITES, 'add')} : ({
         mode: m.mode === 'alpha' || m.mode === 'luminance' ? m.mode : 'match-source',
         repeat: pick(m.repeat, MASK_REPEATS, 'repeat'),
         position: `${r3(num(m.x))}% ${r3(num(m.y))}%`,
@@ -304,7 +320,7 @@
     if (n.strokeToken && tokens && FX_HEX.test(tokens[n.strokeToken] || '')) return tokens[n.strokeToken];
     return '';
   }
-  const usableMask = m => MASK_TYPES.includes(m.type) && (m.type !== 'image' || MASK_IMAGE.test(m.src || '')) && (m.type !== 'custom' || MASK_CSS.test(m.css || ''));
+  const usableMask = m => MASK_TYPES.includes(m.type) && (m.type !== 'image' || MASK_IMAGE.test(m.src || '')) && (m.type !== 'custom' || MASK_CSS.test(m.css || '')) && (m.type !== 'shape' || !!maskInset(m.shape));
   const isBool = v => v === undefined || typeof v === 'boolean';
   const finite = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
   /** Validate the structured effect fields of a layer. Returns an error message, or '' when valid. */
@@ -336,6 +352,8 @@
       if (!MASK_TYPES.includes(m.type) || !finite(m.rotation ?? 0, -3600, 3600) || !finite(m.alpha ?? 100, 0, 100) || !isBool(m.invert)) return 'Invalid mask';
       if (m.type === 'image' && (typeof m.src !== 'string' || m.src.length > 15e6 || !MASK_IMAGE.test(m.src))) return 'Image mask needs an embedded base64 image';
       if (m.type === 'custom' && (typeof m.css !== 'string' || !MASK_CSS.test(m.css) || /url\s*\(/i.test(m.css))) return 'Custom mask needs a CSS gradient';
+      if (m.type === 'shape' && !maskInset(m.shape)) return 'Shape mask needs an inset() of percentages';
+      if (m.shape !== undefined && m.type !== 'shape') return 'Invalid mask';
       if (m.mode !== undefined && !MASK_MODES.includes(m.mode)) return 'Invalid mask mode';
       if (m.repeat !== undefined && !MASK_REPEATS.includes(m.repeat)) return 'Invalid mask repeat';
       if (m.composite !== undefined && !MASK_COMPOSITES.includes(m.composite)) return 'Invalid mask operation';

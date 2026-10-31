@@ -12,10 +12,18 @@
 //   updated" and the label stays the same. Only a single frame was exercised in Wonder; for a multi-selection
 //   Verynize uses the first selected layer (unproven).
 //
-// Not rendered, because Verynize has no mechanism for it yet: "Use as mask" (masks are CSS mask images, not layers).
+// - P5-mask-menu: "Use as mask" follows Layout for two selected siblings. P5-mask-result-menu: a layer with a shape mask
+//   gets "Detach mask as shape" and "Remove mask" there instead (inspector/shape-mask.ts).
 import { toast } from "sonner";
 import { toggleBodyClass } from "../chrome/hooks";
 import { design, activePage, type LayerNode } from "@/lib/bridge";
+import {
+  detachShapeMask,
+  maskPair,
+  removeMask,
+  shapeMaskIndex,
+  useAsMask,
+} from "../inspector/shape-mask";
 
 export type Entry =
   | {
@@ -208,6 +216,28 @@ export function layerMenu(surface: "canvas" | "row", under: string[] = []): Entr
     });
   }
 
+  const masking: Entry[] = [];
+  if (multi && maskPair())
+    masking.push({ type: "item", command: "menu.useAsMask", label: "Use as mask", run: useAsMask });
+  const shapeMask = multi ? -1 : shapeMaskIndex(selected[0]);
+  if (shapeMask >= 0) {
+    const id = selected[0].id;
+    masking.push(
+      {
+        type: "item",
+        command: "menu.detachMask",
+        label: "Detach mask as shape",
+        run: () => detachShapeMask(id, shapeMask),
+      },
+      {
+        type: "item",
+        command: "menu.removeMask",
+        label: "Remove mask",
+        run: () => removeMask(id, shapeMask),
+      },
+    );
+  }
+
   return join([
     [
       {
@@ -250,6 +280,7 @@ export function layerMenu(surface: "canvas" | "row", under: string[] = []): Entr
           commandItem(have, "transform.autoLayout", "Add auto layout", "⇧A"),
         ],
       },
+      ...masking,
     ],
     [
       {
