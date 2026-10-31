@@ -8,7 +8,10 @@
 // the editor's #room= invite → a sent message streams assistant text into the transcript, a read tool call renders
 // with its result from the room, the next turn carries the earlier ones as history, a dropped connection resumes
 // through GET /api/ai/runs/:id/events?after=, Stop cancels a running turn, the model picker lists the server's
-// models and never Claude/Codex; a server without OPENROUTER_API_KEY → "Model API not configured on this server".
+// models and never Claude/Codex; with access "Ask" picked in the composer a write tool call raises the approval card:
+// Allow → POST /approvals with the request's argsHash, the edit lands in the room (backend read and the open canvas)
+// and the run reports permission-resolved; Deny → the room is unchanged and the model gets the denial;
+// a server without OPENROUTER_API_KEY → "Model API not configured on this server".
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -17,7 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "./helpers/web-app.mjs";
-import { startFakeOpenRouter } from "./helpers/fake-openrouter.mjs";
+import { startFakeOpenRouter, toolMessages, userText } from "./helpers/fake-openrouter.mjs";
 
 // cloudOptions on the Node runtime: no workerd bundle build; the Node server runs cloud/worker.js itself.
 process.env.CLOUD_RUNTIME = "node";
@@ -37,6 +40,7 @@ execFileSync(
   },
 );
 
+const labelOf = (body) => /\[label:([\w -]+)\]/.exec(userText(body))?.[1] || "AI card";
 const fake = await startFakeOpenRouter({
   tree: [
     [{ text: "Let me look at the room." }, { tool: "get_element_tree", args: {} }],
@@ -45,6 +49,23 @@ const fake = await startFakeOpenRouter({
   stream: [[{ text: "First part arrives " }, { delay: 1500 }, { text: "and then the rest." }]],
   drop: [[{ text: "Before the drop " }, { delay: 2500 }, { text: "after the reconnect." }]],
   slow: [[{ text: "Working on it" }, { hang: true }]],
+  // One write (create_artboard of a card named by [label:…]), then a closing text that echoes the tool result.
+  write: (body) =>
+    toolMessages(body).length
+      ? [
+          {
+            text: `Write finished: ${/denied/.test(toolMessages(body)[0].content) ? "denied" : "applied"}.`,
+          },
+        ]
+      : [
+          { text: "Adding a card." },
+          {
+            tool: "create_artboard",
+            args: {
+              code: `<div data-node-label="${labelOf(body)}" className="w-[320px] bg-white p-6 flex flex-col gap-2"><p className="text-base text-slate-900">${labelOf(body)}</p></div>`,
+            },
+          },
+        ],
   default: [[{ text: "ok" }]],
 });
 const temp = await fsp.mkdtemp(path.join(os.tmpdir(), "verynize-web-ai-chat-"));
@@ -160,9 +181,12 @@ try {
   const page = await context.newPage();
   watch(page);
   const requests = [];
+  const approvalBodies = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
     requests.push(`${request.method()} ${url.pathname}${url.search}`);
+    if (/^\/api\/ai\/runs\/[^/]+\/approvals$/.test(url.pathname))
+      approvalBodies.push(JSON.parse(request.postData() || "{}"));
   });
   page.on("dialog", (dialog) => dialog.accept());
   await page.goto(origin + "/editor");
@@ -317,6 +341,174 @@ try {
   const events = await api(`/api/ai/runs/${runId}/events?after=0`);
   const body = await events.text();
   assert.match(body, /"type":"done","code":"cancelled"/);
+
+  // ---- write tools with approvals (access "Ask", picked in the composer) ----
+  const roomLabels = async () => {
+    const response = await api(`/api/rooms/${room.id}`);
+    assert.ok(response.ok, await response.clone().text());
+    const { document } = await response.json();
+    return document.pages.flatMap((p) => p.nodes.filter((n) => !n.parentId)).map((n) => n.name);
+  };
+  const canvasLabels = () =>
+    page.evaluate(() =>
+      window.design
+        .getDocument()
+        .pages.flatMap((p) => p.nodes.filter((n) => !n.parentId))
+        .map((n) => n.name),
+    );
+  const runEvents = async (id) => {
+    const response = await api(`/api/ai/runs/${id}/events?after=0`);
+    return (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)));
+  };
+  const lastApprovalRun = () =>
+    requests
+      .filter((line) => /^POST \/api\/ai\/runs\/[0-9a-f-]{36}\/approvals$/.test(line))
+      .at(-1)
+      ?.split("/")[4];
+  assert.deepEqual(await roomLabels(), ["Hero"]);
+  await page.locator("#agent-access-trigger").click();
+  await page.getByRole("menuitemradio", { name: /^Ask/ }).click();
+  await page.waitForFunction(() => document.getElementById("agent-access").value === "ask");
+  assert.match(
+    await page.locator("#agent-access-trigger").getAttribute("aria-label"),
+    /Access: Ask/,
+  );
+
+  // Allow: the card appears, the approval carries the request's argsHash, the edit lands in the room and on the canvas.
+  const runsBefore = requests.filter((line) => line === "POST /api/ai/runs").length;
+  await send("[scenario:write] [label:Approved card] Add a card");
+  const allowCard = page
+    .locator(".chat-message.assistant")
+    .last()
+    .locator(".chat-permission.pending");
+  await allowCard.waitFor({ timeout: 20000 });
+  assert.match(await allowCard.innerText(), /Allow .*\?/);
+  assert.match(await allowCard.innerText(), /Approved card/, "the card shows the call's input");
+  assert.doesNotMatch(
+    await allowCard.innerText(),
+    /Always allow/,
+    "no always-allow on the model API",
+  );
+  assert.equal(
+    (await page.evaluate(() => window.agentWorkspace.getState().messages))
+      .filter((m) => m.role === "assistant")
+      .at(-1).state,
+    "running",
+  );
+  assert.deepEqual(await roomLabels(), ["Hero"], "nothing is applied before the approval");
+  await allowCard.locator(".chat-permission-allow").click();
+  await page
+    .locator(".chat-message.assistant")
+    .last()
+    .getByText("Write finished: applied.")
+    .waitFor({ timeout: 20000 });
+  await idle();
+  assert.equal(requests.filter((line) => line === "POST /api/ai/runs").length, runsBefore + 1);
+  const allowRunId = lastApprovalRun();
+  assert.ok(
+    allowRunId,
+    "the approval was posted: " + requests.filter((l) => l.includes("/api/ai/")).join(", "),
+  );
+  const allowEvents = await runEvents(allowRunId);
+  const allowRequest = allowEvents.find((e) => e.type === "permission-request");
+  assert.equal(allowRequest.name, "create_artboard");
+  assert.match(allowRequest.argsHash, /^[0-9a-f]{64}$/);
+  assert.deepEqual(approvalBodies.at(-1), {
+    requestId: allowRequest.requestId,
+    allow: true,
+    argsHash: allowRequest.argsHash,
+  });
+  const allowResolved = allowEvents.find((e) => e.type === "permission-resolved");
+  assert.deepEqual(
+    {
+      requestId: allowResolved.requestId,
+      allow: allowResolved.allow,
+      reason: allowResolved.reason,
+    },
+    { requestId: allowRequest.requestId, allow: true, reason: "user" },
+  );
+  assert.equal(allowEvents.find((e) => e.type === "tool-result").isError, false);
+  assert.equal(allowEvents.at(-1).code, "ok");
+  assert.deepEqual(await roomLabels(), ["Hero", "Approved card"], "the edit is in the room");
+  await page.waitForFunction(
+    () =>
+      window.design
+        .getDocument()
+        .pages.some((p) => p.nodes.some((n) => n.name === "Approved card")),
+    null,
+    { timeout: 15000 },
+  );
+  reply = await lastReply();
+  assert.equal(reply.state, "complete");
+  const allowedPart = reply.parts.find((part) => part.kind === "permission");
+  assert.equal(allowedPart?.state, "allowed");
+  assert.equal(allowedPart.requestId, allowRequest.requestId);
+  assert.equal(allowedPart.toolName, "create_artboard");
+  assert.equal(
+    reply.parts.find((part) => part.kind === "tool" && part.name === "create_artboard")?.state,
+    "done",
+  );
+  assert.equal(
+    await page
+      .locator(".chat-message.assistant")
+      .last()
+      .locator(".chat-permission.allowed")
+      .count(),
+    1,
+    "the answered approval is rendered as allowed",
+  );
+  assert.equal(fake.requests.at(-1).body.messages.at(-1).role, "tool");
+
+  // Deny: the room is unchanged and the model gets the denial as the tool result.
+  const canvasBeforeDeny = await canvasLabels();
+  await send("[scenario:write] [label:Denied card] Add another card");
+  const denyCard = page
+    .locator(".chat-message.assistant")
+    .last()
+    .locator(".chat-permission.pending");
+  await denyCard.waitFor({ timeout: 20000 });
+  assert.match(await denyCard.innerText(), /Denied card/);
+  await denyCard.locator(".chat-permission-deny").click();
+  await page
+    .locator(".chat-message.assistant")
+    .last()
+    .getByText("Write finished: denied.")
+    .waitFor({ timeout: 20000 });
+  await idle();
+  const denyRunId = lastApprovalRun();
+  assert.ok(denyRunId && denyRunId !== allowRunId, "the denial was posted for the new run");
+  const denyBody = approvalBodies.at(-1);
+  assert.equal(denyBody.allow, false);
+  const denyEvents = await runEvents(denyRunId);
+  const denyRequest = denyEvents.find((e) => e.type === "permission-request");
+  assert.deepEqual(denyBody, {
+    requestId: denyRequest.requestId,
+    allow: false,
+    argsHash: denyRequest.argsHash,
+  });
+  const denyResolved = denyEvents.find((e) => e.type === "permission-resolved");
+  assert.deepEqual([denyResolved.allow, denyResolved.reason], [false, "user"]);
+  const denyResult = denyEvents.find((e) => e.type === "tool-result");
+  assert.equal(denyResult.isError, true);
+  assert.match(denyResult.output, /denied by user/);
+  assert.equal(denyEvents.at(-1).code, "ok");
+  const sawDenial = fake.requests.findLast((request) =>
+    /\[label:Denied card\]/.test(userText(request.body)),
+  );
+  assert.match(toolMessages(sawDenial.body)[0].content, /denied by user/);
+  assert.deepEqual(await roomLabels(), ["Hero", "Approved card"], "a denied write is not applied");
+  assert.deepEqual(await canvasLabels(), canvasBeforeDeny);
+  reply = await lastReply();
+  assert.equal(reply.state, "complete");
+  assert.equal(reply.parts.find((part) => part.kind === "permission")?.state, "denied");
+  assert.equal(
+    await page.locator(".chat-message.assistant").last().locator(".chat-permission.denied").count(),
+    1,
+    "the answered approval is rendered as denied",
+  );
   await page.close();
   await context.close();
 
@@ -342,7 +534,7 @@ try {
 
   assert.deepEqual(errors, [], "no page errors");
   console.log(
-    "PASS web chat (model API): signed-out and not-configured states, room gate, streamed text, read tool call, history, reconnect with events?after=, cancel, model picker",
+    "PASS web chat (model API): signed-out and not-configured states, room gate, streamed text, read tool call, history, reconnect with events?after=, cancel, model picker, access Ask with write approvals (allow and deny)",
   );
 } finally {
   await browser?.close();
