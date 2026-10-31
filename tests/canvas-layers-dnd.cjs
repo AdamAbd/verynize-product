@@ -1,5 +1,6 @@
 // Layers panel drag & drop (reorder / re-parent / multi-select / locked / cancel), flip and rotate 90°,
-// eyedropper (EyeDropper API and click-to-sample fallback), ellipse shapes and the extra context-menu commands.
+// eyedropper (EyeDropper API and click-to-sample fallback), ellipse shapes, the extra context-menu commands and the
+// Layers preview of a canvas drag out of an auto layout (Wonder R1).
 const {_electron} = require('@playwright/test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
@@ -214,6 +215,67 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
       const size = await page.evaluate(async src => { const img = new Image(); img.src = src; await img.decode(); return [img.naturalWidth, img.naturalHeight]; }, html.match(/src="(data:image\/png;base64,[^"]+)"/)[1]);
       assert.deepEqual(size, [200, 160], 'clipboard HTML carries the 2× PNG');
     }
+
+    // ---- 10. Canvas drag out of an auto layout previews the new hierarchy (Wonder R1-row-drag-out / -far) ----
+    // While the pointer is held the Layers tree already lists the child at the top level; returning into the row or
+    // pressing Escape reverts the tree. The preview is view state only: no document change, no save, no undo step.
+    await seed([frame('row', 0, 0, 380, 160, {layout: 'flex', direction: 'row', gap: 20, padding: 20, wMode: 'hug', hMode: 'hug'}),
+      frame('k1', 0, 0, 100, 60, {parentId: 'row'}), frame('k2', 0, 0, 100, 120, {parentId: 'row'}), frame('k3', 0, 0, 100, 90, {parentId: 'row'})]);
+    await page.evaluate(() => window.design.setSelection(['k2']));
+    await row('k2').waitFor();
+    const rowsNow = () => page.locator('#bd-layer-tree .layer-row').evaluateAll(els => els.map(e => e.dataset.id + ':' + e.getAttribute('aria-level')));
+    // The tree re-renders on React's schedule: wait (briefly) for an expected order before comparing.
+    const settle = async want => { for (let i = 0; i < 20; i++) { const now = await rowsNow(); if (want.every((v, k) => now[k] === v) && now.length === want.length) return now; await page.waitForTimeout(25); } return rowsNow(); };
+    const tree = want => (want ? settle(want) : rowsNow());
+    const atWorld = (x, y) => page.evaluate(([x, y]) => { const r = document.querySelector('#canvas-wrap').getBoundingClientRect(), c = window.design.getCamera(); return {x: r.left + c.x + x * c.zoom, y: r.top + c.y + y * c.zoom}; }, [x, y]);
+    const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('verynize-v2') || '{}').pages?.[0]?.nodes?.find(n => n.id === 'k2')?.parentId ?? null);
+    const nested = ['row:1', 'k3:2', 'k2:2', 'k1:2'], out = ['k2:1', 'row:1', 'k3:2', 'k1:2'];
+    assert.deepEqual(await tree(nested), nested, 'the child starts inside its row');
+    await page.evaluate(() => window.design.updateNodes(['k1'], {name: 'renamed'})); // a known last undo step
+    let p = await atWorld(170, 80);
+    await page.mouse.move(p.x, p.y); await page.mouse.down();
+    p = await atWorld(220, 330); await page.mouse.move(p.x, p.y, {steps: 8});
+    assert.deepEqual(await tree(out), out, 'dragged out of the row, the tree shows it at the top level while held');
+    assert.equal(await page.locator('#bd-layer-tree .layer-row[data-id=k2]').evaluate(e => e.getAttribute('aria-selected')), 'true', 'still selected');
+    assert.equal((await node('k2')).parentId, 'row', 'the document is unchanged until release');
+    assert.equal(await stored(), 'row', 'nothing is saved');
+    p = await atWorld(290, 80); await page.mouse.move(p.x, p.y, {steps: 8});
+    assert.deepEqual(await tree(nested), nested, 'back inside the row, the preview reverts');
+    p = await atWorld(220, 330); await page.mouse.move(p.x, p.y, {steps: 8});
+    assert.deepEqual(await tree(out), out);
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await tree(nested), nested, 'Escape cancels the drag and the preview');
+    assert.equal(await page.locator('#canvas [data-id=k2]').evaluate(e => e.style.translate), '', 'the dragged copy goes back to its slot');
+    await page.mouse.up();
+    assert.equal((await node('k2')).parentId, 'row', 'releasing after Escape changes nothing');
+    assert.deepEqual(await selection(), ['k2'], 'Escape during the drag keeps the selection');
+    await undo();
+    assert.equal((await node('k1')).name, 'k1', 'the cancelled drag left no undo step (undo reverts the earlier rename)');
+    // A real drop out of the row: one undo step, and the tree follows the document.
+    await page.evaluate(() => window.design.setSelection(['k2']));
+    p = await atWorld(170, 80); await page.mouse.move(p.x, p.y); await page.mouse.down();
+    p = await atWorld(220, 330); await page.mouse.move(p.x, p.y, {steps: 8}); await page.mouse.up();
+    assert.equal((await node('k2')).parentId, null, 'released outside, the child is top-level');
+    assert.deepEqual(await tree(out), out, 'the tree keeps the previewed order after release');
+    await undo();
+    assert.equal((await node('k2')).parentId, 'row', 'the drop is one undo step');
+    assert.deepEqual(await tree(nested), nested);
+    // R1-row-return-during: a free layer dragged over the row is listed inside it, at its slot, before release.
+    // (Top-level frames are never nested by a drag here, so the fixture moves a rectangle.)
+    await seed([frame('row', 0, 0, 380, 160, {layout: 'flex', direction: 'row', gap: 20, padding: 20, wMode: 'hug', hMode: 'hug'}),
+      frame('k1', 0, 0, 100, 60, {parentId: 'row'}), frame('k3', 0, 0, 100, 90, {parentId: 'row'}), rect('r', 100, 300, 100, 80)]);
+    await page.evaluate(() => window.design.setSelection(['k1'])); await page.evaluate(() => window.design.setSelection(['r'])); // row expanded
+    assert.deepEqual(await tree(['r:1', 'row:1', 'k3:2', 'k1:2']), ['r:1', 'row:1', 'k3:2', 'k1:2']);
+    p = await atWorld(150, 340); await page.mouse.move(p.x, p.y); await page.mouse.down();
+    p = await atWorld(125, 60); await page.mouse.move(p.x, p.y, {steps: 8});
+    const entering = await tree(['row:1', 'k3:2', 'r:2', 'k1:2']);
+    const heldParent = (await node('r')).parentId;
+    await page.mouse.up();
+    assert.deepEqual(entering, ['row:1', 'k3:2', 'r:2', 'k1:2'], 'entering the row, the tree lists it at the slot it will take');
+    assert.equal(heldParent, null, 'still top-level in the document while held');
+    assert.equal((await node('r')).parentId, 'row', 'released, it joins the row');
+    await undo();
+    assert.deepEqual(await tree(['r:1', 'row:1', 'k3:2', 'k1:2']), ['r:1', 'row:1', 'k3:2', 'k1:2'], 'one undo step');
 
     assert.deepEqual(errors, [], 'no page errors');
     console.log('canvas layers dnd tests passed');

@@ -10,6 +10,8 @@
 //   and nothing else (CM6-hidden); a selected nested layer gets dashed guides to the parent edges it is constrained
 //   to and no name label (S2-classic, CM3-text-menu: #c468f7 at 75%, 1px, 2.5/2 dashes); a text layer being edited
 //   shows only its caret, plus the ⊕ chip for a fixed-size box (TX1-click, TX1-selection, TX1-drag).
+// - While a layer is dragged (`.moving`) it shows no outline, handles, size badge or chip, only its name label
+//   (R1-row-drag-slot, R1-row-drag-far, TR4-guide). Multi-selection drags keep their union box (not captured).
 // Everything here is screen-space DOM in #canvas-overlay; the canvas itself stays imperative.
 (() => {
   const ZONE = 18; // rotate zone size outside each corner (screen px)
@@ -83,6 +85,9 @@
 #canvas-overlay .constraint-guides{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 #canvas-overlay .constraint-guide{stroke:${SELECT};stroke-opacity:.75;stroke-width:1;stroke-dasharray:2.5 2;shape-rendering:crispEdges}
 .moving #canvas-overlay .constraint-guides,.transforming #canvas-overlay .constraint-guides{display:none}
+.moving #canvas:not([data-multi-select]) .layer.selected{outline:none!important}
+.moving #canvas:not([data-multi-select]) .layer.selected::after,.moving #canvas:not([data-multi-select]) .layer>.handle{display:none!important}
+.moving #canvas-overlay:not([data-multi-select]) #selection-measure{visibility:hidden!important}
 #canvas .layer.selected[data-text-editing]{outline:none!important}
 #canvas .layer.selected[data-text-editing]::after,#canvas .layer[data-text-editing]>.handle{display:none!important}
 #canvas-wrap:has(#canvas .layer[data-text-editing]) #canvas-overlay .clipped-selection{display:none}
@@ -216,7 +221,10 @@
       // Label, chip and badge: the node's frame turned by k·90° so the chrome angle stays within (−45°, 45°].
       const angle = chromeAngle(f.angle), quarter = ((Math.round((f.angle - angle) / 90) % 4) + 4) % 4, swap = quarter % 2 === 1;
       place(textBox, f.cx, f.cy, swap ? f.h : f.w, swap ? f.w : f.h, angle);
-      if (name) { textBox.append(name); if (n.parentId || n.type === 'text' || editing) name.hidden = true; } // Wonder S2 / CM3: no label on nested or text layers
+      // Wonder S2 / CM3: no label on nested or text layers. A drag previewing a new parent labels by that parent
+      // (R1-row-drag-far: a stack child dragged onto the page shows its name, R1-row-return-during: one entering a stack not).
+      const preview = ctx.previewParent?.(n.id), parentId = preview === undefined ? n.parentId : preview;
+      if (name) { textBox.append(name); if (parentId || n.type === 'text' || editing) name.hidden = true; }
       textBox.append(chip);
       chip.hidden = editing && n.wMode !== 'fixed'; // TX1: a hugging text being typed shows only its caret
       if (badge) { textBox.append(badge); if (editing) badge.hidden = true; }

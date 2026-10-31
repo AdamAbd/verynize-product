@@ -45,7 +45,7 @@
 /* Hover (S1-hover-final) and the clip-proof ring: 1px straddling the edge, turned with the layer (frameOf in
    selection-chrome.js). An outline with a -0.5px offset keeps the box itself at the layer's exact bounds. */
 #canvas-overlay .hover-box,#canvas-overlay .selection-ring{position:absolute;box-sizing:border-box;outline:1px solid var(--canvas-select);outline-offset:-.5px;transform-origin:50% 50%}
-#canvas-overlay .drop-target{position:absolute;box-sizing:border-box;border:1.5px solid var(--canvas-select)}
+#canvas-overlay .drop-target{position:absolute;box-sizing:border-box;outline:1px solid var(--canvas-select);outline-offset:-.5px}
 #canvas-overlay .selection-ring>.handle{position:absolute;width:9px;height:9px;box-sizing:border-box;background:#fff;border:1px solid var(--canvas-select);pointer-events:auto}
 #canvas-overlay .selection-ring>.handle[data-corner=nw]{left:-4.5px;top:-4.5px;cursor:nwse-resize}#canvas-overlay .selection-ring>.handle[data-corner=ne]{right:-4.5px;top:-4.5px;cursor:nesw-resize}#canvas-overlay .selection-ring>.handle[data-corner=sw]{left:-4.5px;bottom:-4.5px;cursor:nesw-resize}#canvas-overlay .selection-ring>.handle[data-corner=se]{right:-4.5px;bottom:-4.5px;cursor:nwse-resize}
 .moving #canvas-overlay .clipped-selection,#canvas.spacing-measure~#canvas-overlay .clipped-selection{display:none}

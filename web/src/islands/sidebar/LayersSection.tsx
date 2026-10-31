@@ -21,7 +21,7 @@ import { Hint, IconButton, InlineRename, SectionHeader } from "./parts";
 import { LayerTypeIcon } from "./icons";
 import { useTakeOver } from "./legacy";
 import { contract } from "./contract";
-import { useTreeNodes, type TreeNode } from "./hooks";
+import { applyLayerPreview, useLayerPreview, useTreeNodes, type TreeNode } from "./hooks";
 import { dragJustEnded, useLayerDrag, type Drop } from "./layer-drag";
 
 type Row = { node: TreeNode; depth: number; hasChildren: boolean; expanded: boolean };
@@ -288,7 +288,10 @@ export function LayersSection({ open, onToggle }: { open: boolean; onToggle: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionKey]);
 
-  const rows = useMemo(() => buildRows(nodes, expanded, query), [nodes, expanded, query]);
+  // A canvas drag that will re-parent on release shows its layers at the new place while the pointer is held.
+  const preview = useLayerPreview();
+  const shown = useMemo(() => applyLayerPreview(nodes, preview), [nodes, preview]);
+  const rows = useMemo(() => buildRows(shown, expanded, query), [shown, expanded, query]);
   const selected = useMemo(() => new Set(selection), [selection]);
 
   const toggleExpand = useMemo(
