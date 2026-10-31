@@ -1,0 +1,218 @@
+/* Preview Edit / Capture overlay (web/preview-edit.js). Canvas-space boxes inside .live-frame-wrap; every stroke and label
+   is divided by the camera zoom (--iz from #canvas) so it reads at screen size, like Wonder's PM3/PM4 marks. */
+.canvas-preview[data-preview-mode] .live-frame-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 calc(2px * var(--iz, 1)) #66a0f8,
+    inset 0 0 calc(8px * var(--iz, 1)) calc(1px * var(--iz, 1)) rgb(102 160 248 / 0.35);
+}
+.pedit-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  cursor: default;
+  touch-action: none;
+}
+.pedit-layer[hidden],
+.pedit-layer [hidden] {
+  display: none !important;
+}
+.pedit-layer.pedit-editing {
+  pointer-events: none;
+}
+.pedit-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: calc(1px * var(--iz, 1)) solid var(--primary, #a245d3);
+  pointer-events: none;
+}
+.pedit-picked {
+  border-width: calc(1.5px * var(--iz, 1));
+}
+.pedit-picked > i {
+  position: absolute;
+  width: calc(8px * var(--iz, 1));
+  height: calc(8px * var(--iz, 1));
+  box-sizing: border-box;
+  background: #fff;
+  border: calc(1px * var(--iz, 1)) solid var(--primary, #a245d3);
+}
+.pedit-picked > i[data-corner="nw"] {
+  left: calc(-4.5px * var(--iz, 1));
+  top: calc(-4.5px * var(--iz, 1));
+}
+.pedit-picked > i[data-corner="ne"] {
+  right: calc(-4.5px * var(--iz, 1));
+  top: calc(-4.5px * var(--iz, 1));
+}
+.pedit-picked > i[data-corner="sw"] {
+  left: calc(-4.5px * var(--iz, 1));
+  bottom: calc(-4.5px * var(--iz, 1));
+}
+.pedit-picked > i[data-corner="se"] {
+  right: calc(-4.5px * var(--iz, 1));
+  bottom: calc(-4.5px * var(--iz, 1));
+}
+.pedit-badge,
+.pedit-tag {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%) scale(var(--iz, 1));
+  transform-origin: top center;
+  box-sizing: border-box;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--primary, #a245d3);
+  font:
+    400 12px/22px Inter,
+    system-ui,
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.pedit-badge {
+  margin-top: calc(10px * var(--iz, 1));
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+.pedit-tag {
+  margin-top: calc(6px * var(--iz, 1));
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 18px;
+}
+.pedit-chat {
+  position: absolute;
+  right: calc(4px * var(--iz, 1));
+  top: calc(-20px * var(--iz, 1));
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--primary-text, #c468f7);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--primary-text, #c468f7);
+  transform: scale(var(--iz, 1));
+  transform-origin: top right;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.pedit-chat::before,
+.pedit-chat::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 1px;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+}
+.pedit-chat::after {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+.pedit-chat:hover,
+.pedit-chat:focus-visible {
+  background: color-mix(in srgb, var(--primary, #a245d3) 20%, transparent);
+  outline: none;
+}
+.pedit-tip {
+  position: absolute;
+  right: -4px;
+  top: 20px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: var(--popover, #202020);
+  color: var(--foreground, #e8e8e8);
+  font:
+    400 12px/24px Inter,
+    system-ui,
+    sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px #0006;
+}
+.pedit-tip kbd {
+  font: inherit;
+  color: var(--muted-foreground, #8f8f8f);
+}
+.pedit-chat:hover .pedit-tip,
+.pedit-chat:focus-visible .pedit-tip {
+  display: flex;
+}
+.pedit-keys {
+  position: absolute;
+  left: 50%;
+  bottom: calc(48px * var(--iz, 1));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--border, #333);
+  border-radius: 12px;
+  background: var(--background, #1c1c1c);
+  color: var(--muted-foreground, #8f8f8f);
+  box-shadow: 0 8px 24px #0008;
+  transform: translateX(-50%) scale(var(--iz, 1));
+  transform-origin: bottom center;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.pedit-keys > span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pedit-keys kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background: var(--input, #2b2b2b);
+  color: var(--foreground-2, #d4d4d4);
+  font:
+    400 10px/1 Inter,
+    system-ui,
+    sans-serif;
+}
+.pedit-keys kbd.pedit-esc {
+  padding: 0 5px;
+}
+.pedit-keys b {
+  font:
+    400 10px/1 Inter,
+    system-ui,
+    sans-serif;
+  color: var(--muted-foreground, #6f6f6f);
+}
+/* While Navigate / Edit / Capture is active the frame shows its blue mode outline instead of the selection marks. */
+#canvas .layer.canvas-preview[data-preview-mode] {
+  outline-color: transparent !important;
+}
+#canvas .layer.canvas-preview[data-preview-mode] > .handle,
+body.preview-mode-active #canvas-overlay #selection-measure,
+body.preview-mode-active #canvas-overlay #selection-chat-chip,
+body.preview-mode-active #canvas-overlay .selection-ring {
+  display: none !important;
+}

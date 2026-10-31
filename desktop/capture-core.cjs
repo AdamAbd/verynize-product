@@ -41,7 +41,13 @@ function snapshotDocument(region, options = {}) {
     records = [],
     assets = [];
   let count = 0;
-  const area = region || { x: 0, y: 0, width: innerWidth, height: innerHeight };
+  // options.root: capture one element (structural CSS path) as top-level layers, its box as the area.
+  const rootEl = options.root ? document.querySelector(options.root) : null;
+  if (options.root && !rootEl) throw Error("The element is no longer on the page");
+  const rootBox = rootEl && rootEl.getBoundingClientRect();
+  const area = rootBox
+    ? { x: rootBox.left, y: rootBox.top, width: Math.max(1, rootBox.width), height: Math.max(1, rootBox.height) }
+    : region || { x: 0, y: 0, width: innerWidth, height: innerHeight };
   const kept = options.keep ? (window.__verynizeCapture = new Map()) : null;
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
   const styleKeys = [
@@ -357,7 +363,7 @@ function snapshotDocument(region, options = {}) {
     if (rules) scan(rules, sheet.href || document.baseURI);
   }
   for (const sheet of document.styleSheets) visit(sheet);
-  walk(document.body);
+  walk(rootEl || document.body);
   if (count >= 500) warnings.push("Capture limited to 500 elements");
   warnings.push(
     "Layout captured as fixed positioned layers; responsive rules and pseudo-elements are not reconstructed",
@@ -367,6 +373,7 @@ function snapshotDocument(region, options = {}) {
     assets,
     warnings,
     area,
+    element: !!rootEl,
     title: document.title,
     url: location.href,
     fonts: { faces: faces.slice(0, 200), sheets: [...new Set(sheets)].slice(0, 20) },
@@ -795,14 +802,15 @@ function captureModel(snapshot) {
     );
     const node = {
       id: item.id,
-      parentId: item.parentId || "capture-region",
+      parentId: item.parentId || (snapshot.element ? null : "capture-region"),
       type: item.type,
       name: item.name,
       x: item.x,
       y: item.y,
       w: Math.max(1, item.w),
       h: Math.max(1, item.h),
-      color: item.type === "text" ? c.color : c.backgroundColor,
+      // Text colour as hex so the inspector shows it as an editable Text Fill (Wonder PM4: Text Fill 172340).
+      color: item.type === "text" ? cssColorHex(c.color) || c.color : c.backgroundColor,
       text: item.text || "",
       fontSize: num(c.fontSize, 16),
       fontFamily: c.fontFamily,
@@ -860,7 +868,7 @@ function captureModel(snapshot) {
     }
     return node;
   });
-  nodes.unshift({
+  if (!snapshot.element) nodes.unshift({
     id: "capture-region",
     parentId: null,
     type: "frame",
