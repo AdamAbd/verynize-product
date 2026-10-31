@@ -1,23 +1,21 @@
-// One-time copy of renderer storage from the old file:// origin to app://verynize.
+// Renderer origin migration and conservative downgrade reconciliation.
+// Read file:// in a sandboxed, hidden blank page before the editor opens. The marker stores
+// per-key SHA-256 baselines for localStorage and each verynize-cloud/outbox record. On subsequent
+// launches only changed old-origin values are candidates: copy when app:// still matches its
+// baseline; otherwise keep app://, preserve both versions in an owner-only backup and show a
+// dismissible notice. Deletions count as changes. Never replay an unchanged old outbox.
 //
-// Until the editor moved to the app:// scheme (desktop/app-protocol.cjs) it ran from file://, and
-// everything the renderer keeps in localStorage (documents and the file library, chats, settings,
-// cloud account sessions, view state) plus the cloud outbox in IndexedDB (`verynize-cloud`/`outbox`)
-// belongs to that origin. A new origin starts empty, so before the first app:// window opens this
-// module reads the old storage in a hidden window at a file:// URL and writes it in a hidden window
-// at app://verynize/storage-migration.html (both blank pages in the default session).
+// Existing done markers without hashes cannot establish which build edited a value: differing
+// app:// values are conflicts. Fresh profiles still use the cheap disk pre-check without a window.
+// Migrated profiles need one hidden file:// read (Chromium's localStorage LevelDB is shared by
+// origins, so file mtime alone cannot reliably detect old-build edits). Unchanged hashes skip
+// app:// navigation, all copying, and backup creation. Times are recorded without data values.
 //
-// - Keys already present on app://verynize are kept; the old file:// data is left in place (an older
-//   build can still read it).
-// - A marker file in userData records the result so the copy runs once. It is written as
-//   `{pending: true}` before the copy starts and replaced by the result when the copy finishes.
-// - Recovery: a pending marker means an earlier attempt failed or crashed, and the editor then ran on
-//   an empty app://verynize origin and wrote its first-run defaults there (an empty file library,
-//   default settings, an empty chat list). Keeping those would hide the user's real data for good, so
-//   the retry lets the file:// values win, after saving every app:// value it replaces to
-//   userData/storage-origin-migration-replaced.json. After MAX_ATTEMPTS failures it gives up (each
-//   attempt can block startup for up to TIMEOUT).
-// - Profiles without file:// storage (fresh installs, test runs) are marked done without opening a window.
+// Pending first-copy recovery retains the original policy: file:// wins over app:// defaults,
+// with backups before replacement and at most three attempts. A failed downgrade check never
+// becomes a pending first-copy recovery: that would overwrite newer edits on the next launch.
+// Storage replacements require exclusive, append-only 0600 backups; marker replacement is atomic.
+const { createHash, randomUUID } = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -65,7 +63,7 @@ const READ = `(async () => {
       }
       db.close();
     }
-  } catch {}
+  } catch (error) { throw new Error("Cannot read migration outbox: " + error.message); }
   return { local, outbox };
 })()`;
 
@@ -78,7 +76,7 @@ const WRITE = (data, overwrite = []) => `(async (data, overwrite) => {
     const current = localStorage.getItem(key);
     if (current === value) { kept++; continue; }
     if (current !== null && !overwrite.includes(key)) { kept++; continue; }
-    try { localStorage.setItem(key, value); if (current === null) copied++; else replaced++; } catch { failed++; failedKeys.push(key); }
+    try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); if (current === null) copied++; else replaced++; } catch { failed++; failedKeys.push(key); }
   }
   if (data.outbox.length) {
     try {
@@ -90,8 +88,8 @@ const WRITE = (data, overwrite = []) => `(async (data, overwrite) => {
       outbox = await new Promise((resolve) => {
         const tx = db.transaction(${JSON.stringify(OUTBOX.store)}, 'readwrite'), store = tx.objectStore(${JSON.stringify(OUTBOX.store)});
         let added = 0;
-        for (const [key, value] of data.outbox) { const probe = store.getKey(key); probe.onsuccess = () => { if (probe.result === undefined) { store.put(value, key); added++; } }; }
-        tx.oncomplete = () => resolve(added); tx.onerror = tx.onabort = () => resolve(0);
+        for (const [key, value] of data.outbox) { const probe = store.getKey(key); probe.onsuccess = () => { if (probe.result === undefined || data.replaceOutbox) { if (value === null) store.delete(key); else store.put(value, key); added++; } }; }
+        tx.oncomplete = () => resolve(added); tx.onerror = tx.onabort = () => { failed++; failedKeys.push("indexedDB:outbox"); resolve(0); };
       });
       db.close();
     } catch { failed++; failedKeys.push('indexedDB:' + ${JSON.stringify(OUTBOX.db)}); }
@@ -125,72 +123,210 @@ async function hasFileOriginData(userData) {
   return false;
 }
 
-const withTimeout = (promise, ms, label) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(Error(label + " timed out")), ms)),
-  ]);
+const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const entries = (data) => ({
+  ...Object.fromEntries(Object.entries(data.local).map(([key, value]) => ["local:" + key, value])),
+  ...Object.fromEntries(
+    data.outbox.map(([key, value]) => ["outbox:" + JSON.stringify(key), value]),
+  ),
+});
+const hashes = (data) =>
+  Object.fromEntries(
+    Object.entries(entries(data))
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => [key, hash(value)]),
+  );
+const absent = hash(null);
+
+// Append-only, exclusive owner-only snapshots: failed marker writes and repeated recoveries must
+// never destroy the only copy of a displaced value. Refuse to mutate storage if the backup fails.
+async function backup(userData, data) {
+  const name = `storage-origin-migration-backup-${randomUUID()}.json`;
+  await fs.writeFile(path.join(userData, name), JSON.stringify(data), { mode: 0o600, flag: "wx" });
+  return name;
+}
+
+async function writeJson(file, data) {
+  const temporary = file + "." + randomUUID() + ".tmp";
+  try {
+    await fs.writeFile(temporary, JSON.stringify(data, null, 2) + "\n", {
+      mode: 0o600,
+      flag: "wx",
+    });
+    await fs.rename(temporary, file);
+  } finally {
+    await fs.rm(temporary, { force: true }).catch(() => {});
+  }
+}
+
+function noticeOnNextWindow(app, backupFile) {
+  const listener = (_event, win) => {
+    win.webContents.once("did-finish-load", () => {
+      if (
+        !win.webContents.getURL().startsWith(ORIGIN + "/") ||
+        win.webContents.getURL().endsWith(PAGE)
+      )
+        return;
+      app.removeListener("browser-window-created", listener);
+      win.webContents
+        .executeJavaScript(`(() => {
+        const notice = document.createElement('div');
+        notice.id = 'storage-migration-notice'; notice.setAttribute('role', 'status');
+        notice.style.cssText = 'position:fixed;bottom:16px;left:16px;right:16px;z-index:2147483647;padding:16px;background:#252525;color:white;border:1px solid #888;font:14px system-ui';
+        notice.textContent = 'Edits from an older Verynize build conflict with this build. Your current edits were kept. Older edits are saved in ' + ${JSON.stringify(backupFile)} + '. ';
+        const close = document.createElement('button'); close.textContent = 'Dismiss'; close.onclick = () => notice.remove();
+        notice.append(close); document.body.append(notice);
+      })()`)
+        .catch(() => {});
+    });
+  };
+  app.on("browser-window-created", listener);
+}
+
+const withTimeout = async (promise, ms, label) => {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Error(label + " timed out")), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 async function migrateStorage({ app, BrowserWindow, log = console }) {
+  const started = performance.now();
   const userData = app.getPath("userData");
   const marker = path.join(userData, MARKER);
   const previous = await readMarker(marker);
-  if (previous && !previous.pending) return { skipped: "done" };
+  if (previous?.unreadable || previous?.gaveUp) return { skipped: "unreadable-or-exhausted" };
+  const sync = !!previous && !previous.pending && !previous.fresh;
   const recover = !!previous?.pending;
   const attempts = (Number(previous?.attempts) || 0) + 1;
   const write = (result) =>
-    fs.writeFile(
-      marker,
-      JSON.stringify(
-        { from: "file://", to: ORIGIN, at: new Date().toISOString(), ...result },
-        null,
-        2,
-      ) + "\n",
-    );
+    writeJson(marker, { from: "file://", to: ORIGIN, at: new Date().toISOString(), ...result });
   // Nothing stored for file:// (fresh profile, or file:// never used storage): no window needed.
-  if (!(await hasFileOriginData(userData))) {
+  if (!sync && !(await hasFileOriginData(userData))) {
     await write({ fresh: true, copied: 0 }).catch(() => {});
     return { fresh: true };
   }
   // Written before the copy: if it fails or the app dies mid-copy, the next launch knows the
   // editor may have run on an empty origin (see Recovery above).
-  await write({ pending: true, attempts }).catch(() => {});
-  const win = new BrowserWindow({
-    show: false,
-    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
-  });
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  win.webContents.on("will-navigate", (event) => event.preventDefault());
+  if (!sync) await write({ pending: true, attempts }).catch(() => {});
+  let win;
   try {
+    win = new BrowserWindow({
+      show: false,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+    });
+    win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    win.webContents.on("will-navigate", (event) => event.preventDefault());
     const run = async () => {
       await win.loadURL(pathToFileURL(path.join(__dirname, "../web", PAGE)).href);
       const data = await win.webContents.executeJavaScript(READ, true);
       const found = Object.keys(data.local).length;
-      if (!found && !data.outbox.length) return { copied: 0, found: 0 };
+      const fileHashes = hashes(data);
+      if (
+        sync &&
+        previous.baseline &&
+        JSON.stringify(fileHashes) === JSON.stringify(previous.baseline.file)
+      ) {
+        return {
+          ...previous,
+          copied: 0,
+          replaced: 0,
+          outbox: 0,
+          conflicts: 0,
+          unchanged: true,
+          elapsedMs: performance.now() - started,
+        };
+      }
       await win.loadURL(`${ORIGIN}/${PAGE}`);
+      const currentData = await win.webContents.executeJavaScript(READ, true);
+      if (sync) {
+        const current = entries(currentData),
+          incoming = entries(data);
+        const old = previous.baseline;
+        const delta = { local: {}, outbox: [], replaceOutbox: true };
+        const conflicts = [],
+          displaced = {};
+        const appBaseline = { ...old?.app };
+        for (const key of new Set([...Object.keys(incoming), ...Object.keys(old?.file || {})])) {
+          const value = incoming[key] ?? null;
+          if (old && (fileHashes[key] || absent) === (old.file[key] || absent)) continue;
+          if (hash(current[key] ?? null) === hash(value)) {
+            appBaseline[key] = hash(value);
+            continue;
+          }
+          // Old done markers have no baseline: never guess which origin is newer.
+          const safe = old
+            ? hash(current[key] ?? null) === (old.app[key] || absent)
+            : !(key in current);
+          displaced[key] = { file: value, app: current[key] ?? null };
+          if (!safe) {
+            conflicts.push(key);
+            appBaseline[key] = old?.app[key] || hash(value);
+            continue;
+          }
+          appBaseline[key] = hash(value);
+          if (key.startsWith("local:")) delta.local[key.slice(6)] = value;
+          else delta.outbox.push([JSON.parse(key.slice(7)), value]);
+        }
+        const backupFile = Object.keys(displaced).length
+          ? await backup(userData, { at: new Date().toISOString(), values: displaced })
+          : undefined;
+        const result = await win.webContents.executeJavaScript(
+          WRITE(delta, Object.keys(delta.local)),
+          true,
+        );
+        if (result.failed)
+          throw Error("Downgrade sync could not write all values; backup retained");
+
+        if (conflicts.length) noticeOnNextWindow(app, path.join(userData, backupFile));
+        return {
+          ...result,
+          found,
+          conflicts: conflicts.length,
+          backupFile,
+          baseline: { file: fileHashes, app: appBaseline },
+          elapsedMs: performance.now() - started,
+        };
+      }
       let overwrite = [];
       if (recover) {
         // Save the app:// values about to be replaced before touching them.
-        const current = (await win.webContents.executeJavaScript(READ, true)).local;
+        const current = currentData.local;
         overwrite = Object.keys(data.local).filter(
           (key) => key in current && current[key] !== data.local[key],
         );
-        if (overwrite.length)
-          await fs.writeFile(
-            path.join(userData, REPLACED),
-            JSON.stringify(
-              {
-                at: new Date().toISOString(),
-                local: Object.fromEntries(overwrite.map((key) => [key, current[key]])),
-              },
-              null,
-              2,
-            ) + "\n",
-            { mode: 0o600 },
-          );
+        if (overwrite.length) {
+          await backup(userData, {
+            local: Object.fromEntries(overwrite.map((key) => [key, current[key]])),
+          });
+          await writeJson(path.join(userData, REPLACED), {
+            at: new Date().toISOString(),
+            local: Object.fromEntries(overwrite.map((key) => [key, current[key]])),
+          });
+        }
       }
+      // Preserve both origins before the initial copy too, including outbox records.
+      await backup(userData, { file: data, app: currentData });
       const result = await win.webContents.executeJavaScript(WRITE(data, overwrite), true);
-      return { found, ...(recover ? { recovered: true } : {}), ...result };
+      if (result.failed)
+        throw Error("Storage migration could not write all values; backup retained");
+      return {
+        found,
+        ...(recover ? { recovered: true } : {}),
+        ...result,
+        baseline: {
+          file: fileHashes,
+          app: hashes(await win.webContents.executeJavaScript(READ, true)),
+        },
+        elapsedMs: performance.now() - started,
+      };
     };
     const result = await withTimeout(run(), TIMEOUT, "Storage migration");
     if (result.failed)
@@ -201,19 +337,20 @@ async function migrateStorage({ app, BrowserWindow, log = console }) {
     return result;
   } catch (error) {
     const message = String(error?.message || error);
-    const gaveUp = attempts >= MAX_ATTEMPTS;
+    const gaveUp = !sync && attempts >= MAX_ATTEMPTS;
     log.error?.(
       `Storage migration failed (${gaveUp ? "giving up" : "will retry next launch"}):`,
       error,
     );
-    await write(
-      gaveUp
-        ? { gaveUp: true, attempts, error: message }
-        : { pending: true, attempts, error: message },
-    ).catch(() => {});
+    if (!sync)
+      await write(
+        gaveUp
+          ? { gaveUp: true, attempts, error: message }
+          : { pending: true, attempts, error: message },
+      ).catch(() => {});
     return { error: message };
   } finally {
-    if (!win.isDestroyed()) win.destroy();
+    if (win && !win.isDestroyed()) win.destroy();
   }
 }
 
