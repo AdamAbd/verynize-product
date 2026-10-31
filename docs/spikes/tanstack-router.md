@@ -132,8 +132,10 @@ view exclusive with the editor and the Files home (`code.css` hides `main` and
 `mode` query would follow every later navigation. Choosing Files (or ⌘K) in code
 mode therefore leaves code mode for the home; before, the home opened hidden
 behind the code workspace. `setCodeMode(false)` outside code mode is still a
-no-op. Code mode is still persisted (`verynize-code-mode`): when the app starts
-on `/editor` with it set, the code island replaces that entry with `/code`.
+no-op. Code mode is still persisted (`verynize-code-mode`): on desktop, when the
+window opens on its launch entry (`/editor`, a fresh load without history
+state), the code island replaces that entry with `/code`. Anywhere else the URL
+wins (reload, Back/Forward, typed or shared URLs, the web).
 
 Not routed (layout state inside a view): `code-sidebar-collapsed`,
 `left-collapsed`/`right-collapsed`, `agent-chat-open`, `chat-sidebar-open`, the

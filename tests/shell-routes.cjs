@@ -230,14 +230,21 @@ const os = require("node:os");
     await page.locator("#settings-back").click();
     await expectShell("/");
 
-    // Code mode is restored on launch (desktop starts on /editor), in place of the startup entry.
+    // Code mode is restored on launch (the desktop window opens /editor), in place of the launch entry. A reload of
+    // /editor keeps the URL's view.
     await page.evaluate(() => {
       localStorage.setItem("verynize-code-mode", "1");
       window.shellNavigation.navigate({ to: "/editor" });
     });
-    await expectShell("/editor");
+    at = await expectShell("/editor");
     await reload();
-    await expectShell("/code");
+    await page.waitForTimeout(500);
+    assert.equal((await expectShell("/editor")).index, at.index, "a reload of /editor stays there");
+    await page.goto("app://verynize/editor");
+    await ready();
+    at = await expectShell("/code");
+    await back();
+    await expectShell("/editor");
     assert.deepEqual(errors, []);
     console.log(
       "PASS shell routes: /code route (switch, setCodeMode, showHome), settings over code, Back/Forward across home/editor/code/settings, reload on every route, Escape over home closes settings only, requests while closing settings, reload while closing, room fragment through code/settings/reload, pre-router request, code mode restored on launch",
