@@ -151,6 +151,9 @@ function viewRoute(path: ViewPath) {
         syncFromShell();
         return;
       }
+      // A stale route: the shell moved on (e.g. settings opened before the router's first render) and
+      // history already points elsewhere; the router renders that entry next, so don't undo it here.
+      if (history.location.pathname !== path) return;
       applyView(path);
     }, []);
     return null;
@@ -225,6 +228,15 @@ const settingsSectionRoute = createRoute({
     return null;
   },
 });
+
+// The shell can change before this bundle runs (settings opened or the Files home shown while ui.js is
+// still loading, before any bd:view-change listener exists). Adopt it so the first route doesn't undo
+// it. A reload of a routed URL lands on the legacy default (editor, settings closed) and the routes
+// apply the URL as usual.
+if (settingsOpen() || (currentView() === "/" && history.location.pathname !== "/")) {
+  const to = shellPath();
+  commit(to, "replace", isSettingsPath(to) ? { settingsUnder: currentView() } : {});
+}
 
 export const shellRouter = createRouter({
   routeTree: root.addChildren([home, editor, settings, settingsSectionRoute]),

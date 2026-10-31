@@ -1,6 +1,7 @@
 // Position section tools (properties-audit C1/B4): the header absolute toggle, single-child align to parent,
 // flip in the third tool group (distribute only for 3+ layers), the constraint menu, the diagram and Z "Auto".
 const {_electron} = require('@playwright/test');
+const {waitForUiReady} = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
@@ -14,6 +15,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.waitForSelector('#canvas .layer');
+    await waitForUiReady(page);
     const node = id => page.evaluate(id => window.design.getDocument().pages[0].nodes.find(n => n.id === id), id);
     const near = (a, b, label, t = 0.6) => assert.ok(Math.abs(a - b) <= t, `${label}: ${a} ~= ${b}`);
     // Rendered box relative to the parent's border box, in world units.
