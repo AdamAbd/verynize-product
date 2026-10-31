@@ -83,9 +83,10 @@
     function showHover(id) {
       hoverId = id || null; overlay.dataset.hover = hoverId || '';
       for (const label of frameLabels.children) label.classList.toggle('hovered', label.dataset.id === hoverId);
-      const b = hoverId && screenBox(hoverId);
-      hoverBox.hidden = !b;
-      if (b) placeBox(hoverBox, b);
+      // The outline turns with a rotated layer (Wonder R4-rotated-hover-100), like the selection chrome.
+      const SC = window.BetterSelectionChrome, f = hoverId && SC.frameOf(elementOf(hoverId), find(hoverId), find, cam.zoom, viewport());
+      hoverBox.hidden = !f;
+      if (f) SC.placeFrame(hoverBox, f);
     }
     // Recompute the hover from the last pointer position (after a move, camera change, render or modifier change).
     function refreshHover(force = false) {
