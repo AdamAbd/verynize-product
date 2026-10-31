@@ -1,0 +1,33 @@
+Implement this Verynize design.
+
+Design to implement (each link ends in the Verynize page id and the element id: verynize://node/<document>/<pageId>/<elementId>):
+  verynize://node/Sunbird/page-1/lod
+  Read each element through the Verynize MCP server: get_element_code with that pageId and element id (omit document to read the design open in Verynize), and get_design_context for its tokens and fonts.
+  (If you don't have the Verynize MCP installed yet, see "Run and configure" in docs/figcraft-reference.md of the Verynize repository: with the app open, connect to the url and token in ~/Library/Application Support/Verynize/mcp.json.)
+
+Inline snapshot (fallback, captured at 2026-10-31T05:15:38.016Z):
+```tsx
+/**
+ * Made with Verynize
+ * verynize://node/Sunbird/page-1/lod
+ * Oct 31, 2026
+ */
+/* @verynize {"name":"Sunbird","page":{"name":"Page 1"}} */
+export default function Frame() {
+  return (
+    <>
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin />
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap" rel="stylesheet" />
+      <style>{"* { box-sizing: border-box; }"}</style>
+      <div data-node-label="Frame" data-canvas-x="0" data-canvas-y="0" className="layout-free w-[420px] h-[391.18px] bg-white" data-vn='{"gap":16,"padding":16}'>
+        <div data-node-label="Frame" className="absolute left-[49px] top-[40px] layout-free w-[100px] h-[80px]" data-vn='{"gap":16,"padding":16}'></div>
+        <p data-node-label="Canvas au" className="absolute left-[59px] top-[160px] text-black text-xs leading-[1.15] font-['Inter']">Canvas au</p>
+      </div>
+    </>
+  );
+}
+```
+
+How to implement it:
+Treat the design as a picture of the result, not as source to paste in. Build each part from the component this repo already has for it; when the design needs something that component lacks, add a prop or variant to it (or wrap it) rather than making a copy, and only write a new component when nothing in the repo fits, saying that you did. Swap the snapshot's hex colours, pixel sizes and arbitrary values for the repo's own tokens, utilities and icons wherever one exists. Keep to the repo's conventions for files, props, state and data. When you are done, compare what you built with the design.

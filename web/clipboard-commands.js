@@ -3,20 +3,25 @@
 // web/canvas-interactions.js through BetterCanvas.extend, so window.design.runCommand(id, arg), the shortcuts and
 // the context menu all reach them.
 //
-//   clipboard.pasteHere          arg {x, y} (document coords): the pasted bounds' top-left lands on that point.
+//   clipboard.pasteHere          arg {x, y} (document coords): the pasted bounds' top-left lands on that point, at the
+//                                top level (Wonder P3-empty-result, P3-paste-over-parent-result).
+//   edit.paste                   arg {menu: true} (the layer context menu's Paste): with one frame selected, the clipboard
+//                                becomes its child, centred in it (Wonder P3-context-paste-result). ⌘V is unchanged.
 //   clipboard.pasteToReplace     ⌘⇧R: each selected layer is replaced by the clipboard, same parent, position and stack slot.
 //   clipboard.pasteOverSelection ⌘⇧V: same parent as the selection, stacked above it and centred on its bounds.
 //   clipboard.copyLink           verynize://node/<document>/<pageId>/<shortId> per selected layer (the finish_artboard
 //                                designLink format that web/desktop-panel.js openLink resolves), one per line.
-//   clipboard.copyPrompt         ⌘⇧⌥C: a text prompt naming the selection, its links and its Tailwind JSX (the
-//                                integrations codec through window.desktop.exportCode; the export HTML outside the desktop app).
+//   edit.copyCode                ⌘⇧C: Tailwind TSX with a "Made with Verynize" comment (Wonder P1-copy-code.txt).
+//   clipboard.copyPrompt         ⌘⇧⌥C: Wonder's prompt structure (P1-copy-prompt*.txt) with Verynize links, MCP tools and
+//                                one TSX snapshot per layer (the integrations codec through window.desktop.exportCode; the
+//                                export HTML outside the desktop app).
 //   edit.duplicate               ⌘D: the copy lands to the right of the original with a 40 px gap (Wonder: 120 wide at
 //                                X515 → X675), stacked just above it.
 // Duplicates (⌘D and Alt-drag) are renamed to the next free "<base> <n>" name on the page (Frame, Frame 2 → Frame 3).
 //
 // Assumptions where Wonder is unproven (design/wonder/canvas-audit/wonder/notes.md K2): the paste modes read the in-app
-// clipboard (last copy or last pasted layers); Paste here pastes at the top level; Paste over selection with nothing
-// selected pastes in place; Paste to replace skips locked layers; numbering applies to every duplicated name.
+// clipboard (last copy or last pasted layers); Paste over selection with nothing selected pastes in place; Paste to
+// replace skips locked layers; numbering applies to every duplicated name.
 (() => {
   const DUPLICATE_GAP = 40;
   const r2 = v => Math.round(v * 100) / 100;
@@ -112,6 +117,17 @@
       return commit(data, (list, wrap) => list.push(...copies.map(wrap)), placed.map(p => p.node.id));
     }
 
+    // Paste from the layer context menu (Wonder P3-context-paste-result): with one frame selected (the menu's target)
+    // the clipboard becomes its last child, centred in it. Otherwise, and for ⌘V, the canvas paste.
+    function menuPaste() {
+      const data = c.getClipboard(); if (!data) return false;
+      const tops = c.topSelected(), target = tops.length === 1 && tops[0].type === 'frame' && !tops[0].locked && !data.roots.includes(tops[0].id) ? tops[0] : null;
+      if (!target) return c.paste(data);
+      const {copies, placed, bounds} = materialize(data), box = localBounds([target]);
+      placeAt(placed, target.id, (box.w - bounds.w) / 2, (box.h - bounds.h) / 2);
+      return commit(data, (list, wrap) => list.splice(subtreeEnd(list, target.id), 0, ...copies.map(wrap)), placed.map(p => p.node.id));
+    }
+
     function pasteOverSelection() {
       const data = c.getClipboard(); if (!data) return false;
       const tops = c.topSelected();
@@ -150,28 +166,61 @@
       try { ref = window.agentWorkspace?.searchElements?.(node.id)?.find(m => m.id === node.id)?.shortId || ref; } catch {}
       return `verynize://node/${encodeURIComponent(documentName())}/${encodeURIComponent(ed.page().id)}/${encodeURIComponent(ref)}`;
     }
+    // Top-level selected layers in the order they were selected (Wonder lists a Shift-click selection that way).
+    function inSelectionOrder() {
+      const order = [...c.sel()];
+      return c.topSelected().sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    }
     function copyLink() {
-      const tops = c.topSelected(); if (!tops.length) return false;
+      const tops = inSelectionOrder(); if (!tops.length) return false;
       c.writeSystemClipboard(tops.map(linkTo).join('\n'));
       c.footer(tops.length === 1 ? 'Copied link to ' + tops[0].name : `Copied links to ${tops.length} layers`);
       return true;
     }
-    async function copyPrompt() {
-      const tops = c.topSelected(); if (!tops.length) return false;
-      const pageName = ed.page().name || 'Page';
-      let code = '', lang = 'jsx';
+    // ---------- Copy as code / Copy prompt ----------
+    // The clipboard form of the Code export: Tailwind TSX from the integrations codec with a "Made with Verynize"
+    // comment (the layer links and the date), Google Fonts links and a box-sizing reset (Wonder P1-copy-code.txt).
+    const today = () => new Date().toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+    async function snippet(nodes) {
+      if (!window.desktop?.exportCode) return '';
       try {
-        if (window.desktop?.exportCode) code = (await window.desktop.exportCode({flavor: 'tailwind', document: structuredClone(ed.design), pageId: ed.page().id, nodeIds: tops.map(n => n.id), name: tops[0].name})).content;
-      } catch {}
-      if (!code) { try { code = (await ed.exportArtwork({format: 'HTML', selectionOnly: true})).content; lang = 'html'; } catch {} }
-      const names = tops.map(n => `"${n.name}"`).join(', ');
+        const result = await window.desktop.exportCode({flavor: 'tailwind', document: structuredClone(ed.design), pageId: ed.page().id, nodeIds: nodes.map(n => n.id), name: nodes[0].name, snippet: {links: nodes.map(linkTo), date: today()}});
+        return String(result?.content || '').trim();
+      } catch { return ''; }
+    }
+    async function copyCode() {
+      const tops = inSelectionOrder(); if (!tops.length) return false;
+      let code = await snippet(tops);
+      if (!code) { // outside the desktop app: the HTML export of the selection
+        try { code = (await ed.exportArtwork({format: 'HTML', selectionOnly: true})).content; }
+        catch (error) { c.footer('Unable to copy as code: ' + (error?.message || error)); return false; }
+      }
+      c.writeSystemClipboard(code);
+      c.footer('Copied selection as code');
+      return true;
+    }
+    // A text prompt for a coding agent (Wonder P1-copy-prompt*.txt): the links and how to read them through the
+    // Verynize MCP server, one inline snapshot block per selected layer, then how to turn the design into repo code.
+    async function copyPrompt() {
+      const tops = inSelectionOrder(); if (!tops.length) return false;
+      const captured = new Date().toISOString();
+      const blocks = [];
+      for (const n of tops) { const code = await snippet([n]); if (code) blocks.push('```tsx\n' + code + '\n```'); }
+      if (!blocks.length) { try { const html = (await ed.exportArtwork({format: 'HTML', selectionOnly: true})).content; if (html) blocks.push('```html\n' + html.trim() + '\n```'); } catch {} }
       const prompt = [
-        `Implement ${tops.length === 1 ? 'this design' : 'these designs'} from Verynize (${documentName()} › ${pageName}): ${names}.`,
-        ...tops.map(n => `- ${n.name} (${n.type}, ${r2(Number(n.w) || 0)}×${r2(Number(n.h) || 0)}): ${linkTo(n)}`),
-        ...(code ? ['', lang === 'jsx' ? 'Tailwind JSX of the selection:' : 'HTML of the selection:', '```' + lang, code.trim(), '```'] : []),
+        'Implement this Verynize design.',
+        '',
+        'Design to implement (each link ends in the Verynize page id and the element id: verynize://node/<document>/<pageId>/<elementId>):',
+        ...tops.map(n => '  ' + linkTo(n)),
+        '  Read each element through the Verynize MCP server: get_element_code with that pageId and element id (omit document to read the design open in Verynize), and get_design_context for its tokens and fonts.',
+        '  (If you don\'t have the Verynize MCP installed yet, see "Run and configure" in docs/figcraft-reference.md of the Verynize repository: with the app open, connect to the url and token in ~/Library/Application Support/Verynize/mcp.json.)',
+        ...(blocks.length ? ['', `Inline snapshot (fallback, captured at ${captured}):`, ...blocks] : []),
+        '',
+        'How to implement it:',
+        'Treat the design as a picture of the result, not as source to paste in. Build each part from the component this repo already has for it; when the design needs something that component lacks, add a prop or variant to it (or wrap it) rather than making a copy, and only write a new component when nothing in the repo fits, saying that you did. Swap the snapshot\'s hex colours, pixel sizes and arbitrary values for the repo\'s own tokens, utilities and icons wherever one exists. Keep to the repo\'s conventions for files, props, state and data. When you are done, compare what you built with the design.',
       ].join('\n');
       c.writeSystemClipboard(prompt);
-      c.footer('Copied prompt for ' + (tops.length === 1 ? tops[0].name : `${tops.length} layers`));
+      c.footer('Prompt copied to clipboard');
       return true;
     }
 
@@ -182,7 +231,9 @@
       {id: 'edit.pasteInPlace', keys: []}, // ⌘⇧V is Paste over selection (Wonder)
       {id: 'edit.copyStyle', label: 'Copy styles', keys: ['mod+alt+c']},
       {id: 'edit.pasteStyle', label: 'Paste styles', keys: ['mod+alt+v']},
-      {id: 'edit.copyCode', label: 'Copy as code', keys: ['mod+shift+c']},
+      {id: 'edit.copyCode', label: 'Copy as code', keys: ['mod+shift+c'], run: copyCode},
+      // ⌘V stays the native paste event (canvas-interactions); runCommand('edit.paste', {menu: true}) is menu Paste.
+      {id: 'edit.paste', run: arg => (arg?.menu ? menuPaste() : c.paste(c.getClipboard()))},
       {id: 'clipboard.pasteHere', label: 'Paste here', section: 'Edit', keys: [], when: canPaste, run: pasteHere},
       {id: 'clipboard.pasteToReplace', label: 'Paste to replace', section: 'Edit', keys: ['mod+shift+r'], when: () => canPaste() && needsSelection(), run: pasteToReplace},
       {id: 'clipboard.pasteOverSelection', label: 'Paste over selection', section: 'Edit', keys: ['mod+shift+v'], when: canPaste, run: pasteOverSelection},
