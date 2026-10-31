@@ -5,7 +5,7 @@
 // directives, short ids) runs in the main process; nothing here evaluates agent-supplied code.
 (() => {
   'use strict';
-  const api = window.desktop?.agentBridge;
+  const api = window.verynizePlatform.can('agentBridge') ? window.desktop.agentBridge : null;
   const editor = () => window.verynize;
   if (!api || !editor()) return;
   // Every editor render bumps the stamp; commits carry the stamp they were computed from, so a
@@ -67,7 +67,7 @@
   const syncFonts = () => {
     clearTimeout(fontState.timer);
     fontState.timer = setTimeout(async () => {
-      if (!window.desktop?.fontFaces) return;
+      if (!window.verynizePlatform.can('localFonts')) return;
       const families = documentFonts(editor().getDocument());
       const key = JSON.stringify(families);
       if (!families.length || key === fontState.requested) return;
@@ -151,7 +151,7 @@
   // the same commands as the shortcuts and context menu, so each one is undoable like a user action.
   // OS clipboard commands stay with the user.
   const BLOCKED_ACTIONS = new Set(['edit.copy', 'edit.cut', 'edit.paste', 'edit.pasteInPlace']);
-  const actionList = () => (editor().commands?.() || []).filter(command => !BLOCKED_ACTIONS.has(command.id));
+  const actionList = () => (editor().commands?.() || []).filter(command => !BLOCKED_ACTIONS.has(command.id) && !command.id.startsWith('clipboard.'));
   ops.actions = () => ({ actions: actionList() });
   ops.action = ({ id, ids, pageId }) => {
     if (!actionList().some(command => command.id === id)) throw new Error(`Unknown action ${id}; call execute_action without an id to list actions`);

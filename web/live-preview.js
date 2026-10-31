@@ -1,6 +1,10 @@
 (() => {
   const entries = new Map();
   let activeId = null;
+  // Frame chrome (web/preview-frame-chrome.js) registers itself here: mount(entry), paint(entry), update(entry), navigated(entry).
+  let chrome = null;
+  // Electron prefixes rejected IPC calls; the user only needs the reason.
+  const cleanError = error => String(error?.message || error || '').replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
   const valid = value => {
     const url = new URL(value);
     if (!['http:', 'https:'].includes(url.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.username || url.password) throw Error('Enter a localhost application URL');
@@ -29,7 +33,8 @@
     entry.controls.toggle.textContent = state === 'running' || state === 'starting' ? '⊙ Stop' : '▶ Start';
     entry.controls.title.textContent = state === 'starting' ? 'Starting your app' : state === 'error' ? 'Unable to start preview' : 'Ready to start your preview';
     entry.controls.message.textContent = message || (state === 'starting' ? 'Waiting for the local application to be ready…' : 'Start this preview to connect to your local app.');
-    entry.controls.placeholder.hidden = state === 'running'; entry.frame.hidden = state !== 'running'; changed();
+    entry.controls.placeholder.hidden = state === 'running'; entry.frame.hidden = state !== 'running';
+    entry.message = message; entry.paintSeq = (entry.paintSeq || 0) + 1; chrome?.paint(entry); changed();
   }
   function navigate(entry, url, remember = true) {
     const target = valid(url);
@@ -41,18 +46,26 @@
   }
   async function toggle(entry) {
     activate(entry);
-    const api = window.desktop?.devServer;
+    const api = window.verynizePlatform.can('devServer') ? window.desktop.devServer : null;
     if (!api || !entry.node.preview.root) { paint(entry, 'error', 'Connect this preview to a repository through chat.'); return; }
+    // Each start is an attempt; results and status polls from an older attempt never repaint a newer one.
+    const attempt = entry.attempt = (entry.attempt || 0) + 1;
     try {
       if (entry.state === 'running' || entry.state === 'starting') {
+        // Staged preview edits are lost on stop: the edit layer may ask first (false keeps the preview running).
+        if (window.previewEdits?.confirmBeforeStop && !(await window.previewEdits.confirmBeforeStop(entry.node.id))) return;
         await api.stop({root: entry.node.preview.root}); entry.settingUp=false; entry.frame.removeAttribute('src'); paint(entry, 'paused');
       } else {
+        entry.attemptAt = Date.now(); entry.status = null; entry.pending = true;
         paint(entry, 'starting');
         const result = await api.start({root: entry.node.preview.root});
+        if (entry.attempt !== attempt) return;
+        entry.status = result;
         if (result.state === 'running' && result.url) navigate(entry, result.url);
         else if (result.state !== 'starting') paint(entry, 'error', result.error || result.tail || 'The app did not start.');
       }
-    } catch (error) { paint(entry, 'error', error.message); }
+    } catch (error) { if (entry.attempt === attempt) paint(entry, 'error', cleanError(error)); }
+    finally { if (entry.attempt === attempt) entry.pending = false; }
   }
   // Captured documents are inserted with fresh ids; embedded fonts merge into the document's fontFaces.
   function insertCaptured(captured, place) {
@@ -64,15 +77,27 @@
     for (const face of captured.document.fontFaces || []) if (!known.has(key(face)) && faces.length < 40) { faces.push(face); known.add(key(face)); }
     if (faces.length) doc.fontFaces = faces;
     window.design.setDocument(doc);
+    return nodes.filter(n => !n.parentId).map(n => ids.get(n.id));
   }
-  async function capture(entry, region = null) {
+  // Select the captured layers and pan the camera to them, keeping the zoom.
+  function revealCaptured(ids) {
+    const doc = window.design.getDocument(), nodes = doc.pages.find(p => p.id === doc.activePage).nodes.filter(n => ids.includes(n.id));
+    if (!nodes.length) return;
+    window.design.setSelection(ids);
+    const x = Math.min(...nodes.map(n => n.x)), y = Math.min(...nodes.map(n => n.y)), w = Math.max(...nodes.map(n => n.x + n.w)) - x, h = Math.max(...nodes.map(n => n.y + n.h)) - y;
+    const rect = document.getElementById('canvas-wrap').getBoundingClientRect(), cam = window.design.getCamera();
+    // Pan sideways to the capture (Wonder PM4-result keeps the vertical position when the layer is already in view).
+    const top = y * cam.zoom + cam.y, inView = top >= 0 && top + h * cam.zoom <= rect.height;
+    window.design.setCamera(rect.width / 2 - (x + w / 2) * cam.zoom, inView ? cam.y : rect.height / 2 - (y + h / 2) * cam.zoom, cam.zoom);
+  }
+  async function capture(entry, region = null, element = null) {
     activate(entry);
     const fileId = window.fileLibrary?.currentId;
     entry.capturing=true;changed();
     try {
-      const captured = await window.desktop.captureLivePreview({url: entry.url, ...(region ? {region} : {})});
+      const captured = await window.desktop.captureLivePreview({url: entry.url, ...(region ? {region} : {}), ...(element ? {element} : {})});
       if (fileId !== window.fileLibrary?.currentId) throw Error('Document changed during capture.');
-      if (captured.document) insertCaptured(captured, () => ({x: entry.node.x + entry.node.w + 80, y: entry.node.y}));
+      if (captured.document) { if (element) for (const n of captured.document.pages.flatMap(p => p.nodes)) n.name = n.type[0].toUpperCase() + n.type.slice(1); const ids = insertCaptured(captured, () => ({x: entry.node.x + entry.node.w + 100, y: entry.node.y})); revealCaptured(ids); }
       else window.design.importHTML(captured.html);
       entry.controls.message.textContent = 'Captured editable layers beside the preview.';
     } catch (error) { entry.controls.message.textContent = error.message; }
@@ -122,14 +147,14 @@
     if (region) await capture(entry, region);
   }
   function create(node, el) {
-    el.innerHTML = `<div class="preview-breadcrumb"><span data-part="breadcrumb"></span><span class="preview-local">Local</span></div><section class="preview-surface"><div class="live-preview-bar"><button data-part="back" aria-label="Back">‹</button><button data-part="forward" aria-label="Forward">›</button><button data-part="live-reload" aria-label="Reload preview">↻</button><span data-part="state"></span><input data-part="live-url" aria-label="Preview path" value="/"/><button data-part="toggle">▶ Start</button><button data-part="live-pick" aria-label="Pick capture region" title="Capture a region">⬚</button><button data-part="live-expand" aria-label="Expand preview" aria-pressed="false">⤢</button></div><div class="live-frame-wrap"><iframe title="Running local application" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads"></iframe><div class="preview-placeholder" data-part="placeholder"><div class="preview-setup-card"><strong data-part="title">Ready to start your preview</strong><small data-part="project"></small><p data-part="message">Start this preview to connect to your local app.</p><button data-part="start">▶ Start preview</button></div></div></div></section><form class="preview-edit" hidden><label>Element selector<input name="selector" value="body"/></label><button type="button" data-part="inspect">Inspect</button><label>Text<input name="text"/></label><label>Text color<input name="color" placeholder="#ffffff"/></label><label>Background<input name="backgroundColor" placeholder="#171717"/></label><label>Font size<input name="fontSize" placeholder="16px"/></label><div><button type="submit">Apply</button><button type="button" data-part="undo">Undo</button></div><p role="status"></p></form>`;
+    el.innerHTML = `<div class="preview-breadcrumb"><span data-part="breadcrumb"></span><span class="preview-local">Local</span></div><section class="preview-surface"><div class="live-preview-bar"><button data-part="back" aria-label="Back">‹</button><button data-part="forward" aria-label="Forward">›</button><button data-part="live-reload" aria-label="Reload preview">↻</button><span data-part="state"></span><input data-part="live-url" aria-label="Preview path" value="/"/><button data-part="toggle">▶ Start</button><button data-part="live-pick" aria-label="Pick capture region" title="Capture a region">⬚</button><button data-part="live-expand" aria-label="Expand preview" aria-pressed="false">⤢</button></div><div class="live-frame-wrap"><iframe title="Running local application" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads"></iframe><div class="preview-placeholder" data-part="placeholder"><div class="preview-setup-card"><strong data-part="title">Ready to start your preview</strong><small data-part="project"></small><p data-part="message">Start this preview to connect to your local app.</p><button data-part="start">▶ Start preview</button></div></div></div></section>`;
     const controls = Object.fromEntries([...el.querySelectorAll('[data-part]')].map(control => [control.dataset.part, control]));
     const entry = {el, node, controls, frame: el.querySelector('iframe'), url: '', state: 'paused', mode:'select', inputToApp:false, fileId: window.fileLibrary?.currentId, identity: JSON.stringify([node.preview.root,node.preview.chatId])};
     entry.frame.style.pointerEvents='none';
     entries.set(node.id, entry);
     el.classList.add('canvas-preview');
     // Toolbar inputs own pointer gestures; frame borders and resize handles retain canvas gestures.
-    for (const region of el.querySelectorAll('.live-preview-bar,.preview-context,.preview-placeholder,.preview-edit')) region.addEventListener('pointerdown', event => {
+    for (const region of el.querySelectorAll('.live-preview-bar,.preview-context,.preview-placeholder')) region.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
       if (!window.design.getSelection().includes(entry.node.id)) window.design.setSelection([entry.node.id]);
       activate(entry);
@@ -142,16 +167,9 @@
     controls.back.onclick = async () => { activate(entry); try { await window.desktop.previewNavigate({direction:'back'}); } catch (error) { controls.message.textContent=error.message; } };
     controls.forward.onclick = async () => { activate(entry); try { await window.desktop.previewNavigate({direction:'forward'}); } catch (error) { controls.message.textContent=error.message; } };
     controls['live-url'].onkeydown = event => { if (event.key === 'Enter' && entry.url) { try { navigate(entry, new URL(event.target.value, entry.url).href); } catch (error) { controls.message.textContent = error.message; } } };
-    controls['live-expand'].onclick = () => {
-      const expanded = controls['live-expand'].getAttribute('aria-pressed') !== 'true';
-      controls['live-expand'].setAttribute('aria-pressed', String(expanded));
-      if (expanded) { entry.view = window.design.getView(); window.design.setSelection([node.id]); const rect = document.getElementById('canvas-wrap').getBoundingClientRect(); const zoom = Math.min((rect.width - 100) / node.w, (rect.height - 140) / node.h, 2); window.design.setCamera(50 - node.x * zoom, 60 - node.y * zoom, zoom); }
-      else if (entry.view) window.design.setView(entry.view);
-    };
-    const form = el.querySelector('form');
-    controls.inspect.onclick = async () => { try { activate(entry); const result = await window.desktop.previewInspect({selector: form.elements.selector.value}); form.elements.text.disabled=result.text===null; for (const key of ['text','color','backgroundColor','fontSize']) form.elements[key].value = key === 'text' ? result.text || '' : result.styles?.[key] || ''; } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
-    form.onsubmit = async event => { event.preventDefault(); try { activate(entry); const styles = {}; for (const key of ['color','backgroundColor','fontSize']) if (form.elements[key].value) styles[key] = form.elements[key].value; await window.desktop.previewEdit({selector: form.elements.selector.value, ...(form.elements.text.disabled?{}:{text: form.elements.text.value}), styles}); form.querySelector('[role=status]').textContent = 'Applied to the running page.'; } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
-    controls.undo.onclick = async () => { try { activate(entry); await window.desktop.previewEdit({undo: true}); } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
+    // Expand opens the preview in its own app tab (window.previewTab, chrome island); the frame stays on the canvas.
+    controls['live-expand'].onclick = () => { activate(entry); window.previewTab?.open(entry.node.id); };
+    chrome?.mount(entry);
     paint(entry, 'paused');
     return entry;
   }
@@ -165,9 +183,19 @@
     entry.controls.breadcrumb.textContent = node.preview.name || node.name;
     entry.controls.project.textContent = node.preview.name || node.preview.root.split('/').pop() || 'Local app';
     if (!activeId) activate(entry);
+    chrome?.update(entry);
     return entry;
   }
   function focus(entry){const rect=document.getElementById('canvas-wrap').getBoundingClientRect(),zoom=Math.max(.05,Math.min((rect.width-100)/entry.node.w,(rect.height-140)/entry.node.h,1));window.design.setCamera(50-entry.node.x*zoom,60-entry.node.y*zoom,zoom);}
+  // The worktree's branch (last segment) when the chat has one, else its title once renamed, else the app name.
+  function layerName(info, preview) {
+    const s = window.agentWorkspace?.getState?.() || {};
+    const chat = info.chatId && s.conversationId === info.chatId ? s : null;
+    const branch = chat?.branch ? String(chat.branch).split('/').pop() : '';
+    const title = (s.conversations || []).find(c => c.id === info.chatId)?.title || '';
+    // Capitalised like the breadcrumb and Wonder's layer (branch adamabd/dipper → "Dipper").
+    return (branch && branch[0].toUpperCase() + branch.slice(1)) || (title && !/^New (quick )?chat$/.test(title) ? title : '') || preview.name;
+  }
   function ensure(options = {}) {
     const info = {...project(), ...options};
     let doc = window.design.getDocument();
@@ -175,8 +203,12 @@
     if (found) { window.design.setActivePage(found.page.id); activeId = found.node.id; if (!entries.has(activeId)) window.design.setSelection([activeId]); activate(entries.get(activeId));focus(entries.get(activeId)); return activeId; }
     const nodes = doc.pages.find(p => p.id === doc.activePage).nodes;
     const right = nodes.length ? Math.max(...nodes.map(n => n.x + n.w)) + 100 : 80;
-    const preview = {root: info.root, name: info.name || 'Local app', chatId: info.chatId || '', ...(info.url ? {url: valid(info.url)} : {})};
-    const id = window.design.addNode('frame', {name: `${preview.name} · Preview`, parentId: null, x: right, y: 100, w: 1200, h: 800, color: '#191919', radius: 8, padding: 0, preview});
+    // Preview audit PF4/PF7: new frames open at the default screen template (MacBook Pro 14", window.previewPresets)
+    // and the layer is named after the chat's worktree.
+    const size = window.previewPresets?.find(p => p.default) || {name: 'MacBook Pro 14"', w: 1512, h: 982};
+    const repo = info.repo || window.agentWorkspace?.getState?.()?.projectName || '';
+    const preview = {root: info.root, name: info.name || 'Local app', chatId: info.chatId || '', template: size.name, ...(repo ? {repo: String(repo).slice(0, 200)} : {}), ...(info.url ? {url: valid(info.url)} : {})};
+    const id = window.design.addNode('frame', {name: layerName(info, preview), parentId: null, x: right, y: 100, w: size.w, h: size.h, color: '#191919', radius: 8, padding: 0, preview});
     activate(entries.get(id));focus(entries.get(id));
     return id;
   }
@@ -184,31 +216,41 @@
   function hide() { document.body.classList.remove('live-preview-open'); window.design.setSelection([]); }
   function reveal() { const entry = current(); if (!entry) return false; window.design.setSelection([entry.node.id]); return true; }
   function selectionState() {const entry=selected();return entry?{nodeId:entry.node.id,state:entry.state,mode:entry.mode,inputToApp:entry.inputToApp,url:entry.url,capturing:!!entry.capturing}:null;}
-  function navigateMode(){const entry=selected();if(!entry)return;activate(entry);entry.mode='navigate';entry.el.querySelector('form').hidden=true;entry.frame.style.pointerEvents=entry.state==='running'?'auto':'none';changed();}
-  function editMode(){const entry=selected();if(!entry)return;activate(entry);releaseInput(entry);entry.mode='edit';entry.frame.style.pointerEvents='none';entry.el.querySelector('form').hidden=false;changed();}
+  function navigateMode(){const entry=selected();if(!entry)return;activate(entry);entry.mode='navigate';entry.frame.style.pointerEvents=entry.state==='running'?'auto':'none';changed();}
+  // Edit and Capture: the iframe stays inert; web/preview-edit.js draws the element overlay and handles input.
+  function setMode(mode){const entry=selected();if(!entry)return;activate(entry);if(mode!=='navigate')releaseInput(entry);if(mode==='navigate')return navigateMode();entry.mode=['edit','capture'].includes(mode)&&entry.state==='running'?mode:'select';entry.frame.style.pointerEvents='none';changed();}
+  function editMode(){setMode('edit');}
   async function sendAllInput(){const entry=selected();if(!entry||entry.state!=='running')return;activate(entry);const enabled=!entry.inputToApp;if(enabled)navigateMode();await window.desktop.previewInput({enabled});entry.inputToApp=enabled;if(enabled)entry.frame.focus();changed();}
   async function openInBrowser(){const entry=selected();if(!entry||!entry.url)return;activate(entry);await window.desktop.previewOpenBrowser();}
   document.addEventListener('pointerdown',event=>{const entry=current();if(entry?.inputToApp&&!event.target.closest('#preview-toolbar')){releaseInput(entry);changed();}},true);
   window.addEventListener('message',event=>{const entry=current();if(entry?.inputToApp&&event.source===entry.frame.contentWindow&&event.data?.type==='verynize-preview-release-input'){releaseInput(entry);changed();}});
   window.addEventListener('bd:preview-input-released',()=>{for(const entry of entries.values())entry.inputToApp=false;changed();});
-  window.livePreview = {show, hide, reveal, ensure, renderNode, getSelectionState:selectionState,navigateMode,editMode,captureSelected:()=>{const entry=selected();return entry?capture(entry):Promise.resolve();},captureRegion:()=>{const entry=selected()||current();return entry?pickAndCapture(entry):Promise.resolve();},pickRegion,insertCaptured,sendAllInput,openInBrowser, nodeElement: id => entries.get(id)?.el, getURL: () => current()?.url || '', getNodeId: () => activeId};
-  window.addEventListener('bd:preview-setup-state', event => {for(const entry of entries.values())if(entry.node.preview.root===event.detail.root){entry.settingUp=event.detail.state==='setting-up';paint(entry,event.detail.state==='failed'?'error':'starting',event.detail.message||'');}});
+  window.livePreview = {show, hide, reveal, ensure, renderNode, getSelectionState:selectionState,navigateMode,editMode,setMode,captureMode:()=>setMode('capture'),captureElement:path=>{const entry=selected();return entry?capture(entry,null,path):Promise.resolve();},captureSelected:()=>{const entry=selected();return entry?capture(entry):Promise.resolve();},captureRegion:()=>{const entry=selected()||current();return entry?pickAndCapture(entry):Promise.resolve();},pickRegion,insertCaptured,sendAllInput,openInBrowser, nodeElement: id => entries.get(id)?.el, getURL: () => current()?.url || '', getNodeId: () => activeId,
+    // Internal surface for the frame chrome module (web/preview-frame-chrome.js); not a stable API.
+    frameInternals: {entries, toggle, navigate, activate, paint, valid, cleanError, current, setChrome(next) { chrome = next; for (const entry of entries.values()) { chrome.mount(entry); chrome.update(entry); chrome.paint(entry); } }}};
+  window.addEventListener('bd:preview-setup-state', event => {for(const entry of entries.values())if(entry.node.preview.root===event.detail.root){entry.settingUp=event.detail.state==='setting-up';if(event.detail.state!=='failed'){entry.attemptAt=Date.now();entry.status=null;}else if(event.detail.status)entry.status=event.detail.status;paint(entry,event.detail.state==='failed'?'error':'starting',event.detail.message||'');}});
   window.design.subscribe(doc => {
     const alive = new Set(doc.pages.find(p => p.id === doc.activePage).nodes.filter(n => n.preview).map(n => n.id));
     for (const [id, entry] of entries) if (!alive.has(id)) { releaseInput(entry);entry.frame.removeAttribute('src'); entries.delete(id); if (id === activeId) activeId = null; }
     const chosen=selected();
-    for(const entry of entries.values()){if(entry!==chosen){releaseInput(entry);entry.mode='select';entry.el.querySelector('form').hidden=true;}entry.frame.style.pointerEvents=entry===chosen&&entry.state==='running'&&entry.mode==='navigate'?'auto':'none';}
+    for(const entry of entries.values()){if(entry!==chosen){releaseInput(entry);entry.mode='select';}entry.frame.style.pointerEvents=entry===chosen&&entry.state==='running'&&entry.mode==='navigate'?'auto':'none';}
     if(chosen)activate(chosen);changed();
   });
   // Rehydrate persisted frames, but never auto-run code when opening a document.
   window.design.setSelection(window.design.getSelection());
   setInterval(async () => {
     for (const entry of entries.values()) {
-      if (!entry.node.preview.root || !window.desktop?.devServer || !entry.el.isConnected) continue;
-      try { const state = await window.desktop.devServer.status({root: entry.node.preview.root}); if (!entry.el.isConnected) continue;
-        if(state.setup?.state==='running'){entry.settingUp=true;paint(entry,'starting',state.setup.tail||'Running setup command…');continue;}if(entry.settingUp)continue;
+      if (!entry.node.preview.root || !window.verynizePlatform.can('devServer') || !entry.el.isConnected) continue;
+      try { const seq = entry.paintSeq, state = await window.desktop.devServer.status({root: entry.node.preview.root}); if (!entry.el.isConnected) continue;
+        // A repaint while this status was in flight (a click, a start result) wins over it.
+        if (entry.paintSeq !== seq) continue;
+        if(state.setup?.state==='running'){entry.settingUp=true;entry.status=state;paint(entry,'starting',state.setup.tail||'Running setup command…');continue;}if(entry.settingUp)continue;
+        // A process record that predates the latest start attempt describes the previous run, not this one.
+        const stale = entry.attemptAt && (!state.startedAt || Date.parse(state.startedAt) < entry.attemptAt - 250);
+        if (!(stale && entry.state === 'starting')) entry.status = state;
         if (state.state === 'running' && state.url && entry.state === 'starting') navigate(entry, state.url);
-        else if (['stopped','failed','exited'].includes(state.state) && ['starting','running'].includes(entry.state)) { entry.frame.removeAttribute('src'); paint(entry, ['failed','exited'].includes(state.state) ? 'error' : 'paused', state.error || state.tail || (state.state==='exited'?'The preview process exited. Check the run command.':'')); }
+        else if (['stopped','failed','exited'].includes(state.state) && ['starting','running'].includes(entry.state) && !(entry.state === 'starting' && (stale || entry.pending))) { entry.frame.removeAttribute('src'); paint(entry, ['failed','exited'].includes(state.state) ? 'error' : 'paused', state.error || state.tail || (state.state==='exited'?'The preview process exited. Check the run command.':'')); }
+        else chrome?.paint(entry);
       } catch { /* Repository may no longer be connected; explicit Start reports the error. */ }
     }
   }, 1500);
@@ -268,7 +310,7 @@
   }
   $('capture-web-form').onsubmit = async event => {
     event.preventDefault();
-    if (!window.desktop?.captureRemoteProbe) { say('Open the desktop app to capture web pages.'); return; }
+    if (!window.verynizePlatform.can('webCapture')) { say('Open the desktop app to capture web pages.'); return; }
     const {width, height} = viewport();
     loaded = null; $('capture-web-full').disabled = true; $('capture-web-stage').hidden = true; $('capture-web-stage').querySelector('.capture-picker')?.cancel();
     $('capture-web-load').disabled = true; say('Loading page in an isolated session…');

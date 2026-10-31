@@ -8,12 +8,14 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { substituteVars, lengthOf, cssColorToHex, normalizeColorsIn } from './codec-css.mjs';
 
-const require = createRequire(import.meta.url);
+// Hosts without a file system (the collaboration Worker, cloud/mcp-env.js) provide the theme
+// stylesheet as globalThis.__verynizeTailwindTheme before this module loads.
 let designSystem = null, engineError = null;
 try {
   const tailwind = await import('tailwindcss');
-  const theme = readFileSync(require.resolve('tailwindcss/theme.css'), 'utf8');
-  designSystem = await tailwind.__unstable__loadDesignSystem(`${theme}\n@tailwind utilities;\n`, { base: dirname(fileURLToPath(import.meta.url)) });
+  const provided = typeof globalThis.__verynizeTailwindTheme === 'string' ? globalThis.__verynizeTailwindTheme : null;
+  const theme = provided ?? readFileSync(createRequire(import.meta.url).resolve('tailwindcss/theme.css'), 'utf8');
+  designSystem = await tailwind.__unstable__loadDesignSystem(`${theme}\n@tailwind utilities;\n`, { base: provided === null ? dirname(fileURLToPath(import.meta.url)) : '/' });
 } catch (error) { engineError = error; }
 
 export const tailwindAvailable = () => !!designSystem;
@@ -51,7 +53,7 @@ export function compileClass(cls) {
       }
       if (node.kind === 'at-rule') { extras.push(node.name); continue; }
       if (node.kind !== 'rule') continue;
-      const target = /[>~+]|:where\(|:is\(/.test(node.selector) ? childDecls : decls;
+      const target = /(?<!\\)[>~+]|:where\(|:is\(/.test(node.selector) ? childDecls : decls; // an escaped \+ (w-[calc(50%_+_8px)]) is part of the class name
       for (const child of node.nodes || []) if (child.kind === 'declaration' && child.value !== undefined) target.push({ property: child.property, value: child.value, important: !!child.important });
     }
     result = decls.length || childDecls.length ? { kind: 'ok', decls, childDecls, extras } : { kind: extras.length ? 'unsupported' : 'invalid', extras };

@@ -41,6 +41,7 @@ import { UsageRing } from "./usage-ring";
 import { AutonomyPopover } from "./autonomy-panel";
 import { AttachMenu, WorkingDirectories } from "./attach-menu";
 import { SlashCommands } from "./slash-commands";
+import { StylePicker } from "./style-picker";
 import { WorksWith } from "./works-with";
 import { commandEndingAt, commandFirst, moveCommandFirst, promptRuns } from "./composer-actions";
 
@@ -457,7 +458,7 @@ export function Composer({ state }: { state: ChatState }) {
               onRemove={() => ws?.removeMention?.(mention.id)}
               removable={!!ws?.removeMention}
             >
-              {mention.label}
+              {mention.type === "element" ? <span className="text-primary-text">{mention.label}</span> : mention.label}
             </Chip>
           ))}
           {state.attachments.map((item, index) => (
@@ -495,6 +496,7 @@ export function Composer({ state }: { state: ChatState }) {
         <AttachMenu state={state} />
         <ModelMenu state={state} open={modelOpen} onOpenChange={setModelOpen} />
         <AccessMenu access={state.defaults.access} />
+        <StylePicker />
         <span className="flex-1" />
         <WorksWith state={state} />
         <AutonomyPopover state={state} />

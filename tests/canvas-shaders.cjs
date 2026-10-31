@@ -1,12 +1,13 @@
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 (async () => {
-  const profile=await fs.mkdtemp(os.tmpdir()+'/bd-shaders-'),env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
+  const profile=await fs.mkdtemp(os.tmpdir()+'/bd-shaders-'),env={...process.env};delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1';
   const app=await _electron.launch({timeout:20000,env,args:['.',`--user-data-dir=${profile}`]});
   try {
-    const page=await app.firstWindow({timeout:15000});await page.waitForSelector('#canvas .layer');
+    const page=await app.firstWindow({timeout:15000});await waitForUiReady(page);await page.waitForSelector('#canvas .layer');
     await page.locator('#add-shader').click();
     await page.waitForSelector('#canvas [data-shader-status="ready"]');
     const pixels=await page.locator('#canvas canvas.shader-surface').evaluate(canvas=>{
@@ -19,7 +20,7 @@ const os = require('node:os');
     for(const preset of ['aurora','noise','waves']){await page.locator('[name=shaderPreset]').selectOption(preset);await page.waitForSelector('#canvas [data-shader-status="ready"]');const alpha=await page.locator('#canvas canvas.shader-surface').evaluate(c=>{const gl=c.getContext('webgl'),p=new Uint8Array(4);gl.readPixels(10,10,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return p[3]});assert.equal(alpha,255);}
     await page.locator('[name=shaderSpeed]').fill('0');await page.locator('[name=shaderSpeed]').press('Tab');
     await page.locator('[name=shaderIntensity]').fill('1.7');await page.locator('[name=shaderIntensity]').press('Tab');
-    await page.reload();await page.waitForSelector('#canvas [data-shader-status="ready"]');
+    await page.reload();await waitForUiReady(page);await page.waitForSelector('#canvas [data-shader-status="ready"]');
     const shader=await page.evaluate(()=>window.design.getDocument().pages[0].nodes.find(n=>n.type==='shader'));
     assert.equal(shader.shaderPreset,'waves');assert.equal(shader.shaderSpeed,0);assert.equal(shader.shaderIntensity,1.7);
     await page.locator('.app-menu-trigger:visible').first().click();await page.locator('#preview').click();

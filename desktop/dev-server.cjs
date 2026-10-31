@@ -9,7 +9,10 @@
  *   m.start(root, {command?, url?, waitMs?})  -> status once a localhost URL answers, the process
  *                                exits, or waitMs passes. One dev server per project root.
  *   m.stop(root)              -> status after the whole process group is gone
- *   m.configure(root, {command|null, url?})   -> persisted per-project override (configFile JSON)
+ *   m.configure(root, {command|null, url?, setup?, stop?, commands?})   -> persisted per-project override
+ *                                (configFile JSON). setup/stop are one argv or a list of argv steps (run in
+ *                                order, like `a && b`); commands is [{name, command, url?}] started together,
+ *                                the first one with a url (else the first) decides the preview address.
  *   m.run(root, argv, {timeoutMs?, background?})  -> foreground: exit code + bounded output;
  *                                background: {id} readable with m.read(id)
  *   m.read(id, {since?, limit?}) -> {entries, nextSeq, dropped, state}   id "dev-server:<root>" or a job id
@@ -38,9 +41,10 @@ const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z
 const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|\[::\])(?::\d{2,5})?(?:\/[^\s'"`<>)\]]*)?/i;
 
 const extraDirs = () => ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local/bin'), path.join(os.homedir(), '.vite-plus/bin'), path.join(os.homedir(), '.bun/bin'), path.join(os.homedir(), '.volta/bin'), path.join(os.homedir(), 'Library/pnpm')];
-/** Child environment: the app's env plus the usual tool directories (GUI apps get a short PATH). */
+/** Child environment: the app's env plus the usual tool directories (GUI apps get a short PATH). Python writes
+ * unbuffered so a piped `python3 -m http.server` shows its "Serving HTTP on …" line (logs and URL detection). */
 function childEnv(extra = {}) {
-  const env = { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', NO_COLOR: '1', ...extra };
+  const env = { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', NO_COLOR: '1', PYTHONUNBUFFERED: '1', ...extra };
   delete env.ELECTRON_RUN_AS_NODE;
   const dirs = [...String(env.PATH || '').split(path.delimiter).filter(Boolean)];
   for (const dir of extraDirs()) if (!dirs.includes(dir)) dirs.push(dir);
@@ -79,6 +83,28 @@ function checkArgv(argv) {
   if (total > MAX_ARGV_CHARS) throw new Error('Command is too long');
   return [...argv];
 }
+
+const MAX_STEPS = 16, MAX_COMMANDS = 8, STOP_TIMEOUT = 60000;
+/** One argv or a list of argv steps -> list of validated argv steps. */
+function checkSteps(value) {
+  if (Array.isArray(value) && value.length && Array.isArray(value[0])) {
+    if (value.length > MAX_STEPS) throw new Error(`At most ${MAX_STEPS} chained steps are supported`);
+    return value.map(checkArgv);
+  }
+  return [checkArgv(value)];
+}
+/** Preview start commands [{name, command, url?}] -> validated copies; at most MAX_COMMANDS. */
+function checkCommands(list) {
+  if (!Array.isArray(list) || !list.length || list.length > MAX_COMMANDS) throw new Error(`Add 1-${MAX_COMMANDS} start commands`);
+  return list.map((entry, index) => {
+    if (!entry || typeof entry !== 'object') throw new Error('Each start command needs a command');
+    const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim().slice(0, 80) : index ? `Command ${index + 1}` : 'App';
+    return { name, command: checkArgv(entry.command), ...(entry.url ? { url: normalizeLocalURL(entry.url) } : {}) };
+  });
+}
+/** Index of the command whose address the preview opens: the first with an explicit url, else the first. */
+const primaryIndex = commands => Math.max(0, commands.findIndex(entry => entry.url));
+const stepsKey = steps => JSON.stringify(steps || null);
 
 /** Normalize a URL printed by a dev server to something the preview accepts (0.0.0.0 -> localhost). */
 function normalizeLocalURL(value) {
@@ -182,9 +208,16 @@ class ProcessManager {
   // ---- per-project override command (persisted) ----
   async loadConfig() {
     if (this.config) return this.config;
-    let data = { version: 1, projects: {} };
-    if (this.configFile) { try { const parsed = JSON.parse(await fsp.readFile(this.configFile, 'utf8')); if (parsed && typeof parsed.projects === 'object' && !Array.isArray(parsed.projects)) data = { version: 1, projects: parsed.projects, proposals: parsed.proposals || {} }; } catch {} }
+    let data = { version: 1, projects: {}, setupDone: {} };
+    if (this.configFile) { try { const parsed = JSON.parse(await fsp.readFile(this.configFile, 'utf8')); if (parsed && typeof parsed.projects === 'object' && !Array.isArray(parsed.projects)) data = { version: 1, projects: parsed.projects, proposals: parsed.proposals || {}, setupDone: parsed.setupDone && typeof parsed.setupDone === 'object' ? parsed.setupDone : {} }; } catch {} }
     this.config = data; return data;
+  }
+  async save(data) {
+    if (!this.configFile) return;
+    await fsp.mkdir(path.dirname(this.configFile), { recursive: true });
+    const temp = `${this.configFile}.${process.pid}.${randomUUID()}.tmp`;
+    await fsp.writeFile(temp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
+    await fsp.rename(temp, this.configFile);
   }
   async proposal(root) {
     return (await this.loadConfig()).proposals?.[root] || null;
@@ -198,30 +231,64 @@ class ProcessManager {
       if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port must be between 1 and 65535');
       data.proposals[root] = { id: randomUUID(), command: checkArgv(command), ...(setup ? {setup: checkArgv(setup)} : {}), port, root, chatId: typeof chatId === 'string' ? chatId.slice(0,200) : null, name: typeof name === 'string' ? name.slice(0,200) : null, createdAt: new Date().toISOString() };
     }
-    if (this.configFile) {
-      await fsp.mkdir(path.dirname(this.configFile), {recursive:true});
-      const temp = `${this.configFile}.${process.pid}.${randomUUID()}.tmp`;
-      await fsp.writeFile(temp, JSON.stringify(data,null,2) + '\n', {mode:0o600});
-      await fsp.rename(temp,this.configFile);
-    }
+    await this.save(data);
     return { proposal: await this.proposal(root) };
   }
   async projectConfig(root) {
     const entry = (await this.loadConfig()).projects[root];
     if (!entry || typeof entry !== 'object') return null;
-    try { return { command: checkArgv(entry.command), ...(entry.setup ? { setup: checkArgv(entry.setup) } : {}), ...(entry.url ? { url: normalizeLocalURL(entry.url) } : {}), updatedAt: entry.updatedAt || null }; } catch { return null; }
+    try {
+      const commands = Array.isArray(entry.commands) && entry.commands.length ? checkCommands(entry.commands) : [{ name: 'App', command: checkArgv(entry.command), ...(entry.url ? { url: normalizeLocalURL(entry.url) } : {}) }];
+      const primary = commands[primaryIndex(commands)];
+      const setupSteps = entry.setup ? checkSteps(entry.setup) : null, stopSteps = entry.stop ? checkSteps(entry.stop) : null;
+      return {
+        command: primary.command, ...(primary.url ? { url: primary.url } : {}), commands,
+        // `setup` is the first step (older callers); setupSteps lists every step.
+        ...(setupSteps ? { setup: setupSteps[0], setupSteps } : {}),
+        ...(stopSteps ? { stopSteps } : {}),
+        updatedAt: entry.updatedAt || null,
+      };
+    } catch { return null; }
   }
-  async configure(root, { command, url, setup } = {}) {
+  async configure(root, { command, url, setup, stop, commands } = {}) {
     const data = await this.loadConfig();
-    if (command === null) delete data.projects[root];
-    else data.projects[root] = { command: checkArgv(command), ...(setup ? { setup: checkArgv(setup) } : {}), ...(url ? { url: normalizeLocalURL(url) } : {}), updatedAt: new Date().toISOString() };
-    if (this.configFile) {
-      await fsp.mkdir(path.dirname(this.configFile), { recursive: true });
-      const temp = `${this.configFile}.${process.pid}.${randomUUID()}.tmp`;
-      await fsp.writeFile(temp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
-      await fsp.rename(temp, this.configFile);
+    if (command === null && !commands) delete data.projects[root];
+    else {
+      const list = commands ? checkCommands(commands) : [{ name: 'App', command: checkArgv(command), ...(url ? { url: normalizeLocalURL(url) } : {}) }];
+      const primary = list[primaryIndex(list)];
+      const setupSteps = setup ? checkSteps(setup) : null, stopSteps = stop ? checkSteps(stop) : null;
+      data.projects[root] = {
+        command: primary.command, ...(primary.url ? { url: primary.url } : {}), ...(list.length > 1 || list[0].name !== 'App' ? { commands: list } : {}),
+        ...(setupSteps ? { setup: setupSteps.length === 1 ? setupSteps[0] : setupSteps } : {}),
+        ...(stopSteps ? { stop: stopSteps } : {}),
+        updatedAt: new Date().toISOString(),
+      };
     }
+    await this.save(data);
     return { config: await this.projectConfig(root), detected: await this.detect(root) };
+  }
+  /** Setup runs again when its steps change or did not finish: remember the steps that last succeeded. */
+  async setupPending(root) {
+    const config = await this.projectConfig(root);
+    return !!config?.setupSteps && (await this.loadConfig()).setupDone?.[root] !== stepsKey(config.setupSteps);
+  }
+  async markSetupDone(root, steps) {
+    const data = await this.loadConfig();
+    data.setupDone ||= {};
+    if (steps) data.setupDone[root] = stepsKey(steps); else delete data.setupDone[root];
+    await this.save(data);
+  }
+  /** Run argv steps in order in the foreground, stopping at the first failure (like `a && b`). */
+  async runSteps(root, steps, { timeoutMs = 60000 } = {}) {
+    let result = { exitCode: 0, output: '' };
+    const outputs = [];
+    for (const step of steps) {
+      try { result = await this.run(root, step, { timeoutMs }); }
+      catch (error) { result = { exitCode: null, state: 'failed', error: error.message, output: error.message }; }
+      outputs.push(result.output || '');
+      if (result.exitCode !== 0) break;
+    }
+    return { ...result, output: outputs.join('\n').slice(-FOREGROUND_OUTPUT) };
   }
 
   // ---- start command detection ----
@@ -243,11 +310,13 @@ class ProcessManager {
   async detectStatic(root) {
     try { if (!(await fsp.stat(path.join(root, 'index.html'))).isFile()) return null; } catch { return null; }
     const env = childEnv();
-    for (const executable of [path.join(root,'.venv/bin/python'), 'python3', 'python']) {
+    // The saved command stays portable (`python3`, or the repository's own `.venv/bin/python`); the
+    // interpreter is resolved on PATH only when the command is launched.
+    for (const [executable, shown] of [[path.join(root,'.venv/bin/python'), '.venv/bin/python'], ['python3', 'python3'], ['python', 'python']]) {
       try {
         const program = resolveProgram(executable, env);
         await fsp.access(program, fs.constants.X_OK);
-        return {command:[program,'-u','-m','http.server','8000','--bind','127.0.0.1'], packageManager:null, source:'index.html', script:null};
+        return {command:[shown,'-u','-m','http.server','8000','--bind','127.0.0.1'], packageManager:null, source:'index.html', script:null};
       } catch { /* Try the next available interpreter. */ }
     }
     return null;
@@ -255,14 +324,17 @@ class ProcessManager {
   async resolveCommand(root, override) {
     if (override) return { command: checkArgv(override), source: 'argument' };
     const config = await this.projectConfig(root);
-    if (config) return { command: config.command, url: config.url, source: 'saved' };
+    if (config) {
+      const primary = primaryIndex(config.commands);
+      return { command: config.command, url: config.url, source: 'saved', name: config.commands[primary].name, companions: config.commands.filter((_, i) => i !== primary) };
+    }
     const detected = await this.detect(root);
     if (detected) return { command: detected.command, source: detected.source };
     return null;
   }
 
   // ---- dev server ----
-  describe(proc, root) {
+  describe(proc, root, tailLines = 30) {
     if (!proc) return { state: 'stopped', root };
     const running = !proc.exited;
     return {
@@ -270,27 +342,47 @@ class ProcessManager {
       root, command: proc.argv, source: proc.source, pid: proc.child?.pid || null, url: proc.url || null, urlSource: proc.urlSource || null,
       startedAt: new Date(proc.startedAt).toISOString(), ...(proc.exited ? { exitCode: proc.exitCode, signal: proc.signal } : {}),
       ...(proc.error ? { error: proc.error } : {}),
-      logId: proc.id, latestSeq: proc.log.seq, tail: proc.log.tail(30),
+      logId: proc.id, latestSeq: proc.log.seq, tail: proc.log.tail(Math.max(1, Math.min(400, Math.floor(Number(tailLines)) || 30))),
+      ...(proc.companions?.length ? { companions: proc.companions.map(c => ({ name: c.name, command: c.argv, state: c.exited ? (c.stopped ? 'stopped' : c.exitCode === 0 ? 'exited' : 'failed') : 'running', ...(c.exited ? { exitCode: c.exitCode } : {}), tail: c.log.tail(10) })) } : {}),
+      ...(proc.stopResult ? { stopCommand: proc.stopResult } : {}),
     };
   }
-  async status(root) {
+  async status(root, { tail } = {}) {
     const [config, detected] = await Promise.all([this.projectConfig(root), this.detect(root)]);
-    return { ...this.describe(this.servers.get(root), root), config, detected, proposal: await this.proposal(root) };
+    return { ...this.describe(this.servers.get(root), root, tail), config, detected, proposal: await this.proposal(root), setupPending: await this.setupPending(root) };
+  }
+  /** Spawn one more start command next to the dev server; it lives and dies with it. */
+  launchCompanion(proc, entry) {
+    const log = new RingLog();
+    const companion = { id: `${proc.id}#${entry.name}`, kind: 'companion', root: proc.root, name: entry.name, argv: entry.command, log, startedAt: Date.now(), exited: false };
+    companion.child = launch(entry.command, proc.root, log);
+    companion.exitPromise = new Promise(resolve => {
+      companion.child.on('error', error => { log.push('stderr', `[verynize] ${error.message}`); companion.exited = true; companion.exitCode = null; resolve(); });
+      companion.child.on('exit', (code, signal) => { log.flush(); companion.exited = true; companion.exitCode = code; companion.signal = signal; resolve(); });
+    });
+    return companion;
   }
   async start(root, { command, url, waitMs = 20000 } = {}) {
     const existing = this.servers.get(root);
     if (existing && !existing.exited) return { ...(await this.status(root)), alreadyRunning: true };
+    // A new attempt supersedes the previous run's exit record, so status() never reports that old failure for it.
+    if (existing) this.servers.delete(root);
     const resolved = await this.resolveCommand(root, command);
     if (!resolved) throw new Error('No dev server command found: package.json has no dev/start/serve/preview script. Pass command (an argument array) or save one with configure_dev_server.');
     const fixedURL = url ? normalizeLocalURL(url) : resolved.url || null;
     if (fixedURL && await probe(fixedURL, Date.now()+500)) throw new Error(`Preview address ${fixedURL} is already in use. Stop the existing server or choose another port before starting this preview.`);
     const log = new RingLog();
-    const proc = { id: `dev-server:${root}`, kind: 'dev-server', root, argv: resolved.command, source: resolved.source, log, startedAt: Date.now(), exited: false, url: fixedURL, urlSource: fixedURL ? 'config' : null, ready: false };
-    proc.child = launch(resolved.command, root, log);
+    const proc = { id: `dev-server:${root}`, kind: 'dev-server', root, argv: resolved.command, source: resolved.source, log, startedAt: Date.now(), exited: false, url: fixedURL, urlSource: fixedURL ? 'config' : null, ready: false, companions: [] };
+    // Extra start commands first: if one cannot be launched, nothing is left running.
+    try { for (const entry of resolved.companions || []) proc.companions.push(this.launchCompanion(proc, entry)); }
+    catch (error) { await Promise.all(proc.companions.map(c => terminate(c, 1000))); throw error; }
+    try { proc.child = launch(resolved.command, root, log); }
+    catch (error) { await Promise.all(proc.companions.map(c => terminate(c, 1000))); throw error; }
     this.servers.set(root, proc);
     proc.exitPromise = new Promise(resolve => {
-      proc.child.on('error', error => { proc.error = error.message; log.push('stderr', `[verynize] ${error.message}`); proc.exited = true; proc.exitCode = null; resolve(); });
-      proc.child.on('exit', (code, signal) => { log.flush(); proc.exited = true; proc.exitCode = code; proc.signal = signal; resolve(); });
+      const ended = () => { for (const c of proc.companions) if (!c.exited) { c.stopped = true; void terminate(c, 2000); } resolve(); };
+      proc.child.on('error', error => { proc.error = error.message; log.push('stderr', `[verynize] ${error.message}`); proc.exited = true; proc.exitCode = null; ended(); });
+      proc.child.on('exit', (code, signal) => { log.flush(); proc.exited = true; proc.exitCode = code; proc.signal = signal; ended(); });
     });
     const urlFound = new Promise(resolve => {
       if (proc.url) return resolve();
@@ -313,7 +405,15 @@ class ProcessManager {
     const proc = this.servers.get(root);
     if (!proc || proc.exited) return { ...(await this.status(root)), wasRunning: false };
     proc.stopped = true;
-    await terminate(proc);
+    for (const c of proc.companions || []) c.stopped = true;
+    await Promise.all([terminate(proc), ...(proc.companions || []).map(c => terminate(c))]);
+    // The saved stop command ends what the start command left behind (containers…). It runs as its own
+    // process group with a bounded timeout, only for servers started from the saved configuration.
+    const config = proc.source === 'saved' ? await this.projectConfig(root) : null;
+    if (config?.stopSteps) {
+      const result = await this.runSteps(root, config.stopSteps, { timeoutMs: STOP_TIMEOUT });
+      proc.stopResult = { exitCode: result.exitCode, ...(result.state === 'timed-out' ? { timedOut: true } : {}), tail: String(result.output || '').split('\n').slice(-10).join('\n') };
+    }
     return { ...(await this.status(root)), wasRunning: true };
   }
 
@@ -380,7 +480,7 @@ class ProcessManager {
 
   /** Synchronous best-effort shutdown for app quit: SIGTERM every group, brief grace, SIGKILL. */
   stopAll() {
-    const procs = [...this.servers.values(), ...this.jobs.values()].filter(p => p.child?.pid && (!p.exited || groupAlive(p.child.pid)));
+    const procs = [...this.servers.values(), ...[...this.servers.values()].flatMap(s => s.companions || []), ...this.jobs.values()].filter(p => p.child?.pid && (!p.exited || groupAlive(p.child.pid)));
     if (!procs.length) return 0;
     for (const proc of procs) { proc.stopped = true; killGroup(proc.child, 'SIGTERM'); }
     const until = Date.now() + 400;
@@ -391,4 +491,4 @@ class ProcessManager {
   }
 }
 
-module.exports = { recoverIgnoredBuilds, ProcessManager, RingLog, detectURL, normalizeLocalURL, checkArgv, childEnv };
+module.exports = { recoverIgnoredBuilds, ProcessManager, RingLog, detectURL, normalizeLocalURL, checkArgv, checkSteps, checkCommands, childEnv };

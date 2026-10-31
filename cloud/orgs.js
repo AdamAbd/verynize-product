@@ -8,9 +8,9 @@ import { room, member } from "./schema.js";
 // The router computes that role from D1 and forwards it to the room as x-verynize-org-role. The
 // room keeps it per live socket, so organization changes are pushed with applyOrgRoles.
 import { APIError } from "better-auth/api";
+import { profileIdForEmail, profilesById } from "./profiles.js";
 
 export const MEMBER_ROOM_ROLES = ["viewer", "commenter", "editor"];
-const directory = (env) => env.ACCOUNTS.getByName("directory");
 
 const parseMetadata = (value) => {
   if (value && typeof value === "object") return value;
@@ -164,7 +164,7 @@ export async function organizationHasRooms(env, organizationId) {
 async function rolesForAccounts(env, organizationId, accountIds) {
   const roles = {};
   if (!accountIds.length) return roles;
-  const accounts = await directory(env).accountsById(accountIds);
+  const accounts = await profilesById(env, accountIds);
   const org = organizationId
     ? await database(env).get(
         sql`SELECT "metadata" FROM "organization" WHERE "id" = ${organizationId}`,
@@ -199,7 +199,10 @@ export async function refreshOrganization(env, organizationId) {
 export async function refreshMember(env, organizationId, userId) {
   const user = await database(env).get(sql`SELECT "email" FROM "user" WHERE "id" = ${userId}`);
   if (!user) return;
-  const accountId = await directory(env).accountIdForEmail(user.email);
+  const linked = await database(env).get(
+    sql`SELECT "id" FROM "profile" WHERE "userId" = ${userId}`,
+  );
+  const accountId = linked?.id || (await profileIdForEmail(env, user.email));
   if (!accountId) return;
   const memberRole = await membership(env, organizationId, userId);
   const org = await database(env).get(

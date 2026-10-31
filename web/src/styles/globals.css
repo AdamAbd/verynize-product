@@ -17,6 +17,8 @@
   /* Surfaces */
   --background: #1c1c1c; /* panels, chrome, home */
   --canvas: #2b2b2b; /* canvas backdrop */
+  --page-checker-a: #2d2d2d; /* hidden page background: checkerboard (Wonder H8-eye-hidden) */
+  --page-checker-b: #252525;
   --settings: #1a1a1a; /* settings main area */
   --card: #222222; /* file cards, settings cards, composer */
   --popover: #222222; /* menus, popovers */
@@ -38,6 +40,7 @@
   --foreground-2: #d4d4d4;
   --foreground-3: #a8a8a8;
   --muted-foreground: #909090;
+  --menu-label: #969696; /* help menu "What's new" section label (Wonder T5-help, R6-help-menu: solid RGB 150) */
   --subtle-foreground: #707070;
 
   /* Brand */
@@ -55,6 +58,8 @@
 html[data-ui-theme="light"] {
   --background: #f7f7f7;
   --canvas: #ececec;
+  --page-checker-a: #f4f4f4;
+  --page-checker-b: #e2e2e2;
   --settings: #f4f4f4;
   --card: #ffffff;
   --popover: #ffffff;
@@ -72,6 +77,7 @@ html[data-ui-theme="light"] {
   --foreground-2: #2b2b2b;
   --foreground-3: #555555;
   --muted-foreground: #6b6b6b;
+  --menu-label: #6b6b6b;
   --subtle-foreground: #8a8a8a;
   --primary-text: #8f2fc0;
   --primary-tint: #f3e8fa;
@@ -106,6 +112,7 @@ html[data-ui-theme="light"] {
   --color-secondary-foreground: var(--foreground-2);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-menu-label: var(--menu-label);
   --color-subtle-foreground: var(--subtle-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--foreground);
@@ -237,10 +244,43 @@ html[data-ui-theme="light"] {
   --spacing-tab-name: 220px;
   /* </chrome-tokens> */
   /* <sidebar-tokens> */
+  /* Inline page rename field (Wonder L2-rename-field: #181818 inside a 1px primary outline). */
+  --color-page-rename: color-mix(in srgb, var(--background) 86%, black);
   /* </sidebar-tokens> */
   /* <inspector-tokens> */
-  /* Fields in 22/25/43: 0.5px lighter top edge, 0.5px dark drop below. */
-  --shadow-field: inset 0 0.5px 0 rgb(255 255 255 / 0.05), 0 0.5px 0 rgb(0 0 0 / 0.35);
+  /* Fields in 22/43 and 2026-10-30/05–06: a 0.5px edge all round, a shade lighter than the #2b2b2b fill (#303030). */
+  --shadow-field: 0 0 0 0.5px color-mix(in srgb, var(--foreground) 3%, var(--input));
+  /* Active segment (Display, flex direction…): #363636 with a 1px #3c3c3c inner edge and a soft 2px drop. */
+  --shadow-segment:
+    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 4%, var(--accent)), 0 0 2px rgb(0 0 0 / 0.15);
+  /* Bound-variable chip inside a #2b2b2b field (2026-10-30/05, 06, 07, 13): 16px tall, 4px radius, panel fill
+   * #1c1c1c, 0.5px #343434 edge, #d4d4d4 label, 4px side padding; starts 27.5px into a field with a prefix icon. */
+  --color-variable-chip: var(--background);
+  --color-variable-chip-foreground: var(--foreground-2);
+  --shadow-variable-chip: 0 0 0 0.5px color-mix(in srgb, var(--foreground) 12%, var(--background));
+  /* Multi-select "Click to replace …" buttons and Selection filters rows (properties-audit A9): a #181818 well
+   * with a 1px #242424 edge. */
+  --color-well: color-mix(in srgb, var(--background) 86%, black);
+  --color-well-edge: color-mix(in srgb, var(--foreground) 4.5%, var(--background));
+  /* Disabled field (properties-audit B4/C1): #242424 fill, #828282 value; its caret and the disabled constraint
+   * diagram's ticks are #535353 (the diagram well itself is #363636 = accent; enabled it is #2b2b2b = input). */
+  --color-field-disabled: color-mix(in srgb, var(--input) 53%, var(--background));
+  --color-field-disabled-foreground: color-mix(in srgb, var(--muted-foreground) 60%, var(--subtle-foreground));
+  --color-disabled-glyph: color-mix(in srgb, var(--foreground) 16.3%, var(--accent));
+  /* Purple "on" header toggle (Position absolute toggle, C1): #372441 fill, #ce86f8 glyph. */
+  --color-toggle-on: color-mix(in srgb, var(--primary) 20%, var(--background));
+  --color-toggle-on-foreground: color-mix(in srgb, var(--primary-text) 85%, white);
+  /* Active flex toggles (reverse, wrap, baseline) in properties-audit C3: a purple tint #362440 behind a #ce86f8
+   * glyph (primary mixed into the panel / primary text lifted toward white; both follow the light theme). */
+  --color-toggle-active: color-mix(in srgb, var(--primary) 19.5%, var(--background));
+  --color-toggle-active-foreground: color-mix(in srgb, var(--primary-text) 82%, white);
+  /* Page swatch edge (properties-audit C8): a 1px #555555 ring so a dark page colour stays visible on #2b2b2b. */
+  --color-swatch-ring: color-mix(in srgb, var(--foreground) 22%, var(--input));
+  /* Frame tool preset names (properties-audit D1): #c0c0c0, between the #d4d4d4 category labels and #909090 sizes. */
+  --color-preset-name: color-mix(in srgb, var(--foreground-2) 70%, var(--muted-foreground));
+  /* Type-to-bind suggestion list (properties-audit G1): #1c1c1c panel with a 0.5px #2f2f2f edge and a soft drop. */
+  --shadow-type-bind:
+    0 0 0 0.5px color-mix(in srgb, var(--foreground) 9.5%, var(--background)), 0 4px 12px rgb(0 0 0 / 0.3);
   /* </inspector-tokens> */
   /* <home-tokens> */
   /* </home-tokens> */
@@ -295,6 +335,20 @@ html[data-ui-theme="light"] {
   --color-file-modified: #d8a03c;
   --color-file-deleted: #f85149;
   /* </code-tokens> */
+  /* <preview-header-tokens> */
+  /* Preview settings modal and header split menu (design/wonder/preview-audit/wonder X1-settings, PS2-edit, X5). */
+  --spacing-preview-settings: 992px; /* modal width */
+  --spacing-preview-settings-height: 640px; /* modal height */
+  --spacing-preview-settings-nav: 192px; /* repository settings navigation */
+  --radius-preview-settings: 16px;
+  --color-preview-running: #9fecb1; /* running dot next to the pause glyph (X5) */
+  /* </preview-header-tokens> */
+  /* <preview-parity-tokens> */
+  /* Final preview parity pass (design/wonder/preview-audit/README.md). */
+  --color-preview-mode-label: color-mix(in srgb, var(--foreground) 81%, var(--background)); /* idle Navigate/Edit/Capture #c0c0c0 (PM1) */
+  --color-preview-path-edit: color-mix(in srgb, var(--background) 86%, black); /* path editor well #181818 (PF2-path) */
+  --color-preview-request: color-mix(in srgb, var(--primary-text) 60%, var(--foreground)); /* "Set up the Preview" #d8a1fa (PS2) */
+  /* </preview-parity-tokens> */
 }
 
 /*
@@ -327,6 +381,57 @@ body {
 [data-bd] svg[data-icon-weight="bold"] {
   stroke-width: 1.75px;
 }
+
+/* <command-palette-tokens> */
+/*
+ * ⌘K command palette (web/src/islands/chrome/CommandPalette.tsx). Measured from Wonder canvas-audit P2-empty /
+ * P2-select / P2-frame (1440 × 870): 672 × 480 at y122, 16px radius, 0.5px #2e2e2e edge, body rgb(24,24,24), active
+ * row rgb(41,41,41), footer and keycaps rgb(34,34,34) with a 0.5px #2b2b2b keycap edge, input strip 44px with a
+ * 0.5px #242424 rule, footer 38px with a 0.5px #2e2e2e rule, 32px rows, 36px section headings, 18px row keycaps,
+ * 20px footer keycaps. The page behind is dimmed to about half (canvas 43 → 23).
+ */
+:root {
+  --command-palette: #181818;
+  --command-palette-highlight: #292929;
+  --command-palette-footer: #222222;
+  --command-palette-keycap: #222222;
+  --command-palette-scrim: rgb(0 0 0 / 0.5);
+  --command-palette-edge: #2e2e2e;
+  --command-palette-rule: #242424;
+  --command-palette-keycap-edge: #2b2b2b;
+}
+html[data-ui-theme="light"] {
+  --command-palette: #ffffff;
+  --command-palette-highlight: #ececec;
+  --command-palette-footer: #f7f7f7;
+  --command-palette-keycap: #f7f7f7;
+  --command-palette-scrim: rgb(0 0 0 / 0.2);
+  --command-palette-edge: #dcdcdc;
+  --command-palette-rule: #e6e6e6;
+  --command-palette-keycap-edge: #dcdcdc;
+}
+@theme inline {
+  --color-command-palette: var(--command-palette);
+  --color-command-palette-highlight: var(--command-palette-highlight);
+  --color-command-palette-footer: var(--command-palette-footer);
+  --color-command-palette-keycap: var(--command-palette-keycap);
+  --color-command-palette-scrim: var(--command-palette-scrim);
+  --color-command-palette-edge: var(--command-palette-edge);
+  --spacing-palette: 672px; /* width */
+  --spacing-palette-height: 480px;
+  --spacing-palette-top: 122px; /* from the window top */
+  --spacing-palette-input: 44px;
+  --spacing-palette-footer: 38px;
+  --spacing-palette-heading: 36px;
+  --spacing-palette-keycap: 18px;
+  --spacing-palette-footer-keycap: 20px;
+  --radius-palette: 16px;
+  --shadow-palette: 0 0 0 0.5px var(--command-palette-edge), 0 24px 64px rgb(0 0 0 / 0.45);
+  --shadow-palette-input: inset 0 -0.5px 0 var(--command-palette-rule);
+  --shadow-palette-footer: inset 0 0.5px 0 var(--command-palette-edge);
+  --shadow-palette-keycap: inset 0 0 0 0.5px var(--command-palette-keycap-edge);
+}
+/* </command-palette-tokens> */
 
 /* <terminal-tokens> */
 /*
@@ -384,3 +489,21 @@ html[data-ui-theme="light"] {
   --terminal-bright-white: #1c1c1c;
 }
 /* </terminal-tokens> */
+
+/* <context-menu-tokens> (canvas, layer-row and page-row context menus; Wonder canvas-audit CM1–CM10) */
+:root {
+  --context-menu: #1c1c1c; /* menu surface, rgb(28,28,28) */
+  --context-menu-highlight: #4c305b; /* highlighted row, rgb(76,48,91) */
+  --context-menu-destructive-disabled: #844544; /* disabled Delete, rgb(132,69,68) (R3-delete-hover) */
+}
+html[data-ui-theme="light"] {
+  --context-menu: #ffffff;
+  --context-menu-highlight: #ecdaf6;
+  --context-menu-destructive-disabled: color-mix(in srgb, var(--destructive) 50%, transparent);
+}
+@theme inline {
+  --color-context-menu: var(--context-menu);
+  --color-context-menu-highlight: var(--context-menu-highlight);
+  --color-context-menu-destructive-disabled: var(--context-menu-destructive-disabled);
+}
+/* </context-menu-tokens> */

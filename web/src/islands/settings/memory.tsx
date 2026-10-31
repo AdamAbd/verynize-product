@@ -8,16 +8,17 @@ import { ClaudeMark, CodexMark } from "@/components/icons";
 import { DesignPreferencesSection } from "./agent-memory";
 import { agentWorkspace, type SettingsApi } from "./api";
 import { Card, IconTile, PageHeader, Row, Section, SettingsButton } from "./controls";
+import { platform } from "@/lib/platform";
 
-type MemoryFile = { name: string; size: number; modified: number };
-type FileInfo = {
+export type MemoryFile = { name: string; size: number; modified: number };
+export type FileInfo = {
   path: string;
   displayPath: string;
   exists: boolean;
   size: number;
   modified: number | null;
 };
-type Overview = {
+export type Overview = {
   repoLess: { claude: { enabled: boolean; dir: string; displayDir: string; files: MemoryFile[] } };
   aboutYou: {
     codex: {
@@ -44,16 +45,15 @@ type Overview = {
     sharedWith: string | null;
   })[];
 };
-type Target = { kind: string; name?: string };
-type MemoryIpc = {
+export type Target = { kind: string; name?: string };
+export type MemoryIpc = {
   overview(): Promise<Overview>;
   reveal(target: Target): Promise<unknown>;
   open(target: Target): Promise<unknown>;
 };
 
 const memoryIpc = (): MemoryIpc | null => {
-  const ipc = (window as unknown as { desktop?: { agentMemory?: Partial<MemoryIpc> } }).desktop
-    ?.agentMemory;
+  const ipc: Partial<MemoryIpc> | undefined = platform.desktop?.agentMemory;
   return ipc &&
     typeof ipc.overview === "function" &&
     typeof ipc.reveal === "function" &&
@@ -151,7 +151,7 @@ export function MemoryView({ api }: { api: SettingsApi }) {
     <>
       <PageHeader
         title="Memory"
-        description="Agent memory stays on this computer and is shared by everyone who uses it. Design preferences are stored on this computer by Verynize."
+        description="Agent memory stays on this computer and is shared by everyone who uses it. Design preferences, your visual taste, are kept on this computer by Verynize."
       />
       <div className="flex flex-col gap-12.5">
         <DesignPreferencesSection />

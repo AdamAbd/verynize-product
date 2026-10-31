@@ -1,13 +1,15 @@
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 (async () => {
   const profile = await fs.mkdtemp(os.tmpdir() + '/bd-roundtrip-');
-  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1';
   const app = await _electron.launch({ timeout:20000, env, args: ['.', `--user-data-dir=${profile}`] });
   try {
     const page = await app.firstWindow({timeout:15000});
+    await waitForUiReady(page);
     await page.waitForSelector('#canvas .layer');
     await page.evaluate(() => window.design.importHTML('<p style="font-size:24px;color:#222222">Hello <strong>bold <em style="color:#ff0000;font-size:36px">and red italic</em></strong><br>world</p>'));
     const text = await page.evaluate(() => window.design.getDocument().pages[0].nodes.at(-1));

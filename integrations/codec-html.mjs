@@ -670,6 +670,11 @@ const SUPPORTED = new Set([
   "white-space",
   "-webkit-line-clamp",
   "text-wrap",
+  // Type settings (word break, indent, smoothing).
+  "word-break",
+  "overflow-wrap",
+  "text-indent",
+  "-webkit-font-smoothing",
   "object-fit",
   "mask-image",
   "-webkit-mask-image",

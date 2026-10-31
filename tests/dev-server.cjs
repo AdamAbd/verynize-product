@@ -209,6 +209,7 @@ test('plain HTML starts with a real Python HTTP server without Node dependencies
   const detected = await manager.detect(root);
   assert.ok(detected,'Python is available on this test machine');
   assert.equal(detected.source,'index.html');
+  assert.ok(!path.isAbsolute(detected.command[0]), `the detected command stays portable: ${detected.command[0]}`);
   assert.equal(detected.packageManager,null);
   const command = detected.command.map(arg=>arg==='8000'?'0':arg);
   const status = await manager.start(root,{command,waitMs:15000});
@@ -253,4 +254,78 @@ test('preview server group exits when its editor process crashes', async t => {
   parent.kill('SIGKILL');
   assert.ok(await waitGone(serverPid,5000),'orphan server should be terminated');
   await assert.rejects(fetch(status.url));
+});
+
+test('preview settings: several start commands, chained setup steps, Opens at override and a stop command', async t => {
+  const root = await fixture(t);
+  const configFile = path.join(root, 'preview-config.json');
+  const manager = new ProcessManager({ configFile });
+  t.after(() => manager.stopAll());
+  const node = process.execPath;
+  // A companion command that records its pid and keeps running; the primary is the Node server fixture.
+  const worker = [node, '-e', "require('fs').writeFileSync('worker.pid',String(process.pid));console.log('worker http://localhost:1/');setInterval(()=>{},1000)"];
+  await manager.configure(root, {
+    commands: [{ name: 'Worker', command: worker }, { name: 'Web', command: [node, 'server.js'] }],
+    setup: [[node, '-e', "require('fs').writeFileSync('step1','1')"], [node, '-e', "require('fs').writeFileSync('step2',require('fs').readFileSync('step1','utf8')+'2')"]],
+    stop: [node, '-e', "require('fs').writeFileSync('stopped','yes')"],
+  });
+  let config = await new ProcessManager({ configFile }).projectConfig(root);
+  assert.deepEqual(config.commands.map(c => c.name), ['Worker', 'Web']);
+  assert.equal(config.setupSteps.length, 2);
+  assert.equal(config.stopSteps.length, 1);
+  assert.equal(await manager.setupPending(root), true, 'a new setup is pending');
+  const setup = await manager.runSteps(root, config.setupSteps);
+  assert.equal(setup.exitCode, 0);
+  assert.equal(await fs.readFile(path.join(root, 'step2'), 'utf8'), '12', 'steps run in order');
+  await manager.markSetupDone(root, config.setupSteps);
+  assert.equal(await new ProcessManager({ configFile }).setupPending(root), false, 'finished setup is remembered');
+  // Without an Opens at, the first command decides the address; give the second one an explicit address instead.
+  const port = 40000 + Math.floor(Math.random() * 20000);
+  await manager.configure(root, { commands: [{ name: 'Worker', command: worker }, { name: 'Web', command: [node, '-e', `require('http').createServer((q,r)=>r.end('web')).listen(${port},'127.0.0.1')`], url: `http://localhost:${port}/` }], setup: config.setupSteps, stop: config.stopSteps });
+  config = await manager.projectConfig(root);
+  assert.equal(config.url, `http://localhost:${port}/`, 'the command with an Opens at decides the address');
+  assert.equal(await manager.setupPending(root), false, 'unchanged setup does not run again');
+  const status = await manager.start(root, { waitMs: 15000 });
+  assert.equal(status.state, 'running', status.tail);
+  assert.equal(status.url, `http://localhost:${port}/`);
+  assert.equal(await (await fetch(status.url)).text(), 'web');
+  assert.equal(status.companions?.[0]?.name, 'Worker');
+  let workerPid = 0;
+  for (const end = Date.now() + 5000; !workerPid && Date.now() < end; await new Promise(r => setTimeout(r, 50))) workerPid = Number(await fs.readFile(path.join(root, 'worker.pid'), 'utf8').catch(() => 0));
+  assert.ok(alive(workerPid), 'every start command runs');
+  const stopped = await manager.stop(root);
+  assert.equal(stopped.state, 'stopped');
+  assert.ok(await waitGone(workerPid), 'stopping the preview stops every start command');
+  assert.equal(await fs.readFile(path.join(root, 'stopped'), 'utf8'), 'yes', 'the stop command runs when the preview stops');
+  assert.equal(stopped.stopCommand.exitCode, 0);
+  // Changing setup makes it pending again; invalid shapes are refused.
+  await manager.configure(root, { command: [node, 'server.js'], setup: [node, '-e', '1'] });
+  assert.equal(await manager.setupPending(root), true);
+  await assert.rejects(manager.configure(root, { commands: [] }), /start commands/);
+  await assert.rejects(manager.configure(root, { command: [node], stop: 'docker compose down' }), /argument array/);
+});
+
+test('a stop command that hangs is ended by its timeout as a whole process group', async t => {
+  const root = await fixture(t);
+  const manager = new ProcessManager();
+  t.after(() => manager.stopAll());
+  const started = Date.now();
+  const result = await manager.runSteps(root, [[process.execPath, '-e', "require('fs').writeFileSync('hang.pid',String(process.pid));setInterval(()=>{},1000)"]], { timeoutMs: 1000 });
+  assert.notEqual(result.exitCode, 0);
+  assert.ok(Date.now() - started < 8000, 'bounded by the timeout');
+  assert.ok(await waitGone(Number(await fs.readFile(path.join(root, 'hang.pid'), 'utf8'))));
+});
+
+test('a piped python3 -m http.server prints its address at once and is detected without a saved URL', { skip: !require('node:child_process').spawnSync('python3', ['--version']).stdout?.length && 'python3 not available' }, async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'bd-dev-python-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'index.html'), '<h1>Static site</h1>');
+  const net = require('node:net');
+  const port = await new Promise(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+  const manager = new ProcessManager();
+  t.after(() => manager.stopAll());
+  const status = await manager.start(root, { command: ['python3', '-m', 'http.server', String(port), '--bind', '127.0.0.1'], waitMs: 15000 });
+  assert.equal(status.state, 'running', JSON.stringify(status));
+  assert.match(status.tail, /Serving HTTP on 127\.0\.0\.1 port \d+/, 'unbuffered Python output reaches the log');
+  assert.match(status.url, new RegExp(`:${port}/`));
 });

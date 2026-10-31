@@ -1,13 +1,12 @@
 // Desktop UI for cloud accounts: two real Electron clients create email + password accounts (verified through the outbox),
 // edit profiles, share a room by email with roles, rotate and recover links, comment, and
 // build/publish/roll back/unpublish a project app against local workerd.
-import { Miniflare } from "miniflare";
 import { _electron as electron } from "@playwright/test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-accounts-ui-"));
 const mf = new Miniflare(await cloudOptions(path.join(dir, "state")));
@@ -28,6 +27,7 @@ try {
   const server = (await mf.ready).origin;
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = "1";
   for (const label of ["a", "b"])
     apps.push(
       await electron.launch({ env, args: [".", `--user-data-dir=${path.join(dir, label)}`] }),

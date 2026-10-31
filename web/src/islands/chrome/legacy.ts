@@ -28,16 +28,9 @@ export const MENU_IDS = [
 
 export const ZOOM_IDS = ["zoom-in", "zoom-out", "zoom-fit", "zoom-reset", "saved-views-open"] as const;
 
-export const TOOL_IDS = [
-  "select-tool",
-  "scale-tool",
-  "pan-tool",
-  "eyedropper-tool",
-  "add-frame",
-  "add-ellipse",
-  "add-shader",
-  "text",
-] as const;
+// Not `eyedropper-tool` / `add-ellipse`: the Wonder toolbar has no such buttons, so no island element would ever
+// claim them (they would hold back the UI-ready signal); canvas-interactions.js already creates them `hidden`.
+export const TOOL_IDS = ["select-tool", "scale-tool", "pan-tool", "add-frame", "add-shader", "text"] as const;
 
 const CHROME_IDS = ["files-home", "document-name", "shell-new-file", "shell-search", "shell-chat"] as const;
 

@@ -1,7 +1,6 @@
 const {onWindowClosed}=require('./window-cleanup.cjs');
-const { app, BrowserWindow, session, dialog, Notification, shell, screen } = require('electron');
+const { app, BrowserWindow, session, dialog, Notification, shell, screen, protocol, net } = require('electron');
 const path = require('node:path');
-const {pathToFileURL}=require('node:url');
 const {Project}=require('./projects.cjs');
 const agents=require('./agents.cjs');
 const {registerPreview}=require('./preview.cjs');
@@ -15,12 +14,17 @@ const {RepositoryRegistry,registerRepositories,createProjectFolder}=require('./r
 const mcpBridge=require('./mcp-bridge.cjs'); // agent-bridge hook: live MCP server (getBridgeInfo for agent runtimes)
 const {registerAgentRuntime}=require('./agent-runtime.cjs'); // agent chat runtime (Claude Agent SDK / Codex app-server)
 const agentBehavior=require('./agent-behavior.cjs'); // Settings › Agents: follow-ups, response style, attribution, folder, branch prefix, modes, allowed rules
-const entry=path.join(__dirname,'../web/index.html');
+// The editor is served from app://verynize/ (desktop/app-protocol.cjs), not file://: IPC trust is
+// origin-based, so client-side routes (app://verynize/editor) keep working.
+const appProtocol=require('./app-protocol.cjs');
+appProtocol.registerSchemes(protocol); // must run before app ready
 let primaryRuntime=null,repositories=null,behaviorStore=null,agentStores=null;const liveRuntimes=new Set(); // agent runtime of the latest editor window (serves ask_agent)
 app.setName('Verynize');
 require('./app-preferences.cjs').attachDeepLinks(app); // verynize:// design links (Settings › Preferences › Advanced)
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  appProtocol.registerHandler(protocol, net);
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  const storageMigration=require('./storage-migration.cjs');const migration=await storageMigration.migrateStorage({app,BrowserWindow}); // one-time file:// → app://verynize localStorage/IndexedDB copy; applies staged old-build edits
   // Design preferences: one file shared by the agent persona (agent-runtime.cjs) and the MCP tools.
   if(!process.env.VERYNIZE_PREFERENCES)process.env.VERYNIZE_PREFERENCES=path.join(app.getPath('userData'),'design-preferences.json');
   // ask_agent MCP tool: nested read-only helper run on the most recent window's agent runtime.
@@ -31,6 +35,8 @@ app.whenReady().then(() => {
   // Named accounts, Verynize MCP servers/permission defaults and per-chat autonomy: one store each for all windows.
   agentStores={profiles:new (require('./agent-profiles.cjs').AgentProfiles)({userData:app.getPath('userData')}),tools:new (require('./agent-tool-config.cjs').AgentToolConfig)({userData:app.getPath('userData')}),autonomy:new (require('./agent-autonomy.cjs').AgentAutonomy)({userData:app.getPath('userData')})};
   mcpBridge.startBridge(app,{askAgent}).catch(error=>console.error('MCP bridge failed to start:',error)); // agent-bridge hook
+  // Editor windows only: the storage probe's hidden window must not count as an open editor on macOS activate.
+  const editorWindows = new Set();
   const createWindow = () => {
     // Keep normal/restored bounds inside the display; an oversized initial window is clamped
     // by macOS but retains off-screen restore bounds, making zoom/resize inconsistent.
@@ -40,11 +46,11 @@ app.whenReady().then(() => {
     let project=null,agentRuntime=null;const agentsBusy=()=>agentRuntime?.active()>0;
     const current=()=>{if(!project)throw Error('Open a project folder first');return project;};
     const handle=(name,fn)=>win.webContents.ipc.handle('desktop:'+name,(event,...args)=>{
-      if(event.sender!==win.webContents||!event.senderFrame||event.senderFrame!==event.sender.mainFrame||event.senderFrame.url!==pathToFileURL(entry).href)throw Error('Untrusted IPC sender');return fn(...args);
+      if(!appProtocol.isTrustedSender(event,win))throw Error('Untrusted IPC sender');return fn(...args);
     });
     registerPreview(handle,win);
     const designFiles=registerDesignFiles(handle,win);
-    mcpBridge.registerWindow(win,{designFiles,entryURL:pathToFileURL(entry).href}); // agent-bridge hook
+    mcpBridge.registerWindow(win,{designFiles,trusted:event=>appProtocol.isTrustedSender(event,win)}); // agent-bridge hook
     registerGeneration(handle,win);
     registerFigma(handle,win);
     require('./figma-oauth.cjs').registerFigmaOAuth(handle,win); // Figma account (OAuth PKCE, safeStorage tokens)
@@ -60,6 +66,8 @@ app.whenReady().then(() => {
     require('./agent-tool-config.cjs').registerAgentToolConfig(handle,{store:agentStores.tools});
     require('./agent-autonomy.cjs').registerAgentAutonomy(handle,{store:agentStores.autonomy});
     require('./agent-memory.cjs').registerAgentMemory(handle,{userData:app.getPath('userData'),shell});
+    // First-run onboarding (web/src/islands/onboarding): automated runs skip it with VERYNIZE_SKIP_ONBOARDING=1.
+    handle('onboardingState',()=>({skip:process.env.VERYNIZE_SKIP_ONBOARDING==='1'}));
     handle('openExternal',value=>{const url=new URL(value);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('Only HTTP and HTTPS links are supported');return shell.openExternal(url.href);});
     let lastNotification=0;
     handle('notifyTask',options=>{if(!options||typeof options.title!=='string'||typeof options.body!=='string')throw Error('Invalid notification');if(Date.now()-lastNotification<3000||!Notification.isSupported())return false;lastNotification=Date.now();new Notification({title:options.title.slice(0,120),body:options.body.slice(0,300)}).show();return true;});
@@ -84,7 +92,7 @@ app.whenReady().then(() => {
     handle('readMemory',()=>current().memory());handle('writeMemory',text=>current().write('VERYNIZE.md',text));
     handle('discoverAgents',()=>agents.discover());
     // --- agent chat runtime (desktop/agent-runtime.cjs): runAgent, cancelAgent, respondAgentPermission, listAgentModels, saveAgentImage ---
-    // --- also: respondAgentQuestion, steerAgent, listAgentRuns, listAllowRules, removeAllowRule, agentToolsVersion, agentTitle, designPreferences* ---
+    // --- also: respondAgentQuestion, steerAgent, listAgentRuns, listAllowRules, removeAllowRule, agentToolsVersion, agentTitle, designPreferences*, designStylesList ---
     agentRuntime=registerAgentRuntime(handle,win,{userData:app.getPath('userData'),getProject:()=>project,resolveProject:async root=>{const resolved=await repositories.resolveRoot(root);const opened=await Project.open(resolved.root);opened.repositoryRoot=resolved.repository.root;return opened;},getBehavior:()=>behaviorStore.get(),...agentStores});
     const windowRuntime=agentRuntime;liveRuntimes.add(windowRuntime);onWindowClosed(win,()=>liveRuntimes.delete(windowRuntime));
     // Global search and history-preserving moves (desktop/project-search.cjs, desktop/repository-moves.cjs): projectSearch*, repositoryMove*, repositoryRelocate.
@@ -113,11 +121,15 @@ app.whenReady().then(() => {
     require('./terminal.cjs').setTerminalCwdValidator(async(real,{defaultAllowed})=>{if(defaultAllowed)return true;try{await repositories.resolveRoot(real);return true}catch{return false}});
     // --- end integrated terminal ---
     win.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
-    win.webContents.on('will-navigate', event => event.preventDefault());
-    win.loadFile(entry);
+    // Same-origin navigations (a client-side route reloaded as app://verynize/editor) are allowed; anything else is blocked.
+    win.webContents.on('will-navigate', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
+    win.webContents.on('will-redirect', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
+    win.loadURL(appProtocol.ENTRY_URL);
+    editorWindows.add(win); win.on('closed', () => editorWindows.delete(win));
+    return win;
   };
-  createWindow();
-  app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
+  storageMigration.probeAfterLaunch({app,BrowserWindow,editor:createWindow(),startup:migration}); // background check for old-build (file://) edits, staged for the next launch
+  app.on('activate', () => { if (!editorWindows.size) createWindow(); });
 });
 app.on('will-quit',()=>mcpBridge.stopBridge()); // agent-bridge hook
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

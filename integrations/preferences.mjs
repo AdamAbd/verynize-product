@@ -10,15 +10,17 @@
 //     update(id, text)  -> Promise<pref>
 //     remove(id)        -> Promise<{deleted: true, id}>
 //
-// Limits: at most 100 preferences of at most 500 characters. Writes are atomic (temp file + rename,
+// Limits: at most MAX_PREFERENCES (50) preferences of at most MAX_PREFERENCE_LENGTH (280) characters
+// each. These two constants are the single source of truth: the desktop persona block and the IPC
+// validator (desktop/agent-runtime.cjs) load them from here. Writes are atomic (temp file + rename,
 // mode 0600) and serialized per file within the process.
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
-export const MAX_PREFERENCES = 100;
-export const MAX_PREFERENCE_LENGTH = 500;
+export const MAX_PREFERENCES = 50;
+export const MAX_PREFERENCE_LENGTH = 280;
 
 export function defaultPreferencesPath(env = process.env) {
   if (env.VERYNIZE_PREFERENCES) return path.resolve(env.VERYNIZE_PREFERENCES);

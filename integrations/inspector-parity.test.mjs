@@ -28,13 +28,31 @@ test('border and outline colours follow a bound colour variable; per-side colour
   assert.equal(sides['border-width'], '1px 2px 3px 4px');
 });
 
-test('validation rejects malformed border/outline variables and side colours (store mirrors web/app.js)', () => {
+test('validation rejects malformed border/outline variables and side colours (shared schema, web/document-core.js)', () => {
   assert.equal(validateEffects(rect({ strokeToken: 'ok/name', outlineToken: 'x' })), '');
   assert.match(validateEffects(rect({ strokeToken: 5 })), /border color variable/);
   assert.match(validateEffects(rect({ outlineToken: '' })), /outline color variable/);
   assert.match(validateEffects(rect({ strokeColors: [{ color: '#fff' }] })), /border side colors/);
   assert.match(validateEffects(rect({ strokeColors: Array(4).fill({ color: 'red' }) })), /border side colors/);
   assert.throws(() => validateDocument(doc([rect({ strokeColors: [1, 2, 3, 4] })])), /border side colors/);
+});
+
+test('a border side hidden with its own eye draws nothing, keeps its width and is validated', () => {
+  const node = rect({ strokeWidths: [1, 2, 3, 4], strokeWidth: 4, strokeColor: '#000000', strokeHiddenSides: [false, true, false, true] });
+  assert.equal(decls(node)['border-width'], '1px 0px 3px 0px');
+  assert.deepEqual(node.strokeWidths, [1, 2, 3, 4]);
+  // The JSX codec writes only the visible sides.
+  const jsxOf = n => { const d = doc([n]); ensureShortIds(d); return serializeNode(d.pages[0].nodes[0], indexPage(d.pages[0])); };
+  const jsx = jsxOf(node);
+  assert.match(jsx, /border-t\b/);
+  assert.match(jsx, /border-b-3/);
+  assert.doesNotMatch(jsx, /border-r-2|border-l-4/);
+  // Every side hidden: no border classes at all.
+  assert.doesNotMatch(jsxOf(rect({ strokeWidths: [1, 1, 1, 1], strokeWidth: 1, strokeHiddenSides: [true, true, true, true] })), /\bborder\b/);
+  assert.equal(validateEffects(node), '');
+  assert.match(validateEffects(rect({ strokeHiddenSides: [true] })), /border side visibility/);
+  assert.match(validateEffects(rect({ strokeHiddenSides: [1, 0, 0, 0] })), /border side visibility/);
+  assert.throws(() => validateDocument(doc([rect({ strokeHiddenSides: 'top' })])), /border side visibility/);
 });
 
 test('colour variable rename, delete and value sync reach border, side colours and outline', () => {

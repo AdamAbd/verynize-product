@@ -5,7 +5,8 @@
 // configuration against node:sqlite. Sessions travel only as `Authorization: Bearer` tokens
 // (bearer plugin): the Worker drops request cookies and response Set-Cookie headers, so there
 // are no ambient credentials and Better Auth's cookie CSRF check is disabled. It would otherwise
-// refuse the desktop renderer, whose file:// page sends `Origin: null`. Redirect and callback
+// refuse the desktop renderer, whose app://verynize page sends `Origin: app://verynize` (older
+// file:// builds sent `Origin: null`). Redirect and callback
 // URLs are still checked against trusted origins. Rate limiting is done by the Worker with
 // the AUTH_LIMIT binding: Better Auth's built-in limiter keeps state in isolate memory, which is
 // not shared between Workers isolates.

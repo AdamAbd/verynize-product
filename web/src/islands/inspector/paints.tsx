@@ -3,37 +3,28 @@
 // visibility. Solid colours and gradient stops bind to colour variables; detaching keeps the resolved colour.
 // A stack of one visible solid paint is stored as the layer's plain `color`/`token` (older documents keep
 // that shape); anything else is stored in `fills` (see web/node-style.js for rendering and validation).
-import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  ArrowDown,
-  ArrowLeftRight,
-  ArrowUp,
-  Check,
-  Diamond,
-  Eye,
-  EyeOff,
-  ImageIcon,
-  Minus,
-  Plus,
-  RotateCw,
-  Unlink,
-  X,
-} from "lucide-react";
-import { ShaderIcon } from "@/components/icons";
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
+import { ArrowDown, ArrowLeftRight, ArrowUp, Eye, GripVertical, ImageIcon, Plus, RotateCw, Square, Unlink, X } from "lucide-react";
+import { ClosedEyeIcon, GradientPaintIcon, RemoveIcon } from "@/components/icons";
 import type { DesignDocument } from "@/lib/bridge";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { ColorPicker, ColorPopover } from "./color-picker";
 import { alphaPercent, parseColor, toHex, withAlpha } from "./color";
-import { Field, IconButton, NativeSelect, Swatch } from "./controls";
+import { Field, IconButton, NativeSelect, Swatch, type IconType } from "./controls";
+import { VariableChip } from "./bind";
 import { notify } from "./legacy";
-import { HEX, hexLabel, pageNodes, parseHex, patchNodes, setField, type Node } from "./model";
+import { HEX, hexLabel, pageNodes, parseHex, patchNodes, type Node } from "./model";
+import { setTokenColor } from "./vars";
+import { isParam } from "./shader-library";
+import { ShaderModeToggle, shaderModeApplies } from "./shader-mode";
 
 export type Stop = { position: number; color: string; token?: string };
 export type Paint = {
@@ -50,7 +41,14 @@ export type Paint = {
   imageHeight?: number;
 };
 type Tokens = Record<string, string>;
-type PaintNode = Node & { fills?: Paint[] };
+type PaintNode = Node & { fills?: Paint[]; backgroundFills?: Paint[] };
+/**
+ * Which stack a PaintStack edits: the layer's own `fills` (Background Fill, or Text Fill on text), or a text layer's
+ * `backgroundFills` (Wonder A10: Background Fill behind the glyphs). The background stack never collapses into
+ * `color`/`token`, and an empty one is removed from the node.
+ */
+export type PaintTarget = "fills" | "backgroundFills";
+const PaintTargetContext = createContext<PaintTarget>("fills");
 
 const TYPES: { value: Paint["type"]; label: string }[] = [
   { value: "solid", label: "Solid" },
@@ -75,7 +73,11 @@ type Css = {
 const css = () => (window as unknown as { BetterNodeStyle: Css }).BetterNodeStyle;
 
 /** The paints a layer shows, top first. Older layers have one solid paint from `color`/`token`. */
-export function paintsOf(node: Node): Paint[] {
+export function paintsOf(node: Node, target: PaintTarget = "fills"): Paint[] {
+  if (target === "backgroundFills") {
+    const background = (node as PaintNode).backgroundFills;
+    return Array.isArray(background) ? structuredClone(background) : [];
+  }
   const fills = (node as PaintNode).fills;
   if (Array.isArray(fills)) return structuredClone(fills);
   if (!HEX.test(node.color)) return [];
@@ -85,8 +87,16 @@ const resolved = (c: { color?: string; token?: string }, tokens: Tokens) =>
   (c.token && tokens[c.token]) || c.color || "#000000";
 
 /** Node patch for a stack: one plain visible solid paint collapses back into `color`/`token`. */
-function stackPatch(node: Node, paints: Paint[], tokens: Tokens): Record<string, unknown> {
+function stackPatch(
+  node: Node,
+  paints: Paint[],
+  tokens: Tokens,
+  target: PaintTarget = "fills",
+): Record<string, unknown> {
+  if (target === "backgroundFills") return { backgroundFills: paints.length ? paints : undefined };
   const [only] = paints;
+  // Removing the last paint leaves no fill at all: no stale `color` for readers that ignore `fills`.
+  if (!paints.length) return { fills: undefined, color: "transparent", token: "" };
   if (
     paints.length === 1 &&
     only.type === "solid" &&
@@ -109,13 +119,24 @@ function stackPatch(node: Node, paints: Paint[], tokens: Tokens): Record<string,
 export function editPaints(
   selection: string[],
   edit: (paints: Paint[], node: Node) => Paint[] | null,
+  target: PaintTarget = "fills",
+  /** Further fields for every edited layer (same undo step), e.g. leaving Shader mode. */
+  extra?: Record<string, unknown>,
 ) {
   const tokens = window.design.getDocument().tokens ?? {};
   patchNodes(selection, (node) => {
     if (node.type === "shader") return {};
-    const next = edit(paintsOf(node), node);
-    return next ? stackPatch(node, next, tokens) : {};
+    // Only text layers carry a Background Fill stack behind the glyphs.
+    if (target === "backgroundFills" && node.type !== "text") return {};
+    const next = edit(paintsOf(node, target), node);
+    return next ? { ...stackPatch(node, next, tokens, target), ...extra } : {};
   });
+}
+/** `editPaints` bound to the stack this component renders (the module-level name stays the call shape). */
+function usePaintEditor() {
+  const target = useContext(PaintTargetContext);
+  return (selection: string[], edit: (paints: Paint[], node: Node) => Paint[] | null) =>
+    editPaints(selection, edit, target);
 }
 const at = (i: number, fn: (p: Paint) => Paint | null) => (paints: Paint[]) =>
   paints[i] ? (paints.map((p, j) => (j === i ? fn(p) : p)).filter(Boolean) as Paint[]) : null;
@@ -221,117 +242,94 @@ function paintPreview(p: Paint, tokens: Tokens) {
     : (layer?.image ?? "transparent");
 }
 
-/* ---------- Header tools: Apply variable + Add paint ---------- */
+/* ---------- Header tools: Shader mode + Add paint ---------- */
+/** Wonder A1: the first paint is white; every further paint is black at 20 %. */
+const defaultPaint = (paints: Paint[]): Paint =>
+  paints.length ? { type: "solid", color: "#00000033" } : { type: "solid", color: "#ffffff" };
+
+/**
+ * Header of a Fill section (Wonder A1): the wavy-square Shader mode toggle (H6), then `+`, 8 px apart. Binding a
+ * colour variable happens in the picker's Variables tab and detaching in the row itself.
+ */
 export function FillTools({
-  doc,
   node,
   selection,
+  target = "fills",
 }: {
   doc: DesignDocument;
   node: Node;
   selection: string[];
+  target?: PaintTarget;
 }) {
-  const tokens = Object.entries(doc.tokens ?? {});
-  const paints = paintsOf(node);
-  const solidIndex = paints.findIndex((p) => p.type === "solid");
-  const bound = (node as PaintNode).fills ? paints.some(paintBound) : !!node.token;
-  const boundName = (node as PaintNode).fills ? paints[solidIndex]?.token : node.token;
-  const apply = (name: string) => {
-    if (!(node as PaintNode).fills) return void setField(selection, node, "token", name);
-    editPaints(selection, (ps) => {
-      const i = ps.findIndex((p) => p.type === "solid");
-      const color = doc.tokens[name];
-      return i < 0
-        ? [{ type: "solid", color, token: name }, ...ps]
-        : at(i, (p) => ({ ...p, color, token: name }))(ps);
-    });
-  };
-  const detach = () => {
-    const colors = window.design.getDocument().tokens ?? {};
-    patchNodes(selection, (n) =>
-      (n as PaintNode).fills
-        ? stackPatch(
-            n,
-            paintsOf(n).map((p) => detachPaint(p, colors)),
-            colors,
-          )
-        : { color: colors[n.token] ?? n.color, token: "" },
-    );
-  };
+  const background = target === "backgroundFills";
+  // Shader layers keep one colour (it drives the shader) and have no header tools.
+  if (node.type === "shader") return null;
+  const shader = shaderModeApplies(node, target) && !!node.shaderFill;
   return (
-    <div className="flex items-center gap-1">
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger asChild>
-          <IconButton icon={ShaderIcon} label="Apply variable" active={bound} />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="left" align="start" sideOffset={12} className="w-48">
-          <div className="flex h-7 items-center gap-2 px-2 text-xs text-foreground-3">
-            <Diamond className="size-3.5" aria-hidden />
-            Apply variable
-          </div>
-          <DropdownMenuSeparator />
-          {tokens.map(([name, color]) => (
-            <DropdownMenuItem key={name} onSelect={() => apply(name)}>
-              <Swatch color={color} className="size-3.5" />
-              <span className="flex-1 truncate">{name}</span>
-              {boundName === name ? <Check className="size-3.5" aria-hidden /> : null}
-            </DropdownMenuItem>
-          ))}
-          {!tokens.length ? (
-            <DropdownMenuItem disabled>No colour variables yet</DropdownMenuItem>
-          ) : null}
-          {bound ? (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={detach}>Detach variable</DropdownMenuItem>
-            </>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {node.type !== "shader" ? (
-        <IconButton
-          icon={Plus}
-          label="Add paint"
-          onClick={() =>
-            editPaints(selection, (ps, n) => [
-              { type: "solid", color: n.type === "text" ? "#25252e" : "#d9d9d9" },
-              ...ps,
-            ])
-          }
-        />
-      ) : null}
+    <div className="flex items-center gap-2" data-paint-target={target}>
+      <ShaderModeToggle node={node} selection={selection} target={target} />
+      {/* Wonder keeps `+` in Shader mode (H6-open-confirmed); adding a paint goes back to the paint rows. */}
+      <IconButton
+        icon={Plus}
+        label={background ? "Add background paint" : "Add paint"}
+        onClick={() =>
+          editPaints(
+            selection,
+            (ps) => [defaultPaint(ps), ...ps],
+            target,
+            shader ? { shaderFill: undefined } : undefined,
+          )
+        }
+      />
     </div>
   );
 }
+
+/** Whether the stack renders any row (an empty Fill section is its header only). */
+export const hasPaintRows = (node: Node, target: PaintTarget = "fills") =>
+  (target === "fills" && node.type === "shader") ||
+  (shaderModeApplies(node, target) && !!node.shaderFill) ||
+  paintsOf(node, target).length > 0;
 
 /* ---------- Stack ---------- */
 export function PaintStack({
   doc,
   node,
   selection,
+  target = "fills",
 }: {
   doc: DesignDocument;
   node: Node;
   selection: string[];
+  target?: PaintTarget;
 }) {
-  const paints = paintsOf(node);
+  const paints = paintsOf(node, target);
   // Shader layers keep one colour (it drives the shader); the stack applies to boxes and text.
-  if (node.type === "shader")
+  if (node.type === "shader" && target === "fills")
     return (
       <SolidRow doc={doc} node={node} selection={selection} paints={paints} index={0} legacy />
     );
-  if (!paints.length)
-    return <p className="text-2xs text-subtle-foreground">No paints. Add one with +.</p>;
+  // Shader mode (H6): a parametric preset's colours replace the paint rows (ShaderFill); classic presets are
+  // tinted by the fill colour, so its rows stay. The stored paints are kept either way.
+  if (shaderModeApplies(node, target) && node.shaderFill && isParam(node.shaderPreset)) return null;
+  // Wonder A1: no placeholder text; the section collapses to its header.
+  if (!paints.length) return null;
   return (
-    <div className="flex flex-col gap-1" data-paint-stack={paints.length}>
-      {paints.map((p, i) =>
-        p.type === "solid" ? (
-          <SolidRow key={i} doc={doc} node={node} selection={selection} paints={paints} index={i} />
-        ) : (
-          <PaintRow key={i} doc={doc} node={node} selection={selection} paints={paints} index={i} />
-        ),
-      )}
-    </div>
+    <PaintTargetContext.Provider value={target}>
+      <div
+        className="flex flex-col gap-2.25"
+        data-paint-stack={paints.length}
+        data-paint-target={target}
+      >
+        {paints.map((p, i) =>
+          p.type === "solid" ? (
+            <SolidRow key={i} doc={doc} node={node} selection={selection} paints={paints} index={i} />
+          ) : (
+            <PaintRow key={i} doc={doc} node={node} selection={selection} paints={paints} index={i} />
+          ),
+        )}
+      </div>
+    </PaintTargetContext.Provider>
   );
 }
 
@@ -344,13 +342,14 @@ type RowProps = {
   legacy?: boolean;
 };
 
-/** Visibility, reorder and remove buttons shared by every row. */
+/** Visibility and remove buttons shared by every row (eye centre x 224, `−` x 256). */
 function RowTools({ selection, paints, index }: Omit<RowProps, "doc" | "node">) {
+  const editPaints = usePaintEditor();
   const p = paints[index];
   return (
     <>
       <IconButton
-        icon={p.hidden ? EyeOff : Eye}
+        icon={p.hidden ? ClosedEyeIcon : Eye}
         label={p.hidden ? "Show paint" : "Hide paint"}
         data-paint-visibility={index}
         onClick={() =>
@@ -361,7 +360,7 @@ function RowTools({ selection, paints, index }: Omit<RowProps, "doc" | "node">) 
         }
       />
       <IconButton
-        icon={Minus}
+        icon={RemoveIcon}
         label="Remove paint"
         data-paint-remove={index}
         onClick={() =>
@@ -375,44 +374,166 @@ function RowTools({ selection, paints, index }: Omit<RowProps, "doc" | "node">) 
   );
 }
 
-/** Move a paint up (towards the top) or down the stack. */
-const move = (index: number, by: number) => (paints: Paint[]) => {
-  const to = index + by;
-  if (to < 0 || to >= paints.length) return null;
+/** Move the paint at `from` to position `to` (top first). */
+const moveTo = (from: number, to: number) => (paints: Paint[]) => {
+  if (from === to || !paints[from] || to < 0 || to >= paints.length) return null;
   const next = [...paints];
-  [next[index], next[to]] = [next[to], next[index]];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
   return next;
 };
+/** Keyboard reorder in the paint editor's title row (the hover grip is pointer-only). */
 function MoveTools({ selection, paints, index }: Omit<RowProps, "doc" | "node">) {
+  const editPaints = usePaintEditor();
   if (paints.length < 2) return null;
   return (
-    <div className="flex items-center">
+    <>
       <IconButton
         icon={ArrowUp}
         label="Move paint up"
         disabled={index === 0}
-        onClick={() => editPaints(selection, move(index, -1))}
+        onClick={() => editPaints(selection, moveTo(index, index - 1))}
       />
       <IconButton
         icon={ArrowDown}
         label="Move paint down"
         disabled={index === paints.length - 1}
-        onClick={() => editPaints(selection, move(index, 1))}
+        onClick={() => editPaints(selection, moveTo(index, index + 1))}
       />
+    </>
+  );
+}
+
+/**
+ * Wonder A1-background-hover: a 6-dot grip in the left gutter (x 3–9) of the hovered row. Dragging it over the
+ * other rows of the stack reorders the paint, committed once on release.
+ */
+function DragGrip({ selection, paints, index }: Omit<RowProps, "doc" | "node">) {
+  const editPaints = usePaintEditor();
+  if (paints.length < 2) return null;
+  const start = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const grip = event.currentTarget;
+    const row = grip.closest<HTMLElement>("[data-paint]");
+    const stack = row?.parentElement;
+    if (!row || !stack) return;
+    const rows = [...stack.querySelectorAll<HTMLElement>(":scope > [data-paint]")];
+    grip.setPointerCapture(event.pointerId);
+    row.dataset.dragging = "";
+    let target = index;
+    const move = (e: PointerEvent) => {
+      const i = rows.findIndex((r) => e.clientY < r.getBoundingClientRect().bottom);
+      target = i < 0 ? rows.length - 1 : i;
+      rows.forEach((r, j) => {
+        if (j === target && j !== index) r.dataset.drop = "";
+        else delete r.dataset.drop;
+      });
+    };
+    const up = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+      grip.removeEventListener("pointercancel", up);
+      rows.forEach((r) => {
+        delete r.dataset.drop;
+        delete r.dataset.dragging;
+      });
+      if (target !== index) editPaints(selection, moveTo(index, target));
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+    grip.addEventListener("pointercancel", up);
+  };
+  return (
+    <span
+      aria-hidden
+      data-paint-grip={index}
+      title="Drag to reorder"
+      className="absolute -left-3 flex h-6 w-3 cursor-grab touch-none items-center justify-center text-muted-foreground opacity-0 group-hover/row:opacity-100 active:cursor-grabbing"
+      onPointerDown={start}
+    >
+      <GripVertical className="size-3" aria-hidden />
+    </span>
+  );
+}
+
+/** One paint row: grip gutter, the 192 px field (x 12–204), eye and `−` 8 px apart; the open row gets Wonder's band. */
+function Row({
+  index,
+  type,
+  open,
+  children,
+  tools,
+}: {
+  index: number;
+  type: Paint["type"];
+  open: boolean;
+  children: ReactNode;
+  tools: ReactNode;
+}) {
+  return (
+    <div
+      className="group/row relative isolate flex items-center gap-2 rounded-md data-dragging:opacity-50 data-drop:ring-1 data-drop:ring-ring"
+      data-paint={index}
+      data-paint-type={type}
+      data-open={open || undefined}
+    >
+      {/* Wonder: while its picker is open the whole 32 px band behind the row (x 0–280) is #2B2B2B, no ring. */}
+      {open ? <span aria-hidden className="absolute -inset-x-3 -inset-y-1 -z-10 bg-input" /> : null}
+      {children}
+      {tools}
     </div>
   );
 }
 
 const rowBox =
-  "flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field focus-within:ring-1 focus-within:ring-ring";
+  "group/paint flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field has-focus-visible:ring-1 has-focus-visible:ring-ring";
+// Wonder A1: the number ends 4 px before the "%" (x 181 / 185.5), the % ends at 194.
+const percentField = "h-5 w-12 shrink-0 gap-0.5 bg-transparent px-0 shadow-none focus-within:ring-0";
+
+/**
+ * The colour an unbound solid actually paints. Older documents (and agents) may carry a paint `opacity` on top of
+ * the colour alpha; the row shows and edits the product, and every edit folds it back into the colour.
+ */
+function solidColor(p: Paint, tokens: Tokens) {
+  const color = resolved(p, tokens);
+  const opacity = p.opacity ?? 100;
+  if (p.token || opacity === 100) return color;
+  return withAlpha(color, (alphaPercent(color) * opacity) / 100) ?? color;
+}
+
+/** Detach the colour variable of one paint on every selected layer, keeping the resolved colour. */
+function detachAt(selection: string[], index: number, target: PaintTarget = "fills") {
+  const colors = window.design.getDocument().tokens ?? {};
+  patchNodes(selection, (n) => {
+    if (target === "fills" && (!(n as PaintNode).fills || n.type === "shader"))
+      return n.token ? { color: colors[n.token] ?? n.color, token: "" } : {};
+    const paints = paintsOf(n, target);
+    if (!paints[index]) return {};
+    return stackPatch(
+      n,
+      paints.map((p, i) => (i === index ? detachPaint(p, colors) : p)),
+      colors,
+      target,
+    );
+  });
+}
+
+/** Wonder B3: a bound colour is edited in its variable (alpha included); the binding stays. */
+function editVariable(name: string, color: string) {
+  setTokenColor(name, color);
+}
 
 /** A solid paint: hex (or bound variable), opacity, picker with Custom/Variables. */
 function SolidRow({ doc, node, selection, paints, index, legacy }: RowProps) {
   const [open, setOpen] = useState(false);
+  const target = useContext(PaintTargetContext);
+  const editPaints = usePaintEditor();
+  const background = target === "backgroundFills";
   const p = paints[index] ?? { type: "solid", color: node.color, token: node.token };
   const tokens = doc.tokens ?? {};
-  const stacked = !!(node as PaintNode).fills;
-  const color = resolved(p, tokens);
+  const stacked = !!(node as PaintNode)[target];
+  const color = solidColor(p, tokens);
   const first = index === 0;
   const selected = pageNodes(doc).filter((n) => selection.includes(n.id));
   const setPaint = (fn: (q: Paint) => Paint) =>
@@ -422,100 +543,141 @@ function SolidRow({ doc, node, selection, paints, index, legacy }: RowProps) {
           return { color: next.color, token: next.token ?? "" };
         })
       : editPaints(selection, at(index, fn));
-  const commit = (next: string) => setPaint((q) => ({ ...q, color: next, token: undefined }));
+  // An unbound edit writes the colour (alpha included) and drops any separate paint opacity.
+  const commitFree = (next: string) =>
+    setPaint((q) => {
+      const rest = { ...q };
+      delete rest.token;
+      delete rest.opacity;
+      return { ...rest, color: next };
+    });
+  const commit = (next: string) => (p.token ? editVariable(p.token, next) : commitFree(next));
   const bind = (name: string) =>
     setPaint((q) => ({ ...q, color: tokens[name] ?? q.color, token: name }));
-  // Opacity of an unbound solid is its colour alpha (as before); a bound colour keeps the variable and uses
-  // the paint opacity instead.
-  const opacity = p.token ? (p.opacity ?? 100) : alphaPercent(color);
+  const opacity = alphaPercent(color);
+  // The background stack gets its own names so both stacks of a text layer stay addressable.
+  const label = background
+    ? first
+      ? "Background fill"
+      : `Background paint ${index + 1}`
+    : first
+      ? "Fill"
+      : `Paint ${index + 1}`;
   return (
-    <div className="flex items-center gap-1" data-paint={index} data-paint-type="solid">
+    <Row
+      index={index}
+      type="solid"
+      open={open}
+      tools={legacy ? null : <RowTools selection={selection} paints={paints} index={index} />}
+    >
+      {legacy ? null : <DragGrip selection={selection} paints={paints} index={index} />}
       <ColorPopover
         open={open}
         onOpenChange={setOpen}
         value={color}
         onPreview={
-          stacked || paints.length > 1 ? undefined : (next) => previewSolid(selected, next)
+          p.token || stacked || paints.length > 1
+            ? undefined
+            : (next) => previewSolid(selected, next)
         }
         onCommit={commit}
         tokens={tokens}
         token={p.token}
         onToken={bind}
-        header={
+        onDetach={p.token ? () => detachAt(selection, index, target) : undefined}
+        typeSwitch={
           legacy ? undefined : (
-            <PaintHeader
-              doc={doc}
-              node={node}
-              selection={selection}
-              paints={paints}
-              index={index}
-            />
+            <PaintTypeSwitch doc={doc} node={node} selection={selection} paints={paints} index={index} />
           )
+        }
+        headTools={
+          legacy ? undefined : <MoveTools selection={selection} paints={paints} index={index} />
         }
       >
         <div data-color-anchor className={rowBox}>
           <button
             type="button"
-            name={first ? "color" : undefined}
-            aria-label={first ? "Fill colour" : `Paint ${index + 1} colour`}
+            name={first && !background ? "color" : undefined}
+            aria-label={`${label} colour`}
             aria-expanded={open}
             title="Pick colour"
             className="flex size-4.5 shrink-0 items-center justify-center rounded-sm focus-visible:ring-1 focus-visible:ring-ring"
             onClick={() => setOpen(!open)}
           >
-            <Swatch color={color} className="size-4.5 rounded-sm" />
+            <Swatch color={color} />
           </button>
           {p.token ? (
-            <span
-              className="min-w-0 flex-1 truncate pl-1 text-foreground"
-              title={`Variable: ${p.token}`}
-            >
-              {p.token}
-            </span>
+            <>
+              <button
+                type="button"
+                data-paint-token={p.token}
+                aria-label={`${label} variable ${p.token}`}
+                title={
+                  tokens[p.token]
+                    ? `${p.token} = ${tokens[p.token]}`
+                    : `${p.token} (missing variable)`
+                }
+                className="-ml-px flex h-5 min-w-0 flex-1 items-center rounded-sm text-left focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => setOpen(!open)}
+              >
+                <VariableChip name={p.token} missing={!tokens[p.token]} />
+              </button>
+              {/* Wonder A1/B3: the unlink shows inside the field on interaction only. */}
+              <button
+                type="button"
+                aria-label="Detach variable"
+                title="Detach variable"
+                data-paint-unlink={index}
+                className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 group-hover/row:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => detachAt(selection, index, target)}
+              >
+                <Unlink className="size-3.5" aria-hidden />
+              </button>
+            </>
           ) : (
             <Field
-              label={first ? "Fill hex colour" : `Paint ${index + 1} hex colour`}
+              label={`${label} hex colour`}
               value={hexLabel(p.color ?? "")}
               placeholder={HEX.test(p.color ?? "") ? "" : p.color}
-              className="h-5 flex-1 bg-transparent px-1 shadow-none focus-within:ring-0"
+              className="-ml-px h-5 flex-1 bg-transparent px-0 shadow-none focus-within:ring-0"
               inputClassName="uppercase"
               onCommit={(value) => {
                 const hex =
-                  parseHex(value, p.color) ??
-                  (parseColor(value) ? toHex(parseColor(value)!) : null);
+                  parseHex(value, color) ?? (parseColor(value) ? toHex(parseColor(value)!) : null);
                 if (!hex) return "Use a hex colour such as A58BDD";
-                commit(hex);
+                commitFree(hex);
               }}
             />
           )}
-          <Field
-            label={first ? "Fill opacity" : `Paint ${index + 1} opacity`}
-            numeric
-            disabled={legacy && !!p.token}
-            value={String(opacity)}
-            className="h-5 w-12 shrink-0 bg-transparent px-0 shadow-none focus-within:ring-0"
-            inputClassName="text-right"
-            suffix="%"
-            onCommit={(value) => {
-              const n = Number(value);
-              if (!Number.isFinite(n)) return "Enter a percentage";
-              const pct = Math.max(0, Math.min(100, n));
-              if (p.token)
-                return void setPaint((q) => ({ ...q, opacity: pct === 100 ? undefined : pct }));
-              const next = withAlpha(p.color ?? color, pct);
-              if (!next) return "Enter a percentage";
-              commit(next);
-            }}
-          />
+          {/* Wonder B3: no percentage for any bound colour; its translucency lives in the variable. */}
+          {p.token ? null : (
+            <Field
+              label={`${label} opacity`}
+              numeric
+              value={String(opacity)}
+              className={percentField}
+              inputClassName="text-right"
+              suffix="%"
+              onCommit={(value) => {
+                const n = Number(value);
+                if (!Number.isFinite(n)) return "Enter a percentage";
+                const next = withAlpha(color, Math.max(0, Math.min(100, n)));
+                if (!next) return "Enter a percentage";
+                commitFree(next);
+              }}
+            />
+          )}
         </div>
       </ColorPopover>
-      {legacy ? null : <RowTools selection={selection} paints={paints} index={index} />}
-    </div>
+    </Row>
   );
 }
 
-/** Gradient or image paint row: preview swatch + type label opening the paint editor, opacity, tools. */
+/** Gradient or image paint row: preview swatch + type label opening the paint editor (Wonder: no %), tools. */
 function PaintRow({ doc, node, selection, paints, index }: RowProps) {
+  const editPaints = usePaintEditor();
+  const background = useContext(PaintTargetContext) === "backgroundFills";
+  const prefix = background ? "Background " : "";
   const [open, setOpen] = useState(false);
   const p = paints[index];
   const tokens = doc.tokens ?? {};
@@ -524,38 +686,53 @@ function PaintRow({ doc, node, selection, paints, index }: RowProps) {
       ? `Image · ${FITS.find((f) => f.value === (p.fit ?? "fill"))?.label}`
       : typeLabel(p);
   return (
-    <div className="flex items-center gap-1" data-paint={index} data-paint-type={p.type}>
+    <Row
+      index={index}
+      type={p.type}
+      open={open}
+      tools={<RowTools selection={selection} paints={paints} index={index} />}
+    >
+      <DragGrip selection={selection} paints={paints} index={index} />
       <Popover open={open} onOpenChange={setOpen} modal={false}>
         <PopoverAnchor asChild>
           <div data-color-anchor className={rowBox}>
             <button
               type="button"
-              name={index === 0 ? "color" : undefined}
-              aria-label={`Edit ${typeLabel(p).toLowerCase()} paint`}
+              name={index === 0 && !background ? "color" : undefined}
+              aria-label={`Edit ${prefix.toLowerCase()}${typeLabel(p).toLowerCase()} paint`}
               aria-expanded={open}
               className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left focus-visible:ring-1 focus-visible:ring-ring"
               onClick={() => setOpen(!open)}
             >
-              <Swatch color={paintPreview(p, tokens)} className="size-4.5 rounded-sm" />
+              <Swatch color={paintPreview(p, tokens)} />
               <span className="min-w-0 flex-1 truncate text-foreground">{label}</span>
             </button>
-            <Field
-              label={index === 0 ? "Fill opacity" : `Paint ${index + 1} opacity`}
-              numeric
-              value={String(p.opacity ?? 100)}
-              className="h-5 w-12 shrink-0 bg-transparent px-0 shadow-none focus-within:ring-0"
-              inputClassName="text-right"
-              suffix="%"
-              onCommit={(value) => {
-                const n = Number(value);
-                if (!Number.isFinite(n)) return "Enter a percentage";
-                const pct = Math.max(0, Math.min(100, n));
-                editPaints(
-                  selection,
-                  at(index, (q) => ({ ...q, opacity: pct === 100 ? undefined : pct })),
-                );
-              }}
-            />
+            {/* Wonder drops the % on gradient rows (opacity is per stop); an image paint keeps its own opacity. */}
+            {p.type === "image" ? (
+              <Field
+                label={
+                  background
+                    ? `Background ${index === 0 ? "fill" : `paint ${index + 1}`} opacity`
+                    : index === 0
+                      ? "Fill opacity"
+                      : `Paint ${index + 1} opacity`
+                }
+                numeric
+                value={String(p.opacity ?? 100)}
+                className={percentField}
+                inputClassName="text-right"
+                suffix="%"
+                onCommit={(value) => {
+                  const n = Number(value);
+                  if (!Number.isFinite(n)) return "Enter a percentage";
+                  const pct = Math.max(0, Math.min(100, n));
+                  editPaints(
+                    selection,
+                    at(index, (q) => ({ ...q, opacity: pct === 100 ? undefined : pct })),
+                  );
+                }}
+              />
+            ) : null}
           </div>
         </PopoverAnchor>
         <PopoverContent
@@ -592,39 +769,62 @@ function PaintRow({ doc, node, selection, paints, index }: RowProps) {
           )}
         </PopoverContent>
       </Popover>
-      <RowTools selection={selection} paints={paints} index={index} />
-    </div>
+    </Row>
   );
 }
 
-/** Paint type switch and reorder buttons at the top of every paint editor. */
-function PaintHeader({ doc, selection, paints, index }: RowProps) {
+const KINDS: { value: "solid" | "gradient" | "image"; label: string; icon: IconType }[] = [
+  { value: "solid", label: "Solid", icon: Square },
+  { value: "gradient", label: "Gradient", icon: GradientPaintIcon },
+  { value: "image", label: "Image", icon: ImageIcon },
+];
+const GRADIENTS = TYPES.filter((t) => isGradient({ type: t.value }));
+
+/**
+ * Wonder's paint type switch: three icons (solid, gradient, image) on the left of the picker's Custom / Variables row.
+ * Linear / Radial / Conic is a select inside the gradient editor (`#paint-type`).
+ */
+function PaintTypeSwitch({ doc, selection, paints, index }: RowProps) {
+  const editPaints = usePaintEditor();
   const p = paints[index];
   const tokens = doc.tokens ?? {};
+  const kind = p.type === "solid" || p.type === "image" ? p.type : "gradient";
+  const choose = (value: (typeof KINDS)[number]["value"]) => {
+    if (value === kind) return;
+    if (value === "image" && !p.src)
+      return pickImage((image) =>
+        editPaints(
+          selection,
+          at(index, (q) => ({ ...convert(q, "image", tokens), ...image })),
+        ),
+      );
+    const type = value === "gradient" ? "linear" : value;
+    editPaints(
+      selection,
+      at(index, (q) => convert(q, type, tokens)),
+    );
+  };
   return (
-    <div className="flex items-center gap-1">
-      <NativeSelect
-        id="paint-type"
-        label="Paint type"
-        value={p.type}
-        className="flex-1"
-        options={TYPES}
-        onChange={(value) => {
-          const type = value as Paint["type"];
-          if (type === "image" && !p.src)
-            return pickImage((image) =>
-              editPaints(
-                selection,
-                at(index, (q) => ({ ...convert(q, "image", tokens), ...image })),
-              ),
-            );
-          editPaints(
-            selection,
-            at(index, (q) => convert(q, type, tokens)),
-          );
-        }}
-      />
-      <MoveTools selection={selection} paints={paints} index={index} />
+    <div
+      role="radiogroup"
+      aria-label="Paint type"
+      data-paint-kind={kind}
+      className="flex h-6 shrink-0 rounded-md bg-muted"
+    >
+      {KINDS.map(({ value, label, icon: Icon }) => (
+        <button
+          key={value}
+          type="button"
+          role="radio"
+          aria-checked={kind === value}
+          aria-label={label}
+          title={label}
+          className="flex w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring aria-checked:bg-accent aria-checked:text-foreground"
+          onClick={() => choose(value)}
+        >
+          <Icon className="size-4" aria-hidden />
+        </button>
+      ))}
     </div>
   );
 }
@@ -683,6 +883,7 @@ function GradientEditor({
   index,
   onClose,
 }: RowProps & { onClose: () => void }) {
+  const editPaints = usePaintEditor();
   const p = paints[index];
   const tokens = doc.tokens ?? {};
   const stops = p.stops ?? [];
@@ -734,31 +935,29 @@ function GradientEditor({
   };
   const header = (
     <div className="flex flex-col gap-2">
-      <PaintHeader doc={doc} node={node} selection={selection} paints={paints} index={index} />
-      <div className="relative h-3 px-1.5">
-        <div ref={bar} aria-hidden className="h-3 rounded-sm ring-1 ring-card" />
-        <div className="absolute inset-x-1.5 top-0 h-3">
-          {shown.map((s, i) => (
-            <StopMarker
-              key={i}
-              stop={s}
-              index={i}
-              active={i === current}
-              color={resolved(s, tokens)}
-              onSelect={() => setSelected(i)}
-              onDrag={startDrag(i)}
-            />
-          ))}
-        </div>
-      </div>
+      <PaintTypeSwitch doc={doc} node={node} selection={selection} paints={paints} index={index} />
+      {/* Wonder A1-background-gradient: "Linear ▾" with rotate and flip on one row, then the stop bar. */}
       <div className="flex items-center gap-1">
+        <NativeSelect
+          id="paint-type"
+          label="Gradient type"
+          value={p.type}
+          className="min-w-0 flex-1"
+          options={GRADIENTS}
+          onChange={(value) =>
+            editPaints(
+              selection,
+              at(index, (q) => convert(q, value as Paint["type"], tokens)),
+            )
+          }
+        />
         {p.type !== "radial" ? (
           <Field
             label="Gradient angle"
             numeric
             value={String(p.angle ?? (p.type === "linear" ? 180 : 0))}
             suffix="°"
-            className="w-20"
+            className="w-16"
             onCommit={(value) => {
               const n = Number(value);
               if (!Number.isFinite(n)) return "Enter degrees";
@@ -769,7 +968,6 @@ function GradientEditor({
             }}
           />
         ) : null}
-        <span className="flex-1" />
         {p.type !== "radial" ? (
           <IconButton
             icon={RotateCw}
@@ -792,7 +990,22 @@ function GradientEditor({
             setStops((s) => s.map((x) => ({ ...x, position: round(100 - x.position) })))
           }
         />
-        <IconButton icon={Plus} label="Add stop" disabled={stops.length >= 16} onClick={addStop} />
+      </div>
+      <div className="relative h-3 px-1.5">
+        <div ref={bar} aria-hidden className="h-3 rounded-sm ring-1 ring-card" />
+        <div className="absolute inset-x-1.5 top-0 h-3">
+          {shown.map((s, i) => (
+            <StopMarker
+              key={i}
+              stop={s}
+              index={i}
+              active={i === current}
+              color={resolved(s, tokens)}
+              onSelect={() => setSelected(i)}
+              onDrag={startDrag(i)}
+            />
+          ))}
+        </div>
       </div>
       <div className="flex flex-col gap-1" role="list" aria-label="Gradient stops">
         {stops.map((s, i) => (
@@ -831,7 +1044,7 @@ function GradientEditor({
               />
             ) : null}
             <IconButton
-              icon={Minus}
+              icon={RemoveIcon}
               label={`Remove stop ${i + 1}`}
               disabled={stops.length <= 2}
               onClick={() => {
@@ -842,16 +1055,35 @@ function GradientEditor({
           </div>
         ))}
       </div>
+      <button
+        type="button"
+        disabled={stops.length >= 16}
+        className="flex h-6 items-center gap-2 self-start rounded-md px-1 text-xs text-foreground-3 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40"
+        onClick={addStop}
+      >
+        <Plus className="size-4" aria-hidden />
+        Add stop
+      </button>
     </div>
   );
   if (!stop) return null;
   return (
     <ColorPicker
       key={current}
-      title={`${typeLabel(p)} gradient`}
+      title="Gradient"
       header={header}
+      headTools={<MoveTools selection={selection} paints={paints} index={index} />}
       value={resolved(stop, tokens)}
-      onCommit={(color) => setStop(current, (s) => ({ position: s.position, color }))}
+      onCommit={(color) =>
+        stop.token
+          ? editVariable(stop.token, color)
+          : setStop(current, (s) => ({ position: s.position, color }))
+      }
+      onDetach={
+        stop.token
+          ? () => setStop(current, (s) => ({ position: s.position, color: resolved(s, tokens) }))
+          : undefined
+      }
       tokens={tokens}
       token={stop.token}
       onToken={(name) =>
@@ -871,15 +1103,17 @@ function ImageEditor({
   index,
   onClose,
 }: RowProps & { onClose: () => void }) {
+  const editPaints = usePaintEditor();
   const p = paints[index];
   const preview = useRefStyle<HTMLDivElement>({ background: paintPreview(p, doc.tokens ?? {}) });
   return (
     <div className="flex flex-col gap-2">
-      <div className="-mt-1 flex h-7 items-center justify-between">
-        <strong className="text-xs font-normal text-foreground">Image</strong>
+      <div className="-mt-1 flex h-7 items-center gap-1">
+        <strong className="min-w-0 flex-1 text-xs font-normal text-foreground">Image</strong>
+        <MoveTools selection={selection} paints={paints} index={index} />
         <IconButton icon={X} label="Close paint editor" onClick={onClose} />
       </div>
-      <PaintHeader doc={doc} node={node} selection={selection} paints={paints} index={index} />
+      <PaintTypeSwitch doc={doc} node={node} selection={selection} paints={paints} index={index} />
       <div ref={preview} aria-hidden className="h-32 rounded-md ring-1 ring-card" />
       <div className="grid grid-cols-2 gap-2">
         <NativeSelect

@@ -3,6 +3,7 @@
 // user gesture) and the built-in list as a browser fallback. Web font previews are loaded on demand through
 // `desktop.fontFaces` (embedded @font-face CSS) into one <style> element.
 import { FONTS } from "./model";
+import { platform } from "@/lib/platform";
 
 export type FontEntry = {
   family: string;
@@ -11,13 +12,7 @@ export type FontEntry = {
   weights: number[];
   styles?: string[];
 };
-type DesktopFonts = {
-  fontCatalog?: () => Promise<{ fonts: FontEntry[]; source: string }>;
-  fontFaces?: (
-    families: { family: string; weights: number[]; styles: string[] }[],
-  ) => Promise<{ css: string }>;
-};
-const desktop = () => (window as unknown as { desktop?: DesktopFonts }).desktop;
+const desktop = () => platform.desktop;
 
 export const ALL_WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900];
 const FALLBACK: FontEntry[] = FONTS.map((family) => ({
@@ -91,6 +86,22 @@ export function loadLocalFonts(): Promise<FontEntry[]> {
       return [];
     });
   return local;
+}
+
+/**
+ * A family Verynize cannot offer (Wonder PM3 / PM4: "system-ui (unsupported)"): it is not in the font list (bundled,
+ * system, Google and installed fonts). Unknown until the list has loaded. `generic: false` also counts CSS generic
+ * keywords (system-ui, sans-serif…) as unsupported: on a live page they name whatever the browser picks, not a font
+ * a design can carry.
+ */
+export function isUnsupportedFont(
+  family: string | undefined,
+  fonts: FontEntry[],
+  { generic = true }: { generic?: boolean } = {},
+): boolean {
+  const key = (family ?? "").trim().toLowerCase();
+  if (!key || !fonts.length) return false;
+  return !fonts.some((f) => f.family.toLowerCase() === key && (generic || f.kind !== "generic"));
 }
 
 /** Weights available for a family (all weights when unknown). */

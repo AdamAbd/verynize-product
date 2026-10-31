@@ -422,6 +422,16 @@ test("code export: Tailwind component without editor bookkeeping, CSS classes fr
   );
   assert.doesNotMatch(jsx, /data-node-id|data-component-x/);
   assert.match(jsx, /data-fills=/);
+  assert.doesNotMatch(jsx, /Made with Verynize|box-sizing/, "the plain export has no clipboard header");
+  // The clipboard form (Copy as code / Copy prompt, Wonder P1-copy-code.txt): header comment, then the reset.
+  const snippet = tailwindCode(d, "p", ["label"], "Label", {
+    snippet: { links: ["verynize://node/doc/p/abc"], date: "Oct 31, 2026" },
+  });
+  assert.match(
+    snippet,
+    /^\/\*\*\n \* Made with Verynize\n \* verynize:\/\/node\/doc\/p\/abc\n \* Oct 31, 2026\n \*\/\n/,
+  );
+  assert.match(snippet, /<>\n {6}<style>\{"\* \{ box-sizing: border-box; \}"\}<\/style>\n/);
   const html = exportHTML(validateDocument(d), "p");
   const out = cssCode(html, d.tokens);
   assert.match(out, /<style>\n:root \{\n  --brand: #172033;\n  --glow: #456099;\n\}\n/);
@@ -434,4 +444,64 @@ test("code export: Tailwind component without editor bookkeeping, CSS classes fr
   assert.match(out, /<div[^>]* class="hero-card">/);
   assert.doesNotMatch(out, /data-id="card"[^>]*style=/);
   assert.throws(() => tailwindCode(d, "p", ["missing"]), /Select at least one layer/);
+});
+
+test("text Background Fill: validated on text only, drawn under the glyphs, bound, and kept by the codec", () => {
+  const label = {
+    id: "label",
+    name: "Label",
+    type: "text",
+    x: 0,
+    y: 0,
+    w: 80,
+    h: 20,
+    color: "#ffffff",
+    text: "Hi",
+    backgroundFills: [{ type: "solid", color: "#ff0000", token: "brand" }],
+  };
+  const d = validateDocument(doc([label]));
+  assert.equal(paintError({ type: "frame", backgroundFills: [] }) !== "", true, "frames use fills");
+  assert.throws(
+    () => validateDocument(doc([{ ...label, backgroundFills: [{ type: "solid" }] }])),
+    /Solid paint/,
+  );
+  // A solid Text Fill keeps `color`; the background paints the box.
+  const plain = css(d.pages[0].nodes[0], { tokens: d.tokens });
+  assert.equal(plain.color, "#ffffff");
+  assert.equal(plain["background-image"], "linear-gradient(#172033, #172033)");
+  assert.equal(plain["background-clip"], "border-box");
+  // A gradient Text Fill stays clipped to the glyphs, above the box-clipped background.
+  const both = css(
+    {
+      ...label,
+      backgroundFills: [{ type: "solid", color: "#00ff00" }],
+      fills: [
+        {
+          type: "linear",
+          angle: 90,
+          stops: [
+            { position: 0, color: "#ff0000" },
+            { position: 100, color: "#0000ff" },
+          ],
+        },
+      ],
+    },
+    { tokens: {} },
+  );
+  assert.equal(both.color, "transparent");
+  assert.equal(both["background-clip"], "text, border-box");
+  assert.match(both["background-image"], /^linear-gradient\(90deg[^)]*\)[^,]*, linear-gradient\(#00ff00/);
+  // Colour variables are followed (rename, unbind) like any other paint.
+  renameTokenRefs(d, "brand", "ink");
+  assert.equal(d.pages[0].nodes[0].backgroundFills[0].token, "ink");
+  d.tokens.ink = d.tokens.brand;
+  unbindToken(d, "ink");
+  assert.deepEqual(d.pages[0].nodes[0].backgroundFills[0], { type: "solid", color: "#172033" });
+  // JSX round trip.
+  ensureShortIds(d);
+  const page = d.pages[0];
+  const code = elementCode(d, page, page.nodes[0]);
+  assert.match(code, /data-background-fills="\[/);
+  const built = buildNodes(parseJsx(code).elements, { document: d, page }).nodes[0];
+  assert.deepEqual(built.backgroundFills, [{ type: "solid", color: "#172033" }]);
 });

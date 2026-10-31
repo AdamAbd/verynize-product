@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { workspace, type ChatState } from "./store";
+import { platform } from "@/lib/platform";
 
 type Agent = "claude" | "codex";
 type Autonomy = {
@@ -21,18 +22,7 @@ type Autonomy = {
   planFirst: boolean;
 };
 type Profile = { id: string; agent: Agent; name: string; system: boolean };
-type Desktop = {
-  agentAutonomy?: {
-    get(o: { chatId: string }): Promise<Autonomy>;
-    set(o: { chatId: string; settings: Autonomy }): Promise<Autonomy>;
-  };
-  agentProfiles?: {
-    list(): Promise<{ profiles: Profile[]; defaults: Record<Agent, string> }>;
-    chat(o: { chatId: string }): Promise<Partial<Record<Agent, string>>>;
-    setChat(o: { chatId: string; agent: Agent; id: string | null }): Promise<unknown>;
-  };
-};
-const desktop = () => (window as unknown as { desktop?: Desktop }).desktop;
+const desktop = () => platform.desktop;
 const errorText = (error: unknown) =>
   (error instanceof Error ? error.message : String(error)).replace(
     /^Error invoking remote method '[^']+': (Error: )?/,

@@ -1,6 +1,9 @@
-import { StrictMode, type ReactNode } from "react";
+import { StrictMode, useEffect, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { markIslandCommitted, registerIsland } from "@/lib/bridge";
+import { queryClient } from "@/lib/query/client";
 import "@/styles/globals.css";
 
 // The shell is a fixed one-viewport layout; undo any document scroll caused by focus or scrollIntoView
@@ -14,28 +17,50 @@ function guardDocumentScroll() {
   });
 }
 
+/** Reports the island's first commit to the UI-ready signal (bridge.ts). Renders nothing. */
+function Committed({ name }: { name: string }) {
+  useEffect(() => markIslandCommitted(name), [name]);
+  return null;
+}
+
 /**
  * Mount an island once the legacy scripts have run.
  * `target` is the element the island renders into (created if it is a string id that does not exist yet).
+ * Every island shares one QueryClient (`@/lib/query/client`).
+ * The island holds back `html[data-ui-ready]` / `bd:ui-ready` until its first render has committed.
  */
-export function mountIsland(name: string, target: HTMLElement | (() => HTMLElement), node: () => ReactNode) {
+export function mountIsland(
+  name: string,
+  target: HTMLElement | (() => HTMLElement),
+  node: () => ReactNode,
+) {
   guardDocumentScroll();
+  registerIsland(name);
   const start = () => {
     const container = typeof target === "function" ? target() : target;
     container.setAttribute("data-bd", "");
     container.dataset.island = name;
     createRoot(container).render(
       <StrictMode>
-        <TooltipProvider delayDuration={400}>{node()}</TooltipProvider>
+        {/* One QueryClient for every island root: server state is shared across islands. */}
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider delayDuration={400}>{node()}</TooltipProvider>
+        </QueryClientProvider>
+        <Committed name={name} />
       </StrictMode>,
     );
   };
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", start, { once: true });
   else start();
 }
 
 /** Create (or reuse) a container element with an id, appended to `parent` (default: body). */
-export function ensureContainer(id: string, parent: Element = document.body, tag = "div"): HTMLElement {
+export function ensureContainer(
+  id: string,
+  parent: Element = document.body,
+  tag = "div",
+): HTMLElement {
   let el = document.getElementById(id);
   if (!el) {
     el = document.createElement(tag);

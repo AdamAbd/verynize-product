@@ -13,21 +13,15 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
-import { ChevronRight, Eye, EyeOff, ListChevronsDownUp, Lock, LockOpen, Pencil, Search, Type } from "lucide-react";
+import { ChevronRight, Eye, EyeOff, ListChevronsDownUp, Lock, Search, Type } from "lucide-react";
 import { design, useSelection } from "@/lib/bridge";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { LayerRowMenu, RowMenuRoot, RowMenuTrigger } from "../context-menu/RowMenus";
 import { cn } from "@/lib/utils";
-import { IconButton, InlineRename, SectionHeader } from "./parts";
+import { Hint, IconButton, InlineRename, SectionHeader } from "./parts";
 import { LayerTypeIcon } from "./icons";
 import { useTakeOver } from "./legacy";
 import { contract } from "./contract";
-import { useTreeNodes, type TreeNode } from "./hooks";
+import { applyLayerPreview, useLayerPreview, useTreeNodes, type TreeNode } from "./hooks";
 import { dragJustEnded, useLayerDrag, type Drop } from "./layer-drag";
 
 type Row = { node: TreeNode; depth: number; hasChildren: boolean; expanded: boolean };
@@ -133,8 +127,8 @@ const LayerRow = memo(function LayerRow({
   };
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
+    <RowMenuRoot>
+      <RowMenuTrigger asChild>
         <div
           role="treeitem"
           aria-level={depth + 1}
@@ -154,6 +148,10 @@ const LayerRow = memo(function LayerRow({
             if (!dragJustEnded()) select(node.id, e);
           }}
           onDoubleClick={() => onRename(node.id)}
+          onContextMenu={() => {
+            // Wonder CM7: the row menu acts on this layer; a multi-selection that contains it is kept.
+            if (!selected) design().setSelection([node.id]);
+          }}
           onKeyDown={onKeyDown}
         >
           <button
@@ -199,69 +197,58 @@ const LayerRow = memo(function LayerRow({
           </div>
           {!renaming && (
             <div className="ml-1 flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                aria-label={`Rename ${node.name}`}
-                title="Rename"
-                className={action}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRename(node.id);
-                }}
-                onDoubleClick={(e) => e.stopPropagation()}
-              >
-                <Type className="size-4" />
-              </button>
-              <button
-                type="button"
-                data-toggle="locked"
-                aria-pressed={Boolean(node.locked)}
-                aria-label={`${node.locked ? "Unlock" : "Lock"} ${node.name}`}
-                title={node.locked ? "Unlock" : "Lock"}
-                className={cn(contract(node.locked && "on"), action, node.locked && "flex text-foreground")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleFlag(node, "locked");
-                }}
-                onDoubleClick={(e) => e.stopPropagation()}
-              >
-                <Lock className="size-4" />
-              </button>
-              <button
-                type="button"
-                data-toggle="hidden"
-                aria-pressed={Boolean(node.hidden)}
-                aria-label={`${node.hidden ? "Show" : "Hide"} ${node.name}`}
-                title={node.hidden ? "Show" : "Hide"}
-                className={cn(contract(node.hidden && "on"), action, node.hidden && "flex text-foreground")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleFlag(node, "hidden");
-                }}
-                onDoubleClick={(e) => e.stopPropagation()}
-              >
-                {node.hidden ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </button>
+              <Hint label="Rename layer">
+                <button
+                  type="button"
+                  aria-label={`Rename ${node.name}`}
+                  className={action}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRename(node.id);
+                  }}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                >
+                  <Type className="size-4" />
+                </button>
+              </Hint>
+              <Hint label={node.locked ? "Unlock layer" : "Lock layer"}>
+                <button
+                  type="button"
+                  data-toggle="locked"
+                  aria-pressed={Boolean(node.locked)}
+                  aria-label={`${node.locked ? "Unlock" : "Lock"} ${node.name}`}
+                  className={cn(contract(node.locked && "on"), action, node.locked && "flex text-foreground")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFlag(node, "locked");
+                  }}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                >
+                  <Lock className="size-4" />
+                </button>
+              </Hint>
+              <Hint label={node.hidden ? "Show layer" : "Hide layer"}>
+                <button
+                  type="button"
+                  data-toggle="hidden"
+                  aria-pressed={Boolean(node.hidden)}
+                  aria-label={`${node.hidden ? "Show" : "Hide"} ${node.name}`}
+                  className={cn(contract(node.hidden && "on"), action, node.hidden && "flex text-foreground")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFlag(node, "hidden");
+                  }}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                >
+                  {node.hidden ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </Hint>
             </div>
           )}
         </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-44">
-        <ContextMenuItem onSelect={() => onRename(node.id)}>
-          <Pencil />
-          Rename
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => toggleFlag(node, "locked")}>
-          {node.locked ? <LockOpen /> : <Lock />}
-          {node.locked ? "Unlock" : "Lock"}
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => toggleFlag(node, "hidden")}>
-          {node.hidden ? <Eye /> : <EyeOff />}
-          {node.hidden ? "Show" : "Hide"}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+      </RowMenuTrigger>
+      <LayerRowMenu />
+    </RowMenuRoot>
   );
 });
 
@@ -301,7 +288,10 @@ export function LayersSection({ open, onToggle }: { open: boolean; onToggle: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionKey]);
 
-  const rows = useMemo(() => buildRows(nodes, expanded, query), [nodes, expanded, query]);
+  // A canvas drag that will re-parent on release shows its layers at the new place while the pointer is held.
+  const preview = useLayerPreview();
+  const shown = useMemo(() => applyLayerPreview(nodes, preview), [nodes, preview]);
+  const rows = useMemo(() => buildRows(shown, expanded, query), [shown, expanded, query]);
   const selected = useMemo(() => new Set(selection), [selection]);
 
   const toggleExpand = useMemo(

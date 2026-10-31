@@ -10,6 +10,7 @@ const path = require("node:path");
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), "inspector-binding-"));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({
     env,
     args: [".", `--user-data-dir=${profile}`],
@@ -106,11 +107,12 @@ const path = require("node:path");
     });
 
     const colorsBefore = await Promise.all(["card", "other", "fallback"].map(styles));
+    // Wonder A1/B3: the unlink sits inside the bound fill row (shown on hover) and detaches every selected layer.
+    await page.locator("#fill-section [data-paint='0']").hover();
     await page
       .locator("#fill-section")
-      .getByRole("button", { name: "Apply variable", exact: true })
+      .getByRole("button", { name: "Detach variable", exact: true })
       .click();
-    await page.getByRole("menuitem", { name: "Detach variable", exact: true }).click();
     for (const [i, id] of ["card", "other", "fallback"].entries()) {
       assert.equal((await node(id)).token, "");
       assert.equal(
@@ -141,9 +143,17 @@ const path = require("node:path");
 
     await page.evaluate(() => window.design.setSelection(["card"]));
     // Direct scalar edits must have the same visible effect as binding a variable.
+    // Per-side borders are four side entries (Wonder A2): "All" in a side selector collapses them to one
+    // uniform border (one undo step), whose width field then sets every side.
+    await page.locator('[name="strokeSide-0"]').selectOption("all");
+    assert.equal((await node("card")).strokeWidths, undefined, "All collapses the side entries");
+    assert.equal((await styles("card")).border, "1px");
+    await page.evaluate(() => window.design.runCommand("edit.undo"));
+    assert.deepEqual((await node("card")).strokeWidths, [1, 2, 3, 4], "one undo restores the sides");
+    await page.locator('[name="strokeSide-0"]').selectOption("all");
     for (const [field, value, override, initial, cssKey] of [
       ["radius", "18", "cornerRadii", [4, 8, 12, 16], "radius"],
-      ["strokeWidth", "6", "strokeWidths", [1, 2, 3, 4], "border"],
+      ["strokeWidth", "6", "strokeWidths", undefined, "border"],
     ]) {
       await page.locator(`[name="${field}"]`).fill(value);
       await page.locator(`[name="${field}"]`).press("Enter");
@@ -222,7 +232,7 @@ const path = require("node:path");
     await bind("strokeWidth");
     assert.equal((await node("card")).strokeWidths, undefined);
     assert.equal((await styles("card")).border, "24px");
-    await page.getByRole("button", { name: "Independent border widths", exact: true }).click();
+    await page.getByRole("button", { name: "Independent border sides", exact: true }).click();
     assert.equal((await node("card")).bindings?.strokeWidth, undefined);
     assert.equal(
       (await node("card")).bindings.radius,
@@ -238,6 +248,7 @@ const path = require("node:path");
     await proof("02-individual-border-widths.png");
     await page.evaluate(() => window.design.runCommand("edit.undo"));
     assert.deepEqual((await node("card")).strokeWidths, [2, 4, 6, 24]);
+    await page.locator('[name="strokeSide-0"]').selectOption("all");
     await page.locator('[name="strokeWidth"]').fill("3");
     await page.locator('[name="strokeWidth"]').press("Enter");
     assert.equal((await node("card")).strokeWidths, undefined);

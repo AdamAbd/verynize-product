@@ -7,6 +7,7 @@ import { parseClasses as mapClasses, cssVarForToken, GENERIC_FAMILIES } from './
 import { paletteName, fontSizeName, fontSizeLineHeight, radiusName, shadowName, weightName, trackingName, leadingName, containerName } from './tailwind-engine.mjs';
 import { cssColorToHex } from './codec-css.mjs';
 import { effectsOf } from './node-style.mjs';
+import { parseCalc, BLOCK_ALIGN, trackWeight } from './node-style.mjs';
 import { paintAttrs } from './paints.mjs';
 import { shaderJsxAttrs } from './shaders.mjs';
 import { baselineTextStyle, TEXT_DEFAULTS } from './codec-text.mjs';
@@ -86,12 +87,16 @@ export function defaultSizing(node, parent) {
   if (parent.layout === 'flex' && parent.direction !== 'column') return { w: canHug ? 'hug' : 'fixed', h };
   // Inline-level tags (span, a, button…) shrink to fit in block flow, like inline-block.
   if ((parent.layout === 'block' || parent.layout === 'inline') && canHug && INLINE_TAGS.has(node.htmlTag) && node.layout !== 'block') return { w: 'hug', h };
+  // Block alignment (justify-items start/center/end): auto-width children shrink to fit, like justify-self in block flow.
+  if (parent.layout === 'block' && BLOCK_ALIGN[parent.justifyItems]) return { w: canHug ? 'hug' : 'fixed', h };
   if (parent.layout === 'flex') {
     const align = node.alignSelf && node.alignSelf !== 'auto' ? node.alignSelf : parent.alignItems || 'stretch';
     return { w: align === 'stretch' ? 'fill' : canHug ? 'hug' : 'fixed', h };
   }
   return { w: 'fill', h }; // block, inline and grid cells stretch horizontally
 }
+/** Calculate sizing -> `w-[calc(100%_-_24px)]` (an invalid expression falls back to the measured px). */
+const calcClass = (prefix, expr, px) => { const c = parseCalc(expr); return c ? `${prefix}-[calc(${c.text.replace(/ /g, '_')})]` : `${prefix}-[${round(px)}px]`; };
 const INLINE_TAGS = new Set(['span', 'a', 'button', 'label', 'small', 'strong', 'em', 'code', 'b', 'i']);
 export const isFlexRow = parent => !!parent && parent.layout === 'flex' && parent.direction !== 'column';
 
@@ -99,6 +104,11 @@ export const isFlexRow = parent => !!parent && parent.layout === 'flex' && paren
 // Node -> Tailwind classes
 
 /** Spacing value -> Tailwind suffix ("4", "0.5", "px", "[13px]"). */
+/** grid-cols-N / grid-rows-N, or an arbitrary list of Fill tracks when the fr weights differ. */
+const gridTrackClass = (axis, count, sizes) => {
+  const weights = Array.from({ length: count }, (_, i) => trackWeight(sizes, i));
+  return weights.every(w => w === 1) ? `grid-${axis}-${count}` : `grid-${axis}-[${weights.map(w => `minmax(0,${w}fr)`).join('_')}]`;
+};
 const space = px => { const v = Math.abs(Number(px)); if (v === 1) return 'px'; if (Number.isInteger(v) && v % 2 === 0) return String(v / 4); return `[${round(v)}px]`; };
 const signed = (prefix, px) => (Number(px) < 0 ? `-${prefix}-${space(px)}` : `${prefix}-${space(px)}`);
 const FRACTIONS = { 50: '1/2', 33.333: '1/3', 66.667: '2/3', 25: '1/4', 75: '3/4', 20: '1/5', 40: '2/5', 60: '3/5', 80: '4/5', 16.667: '1/6', 83.333: '5/6', 100: 'full' };
@@ -160,11 +170,13 @@ function textClasses(style, baseline, tokens, own = new Set()) {
   // Keys the text declares itself (styleOwn) are written even when they equal the inherited value.
   if (own.size) { baseline = { ...baseline }; for (const key of own) if (key !== 'textWrap' || style.textWrap) baseline[key] = key === 'color' ? undefined : NaN; if (own.has('color')) baseline.token = undefined; }
   if (style.color !== undefined && (style.color !== baseline.color || (style.token || '') !== (baseline.token || ''))) c.push(colorClass('text', style.color, style.token, tokens));
+  // lineHeight 'auto' (inspector "Auto") is CSS `normal`: leading-[normal].
+  const autoLeading = style.lineHeight === 'auto';
   let leadingSet = baseline.lineHeight;
   if (style.fontSize !== undefined && !close(style.fontSize, baseline.fontSize, 0.01)) {
     // A size declared without its own leading must not bring Tailwind's implied leading (text-2xl sets both).
     const { cls, leading } = sizeClass(style.fontSize, style.lineHeight !== undefined && !(own.has('fontSize') && !own.has('lineHeight')));
-    if (leading !== undefined && style.lineHeight !== undefined && !close(style.lineHeight, leading, 0.003)) {
+    if (!autoLeading && leading !== undefined && style.lineHeight !== undefined && !close(style.lineHeight, leading, 0.003)) {
       // Tailwind's size/leading shorthand: text-sm/6, text-5xl/tight.
       const named = leadingName(style.lineHeight), px = style.lineHeight * style.fontSize;
       if (named) { c.push(`${cls}/${named}`); leadingSet = style.lineHeight; }
@@ -172,7 +184,8 @@ function textClasses(style, baseline, tokens, own = new Set()) {
       else { c.push(cls); leadingSet = leading; }
     } else { c.push(cls); if (leading !== undefined) leadingSet = leading; }
   }
-  if (style.lineHeight !== undefined && !close(style.lineHeight, leadingSet, 0.003)) c.push(leadingClass(style.lineHeight, style.fontSize ?? baseline.fontSize));
+  if (autoLeading) { if (leadingSet !== 'auto') c.push('leading-[normal]'); }
+  else if (style.lineHeight !== undefined && !close(style.lineHeight, leadingSet, 0.003)) c.push(leadingClass(style.lineHeight, style.fontSize ?? baseline.fontSize));
   if (style.fontWeight !== undefined && String(style.fontWeight) !== String(baseline.fontWeight)) { const name = weightName(String(style.fontWeight)); c.push(name ? `font-${name}` : `font-[${style.fontWeight}]`); }
   if (style.fontFamily !== undefined && style.fontFamily !== baseline.fontFamily) c.push(familyClass(style.fontFamily));
   if (style.letterSpacing !== undefined && !close(style.letterSpacing, baseline.letterSpacing, 0.02)) c.push(trackingClass(style.letterSpacing, style.fontSize ?? baseline.fontSize));
@@ -194,6 +207,7 @@ function declaredTextClasses(style, tokens) {
   // Leading suffix: combined with a named size as text-sm/6 or text-5xl/tight when possible.
   const suffix = (value, separate) => { if (implied !== undefined && sizeAt >= 0) c[sizeAt] += `/${value}`; else c.push(separate); };
   if (style.lineHeightPx !== undefined) { const px = style.lineHeightPx; if (implied === undefined || !close(implied * style.fontSize, px, 0.05)) { if (Number.isInteger(px) && px % 2 === 0) suffix(px / 4, `leading-${px / 4}`); else c.push(`leading-[${round(px)}px]`); } }
+  else if (style.lineHeight === 'auto') c.push('leading-[normal]');
   else if (style.lineHeight !== undefined && (implied === undefined || !close(implied, style.lineHeight, 0.003))) { const named = leadingName(style.lineHeight); if (named) suffix(named, `leading-${named}`); else c.push(`leading-[${Math.round(style.lineHeight * 1000) / 1000}]`); }
   if (style.fontWeight !== undefined) { const name = weightName(String(style.fontWeight)); c.push(name ? `font-${name}` : `font-[${style.fontWeight}]`); }
   if (style.fontFamily !== undefined) c.push(familyClass(style.fontFamily));
@@ -229,13 +243,15 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
   if (node.type === 'frame') {
     const layout = node.layout || 'free';
     if (layout === 'flex') { c.push('flex'); if (node.direction === 'column') c.push(node.reverse ? 'flex-col-reverse' : 'flex-col'); else if (node.reverse) c.push('flex-row-reverse'); if (node.flexWrap) c.push('flex-wrap'); }
-    else if (layout === 'grid') { c.push('grid', `grid-cols-${Math.max(1, Math.floor(node.columns) || 2)}`); if (Number(node.rows) >= 1) c.push(`grid-rows-${Math.floor(node.rows)}`); }
+    else if (layout === 'grid') { c.push('grid', gridTrackClass('cols', Math.max(1, Math.floor(node.columns) || 2), node.columnSizes)); if (Number(node.rows) >= 1) c.push(gridTrackClass('rows', Math.floor(node.rows), node.rowSizes)); }
     else if (layout === 'inline') c.push('inline-flow');
     else if (layout === 'free') c.push('layout-free');
     if (layout !== 'free') {
       const gx = Number(node.gapX ?? node.gap) || 0, gy = Number(node.gapY ?? node.gap) || 0;
       if (layout === 'flex' || layout === 'grid') { if (gx === gy) { if (gx) c.push(`gap-${space(gx)}`); } else { if (gx) c.push(`gap-x-${space(gx)}`); if (gy) c.push(`gap-y-${space(gy)}`); } }
       else if (Number(node.gapY)) c.push(`space-y-${space(Number(node.gapY))}`);
+      // Block alignment: justify-items on a block frame (children narrower than it sit left / centre / right).
+      if (layout === 'block' && BLOCK_ALIGN[node.justifyItems]) c.push(`justify-items-${BLOCK_ALIGN[node.justifyItems]}`);
       if (layout === 'flex' || layout === 'grid') {
         const items = { 'flex-start': 'start', 'flex-end': 'end', center: 'center', baseline: 'baseline' }[node.alignItems]; if (items) c.push(`items-${items}`);
         const justify = { 'flex-end': 'end', center: 'center', 'space-between': 'between', 'space-around': 'around', 'space-evenly': 'evenly' }[node.justifyContent]; if (justify) c.push(`justify-${justify}`);
@@ -251,16 +267,20 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
   const iconSquare = node.icon && wm === 'fixed' && hm === 'fixed' && node.wPct === undefined && node.hPct === undefined && close(node.w, node.h, 0.01);
   if (iconSquare) c.push(`size-${space(node.w)}`);
   else if (wm === 'fixed') c.push(node.wPct !== undefined ? `w-${pctSuffix(node.wPct)}` : `w-[${round(node.w)}px]`);
+  else if (wm === 'calc') c.push(calcClass('w', node.wCalc, node.w));
+  else if (wm === 'auto') c.push('w-auto');
   else if (wm === 'fill' && row) {
     c.push('flex-1');
   } else if (wm !== def.w) c.push(wm === 'fill' ? 'w-full' : 'w-fit');
   if (iconSquare) { /* size-* above */ } else if (hm === 'fixed') c.push(node.hPct !== undefined ? `h-${pctSuffix(node.hPct)}` : `h-[${round(node.h)}px]`);
+  else if (hm === 'calc') c.push(calcClass('h', node.hCalc, node.h));
+  else if (hm === 'auto') c.push('h-auto');
   else if (hm !== def.h) c.push(hm === 'fill' ? 'h-full' : 'h-fit');
   const flexOne = wm === 'fill' && row && (node.grow === undefined || node.grow === 1) && (node.shrink === undefined || node.shrink === 1) && (node.basis === undefined || node.basis === '0%');
   if (!isRoot && isFlexRow(parent) || parent?.layout === 'flex') {
     if (!flexOne) {
       if (node.grow !== undefined && node.grow !== (wm === 'fill' && row ? 1 : 0)) c.push(node.grow === 1 ? 'grow' : node.grow === 0 ? 'grow-0' : `grow-[${node.grow}]`);
-      const defShrink = wm === 'hug' ? 1 : 0;
+      const defShrink = wm === 'hug' || wm === 'auto' ? 1 : 0;
       if (node.shrink !== undefined && node.shrink !== defShrink) c.push(node.shrink === 0 ? 'shrink-0' : node.shrink === 1 ? 'shrink' : `shrink-[${node.shrink}]`);
       if (node.basis !== undefined && !(wm === 'fill' && row && node.basis === '0%')) c.push(`basis-${lengthSuffix(node.basis)}`);
     }
@@ -285,8 +305,13 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
     const baseline = { ...baselineTextStyle(node, ancestors) };
     const inherited = baselineTextStyle({ type: 'text' }, ancestors);
     for (const key of ['fontSize', 'fontWeight']) if (baseline[key] !== inherited[key]) baseline[key] = NaN;
-    c.push(...textClasses({ color: node.color ?? TEXT_DEFAULTS.color, token: node.token || '', fontSize: Number(node.fontSize ?? 16), lineHeight: Number(node.lineHeight ?? 1.15), fontWeight: String(node.fontWeight ?? '400'), fontFamily: node.fontFamily ?? 'system-ui', letterSpacing: Number(node.letterSpacing) || 0, textAlign: node.textAlign || 'left', textTransform: node.textTransform || '', textDecoration: node.textDecoration || '', fontStyle: node.fontStyle || '', textWrap: node.textWrap || '' }, baseline, tokens, new Set(Array.isArray(node.styleOwn) ? node.styleOwn : [])));
-    if (node.truncate) c.push('truncate'); else if (node.noWrap) c.push('whitespace-nowrap');
+    c.push(...textClasses({ color: node.color ?? TEXT_DEFAULTS.color, token: node.token || '', fontSize: Number(node.fontSize ?? 16), lineHeight: node.lineHeight === 'auto' ? 'auto' : Number(node.lineHeight ?? 1.15), fontWeight: String(node.fontWeight ?? '400'), fontFamily: node.fontFamily ?? 'system-ui', letterSpacing: Number(node.letterSpacing) || 0, textAlign: node.textAlign || 'left', textTransform: node.textTransform || '', textDecoration: node.textDecoration || '', fontStyle: node.fontStyle || '', textWrap: node.textWrap || '' }, baseline, tokens, new Set(Array.isArray(node.styleOwn) ? node.styleOwn : [])));
+    if (node.truncate) c.push('truncate'); else if (node.whiteSpace) c.push(`whitespace-${node.whiteSpace}`); else if (node.noWrap) c.push('whitespace-nowrap');
+    // Type settings (absent = canvas default: top, pre-wrap, wrap anywhere, no indent, inherited smoothing).
+    if (node.textAlignVertical === 'center') c.push('content-center'); else if (node.textAlignVertical === 'bottom') c.push('content-end');
+    if (node.wordBreak === 'normal') c.push('break-normal'); else if (node.wordBreak === 'break-all') c.push('break-all');
+    if (Number(node.textIndent)) c.push(signed('indent', node.textIndent));
+    if (node.fontSmoothing === 'antialiased') c.push('antialiased'); else if (node.fontSmoothing === 'subpixel-antialiased') c.push('subpixel-antialiased');
     if (Number(node.lineClamp) > 0) c.push(`line-clamp-${node.lineClamp}`);
   } else if (node.type !== 'image') {
     const color = node.color ?? '#d9d9d9';
@@ -306,8 +331,13 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
   if (node.opacity !== undefined && Number(node.opacity) !== 100) c.push(Number.isInteger(node.opacity) ? `opacity-${node.opacity}` : `opacity-[${round(node.opacity)}%]`);
   if (Number(node.rotation)) c.push(`rotate-[${round(node.rotation)}deg]`);
   if (node.flipX === true && node.flipY === true) c.push('-scale-100'); else if (node.flipX === true) c.push('-scale-x-100'); else if (node.flipY === true) c.push('-scale-y-100');
-  const widths = Array.isArray(node.strokeWidths) && node.strokeWidths.length === 4 ? node.strokeWidths.map(Number) : null;
-  if (widths && !widths.every(v => v === widths[0])) {
+  // A hidden border (inspector eye) draws nothing, so it writes no classes; data-vn keeps it (codec-residual.mjs).
+  const strokeShown = node.strokeHidden !== true;
+  // A side hidden with its own eye (strokeHiddenSides) draws nothing either; data-vn keeps its width.
+  const sideHidden = i => Array.isArray(node.strokeHiddenSides) && node.strokeHiddenSides[i] === true;
+  const widths = Array.isArray(node.strokeWidths) && node.strokeWidths.length === 4 ? node.strokeWidths.map((v, i) => (sideHidden(i) ? 0 : Number(v))) : null;
+  const sidesHidden = !!widths && [0, 1, 2, 3].some(sideHidden);
+  if (!strokeShown || (sidesHidden && widths.every(v => !v))) { /* no border classes */ } else if (widths && (sidesHidden || !widths.every(v => v === widths[0]))) {
     ['t', 'r', 'b', 'l'].forEach((side, i) => { if (widths[i]) c.push(widths[i] === 1 ? `border-${side}` : Number.isInteger(widths[i]) ? `border-${side}-${widths[i]}` : `border-${side}-[${round(widths[i])}px]`); });
     c.push(typedColorClass('border', node.strokeColor || '#000000', node.strokeToken, tokens));
   } else if (Number(node.strokeWidth) > 0) {
@@ -315,9 +345,9 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
     c.push(w === 1 ? 'border' : Number.isInteger(w) ? `border-${w}` : `border-[${round(w)}px]`, typedColorClass('border', node.strokeColor || '#000000', node.strokeToken, tokens));
   }
   // Per-side border colours (top, right, bottom, left), each optionally bound to a colour variable.
-  if (Array.isArray(node.strokeColors) && node.strokeColors.length === 4 && (widths ? widths.some(Boolean) : Number(node.strokeWidth) > 0))
+  if (strokeShown && Array.isArray(node.strokeColors) && node.strokeColors.length === 4 && (widths ? widths.some(Boolean) : Number(node.strokeWidth) > 0))
     ['t', 'r', 'b', 'l'].forEach((side, i) => c.push(typedColorClass(`border-${side}`, node.strokeColors[i]?.color || node.strokeColor || '#000000', node.strokeColors[i]?.token, tokens)));
-  if (node.strokeStyle && node.strokeStyle !== 'solid' && Number(node.strokeWidth) > 0) c.push(`border-${node.strokeStyle}`);
+  if (strokeShown && node.strokeStyle && node.strokeStyle !== 'solid' && (widths ? widths.some(Boolean) : Number(node.strokeWidth) > 0)) c.push(`border-${node.strokeStyle}`);
   if (Number(node.ringWidth) > 0) { const w = Number(node.ringWidth); c.push(Number.isInteger(w) ? (w === 1 ? 'ring-1' : `ring-${w}`) : `ring-[${round(w)}px]`, colorClass('ring', node.ringColor || '#000000', '', tokens)); if (node.ringInset) c.push('ring-inset'); }
   // Structured effects (web/node-style.js effectsOf): hidden entries are not written; colors are resolved.
   const fx = effectsOf(node, tokens);

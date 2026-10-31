@@ -1,12 +1,11 @@
 // Published running apps: a real project build (its own npm script) is collected, uploaded to
 // local workerd through the HTTP API and served with versioning, rollback and unpublish.
-import { Miniflare } from "miniflare";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { cloudOptions, signIn } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions, signIn } from "./cloud-harness.mjs";
 
 const require = createRequire(import.meta.url);
 const publisher = require("../desktop/app-publish.cjs");

@@ -2,6 +2,7 @@
 // (fake Codex app-server), the dialog shows colored unified diffs, discards a file after confirmation, commits,
 // publishes the branch to a local bare remote and opens a pull request through a stub `gh` on PATH (no network).
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -35,9 +36,11 @@ process.exit(2);
   await fs.chmod(path.join(bin, 'gh'), 0o755);
   const env = { ...process.env, ...identity, PATH: bin + path.delimiter + process.env.PATH, FAKE_CODEX_LOG: path.join(root, 'codex.log'), VERYNIZE_WORKSPACES_DIR: path.join(root, 'workspaces'), VERYNIZE_BRANCH_PREFIX: 'verynize' };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await app.evaluate(({ dialog }, dir) => (dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] })), project);
     await page.evaluate(() => window.agentWorkspace.openProject());

@@ -37,6 +37,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { AgentInfo, AuthKind, SettingsApi } from "./api";
 import { Card, IconTile, Row, Section, SettingsButton, TextField, Toggle } from "./controls";
+import { platform } from "@/lib/platform";
 
 /* ---------- desktop contract (desktop/agent-tools.cjs) ---------- */
 export type ProviderAccount = { email: string; organization: string; plan: string; method: string; default?: boolean };
@@ -59,7 +60,7 @@ export type McpServer = {
   removable?: boolean;
   source?: string;
 };
-type ServerList = { agent: string; installed: boolean; servers: McpServer[]; checked: boolean; error?: string };
+export type ServerList = { agent: string; installed: boolean; servers: McpServer[]; checked: boolean; error?: string };
 export type AccessSettings = {
   createFiles: boolean;
   shareMemory: boolean;
@@ -70,8 +71,8 @@ export type AccessSettings = {
   codexApps: boolean;
   codexComputerUse: boolean;
 };
-type AddServer = { agent: string; name: string; transport: "stdio" | "http"; command?: string; args?: string[]; url?: string };
-type AgentToolsIpc = {
+export type AddServer = { agent: string; name: string; transport: "stdio" | "http"; command?: string; args?: string[]; url?: string };
+export type AgentToolsIpc = {
   accounts(): Promise<Provider[]>;
   listServers(options: { agent: string; check?: boolean }): Promise<ServerList>;
   addServer(options: AddServer): Promise<unknown>;
@@ -80,12 +81,7 @@ type AgentToolsIpc = {
   getAccess(): Promise<AccessSettings>;
   setAccess(changes: Partial<AccessSettings>): Promise<{ settings: AccessSettings; stopped: number }>;
 };
-type DesktopApi = {
-  agentTools?: AgentToolsIpc;
-  openExternal?: (url: string) => Promise<unknown>;
-  onAuthEvent?: (callback: (event: { agent: string; type: string }) => void) => () => void;
-};
-const desktop = () => (window as unknown as { desktop?: DesktopApi }).desktop;
+const desktop = () => platform.desktop;
 const toolsIpc = () => desktop()?.agentTools ?? null;
 const message = (error: unknown) =>
   (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");

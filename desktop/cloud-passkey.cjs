@@ -1,6 +1,6 @@
 /**
  * Passkey window for cloud accounts (desktop main process).
- * The renderer runs from file://, which cannot be a WebAuthn relying party, so the ceremony runs
+ * The renderer runs from app://verynize, which is not the server's origin (WebAuthn relying party), so the ceremony runs
  * in a small window on the cloud server's own /passkey page. That window has no preload, an
  * in-memory session, sandboxing, and cannot navigate away from the server origin or open popups.
  *

@@ -18,6 +18,7 @@ measure with Python/PIL — divide pixel coordinates by 2). `design-qa.md` lists
 | chat | `chat.tsx` | `#agent-chat-dock` and the Code workspace center column (`#code-chat-host`): transcript, composer, model picker (30), access (31), attach menu (32), repository switcher (33), quick chats (34–35), running state (36–37, 51) | 29–37, 51, 80–83 |
 | settings | `settings.tsx` | `#settings-screen` (all pages) and the remaining dialogs: share/cloud (13), export flow (45–50 save/success), templates, saved views, generate illustration, Figma import, text prompt (`#text-prompt`), preview modal (`#modal`) | 13, 45–50, 61–79 |
 | code | `code.tsx` | `#code-workspace` (body class `code-mode`): repositories/chats sidebar, breadcrumb in the title bar slot `#bd-code-titlebar`, toolbar (Start preview, panel toggle), file tree + editor, terminal panel (`code/terminal-panel.tsx`, terminal workstream), hosting the chat island's `.project-agent` section in the center column | code mode, 80, 81, 33–35, extra/38 |
+| onboarding | `onboarding.tsx` | `#onboarding`: desktop first-run setup (not a tutorial): Verynize account (sign in / create / forgot password / skip), then "Bring your own agent" (Claude/Codex connection status and sign-in, Cursor coming soon). Shown once per profile (`localStorage` `verynize.onboarding`), reopened by `bd:open-onboarding`, skipped when `window.desktop.onboardingState()` reports `skip` (`VERYNIZE_SKIP_ONBOARDING=1`, set by every Electron test) | onboarding reference (agents step) |
 
 Shared files are owned by the integrator — **do not edit**: `web/src/lib/*`, `web/src/components/ui/*` (existing files),
 `web/src/styles/globals.css` (except your own `<area>-tokens` block at the bottom), `web/index.html`, `vite*.config.ts`,
@@ -41,6 +42,26 @@ Build a local component in your island folder (wrapping Radix primitives from `r
 
 The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; islands are the only shell UI.
 
+## Desktop vs web runtime (`web/src/lib/platform.ts`)
+
+One place answers "what can this runtime do": `web/platform.js`, a classic script that `web/index.html` loads before
+every other script, registers a frozen `window.verynizePlatform`; `platform.ts` types it and re-exports it.
+
+- `platform.kind` is `"desktop"` when the Electron preload exposed `window.desktop`, else `"web"`.
+- `platform.desktop` is the bridge typed as `DesktopApi` (`web/src/lib/desktop-api.ts`), or `null` on the web. Never
+  read `window.desktop` or cast `window` to reach it; import `platform` (or `can`) from `@/lib/platform`.
+- `can(capability)` / `platform.capabilities` (`projects`, `git`, `designFiles`, `agents`, `agentAccounts`, `terminal`,
+  `devServer`, `livePreview`, `rasterExport`, `codeExport`, `imageGeneration`, `figma`, `htmlImport`, `templatePacks`,
+  `webCapture`, `publishApps`, `passkeyWindow`, `localFonts`, `notifications`, `externalLinks`, `agentBridge`,
+  `onboarding`): true when every preload method the feature needs is present. Gate desktop-only UI on a capability,
+  then call `platform.desktop.x()`.
+- Legacy scripts use the same object: `window.verynizePlatform.can('figma')`; they may keep calling
+  `window.desktop.x()` behind that check.
+- New preload method: add it to `DesktopApi` and `DESKTOP_API_SHAPE` (tsc checks the two agree) — `tests/platform-contract.cjs`
+  fails until the typed contract matches `desktop/preload.cjs`. New capability: add it to `CAPABILITY_METHODS` in
+  `web/platform.js` and `CAPABILITIES` in `platform.ts` (the same test compares them).
+- `tests/web-platform.cjs` loads the app in plain Chromium (no preload) and checks the web behaviour.
+
 ## Cross-island contracts
 
 - **Layout state** lives in `body` classes: `left-collapsed`, `right-collapsed` (any island may toggle them; the chrome
@@ -50,18 +71,43 @@ The earlier vanilla parity layer (`wonder-parity.js|css`) has been removed; isla
   trigger button must have class `app-menu-trigger` (tests click `.app-menu-trigger:visible` then a command id such as
   `#rectangle`, `#undo`, `#save-project`, `#shell-settings`, `#rename-page`, `#import-tokens`, `#icon-kind`).
   Commands must stay reachable by those ids inside the opened menu.
-- **Code mode**: `body.code-mode` (toggle with `window.agentWorkspace.setCodeMode(on)`; `openProject()` enters it, `#project-toggle`
+- **Shell routes** (`web/src/lib/router/shell-router.ts`, docs/spikes/tanstack-router.md): the URL owns the top-level
+  view — `/` (`files-view`), `/editor`, `/code` (`code-mode`), `/settings/<section>` (`settings-open`). Never toggle
+  those three body classes yourself: navigate with `navigate()` or call the legacy request APIs
+  (`fileLibrary.showHome/showEditor`, `appSettings.open/close/select`, `agentWorkspace.setCodeMode`), which update the
+  URL and apply the view synchronously. The `apply*` functions on those objects are for the router only.
+- **Code mode**: `body.code-mode` (toggle with `window.agentWorkspace.setCodeMode(on)`, which navigates to `/code` or `/editor`; `openProject()` enters it, `#project-toggle`
   toggles it). Tests use `#code-add-repository` then `#project-open` / `#project-new` / `#project-clone`, `#code-new-chat`,
   `#code-new-quick-chat`, `[data-repository=<name>]`, `[data-chat-id=<id>]`, `#code-file-tree[data-root=<path>]
   [data-path=<file>]`, `#code-file-filter`, `#code-editor`, `#code-editor-save`, `#code-start-preview`, `#code-panel-toggle`,
   and `window.agentWorkspace.getState()` (`chatRoot`, `activeRoot`, `branch`). `#project-name` and `#project-status` stay
   as hidden text hooks. `window.codeWorkspace` exposes repository/chat actions to other islands.
+- **Cloud account and workspaces** (`web/src/lib/cloud-account.ts`): `window.cloudAccount` (from `web/cloud-panel.js`) is the one
+  email + password session. Islands use `useCloudAccount()`, `useOrganizations()` (one shared list; `await organizationsChanged()`
+  before switching to a workspace that was just created or joined), `useActiveOrganization()`, `authRequest()` (Better Auth under
+  `/api/auth`) and `openSignIn()`. Events: `cloud-account-changed`, `cloud-organization-changed`, `bd:open-onboarding`. Test ids:
+  `#workspace-profile`, `#workspace-create`, `#workspace-members`, `#workspace-sign-in`, `#members-page[data-organization]`,
+  `[data-org-member=<email>]`, `[data-org-member-role=<email>]`, `#members-invite*`, `#members-room-role`, `#members-leave`,
+  `[data-accept-invitation]`, `#onboarding[data-step]`, `#onboarding-*`, `[data-agent=<id>] [data-status]`. The legacy Share
+  dialog already uses `data-member` / `data-remove-member`, so organization rows must not.
+- **UI ready** (`web/src/lib/bridge.ts` + `mount.tsx`): `<html data-ui-ready="true">` is set and `bd:ui-ready` fires on
+  `window`, once per page load, when every island started with `mountIsland()` has committed its first render AND no
+  `takeOver()` id is still pending (until claimed, an id such as `#files-home` or `#add-page` resolves to the hidden
+  legacy element parked in `#bd-legacy-dock`). It means "the shell's taken-over controls are claimed", not "every lazy
+  panel exists": content an island renders on demand (menus, dialogs, settings pages, onboarding steps) is not covered.
+  An id that the island only renders on demand must be taken over with `takeOver(id, { deferred: true })` (e.g. home's
+  `#folder-breadcrumb`); never take over an id the island never renders — it would hold the signal back forever.
+  The signal has no timeout fallback: after 5 s without it, a `[bd] UI not ready` console warning names what is stuck,
+  and `window.__bdPendingTakeovers()` returns `{ islands, ids, deferred }` (uncommitted islands, blocking pending ids,
+  deferred pending ids). It also works for an island built alone (`node scripts/build-ui.cjs <area>`): then only that
+  island is counted. Electron tests call `waitForUiReady(page)` from `tests/helpers/ui-ready.cjs` after launch and after
+  every reload, before clicking shell controls (`tests/ui-ready.cjs` is the regression test).
 - **Zoom menu**: tests click `#zoom-menu-button` then `#zoom-in`, `#zoom-out`, `#zoom-fit`, `#zoom-reset`, `#snap`,
   `#saved-views-open` (chrome island). `#zoom-reset` text must keep the zoom percentage (tests parse it).
-- **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask]`, `[name=layout]`,
-  `[name=wMode]`, `[name=shaderPreset]`, `[name=shaderSpeed]`, `[name=shaderIntensity]`, `[name=animated]`,
+- **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask-0-css]`, `[name=layout]`,
+  `[name=wMode]`, `[name=shaderPreset]`, `[name=shaderSpeed]`, `[name=shaderIntensity]`, `[data-shader-mode]` (Fill header Shader mode toggle), `#shader-fill-preset`, `[name=animated]` (only while an older layer has one),
   `[name=color]`, `.insp-display [data-layout=flex]`, `#mask-section .insp-add`, `#shader-settings summary`,
-  `#choose-shader`, `#range-bold`, `#precision-right`, `#color-value`, `#color-dialog` … — grep `tests/` for the full list.
+  `#choose-shader`, `#type-settings-toggle` / `#type-settings`, `#precision-right`, `#color-value`, `#color-dialog` … — grep `tests/` for the full list.
   Field names must be unique in the document (Playwright strict mode), so the legacy `#inspector` form may not keep
   same-named inputs in the DOM at the same time.
 - **Plain CSS**: if you must restyle legacy DOM you cannot render yourself (e.g. the `main` grid, `#canvas-wrap`

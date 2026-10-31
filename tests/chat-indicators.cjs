@@ -2,6 +2,7 @@
 // Runs against tests/fixtures/fake-codex.cjs with a fixture HOME (never the real ~/.claude or ~/.codex); provider
 // account usage is stubbed in the main process, so nothing touches the network.
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -14,10 +15,11 @@ const path = require('node:path');
   await fs.chmod(path.join(bin, 'codex'), 0o755);
   await fs.writeFile(path.join(home, '.codex/config.toml'), '[mcp_servers.rea]\ncommand = "rea"\n');
   const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, HOME: home, VERYNIZE_AGENT_HOME: home, VERYNIZE_DISABLE_AGENT_USAGE: '1', FAKE_CODEX_LOG: path.join(root, 'codex.log') };
-  delete env.ELECTRON_RUN_AS_NODE; delete env.CODEX_HOME;
+  delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1'; delete env.CODEX_HOME;
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await page.evaluate(() => window.agentWorkspace.openChat());
     await page.evaluate(() => window.agentWorkspace.setDefaults({ agent: 'codex', access: 'edit' }));

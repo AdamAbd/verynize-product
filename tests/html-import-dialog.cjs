@@ -2,6 +2,7 @@
 // (resolved relative to the file by desktop/html-import.cjs -> integrations/codec-html.mjs), the
 // viewport selector (media queries), :root variables becoming colour/typed variables, and pasted HTML.
 const { _electron } = require("@playwright/test");
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -25,6 +26,7 @@ const path = require("node:path");
   );
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({
     timeout: 20000,
     env,
@@ -32,6 +34,7 @@ const path = require("node:path");
   });
   try {
     const page = await app.firstWindow({ timeout: 15000 });
+    await waitForUiReady(page);
     await page.waitForSelector("#canvas .layer");
     await app.evaluate(
       ({ dialog }, file) => {
