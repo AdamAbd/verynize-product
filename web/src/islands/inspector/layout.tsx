@@ -1,32 +1,34 @@
 // Layout section (design/wonder Layout panel): Display, size + min/max limits, then the controls of the chosen display
-// (Flex: direction, 3×3 alignment, distribution, reverse, wrap, gaps · Grid: tracks, gaps, cell alignment · Block:
-// vertical spacing), the layer's own placement inside its parent (Grid child spans, Margin) and Padding.
-import { useState, type ReactNode } from "react";
+// (Flex: direction, 3×3 alignment, distribution, baseline, reverse, wrap, gaps · Grid: tracks, gaps, cell alignment ·
+// Block: vertical spacing and alignment), the layer's own placement inside its parent (Grid child spans, Margin) and
+// Padding.
+import { useRef, useState, type ComponentProps, type ReactNode } from "react";
 import {
-  AlignHorizontalDistributeCenter,
-  AlignHorizontalSpaceAround,
-  AlignHorizontalSpaceBetween,
-  AlignVerticalDistributeCenter,
-  AlignVerticalSpaceAround,
-  AlignVerticalSpaceBetween,
-  ArrowLeftRight,
-  Columns2,
-  Columns3,
-  CornerDownLeft,
-  FoldHorizontal,
-  FoldVertical,
-  GitCommitHorizontal,
-  LayoutGrid,
-  Proportions,
-  Rows2,
-  Rows3,
-  SeparatorHorizontal,
-  SeparatorVertical,
-  Shapes,
-  Square,
+  AlignCenterVertical,
+  AlignEndVertical,
+  AlignStartVertical,
+  ArrowDownToLine,
+  ArrowRightLeft,
+  Check,
+  ChevronDown,
+  CirclePercent,
+  MoveHorizontal,
 } from "lucide-react";
-import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui";
 import {
+  AutoLayoutIcon,
+  BlockLayoutIcon,
+  ColumnsIcon,
+  DistributeAroundXIcon,
+  DistributeAroundYIcon,
+  DistributeBetweenXIcon,
+  DistributeBetweenYIcon,
+  DistributeEvenlyXIcon,
+  DistributeEvenlyYIcon,
+  FlexLayoutIcon,
+  FreeLayoutIcon,
+  GapXIcon,
+  GapYIcon,
+  GridLayoutIcon,
   MarginBottomIcon,
   MarginLeftIcon,
   MarginRightIcon,
@@ -41,8 +43,15 @@ import {
   PaddingTopIcon,
   PaddingXIcon,
   PaddingYIcon,
-  StackColumnIcon,
-  StackRowIcon,
+  RowsIcon,
+  SizeAutoIcon,
+  SizeCalcIcon,
+  SizeFixedIcon,
+  SizeHugIcon,
+  SizeMaxIcon,
+  SizeMinIcon,
+  SizeOptionsIcon,
+  WrapIcon,
 } from "@/components/icons";
 import type { DesignDocument } from "@/lib/bridge";
 import {
@@ -52,16 +61,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { BindableField } from "./bind";
+import { GridHeaderTools, GridPreview } from "./grid-settings";
+import { Tip } from "../chrome/tip";
 import {
   Affix,
   Caption,
   Field,
   IconAffix,
   IconButton,
-  NativeSelect,
   Section,
   Segmented,
   type IconType,
@@ -69,6 +78,7 @@ import {
 import { notify } from "./legacy";
 import {
   fmt,
+  pageNodes,
   parentOf,
   patchNodes,
   setField,
@@ -86,6 +96,7 @@ const num = (v: unknown, fallback = 0) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isFinite(n) ? n : fallback;
 };
+const r2 = (v: number) => Math.round(v * 100) / 100;
 const isFlow = (n: Node | undefined) => !!n && n.type === "frame" && n.layout !== "free";
 /** Patch that drops a variable binding, so typing a value detaches the property (as in model.setField). */
 function unbind(node: Node, ...keys: string[]): Patch {
@@ -104,12 +115,23 @@ function parseLength(raw: string, min = -Infinity): number | null {
   }
   return Math.max(min, Math.round(v * 100) / 100);
 }
+/** Calculate expressions are parsed by the shared node-style engine (web/node-style.js), like the canvas. */
+type CalcApi = { parseCalc: (expr: string) => { pct: number; px: number; text: string } | null };
+const calcApi = () => (window as unknown as { BetterNodeStyle: CalcApi }).BetterNodeStyle;
 
 /* ---------- Shared rows ---------- */
 /** Two field columns plus Wonder's 24px trailing tool column. */
-function Row({ children, tool }: { children: ReactNode; tool?: ReactNode }) {
+export function Row({
+  children,
+  tool,
+  className,
+}: {
+  children: ReactNode;
+  tool?: ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="flex items-start gap-2">
+    <div className={cn("flex items-start gap-2", className)}>
       <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">{children}</div>
       <div className="flex w-6 shrink-0 flex-col items-center gap-2">{tool}</div>
     </div>
@@ -153,26 +175,201 @@ function NumberField({
   );
 }
 
+/**
+ * The unit at the end of a field doubles as its menu trigger (Wonder B2 / C7): "px ▾", "Hug ▾", "Auto ▾". The
+ * chevron flips while the menu is open and the field shows its purple ring (focus-within on the shell).
+ */
+export function UnitTrigger({
+  label,
+  unit,
+  ...props
+}: { label: string; unit: string } & ComponentProps<"button">) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className="group/unit flex h-6 items-center gap-0.5 text-muted-foreground outline-none hover:text-foreground"
+      {...props}
+    >
+      {unit ? <span>{unit}</span> : null}
+      <ChevronDown aria-hidden className="size-3 shrink-0 group-aria-expanded/unit:rotate-180" />
+    </button>
+  );
+}
+
+/** A 24px menu row with a leading icon and Wonder's trailing ✓ on the current choice. */
+function MenuChoice({
+  icon: Icon,
+  label,
+  checked,
+  turn,
+  onSelect,
+  ...props
+}: {
+  icon?: IconType;
+  label: string;
+  checked?: boolean;
+  /** Turn a horizontal glyph a quarter for the H axis. */
+  turn?: boolean;
+  onSelect: () => void;
+} & Record<`data-${string}`, string>) {
+  return (
+    <DropdownMenuItem className="h-6" onSelect={onSelect} {...props}>
+      {Icon ? (
+        <span className={cn("flex size-3.5 items-center justify-center", turn && "rotate-90")}>
+          <Icon className="size-3.5" aria-hidden />
+        </span>
+      ) : null}
+      <span className="flex-1">{label}</span>
+      {checked ? <Check className="size-3.5 text-foreground" aria-hidden /> : null}
+    </DropdownMenuItem>
+  );
+}
+
+/** Groups after the size row (Flex, Grid, Grid child, Padding, Margin) sit 16px apart, as in Wonder 05/06. */
+const GROUP = "mt-2";
+
 /* ---------- Display + size ---------- */
-const DISPLAY = (direction: string) => [
-  { value: "free", label: "Free position", icon: Shapes },
-  {
-    value: "flex",
-    label: "Flexbox",
-    icon: direction === "column" ? StackColumnIcon : StackRowIcon,
-  },
-  { value: "block", label: "Block flow", icon: Square },
-  { value: "grid", label: "Grid", icon: LayoutGrid },
+const DISPLAY = [
+  { value: "free", label: "Free position", icon: FreeLayoutIcon },
+  { value: "flex", label: "Flexbox", icon: FlexLayoutIcon },
+  { value: "block", label: "Block flow", icon: BlockLayoutIcon },
+  { value: "grid", label: "Grid", icon: GridLayoutIcon },
 ];
-const UNIT_LABEL: Record<SizingMode, string> = { fixed: "px", hug: "Hug", fill: "Fill" };
+
+/** What the W/H menu offers: the stored modes plus Relative (a Fixed size kept as a % of the parent: wPct / hPct). */
+type SizeChoice = SizingMode | "relative";
+const SIZE: Record<SizeChoice, { label: string; unit: string; icon: IconType; turn?: boolean }> = {
+  fixed: { label: "Fixed", unit: "px", icon: SizeFixedIcon, turn: true },
+  relative: { label: "Relative", unit: "%", icon: CirclePercent },
+  hug: { label: "Hug", unit: "Hug", icon: SizeHugIcon, turn: true },
+  fill: { label: "Fill", unit: "Fill", icon: MoveHorizontal, turn: true },
+  auto: { label: "Auto", unit: "Auto", icon: SizeAutoIcon },
+  calc: { label: "Calculate", unit: "", icon: SizeCalcIcon },
+};
+const ORDER: SizeChoice[] = ["fixed", "relative", "hug", "fill", "auto", "calc"];
+const AXIS_KEYS = {
+  w: { mode: "wMode", pct: "wPct", calc: "wCalc", name: "width" },
+  h: { mode: "hMode", pct: "hPct", calc: "hCalc", name: "height" },
+} as const;
+
+function choiceOf(node: Node, axis: "w" | "h", parent: Node | undefined): SizeChoice {
+  const mode = sizingMode(node, axis, parent);
+  return mode === "fixed" && parent && node[AXIS_KEYS[axis].pct] !== undefined ? "relative" : mode;
+}
+
+/**
+ * Modes listed in the axis menu; unavailable ones are omitted, not disabled (Wonder B2): a top-level frame offers
+ * Fixed and Calculate, a top-level text adds Hug and Auto, a child adds Relative and (in a flow parent) Fill.
+ */
+function sizeChoices(node: Node, parent: Node | undefined, current: SizeChoice): SizeChoice[] {
+  const allowed: Record<SizeChoice, boolean> = {
+    fixed: true,
+    relative: !!parent,
+    hug: sizingAllowed(node, parent, "hug") && (node.type === "text" || !!parent),
+    fill: sizingAllowed(node, parent, "fill"),
+    auto: node.type === "text" || (node.type === "frame" && isFlow(parent)),
+    calc: true,
+  };
+  return ORDER.filter((c) => allowed[c] || c === current);
+}
+
+/** The parent's size a percentage resolves against: its content box for flow children, padding box otherwise. */
+function percentBase(node: Node, parent: Node, axis: "w" | "h"): number {
+  const el = document.querySelector<HTMLElement>(`#canvas [data-id="${CSS.escape(parent.id)}"]`);
+  if (!el) return num(parent[axis]);
+  const style = getComputedStyle(el);
+  const inner = axis === "w" ? el.clientWidth : el.clientHeight;
+  const sides =
+    axis === "w"
+      ? [style.paddingLeft, style.paddingRight]
+      : [style.paddingTop, style.paddingBottom];
+  const flow = isFlow(parent) && node.position !== "absolute";
+  return inner - (flow ? sides.reduce((sum, v) => sum + (parseFloat(v) || 0), 0) : 0);
+}
+
+/** The patch that switches one layer's axis to `choice`, keeping its current size where the mode stores one. */
+function sizePatch(doc: DesignDocument, n: Node, axis: "w" | "h", choice: SizeChoice): Patch {
+  const k = AXIS_KEYS[axis];
+  const size = num(n[axis], 1);
+  const base: Patch = { [k.pct]: undefined, [k.calc]: undefined };
+  if (choice === "fixed") return { ...base, [k.mode]: "fixed", [axis]: Math.max(1, r2(size)) };
+  if (choice === "relative") {
+    const parent = parentOf(doc, n);
+    const total = parent ? percentBase(n, parent, axis) : 0;
+    return { ...base, [k.mode]: "fixed", [k.pct]: total > 0 ? r2((size / total) * 100) : 100 };
+  }
+  if (choice === "calc") return { ...base, [k.mode]: "calc", [k.calc]: fmt(size) + "px" };
+  return { ...base, [k.mode]: choice };
+}
+
+/**
+ * Commit typed W/H text. A number keeps the mode's meaning (px, or % in Relative); "50%" switches to Relative; an
+ * expression ("100% - 24px") or any text in Calculate mode is a Calculate expression. Typing detaches a variable.
+ */
+function commitSize(
+  doc: DesignDocument,
+  selection: string[],
+  node: Node,
+  axis: "w" | "h",
+  choice: SizeChoice,
+  raw: string,
+) {
+  const k = AXIS_KEYS[axis];
+  const text = raw.trim();
+  const plain = /^-?\d*\.?\d+$/.test(text);
+  const percent = /^-?\d*\.?\d+\s*%$/.test(text);
+  if (plain && choice !== "relative" && choice !== "calc") {
+    setField(selection, node, axis, text);
+    return;
+  }
+  if ((plain && choice === "relative") || (percent && choice !== "calc")) {
+    if (!parentOf(doc, node)) return void notify("A percentage needs a parent layer.");
+    const v = parseFloat(text);
+    if (!(v > 0)) return void notify("Enter a percentage above 0.");
+    patchNodes(selection, (n) => ({
+      [k.mode]: "fixed",
+      [k.pct]: r2(v),
+      [k.calc]: undefined,
+      ...unbind(n, axis),
+    }));
+    return;
+  }
+  const parsed = calcApi().parseCalc(plain ? text + "px" : text);
+  if (!parsed)
+    return void notify("Enter a number, a percentage or an expression such as 100% - 24px.");
+  if (parsed.pct && !parentOf(doc, node)) return void notify("A percentage needs a parent layer.");
+  patchNodes(selection, (n) => ({
+    [k.mode]: "calc",
+    [k.calc]: parsed.text,
+    [k.pct]: undefined,
+    ...unbind(n, axis),
+  }));
+}
+
+/** The limit glyphs turned a quarter for the height limits (Wonder B2-max-height-added). */
+export const SizeMinHIcon = ({ className }: { className?: string }) => (
+  <SizeMinIcon className={cn(className, "rotate-90")} aria-hidden />
+);
+const SizeMaxHIcon = ({ className }: { className?: string }) => (
+  <SizeMaxIcon className={cn(className, "rotate-90")} aria-hidden />
+);
 const LIMITS = [
-  { key: "minW", label: "Min width", icon: FoldHorizontal },
-  { key: "maxW", label: "Max width", icon: FoldHorizontal },
-  { key: "minH", label: "Min height", icon: FoldVertical },
-  { key: "maxH", label: "Max height", icon: FoldVertical },
+  { key: "minW", axis: "w", label: "Min width", short: "Min W", icon: SizeMinIcon },
+  { key: "maxW", axis: "w", label: "Max width", short: "Max W", icon: SizeMaxIcon },
+  { key: "minH", axis: "h", label: "Min height", short: "Min H", icon: SizeMinHIcon },
+  { key: "maxH", axis: "h", label: "Max height", short: "Max H", icon: SizeMaxHIcon },
 ] as const;
 type LimitKey = (typeof LIMITS)[number]["key"];
 const hasLimit = (node: Node, key: LimitKey) => node[key] !== undefined && node[key] !== null;
+/** Focus a newly inserted limit field (Wonder inserts the empty row focused); retries until React has rendered it. */
+const focusLimit = (key: LimitKey, tries = 5) =>
+  requestAnimationFrame(() => {
+    const input = document.querySelector<HTMLInputElement>(`#layout-section input[name=${key}]`);
+    if (input) input.focus();
+    else if (tries > 1) focusLimit(key, tries - 1);
+  });
 
 function SizeField({
   doc,
@@ -180,9 +377,40 @@ function SizeField({
   parent,
   axis,
   selection,
-}: Props & { parent: Node | undefined; axis: "w" | "h" }) {
-  const mode = sizingMode(node, axis, parent);
+  pending,
+  onAddLimit,
+}: Props & {
+  parent: Node | undefined;
+  axis: "w" | "h";
+  pending: LimitKey[];
+  onAddLimit: (key: LimitKey) => void;
+}) {
+  const choice = choiceOf(node, axis, parent);
   const label = axis === "w" ? "Width" : "Height";
+  const k = AXIS_KEYS[axis];
+  const value =
+    choice === "relative"
+      ? fmt(node[k.pct])
+      : choice === "calc"
+        ? String(node[k.calc] ?? "")
+        : fmt(node[axis]);
+  const limits = LIMITS.filter(
+    (l) => l.axis === axis && !hasLimit(node, l.key) && !pending.includes(l.key),
+  );
+  const added = useRef<LimitKey | null>(null);
+  // Wonder A9 multi-select: W/H read "Mixed" (no unit, chevron only) when the selected layers differ.
+  const wanted = new Set(selection);
+  const mixed =
+    selection.length > 1 &&
+    new Set(
+      pageNodes(doc)
+        .filter((n) => wanted.has(n.id))
+        .map((n) => {
+          const c = choiceOf(n, axis, parentOf(doc, n));
+          const v = c === "relative" ? fmt(n[k.pct]) : c === "calc" ? String(n[k.calc] ?? "") : fmt(n[axis]);
+          return c + ":" + v;
+        }),
+    ).size > 1;
   // A Dimension variable can drive a fixed width/height; binding switches the axis to fixed.
   return (
     <BindableField
@@ -192,33 +420,77 @@ function SizeField({
       field={axis}
       label={label}
       prefix={<Affix>{axis.toUpperCase()}</Affix>}
+      typeBind="typing"
     >
       {(bind) => (
         <Field
           name={axis}
           label={label}
-          numeric
-          value={fmt(node[axis])}
-          onCommit={(value) => setField(selection, node, axis, value)}
+          numeric={choice !== "calc"}
+          scrub={choice !== "calc"}
+          value={mixed ? "" : value}
+          placeholder={mixed ? "Mixed" : undefined}
+          onCommit={(raw) => commitSize(doc, selection, node, axis, choice, raw)}
           prefix={<Affix>{axis.toUpperCase()}</Affix>}
-          className="pr-1"
+          className="pr-1 has-aria-expanded:ring-1 has-aria-expanded:ring-ring"
           suffix={
-            <span className="flex items-center gap-1">
-              <NativeSelect
-                bare
-                name={axis + "Mode"}
-                label={label + " sizing"}
-                value={mode}
-                className="text-muted-foreground"
-                options={(["fixed", "hug", "fill"] as SizingMode[]).map((m) => ({
-                  value: m,
-                  label: UNIT_LABEL[m],
-                  disabled: !sizingAllowed(node, parent, m),
-                }))}
-                onChange={(value) => setField(selection, node, axis + "Mode", value)}
-              />
-              {bind}
-            </span>
+            <>
+              {/* The variable diamond floats left of the unit so the unit sits where Wonder draws it. */}
+              <span className="relative -mr-1 w-0 self-stretch">
+                <span className="absolute inset-y-0 right-0.5 flex items-center">{bind}</span>
+              </span>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <UnitTrigger
+                    label={label + " sizing"}
+                    unit={mixed ? "" : SIZE[choice].unit}
+                    data-size-menu={axis}
+                    data-mixed={mixed || undefined}
+                    data-mode={choice}
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  alignOffset={-4}
+                  sideOffset={8}
+                  className="w-38"
+                  onCloseAutoFocus={(event) => {
+                    // The new limit row already has focus: don't hand it back to the trigger.
+                    if (!added.current) return;
+                    event.preventDefault();
+                    added.current = null;
+                  }}
+                >
+                  {sizeChoices(node, parent, choice).map((c) => (
+                    <MenuChoice
+                      key={c}
+                      data-size-mode={c}
+                      icon={SIZE[c].icon}
+                      turn={axis === "h" && SIZE[c].turn}
+                      label={SIZE[c].label}
+                      checked={c === choice}
+                      onSelect={() =>
+                        c !== choice && patchNodes(selection, (n) => sizePatch(doc, n, axis, c))
+                      }
+                    />
+                  ))}
+                  {limits.length ? <DropdownMenuSeparator /> : null}
+                  {limits.map((l) => (
+                    <MenuChoice
+                      key={l.key}
+                      data-limit={l.key}
+                      icon={l.icon}
+                      label={"Add " + l.label.toLowerCase()}
+                      onSelect={() => {
+                        added.current = l.key;
+                        onAddLimit(l.key);
+                        focusLimit(l.key);
+                      }}
+                    />
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
           }
         />
       )}
@@ -226,48 +498,47 @@ function SizeField({
   );
 }
 
-/** Trailing size tool: hug contents, and add min/max limits (Figma's W/H menu). */
-function SizeMenu({ node, parent, selection }: Props & { parent: Node | undefined }) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <IconButton icon={Proportions} label="Size options" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="bottom" align="end" className="w-44">
-        <DropdownMenuItem
-          disabled={!sizingAllowed(node, parent, "hug")}
-          onSelect={() => patchNodes([node.id], () => ({ wMode: "hug", hMode: "hug" }))}
-        >
-          Hug contents
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {LIMITS.map((l) => (
-          <DropdownMenuItem
-            key={l.key}
-            data-limit={l.key}
-            disabled={hasLimit(node, l.key)}
-            onSelect={() =>
-              patchNodes(selection, (n) => ({
-                [l.key]: Math.round(l.key.endsWith("W") ? n.w : n.h),
-              }))
-            }
-          >
-            Add {l.label.toLowerCase()}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/** One row per min/max limit that is set: value + which limit (switch or remove). */
-function LimitRows({ doc, node, selection }: Props) {
-  const rows = LIMITS.filter((l) => hasLimit(node, l.key));
+/**
+ * One row per min/max limit: Wonder's "Add min width" inserts an empty, focused "⟷ Min W ▾" row (pending until a
+ * value is typed); a set limit shows its value with the kind menu (switch kind, remove) on the chevron.
+ */
+function LimitRows({
+  doc,
+  node,
+  selection,
+  pending,
+  onPendingChange,
+}: Props & { pending: LimitKey[]; onPendingChange: (next: LimitKey[]) => void }) {
+  const rows = LIMITS.filter((l) => hasLimit(node, l.key) || pending.includes(l.key));
   if (!rows.length) return null;
+  const drop = (key: LimitKey) => onPendingChange(pending.filter((p) => p !== key));
   return (
     <>
       {rows.map((l) => {
-        const value = node[l.key] as number | string;
+        const set = hasLimit(node, l.key);
+        const value = set ? String(node[l.key] as number | string) : "";
+        const icon = l.icon;
+        const others = LIMITS.filter((o) => o.key !== l.key && !hasLimit(node, o.key));
+        const switchTo = (next: LimitKey) => {
+          if (!set) {
+            onPendingChange([...pending.filter((p) => p !== l.key && p !== next), next]);
+            focusLimit(next);
+            return;
+          }
+          // Switching the limit kind carries its value and variable along.
+          patchNodes(selection, (n) => {
+            const bound = n.bindings?.[l.key];
+            const rest = unbind(n, l.key);
+            const bindings = bound
+              ? { bindings: { ...(rest.bindings ?? n.bindings), [next]: bound } }
+              : rest;
+            return { [l.key]: undefined, [next]: n[l.key], ...bindings };
+          });
+        };
+        const remove = () => {
+          drop(l.key);
+          if (set) patchNodes(selection, (n) => ({ [l.key]: undefined, ...unbind(n, l.key) }));
+        };
         return (
           <Row key={l.key}>
             <BindableField
@@ -276,61 +547,70 @@ function LimitRows({ doc, node, selection }: Props) {
               selection={selection}
               field={l.key}
               label={l.label}
-              prefix={<IconAffix icon={l.icon} />}
+              prefix={<IconAffix icon={icon} />}
               className="col-span-2"
+              typeBind="empty"
             >
               {(bind) => (
                 <Field
                   name={l.key}
                   label={l.label}
-                  numeric={typeof value === "number"}
-                  value={String(value)}
-                  className="col-span-2 pr-1"
-                  prefix={<IconAffix icon={l.icon} />}
+                  numeric={!value.endsWith("%")}
+                  value={value}
+                  placeholder={l.short}
+                  className="col-span-2 pr-1 has-aria-expanded:ring-1 has-aria-expanded:ring-ring"
+                  prefix={<IconAffix icon={icon} />}
                   onCommit={(raw) => {
+                    if (raw.trim() === "") return remove();
                     const pct = /^\s*\d+(\.\d+)?%\s*$/.test(raw) ? raw.trim() : null;
                     const v = pct ?? parseLength(raw, 0);
+                    if (v === null) return;
                     // Typing a limit detaches its variable.
-                    if (v !== null)
-                      patchNodes(selection, (n) => ({ [l.key]: v, ...unbind(n, l.key) }));
+                    patchNodes(selection, (n) => ({ [l.key]: v, ...unbind(n, l.key) }));
+                    drop(l.key);
                   }}
                   suffix={
-                    <span className="flex items-center gap-1">
-                      <NativeSelect
-                        bare
-                        name={l.key + "Kind"}
-                        label={l.label + " limit"}
-                        value={l.key}
-                        options={[
-                          ...LIMITS.map((o) => ({
-                            value: o.key,
-                            label: o.label,
-                            disabled: o.key !== l.key && hasLimit(node, o.key),
-                          })),
-                          { value: "remove", label: "Remove" },
-                        ]}
-                        onChange={(next) =>
-                          patchNodes(selection, (n) => {
-                            // Switching the limit kind carries its variable along; removing detaches it.
-                            const bound = n.bindings?.[l.key];
-                            const bindings = unbind(n, l.key);
-                            const moved =
-                              bound && next !== "remove"
-                                ? {
-                                    bindings: {
-                                      ...(bindings.bindings ?? n.bindings),
-                                      [next]: bound,
-                                    },
-                                  }
-                                : bindings;
-                            return next === "remove"
-                              ? { [l.key]: undefined, ...moved }
-                              : { [l.key]: undefined, [next]: n[l.key], ...moved };
-                          })
-                        }
-                      />
-                      {bind}
-                    </span>
+                    <>
+                      <span className="relative -mr-1 w-0 self-stretch">
+                        <span className="absolute inset-y-0 right-0.5 flex items-center">
+                          {bind}
+                        </span>
+                      </span>
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <UnitTrigger
+                            label={l.label + " limit"}
+                            unit={set ? l.short : ""}
+                            data-limit-menu={l.key}
+                          />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          alignOffset={-4}
+                          sideOffset={8}
+                          className="w-38"
+                        >
+                          <MenuChoice
+                            data-limit-kind={l.key}
+                            icon={l.icon}
+                            label={l.label}
+                            checked
+                            onSelect={() => undefined}
+                          />
+                          {others.map((o) => (
+                            <MenuChoice
+                              key={o.key}
+                              data-limit-kind={o.key}
+                              icon={o.icon}
+                              label={o.label}
+                              onSelect={() => switchTo(o.key)}
+                            />
+                          ))}
+                          <DropdownMenuSeparator />
+                          <MenuChoice data-limit-remove={l.key} label="Remove" onSelect={remove} />
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </>
                   }
                 />
               )}
@@ -348,31 +628,33 @@ const JUSTIFY_AT = ["flex-start", "center", "flex-end"];
 const indexOf = (value: unknown) =>
   value === "center" ? 1 : value === "flex-end" || value === "end" ? 2 : 0;
 const DISTRIBUTED = ["space-around", "space-between", "space-evenly"];
+const EDGE = ["items-start", "items-center", "items-end"];
+const EDGE_X = ["justify-start", "justify-center", "justify-end"];
+const CELL_Y = ["top", "center", "bottom"];
+const CELL_X = ["left", "center", "right"];
+/** Wonder's cell tooltip (H9-hover-verified: "Align bottom right"); the middle cell reads "Align center". */
+const cellTip = (row: number, col: number) =>
+  row === 1 && col === 1 ? "Align center" : `Align ${CELL_Y[row]} ${CELL_X[col]}`;
 
-/** Wonder's active-cell glyph: three bars along the main axis, aligned on the cross axis (equal when stretched). */
+/**
+ * Wonder's active-cell glyph (C3): three 2px bars 2px apart along the main axis, the middle one longer (6 / 10 / 6),
+ * aligned on the cross axis; all three full length when stretched.
+ */
 function Bars({ column, cross, stretch }: { column: boolean; cross: number; stretch: boolean }) {
+  const outer = column ? (stretch ? "w-2.5" : "w-1.5") : stretch ? "h-2.5" : "h-1.5";
+  const bar = cn("rounded-full bg-primary", column ? "h-0.5" : "w-0.5");
   return (
     <span
       aria-hidden
       className={cn(
-        "flex gap-px",
+        "flex gap-0.5",
         column ? "flex-col" : "flex-row",
         cross === 1 ? "items-center" : cross === 2 ? "items-end" : "items-start",
       )}
     >
-      {column ? (
-        <>
-          <span className={cn("h-0.5 rounded-full bg-primary", stretch ? "w-2.5" : "w-1.5")} />
-          <span className="h-0.5 w-2.5 rounded-full bg-primary" />
-          <span className={cn("h-0.5 rounded-full bg-primary", stretch ? "w-2.5" : "w-1.5")} />
-        </>
-      ) : (
-        <>
-          <span className={cn("w-0.5 rounded-full bg-primary", stretch ? "h-2.5" : "h-1.5")} />
-          <span className="h-2.5 w-0.5 rounded-full bg-primary" />
-          <span className={cn("w-0.5 rounded-full bg-primary", stretch ? "h-2.5" : "h-1.5")} />
-        </>
-      )}
+      <span className={cn(bar, outer)} />
+      <span className={cn(bar, column ? "w-2.5" : "h-2.5")} />
+      <span className={cn(bar, outer)} />
     </span>
   );
 }
@@ -381,12 +663,15 @@ function Matrix({
   label,
   isActive,
   glyph,
+  place,
   onPick,
   className,
 }: {
   label: string;
   isActive: (row: number, col: number) => boolean;
   glyph: ReactNode;
+  /** Where the active glyph sits in its cell (default: centred). */
+  place?: (row: number, col: number) => string;
   onPick: (row: number, col: number) => void;
   className?: string;
 }) {
@@ -395,7 +680,8 @@ function Matrix({
       role="group"
       aria-label={label}
       className={cn(
-        "grid h-14 grid-cols-3 grid-rows-3 rounded-md bg-input p-0.5 shadow-field",
+        // 3px inset (Wonder G4): 34px columns centred at x 20 / 54 / 88, and edge-cell bars 3px from the well's edge.
+        "grid h-14 grid-cols-3 grid-rows-3 rounded-md bg-input p-0.75 shadow-field",
         className,
       )}
     >
@@ -403,25 +689,26 @@ function Matrix({
         [0, 1, 2].map((col) => {
           const active = isActive(row, col);
           return (
-            <button
-              key={row + "-" + col}
-              type="button"
-              data-cell={row + "-" + col}
-              aria-label={`${label}: ${AXIS[row]} ${AXIS[col]}`}
-              aria-pressed={active}
-              title={`${AXIS[row]} ${AXIS[col]}`}
-              className={cn(
-                "group/cell flex items-center rounded-sm px-1 outline-none hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring",
-                col === 1 ? "justify-center" : col === 2 ? "justify-end" : "justify-start",
-              )}
-              onClick={() => onPick(row, col)}
-            >
-              {active ? (
-                glyph
-              ) : (
-                <span className="mx-1 size-0.5 rounded-full bg-muted-foreground group-hover/cell:bg-foreground" />
-              )}
-            </button>
+            <Tip key={row + "-" + col} label={cellTip(row, col)}>
+              <button
+                type="button"
+                data-cell={row + "-" + col}
+                aria-label={`${label}: ${AXIS[row]} ${AXIS[col]}`}
+                aria-pressed={active}
+                className={cn(
+                  // Dots sit at the cell centres; the hovered cell shows Wonder's #363636 box (C3-flex-align-center).
+                  "group/cell flex rounded-sm outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring",
+                  active && place ? place(row, col) : "items-center justify-center",
+                )}
+                onClick={() => onPick(row, col)}
+              >
+                {active ? (
+                  glyph
+                ) : (
+                  <span className="size-0.5 rounded-full bg-muted-foreground group-hover/cell:bg-foreground" />
+                )}
+              </button>
+            </Tip>
           );
         }),
       )}
@@ -439,45 +726,43 @@ function Distribution({
   column: boolean;
   onChange: (value: string) => void;
 }) {
-  const items = column
-    ? [
-        { value: "space-around", label: "Space around", icon: AlignVerticalSpaceAround },
-        { value: "space-between", label: "Space between", icon: AlignVerticalSpaceBetween },
-        { value: "space-evenly", label: "Space evenly", icon: AlignVerticalDistributeCenter },
-      ]
-    : [
-        { value: "space-around", label: "Space around", icon: AlignHorizontalSpaceAround },
-        { value: "space-between", label: "Space between", icon: AlignHorizontalSpaceBetween },
-        { value: "space-evenly", label: "Space evenly", icon: AlignHorizontalDistributeCenter },
-      ];
+  const items = [
+    {
+      value: "space-around",
+      label: "Space around",
+      icon: column ? DistributeAroundYIcon : DistributeAroundXIcon,
+    },
+    {
+      value: "space-between",
+      label: "Space between",
+      icon: column ? DistributeBetweenYIcon : DistributeBetweenXIcon,
+    },
+    {
+      value: "space-evenly",
+      label: "Space evenly",
+      icon: column ? DistributeEvenlyYIcon : DistributeEvenlyXIcon,
+    },
+  ];
   return (
-    <ToggleGroupPrimitive.Root
-      type="single"
-      aria-label="Distribution"
+    <Segmented
+      label="Distribution"
+      hook="insp-distribution"
+      dataKey="distribute"
+      deselectable
       value={DISTRIBUTED.includes(value) ? value : ""}
-      onValueChange={onChange}
-      className="flex h-6 w-full items-stretch overflow-hidden rounded-md bg-muted"
-    >
-      {items.map(({ value: v, label, icon: Icon }) => (
-        <ToggleGroupPrimitive.Item
-          key={v}
-          value={v}
-          aria-label={label}
-          title={label}
-          data-distribute={v}
-          className="flex flex-1 items-center justify-center rounded-md text-subtle-foreground hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=on]:bg-accent data-[state=on]:text-foreground"
-        >
-          <Icon className="size-4" aria-hidden />
-        </ToggleGroupPrimitive.Item>
-      ))}
-    </ToggleGroupPrimitive.Root>
+      onChange={onChange}
+      items={items}
+      itemClassName="text-muted-foreground"
+    />
   );
 }
 
 /* ---------- Gaps ---------- */
 /**
- * Gap fields on physical axes (`)(` column gap, `≍` row gap). The main-axis field edits `gap` (bindable to a
- * variable) and clears that axis' override; the cross-axis field edits its own override (`gapX` / `gapY`).
+ * Gap fields on physical axes (`]|[` column gap, `≍` row gap). The main-axis field edits `gap` (bindable to a
+ * variable) and clears that axis' override; the cross-axis field edits its own override (`gapX` / `gapY`) and is
+ * always editable (Wonder B1: it only shows on the canvas once the stack wraps). Committing the main gap pins an
+ * unset cross gap to the old value, so the cross field never follows the main one.
  */
 function GapField({
   doc,
@@ -485,19 +770,21 @@ function GapField({
   selection,
   axis,
   main,
-  disabled,
   className,
-}: Props & { axis: "x" | "y"; main: boolean; disabled?: boolean; className?: string }) {
+}: Props & { axis: "x" | "y"; main: boolean; className?: string }) {
   const key = axis === "x" ? "gapX" : "gapY";
+  const cross = axis === "x" ? "gapY" : "gapX";
   const value = num(node[key], num(node.gap));
-  const icon = axis === "x" ? SeparatorVertical : SeparatorHorizontal;
+  const icon = axis === "x" ? GapXIcon : GapYIcon;
   const label = axis === "x" ? "Column gap" : "Row gap";
   const commit = (raw: string) => {
     const v = parseLength(raw, 0);
     if (v === null) return;
-    patchNodes(selection, (n) =>
-      main ? { gap: v, [key]: undefined, ...unbind(n, "gap") } : { [key]: v },
-    );
+    patchNodes(selection, (n) => {
+      if (!main) return { [key]: v };
+      const pin = n[cross] === undefined && num(n.gap) !== v ? { [cross]: num(n.gap) } : {};
+      return { gap: v, [key]: undefined, ...pin, ...unbind(n, "gap") };
+    });
   };
   if (!main)
     return (
@@ -506,7 +793,6 @@ function GapField({
         label={label}
         icon={icon}
         value={fmt(value)}
-        disabled={disabled}
         className={className}
         onCommit={commit}
       />
@@ -520,6 +806,7 @@ function GapField({
         field="gap"
         label={label}
         prefix={<IconAffix icon={icon} />}
+        typeBind="typing"
       >
         {(suffix) => (
           <Field
@@ -539,15 +826,18 @@ function GapField({
 
 /* ---------- Flex ---------- */
 const DIRECTION = [
-  { value: "row", label: "Horizontal", icon: Columns2 },
-  { value: "column", label: "Vertical", icon: Rows2 },
+  { value: "row", label: "Horizontal", icon: ColumnsIcon },
+  { value: "column", label: "Vertical", icon: RowsIcon },
 ];
+/** Active flex toggles (baseline, reverse, wrap) take Wonder's purple tint (C3-flex-wrap-on). */
+const TOGGLE = "data-active:bg-toggle-active data-active:text-toggle-active-foreground";
 
 function FlexGroup(props: Props) {
   const { node, selection } = props;
   const column = node.direction === "column";
   const reverse = node.reverse === true;
   const wrap = !!node.flexWrap;
+  const baseline = !column && node.alignItems === "baseline";
   const distributed = DISTRIBUTED.includes(node.justifyContent);
   // Visual main-axis position (reverse flips which edge flex-start is on).
   const mainOf = (justify: unknown) => {
@@ -557,7 +847,7 @@ function FlexGroup(props: Props) {
   const cross = indexOf(node.alignItems);
   const set = (patch: Patch) => patchNodes(selection, () => patch);
   return (
-    <Caption label="Flex">
+    <Caption label="Flex" className={GROUP}>
       <div className="flex items-start gap-2">
         <div className="grid min-w-0 flex-1 grid-cols-2 grid-rows-3 gap-2">
           <Segmented
@@ -577,6 +867,10 @@ function FlexGroup(props: Props) {
               return c === cross && (distributed || m === mainOf(node.justifyContent));
             }}
             glyph={<Bars column={column} cross={cross} stretch={node.alignItems === "stretch"} />}
+            // The glyph is centred along the main axis and pushed to its cross-axis edge.
+            place={(row, col) =>
+              column ? cn("items-center", EDGE_X[col]) : cn("justify-center", EDGE[row])
+            }
             onPick={(row, col) => {
               const [m, c] = column ? [row, col] : [col, row];
               const patch: Patch = { alignItems: JUSTIFY_AT[c] };
@@ -584,20 +878,8 @@ function FlexGroup(props: Props) {
               set(patch);
             }}
           />
-          <GapField
-            {...props}
-            axis="x"
-            main={!column}
-            disabled={column && !wrap}
-            className="col-start-1 row-start-2"
-          />
-          <GapField
-            {...props}
-            axis="y"
-            main={column}
-            disabled={!column && !wrap}
-            className="col-start-1 row-start-3"
-          />
+          <GapField {...props} axis="x" main={!column} className="col-start-1 row-start-2" />
+          <GapField {...props} axis="y" main={column} className="col-start-1 row-start-3" />
           <div className="col-start-2 row-start-3">
             <Distribution
               value={node.justifyContent}
@@ -606,19 +888,32 @@ function FlexGroup(props: Props) {
             />
           </div>
         </div>
+        {/* Wonder's trailing column: baseline (rows only), reverse, wrap. */}
         <div className="flex w-6 shrink-0 flex-col items-center gap-2">
+          {column ? null : (
+            <IconButton
+              icon={ArrowDownToLine}
+              label="Align to baseline"
+              active={baseline}
+              aria-pressed={baseline}
+              className={TOGGLE}
+              onClick={() => set({ alignItems: baseline ? "flex-start" : "baseline" })}
+            />
+          )}
           <IconButton
-            icon={ArrowLeftRight}
+            icon={ArrowRightLeft}
             label="Reverse order"
             active={reverse}
             aria-pressed={reverse}
+            className={TOGGLE}
             onClick={() => set({ reverse: reverse ? undefined : true })}
           />
           <IconButton
-            icon={CornerDownLeft}
+            icon={WrapIcon}
             label="Wrap"
             active={wrap}
             aria-pressed={wrap}
+            className={TOGGLE}
             onClick={() => set({ flexWrap: wrap ? undefined : true })}
           />
         </div>
@@ -628,62 +923,6 @@ function FlexGroup(props: Props) {
 }
 
 /* ---------- Grid ---------- */
-function TrackEditor({ node, selection }: Props) {
-  const columns = Math.max(1, Math.floor(num(node.columns, 2)));
-  const rows = num(node.rows) >= 1 ? Math.floor(num(node.rows)) : 0;
-  const commit = (key: "columns" | "rows") => (raw: string) => {
-    if (key === "rows" && (raw.trim() === "" || /^auto$/i.test(raw.trim()))) {
-      patchNodes(selection, () => ({ rows: undefined }));
-      return;
-    }
-    const v = parseLength(raw, 1);
-    if (v !== null) patchNodes(selection, () => ({ [key]: Math.min(12, Math.round(v)) }));
-  };
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          id="grid-tracks"
-          aria-label="Grid tracks"
-          title="Edit grid tracks"
-          className="relative flex h-14 w-full items-stretch gap-px rounded-md bg-input p-1 text-xs text-foreground shadow-field outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          {Array.from({ length: Math.min(columns, 12) }, (_, i) => (
-            <span key={i} aria-hidden className="flex-1 rounded-xs border border-border" />
-          ))}
-          <span className="absolute inset-0 flex items-center justify-center">
-            {columns} × {rows || "Auto"}
-          </span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent side="left" align="start" sideOffset={12} className="w-52">
-        <div className="flex flex-col gap-2">
-          <Caption label="Columns">
-            <NumberField
-              name="columns"
-              label="Grid columns"
-              icon={Columns3}
-              value={String(columns)}
-              onCommit={commit("columns")}
-            />
-          </Caption>
-          <Caption label="Rows">
-            <NumberField
-              name="rows"
-              label="Grid rows"
-              icon={Rows3}
-              value={rows ? String(rows) : ""}
-              placeholder="Auto"
-              onCommit={commit("rows")}
-            />
-          </Caption>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 function GridGroup(props: Props) {
   const { node, selection } = props;
   const stretched = (v: unknown) => v === undefined || v === "stretch" || v === "normal";
@@ -692,16 +931,19 @@ function GridGroup(props: Props) {
     col = indexOf(node.justifyItems);
   return (
     <>
-      <Row>
+      <Row className={GROUP}>
         <Caption label="Grid">
-          <TrackEditor {...props} />
+          <GridPreview node={props.node} />
         </Caption>
         <Caption label="Gap">
-          <GapField {...props} axis="x" main />
-          <GapField {...props} axis="y" main={false} />
+          {/* Two stacked 24px fields, 8px apart, beside the 60px track preview (Wonder C4). */}
+          <div className="flex flex-col gap-2">
+            <GapField {...props} axis="x" main />
+            <GapField {...props} axis="y" main={false} />
+          </div>
         </Caption>
       </Row>
-      <Row>
+      <Row className={GROUP}>
         <Caption label="Align">
           <Matrix
             label="Cell alignment"
@@ -722,19 +964,44 @@ function GridGroup(props: Props) {
 }
 
 /* ---------- Block ---------- */
+const BLOCK_ALIGN = [
+  { value: "flex-start", label: "Align left", icon: AlignStartVertical },
+  { value: "center", label: "Align center", icon: AlignCenterVertical },
+  { value: "flex-end", label: "Align right", icon: AlignEndVertical },
+];
+
+/**
+ * Block flow (Wonder C2-display-block): vertical spacing, then a left / centre / right alignment of the children
+ * (`justifyItems` on the frame; children narrower than the frame move, Fill children keep the full width).
+ */
 function BlockGroup({ node, selection }: Props) {
+  const align =
+    node.justifyItems === "center" || node.justifyItems === "flex-end"
+      ? node.justifyItems
+      : "flex-start";
   return (
-    <Caption label="Block">
+    <Caption label="Block" className={GROUP}>
       <Row>
         <NumberField
           name="gapY"
           label="Vertical spacing"
-          icon={SeparatorHorizontal}
+          icon={GapYIcon}
           value={fmt(num(node.gapY))}
           onCommit={(raw) => {
             const v = parseLength(raw, 0);
             if (v !== null) patchNodes(selection, () => ({ gapY: v || undefined }));
           }}
+        />
+        <Segmented
+          label="Block alignment"
+          hook="insp-block-align"
+          dataKey="align"
+          value={align}
+          onChange={(v) =>
+            patchNodes(selection, () => ({ justifyItems: v === "flex-start" ? undefined : v }))
+          }
+          items={BLOCK_ALIGN}
+          itemClassName="text-muted-foreground"
         />
       </Row>
     </Caption>
@@ -752,19 +1019,19 @@ function GridChild({ node, selection }: Props) {
     if (v !== null) patchNodes(selection, () => ({ [key]: Math.min(24, Math.round(v)) }));
   };
   return (
-    <Caption label="Grid child">
+    <Caption label="Grid child" className={GROUP}>
       <Row>
         <NumberField
           name="colSpan"
           label="Column span"
-          icon={Columns2}
+          icon={ColumnsIcon}
           value={node.colSpan === "full" ? "Full" : String(node.colSpan ?? 1)}
           onCommit={span("colSpan")}
         />
         <NumberField
           name="rowSpan"
           label="Row span"
-          icon={Rows2}
+          icon={RowsIcon}
           value={String(node.rowSpan ?? 1)}
           onCommit={span("rowSpan")}
         />
@@ -774,6 +1041,8 @@ function GridChild({ node, selection }: Props) {
 }
 
 /* ---------- Padding ---------- */
+/** Wonder's neutral active toggle (C6-padding-expanded): #262626 behind a bright glyph. */
+const NEUTRAL = "data-active:bg-muted";
 const PAD_KEYS = ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"] as const;
 const padsOf = (n: Node) => PAD_KEYS.map((k) => num(n[k], num(n.padding)));
 
@@ -838,7 +1107,7 @@ function PaddingGroup({ doc, node, selection }: Props) {
           icon={icon}
           value={value}
           placeholder="Mixed"
-          unit={<span className="flex items-center gap-1">px{suffix}</span>}
+          unit={<>px{suffix}</>}
           onCommit={edit(sides)}
         />
       )}
@@ -847,12 +1116,13 @@ function PaddingGroup({ doc, node, selection }: Props) {
   const horizontal = axisField("paddingX", "Horizontal padding", PaddingXIcon, mixed(l, r), [1, 3]);
   const bound = !!node.bindings?.padding;
   return (
-    <Caption label="Padding">
+    <Caption label="Padding" className={GROUP}>
       <Row
         tool={
           <IconButton
             icon={PaddingSidesIcon}
             label="Independent padding"
+            className={NEUTRAL}
             active={split}
             aria-pressed={split}
             onClick={() => setSplit(!split)}
@@ -921,28 +1191,42 @@ function MarginGroup({ node, selection }: Props) {
           if (v !== null) write(sides, v);
         }}
         unit={
-          <NativeSelect
-            bare
-            name={name + "Unit"}
-            label={label + " unit"}
-            value={auto ? "auto" : "px"}
-            options={[
-              { value: "px", label: "px" },
-              { value: "auto", label: "Auto" },
-            ]}
-            onChange={(unit) => write(sides, unit === "auto" ? "auto" : 0)}
-          />
+          // Wonder C7: "px ▾" / "Auto ▾" opens Fixed / Auto (24px rows, ✓ on the current one).
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <UnitTrigger
+                label={label + " unit"}
+                unit={auto ? "Auto" : "px"}
+                data-unit-menu={name}
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" alignOffset={-8} sideOffset={8} className="w-38">
+              <MenuChoice
+                data-unit="px"
+                label="Fixed"
+                checked={!auto}
+                onSelect={() => auto && write(sides, 0)}
+              />
+              <MenuChoice
+                data-unit="auto"
+                label="Auto"
+                checked={auto}
+                onSelect={() => !auto && write(sides, "auto")}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
         }
       />
     );
   };
   return (
-    <Caption label="Margin">
+    <Caption label="Margin" className={GROUP}>
       <Row
         tool={
           <IconButton
             icon={MarginSidesIcon}
             label="Independent margins"
+            className={NEUTRAL}
             active={split}
             aria-pressed={split}
             onClick={() => setSplit(!split)}
@@ -975,18 +1259,37 @@ export function LayoutSection(props: Props) {
   const layout = node.layout === "inline" ? "block" : node.layout;
   const flow = frame && node.layout !== "free";
   const inFlow = isFlow(parent) && node.position !== "absolute";
+  // Limit rows added from a W/H menu but not typed yet (Wonder shows them empty and focused).
+  const [pendingLimits, setPendingLimits] = useState<{ id: string; keys: LimitKey[] }>({
+    id: node.id,
+    keys: [],
+  });
+  const pending = pendingLimits.id === node.id ? pendingLimits.keys : [];
+  const setPending = (keys: LimitKey[]) => setPendingLimits({ id: node.id, keys });
+  const sizeProps = {
+    ...props,
+    parent,
+    pending,
+    onAddLimit: (key: LimitKey) => setPending([...pending.filter((k) => k !== key), key]),
+  };
+  const canHug = sizingAllowed(node, parent, "hug");
   return (
     <Section
       id="layout-section"
       title="Layout"
       tools={
         frame ? (
-          <IconButton
-            icon={GitCommitHorizontal}
-            label={flow ? "Remove auto layout" : "Add auto layout"}
-            active={flow}
-            onClick={() => setField(selection, node, "layout", flow ? "free" : "flex")}
-          />
+          <div className="flex items-center gap-2.5">
+            {layout === "grid" ? <GridHeaderTools node={node} selection={selection} /> : null}
+            {/* Wonder keeps this a quiet glyph without a fill in both states (05, 06, 14). */}
+            <IconButton
+              icon={AutoLayoutIcon}
+              label={flow ? "Remove auto layout" : "Add auto layout"}
+              aria-pressed={flow}
+              className="text-subtle-foreground"
+              onClick={() => setField(selection, node, "layout", flow ? "free" : "flex")}
+            />
+          </div>
         ) : null
       }
     >
@@ -998,15 +1301,30 @@ export function LayoutSection(props: Props) {
             dataKey="layout"
             value={layout}
             onChange={(value) => setField(selection, node, "layout", value)}
-            items={DISPLAY(node.direction)}
+            items={DISPLAY}
           />
         </Caption>
       ) : null}
-      <Row tool={<SizeMenu {...props} parent={parent} />}>
-        <SizeField {...props} parent={parent} axis="w" />
-        <SizeField {...props} parent={parent} axis="h" />
+      <Row
+        tool={
+          // Wonder's trailing W/H glyph; here it fits the layer to its content (Hug on both axes).
+          <IconButton
+            icon={SizeOptionsIcon}
+            label="Hug contents"
+            disabled={!canHug}
+            onClick={() =>
+              patchNodes([node.id], () => ({
+                ...sizePatch(doc, node, "w", "hug"),
+                ...sizePatch(doc, node, "h", "hug"),
+              }))
+            }
+          />
+        }
+      >
+        <SizeField {...sizeProps} axis="w" />
+        <SizeField {...sizeProps} axis="h" />
       </Row>
-      <LimitRows {...props} />
+      <LimitRows {...props} pending={pending} onPendingChange={setPending} />
       {frame && node.layout === "flex" ? <FlexGroup {...props} /> : null}
       {frame && node.layout === "grid" ? <GridGroup {...props} /> : null}
       {frame && node.layout === "block" ? <BlockGroup {...props} /> : null}

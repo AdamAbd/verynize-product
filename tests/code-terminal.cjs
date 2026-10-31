@@ -68,6 +68,7 @@ export default {
   git(project, 'worktree', 'add', '-b', 'feature', worktree);
   const env = { ...process.env, ...identity, HOME: home, ZDOTDIR: zdot, SHELL: '/bin/zsh', HISTFILE: '/dev/null' };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const bundle = await buildPanelBundle(path.join(root, 'bundle'));
 
   const launch = async () => {

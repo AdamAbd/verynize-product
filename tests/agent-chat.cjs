@@ -2,6 +2,7 @@
 // JSON-RPC fake). Covers quick chats in a scratch folder, streaming text, tool cards, per-turn
 // canvas context, session resume, permission cards, stop, transcript branching and persistence.
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -15,11 +16,13 @@ const path = require('node:path');
   await fs.chmod(path.join(bin, 'codex'), 0o755);
   const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, FAKE_CODEX_LOG: log };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   // Auto-title helper threads (agent-workdirs/titles) are excluded so assertions see chat turns only.
   const rpc = async method => (await fs.readFile(log, 'utf8')).trim().split('\n').map(JSON.parse).filter(c => c.rpc === method && !/agent-workdirs[\/\\]titles|word title for a design chat/.test(JSON.stringify(c.params || {})));
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle',{state:'attached'});
     await page.evaluate(() => window.agentWorkspace.openChat());
     const completed = n => page.waitForFunction(n => window.agentWorkspace.getUsage().completed === n && !window.agentWorkspace.isBusy(), n, { timeout: 15000 });
@@ -91,6 +94,7 @@ const path = require('node:path');
     assert.equal(await page.evaluate(() => window.agentWorkspace.getDefaults().model), 'fixture-model');
     assert.equal(await page.evaluate(() => window.agentWorkspace.getDefaults().access), 'ask');
     await page.reload();
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle',{state:'attached'});
     await page.evaluate(() => window.agentWorkspace.openProject());
     await page.locator('#code-add-repository').click();
@@ -108,7 +112,21 @@ const path = require('node:path');
     const sendText = async text => { await page.locator('#project-prompt').fill(text); await page.locator('#project-run').click(); };
     await page.evaluate(() => window.agentWorkspace.setDefaults({ access: 'edit' }));
     await ws(() => window.agentWorkspace.newChat());
-    assert.equal((await state()).suggestions.length, 6, 'empty chats offer six suggestions');
+    const starters = (await state()).suggestions;
+    assert.equal(starters.length, 12, 'empty chats offer twelve starter briefs');
+    for (const item of starters) assert.ok(item.title && item.style && item.prompt.length > 120, `starter brief "${item.title}" names a style and is detailed`);
+    assert.equal(new Set(starters.map(item => item.style)).size, 12, 'every starter brief uses a different style direction');
+    await page.waitForFunction(() => document.querySelectorAll('[data-suggestion]').length === 4);
+    // Clicking a starter brief fills the composer and pins the brief's style in the composer style picker (sent as designStyle).
+    await ws(() => window.chatDesignStyle?.set(''));
+    const shownTitle = await page.locator('[data-suggestion]').first().getAttribute('data-suggestion');
+    const shown = starters.find(item => item.title === shownTitle);
+    await page.locator('[data-suggestion] button').first().click();
+    assert.equal(await page.locator('#project-prompt').inputValue(), shown.prompt, 'a starter brief fills the composer');
+    assert.equal(await ws(() => window.chatDesignStyle?.get()), shown.style, 'a starter brief selects its design style');
+    if (await page.locator('#chat-style-picker').count()) await page.waitForFunction(id => document.getElementById('chat-style-picker')?.dataset.styleId === id, shown.style);
+    await ws(() => window.chatDesignStyle.set(''));
+    await page.locator('#project-prompt').fill('');
     await ws(() => window.agentWorkspace.setDraft('draft for the new chat'));
     const draftChat = (await state()).conversationId;
     await ws(() => window.agentWorkspace.newChat());
@@ -222,6 +240,7 @@ const path = require('node:path');
     const storedKey = await ws(() => window.agentWorkspace.getState().projectKey);
     await page.evaluate(([key, id]) => { const list = JSON.parse(localStorage.getItem(key)); list.find(c => c.id === id).toolsVersion = 'stale-tools'; localStorage.setItem(key, JSON.stringify(list)); }, ['better-agent-chats:' + storedKey, chatId]);
     await page.reload();
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await page.evaluate(() => window.agentWorkspace.openProject());
     await page.locator('#code-add-repository').click();

@@ -4,6 +4,7 @@
 // worktree, switching chats switches the tree root, the list survives a reload and Design returns to the canvas.
 // CODE_WORKSPACE_SHOT=/path.png saves a screenshot of the populated workspace.
 const { _electron } = require('@playwright/test');
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -26,10 +27,12 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
   await fs.chmod(path.join(bin, 'codex'), 0o755);
   const env = { ...process.env, ...identity, PATH: bin + path.delimiter + process.env.PATH, FAKE_CODEX_LOG: log, VERYNIZE_WORKSPACES_DIR: workspaces, VERYNIZE_BRANCH_PREFIX: 'verynize' };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   const rpc = async method => (await fs.readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(c => c.rpc === method && !/agent-workdirs[\/\\]titles|word title for a design chat/.test(JSON.stringify(c.params || {})));
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     await page.setViewportSize({ width: 1440, height: 870 });
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     const state = () => page.evaluate(() => window.agentWorkspace.getState());
@@ -158,6 +161,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     // First preview requests the LLM setup flow; manual configuration remains available.
     await page.addInitScript(() => window.addEventListener('bd:setup-preview', event => { event.stopImmediatePropagation(); window.previewSetupRequested = true; }, {capture: true, once: true}));
     await page.reload();
+    await waitForUiReady(page);
     await page.locator(`#code-file-tree[data-root="${first.chatRoot}"]`).waitFor();
     await page.locator('#code-start-preview').click();
     assert.equal(await page.evaluate(() => window.previewSetupRequested), true);
@@ -165,9 +169,9 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     await page.locator('#code-configure-preview').click();
     await page.locator('#preview-run-command').waitFor();
     await page.getByRole('button', {name: 'Save', exact: true}).click();
-    await page.getByRole('status').filter({hasText: 'Enter a run command.'}).waitFor();
+    await page.getByRole('status').filter({hasText: 'Enter a start command.'}).waitFor();
     await page.locator('#preview-run-command').fill('npm run dev');
-    await page.locator('#preview-port').fill('5173');
+    await page.locator('#preview-opens-at').fill('5173');
     await page.getByRole('button', {name: 'Save', exact: true}).click();
     await page.locator('#preview-run-command').waitFor({state: 'hidden'});
     const previewConfig = await page.evaluate(() => window.desktop.devServer.status());
@@ -175,12 +179,13 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     assert.equal(previewConfig.config.url, 'http://localhost:5173/');
     assert.equal((await page.evaluate(() => window.desktop.devServer.status())).root, first.chatRoot);
 
-    // A real MCP proposal remains pending until the user accepts its inline card.
+    // A real MCP proposal in edit access remains pending until the user accepts its inline card (auto access saves it
+    // directly: tests/preview-header.cjs).
     const {Client} = await import('@modelcontextprotocol/sdk/client/index.js');
     const {StreamableHTTPClientTransport} = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
     const bridgeInfo = JSON.parse(await fs.readFile(path.join(root, 'profile', 'mcp.json'), 'utf8'));
     const previewClient = new Client({name:'preview-proposal-test',version:'1'});
-    await previewClient.connect(new StreamableHTTPClientTransport(new URL(bridgeInfo.url), {requestInit:{headers:{Authorization:`Bearer ${bridgeInfo.token}`, 'x-verynize-access':'full'}}}));
+    await previewClient.connect(new StreamableHTTPClientTransport(new URL(bridgeInfo.url), {requestInit:{headers:{Authorization:`Bearer ${bridgeInfo.token}`, 'x-verynize-access':'edit'}}}));
     try {
       const result = await previewClient.callTool({name:'propose_preview',arguments:{command:['node','-e','process.exit(7)'],port:5173,chatId:first.conversationId,name:'Fixture'}});
       assert.ok(!result.isError, JSON.stringify(result));
@@ -188,6 +193,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
       const beforeAccept = await page.evaluate(() => window.desktop.devServer.status());
       assert.deepEqual(beforeAccept.config.command, ['npm','run','dev'], 'proposal does not overwrite accepted configuration');
       await page.reload();
+      await waitForUiReady(page);
       await page.locator('#preview-proposal').waitFor();
       assert.match(await page.locator('#preview-proposal').textContent(), /Proposed Preview configuration/);
       await page.locator('#preview-proposal').getByRole('button',{name:'Edit',exact:true}).click();
@@ -241,6 +247,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
     assert.equal(await page.locator('#code-workspace').isVisible(), false);
     assert.equal(await page.locator('#canvas').isVisible(), true);
     await page.reload();
+    await waitForUiReady(page);
     await page.waitForSelector('#project-toggle', { state: 'attached' });
     await page.getByRole('radio', { name: 'Code' }).click();
     await page.locator('[data-repository="site"]').waitFor();

@@ -34,6 +34,8 @@ import { MAX_FILE, cleanPath } from "./apps.js";
 import { profilePage, missingApp } from "./pages.js";
 import { passkeyPage, passkeyScript } from "./passkey-page.js";
 import { verifiedPage, resetPasswordPage, resetPasswordScript } from "./account-pages.js";
+import * as profiles from "./profiles.js";
+import { handleRoomAssets } from "./assets.js";
 
 export { DesignRoom } from "./rooms.js";
 export { AccountDirectory } from "./accounts.js";
@@ -46,6 +48,8 @@ const ROOM_ROUTE = new RegExp(
 const APP_ROUTE = new RegExp(
   `^/api/apps/(${UUID})(/versions(?:/(\\d+)(/finalize|/files/(.+))?)?|/activate|/publish)?$`,
 );
+// Room assets (cloud/assets.js).
+const ASSET_ROUTE = new RegExp(`^/api/rooms/(${UUID})/assets(?:/(${UUID}))?$`);
 const SERVE_ROUTE =
   /^\/apps\/([a-z0-9][a-z0-9-]{2,29})\/([a-z0-9][a-z0-9-]{0,62})(?:@(\d+))?(\/.*)?$/;
 
@@ -76,14 +80,40 @@ async function authSession(env, request, token) {
 async function accountOf(env, request, url) {
   const session = sessionOf(request, url);
   if (!session) return null;
-  if (SESSION.test(session)) return await directory(env).resolveSession(session);
-  // Better Auth users act through their directory account (rooms, profiles, apps, passkeys).
+  if (SESSION.test(session)) {
+    const id = await directory(env).resolveSession(session);
+    return id ? await profiles.getProfile(env, id) : null;
+  }
+  // Better Auth users act through their directory profile (rooms, profiles, apps, passkeys).
   const found = await authSession(env, request, session);
   if (!found?.user?.emailVerified) return null;
-  const account = await rpc(directory(env).linkVerifiedAccount(found.user.email, found.user.name));
+  const { profile: account, linked } = await profiles.linkUser(env, found.user);
+  if (linked) await adoptLegacyRooms(env, request, account, found.user);
   // The Better Auth user (organizations); not serialized into responses.
   Object.defineProperty(account, "authUser", { value: found.user, enumerable: false });
   return account;
+}
+/**
+ * First sign-in of an account that existed before email + password: the rooms it owns outside any
+ * organization move into the user's personal organization, so its workspace shows them.
+ */
+async function adoptLegacyRooms(env, request, account, user) {
+  const owned = (await profiles.rooms(env, account.id)).filter((room) => room.role === "owner");
+  if (!owned.length) return;
+  const personal = await ensurePersonalOrganization(env, createAuth(env, request), user);
+  for (const room of owned)
+    if (!(await roomOrganization(env, room.id)))
+      await addRoom(env, {
+        id: room.id,
+        organizationId: personal,
+        title: room.title,
+        userId: user.id,
+      });
+}
+/** Session responses from the credential store carry its mirror; answer with the D1 profile. */
+async function withProfile(env, result) {
+  if (!result?.session || !result.account?.id) return result;
+  return { ...result, account: await profiles.getProfile(env, result.account.id) };
 }
 async function requireAccount(env, request, url) {
   const account = await accountOf(env, request, url);
@@ -116,10 +146,13 @@ function roomRequest(target, request, account, body, orgRole) {
     headers.set("content-type", "application/json");
     return new Request(target, { method: request.method, headers, body: JSON.stringify(body) });
   }
+  const streamed = !["GET", "HEAD"].includes(request.method);
   return new Request(target, {
     method: request.method,
     headers,
-    body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
+    body: streamed ? request.body : undefined,
+    // A streamed body needs a half-duplex request outside workerd (Node's fetch).
+    duplex: streamed ? "half" : undefined,
   });
 }
 
@@ -185,7 +218,11 @@ async function handleAuth(request, env, url) {
     const data = await readJson(request, 16 * 1024);
     if (await limited(env.AUTH_LIMIT, `${ip(request)}:verify`))
       fail(429, "Too many sign-in attempts. Try again in a minute.");
-    return json(await rpc(directory(env).verifySignIn(data.token, data.label)));
+    const { email } = await rpc(directory(env).consumeSignInLink(data.token));
+    const account = await profiles.ensureProfile(env, email, { verified: true });
+    await directory(env).mirrorAccount(account);
+    const { session } = await directory(env).newSession(account.id, data.label);
+    return json({ session, account });
   }
   if (path === "/api/auth/signout" && request.method === "POST") {
     const session = sessionOf(request, url);
@@ -228,19 +265,20 @@ async function handleAuth(request, env, url) {
     const account = await requireAccount(env, request, url);
     const data = await readJson(request, 16 * 1024);
     const updated = await rpc(
-      directory(env).updateProfile(account.id, {
+      profiles.updateProfile(env, account.id, {
         handle: data.handle,
         displayName: data.displayName,
         avatarUrl: data.avatarUrl,
       }),
     );
+    await directory(env).mirrorAccount(updated);
     return json({ account: updated, profilePath: `/u/${updated.handle}` });
   }
   if (path === "/api/me/rooms" && request.method === "GET") {
     const account = await requireAccount(env, request, url);
     // Direct memberships plus rooms reached through organizations; the higher role wins.
     const rooms = new Map();
-    for (const room of await directory(env).rooms(account.id)) rooms.set(room.id, room);
+    for (const room of await profiles.rooms(env, account.id)) rooms.set(room.id, room);
     if (account.authUser)
       for (const room of await userOrganizationRooms(env, account.authUser.id)) {
         const direct = rooms.get(room.id);
@@ -274,11 +312,15 @@ async function handleAuth(request, env, url) {
   }
   if (path === "/api/auth/handoff/claim" && request.method === "POST") {
     const data = await readJson(request, 16 * 1024);
-    const result = await rpc(directory(env).claimHandoff(data.id, data.secret, data.label));
+    const result = await withProfile(
+      env,
+      await rpc(directory(env).claimHandoff(data.id, data.secret, data.label)),
+    );
     return json(result, result.pending ? 202 : 200);
   }
   if (path === "/api/auth/passkeys/ticket" && request.method === "POST") {
     const account = await requireAccount(env, request, url);
+    await directory(env).mirrorAccount(account);
     return json(await rpc(directory(env).createPasskeyTicket(account.id)), 201);
   }
   if (path === "/api/auth/passkeys/register/options" && request.method === "POST") {
@@ -295,7 +337,9 @@ async function handleAuth(request, env, url) {
   }
   if (path === "/api/auth/passkeys/login/verify" && request.method === "POST") {
     const data = await readJson(request, 64 * 1024);
-    return json(await rpc(directory(env).verifyPasskeyLogin(data, rp.origin, rp.id)));
+    return json(
+      await withProfile(env, await rpc(directory(env).verifyPasskeyLogin(data, rp.origin, rp.id))),
+    );
   }
   if (path === "/api/me/passkeys" && request.method === "GET") {
     const account = await requireAccount(env, request, url);
@@ -312,7 +356,7 @@ async function handleAuth(request, env, url) {
   }
   const profile = path.match(/^\/api\/profiles\/([a-z0-9-]{1,30})$/);
   if (profile && request.method === "GET") {
-    const result = await directory(env).profile(profile[1]);
+    const result = await profiles.publicCreator(env, profile[1]);
     return result ? json(result) : json({ error: "Profile not found" }, 404);
   }
   return null;
@@ -345,8 +389,7 @@ async function handleRooms(request, env, url) {
       roomRequest("https://room/create", request, account, { document: data.document }),
     );
     const result = await response.json();
-    if (response.ok && account)
-      await directory(env).linkRoom(account.id, id, "owner", result.title);
+    if (response.ok && account) await profiles.linkRoom(env, account.id, id, "owner", result.title);
     if (response.ok && organizationId)
       await addRoom(env, { id, organizationId, title: result.title, userId: account.authUser.id });
     return json({ id, ...result, organizationId }, response.status);
@@ -356,6 +399,25 @@ async function handleRooms(request, env, url) {
     return env.ROOMS.getByName(publicMatch[1]).fetch(
       new Request(`https://room/public?nonce=${publicMatch[2]}`),
     );
+  // ---- Room assets (cloud/assets.js): R2 images referenced by URL from room documents. ----
+  const assetMatch = url.pathname.match(ASSET_ROUTE);
+  if (assetMatch) {
+    const [, assetRoom, assetId] = assetMatch;
+    // The caller's room role, computed by the room exactly as for /access.
+    const access = async () => {
+      const account = await accountOf(env, request, url);
+      const orgRole = account?.authUser
+        ? await orgRoomRole(env, assetRoom, account.authUser.id)
+        : null;
+      const asGet = new Request(request.url, { method: "GET", headers: request.headers });
+      const checked = await env.ROOMS.getByName(assetRoom).fetch(
+        roomRequest(new URL("https://room/access"), asGet, account, undefined, orgRole),
+      );
+      return { role: checked.ok ? (await checked.json()).role : null, account };
+    };
+    return handleRoomAssets(request, env, url, assetRoom, assetId || null, access);
+  }
+  // ---- end room assets ----
   const match = url.pathname.match(ROOM_ROUTE);
   if (!match) return null;
   const roomId = match[1],
@@ -371,13 +433,13 @@ async function handleRooms(request, env, url) {
   if (action === "/members" && request.method === "POST") {
     if (!account) fail(401, "Sign in to invite people by email");
     const data = await readJson(request, 16 * 1024);
-    const invitee = await rpc(directory(env).ensureAccount(data.email));
+    const invitee = await profiles.ensureProfile(env, data.email);
     const response = await stub.fetch(
       roomRequest(forward, request, account, { account: invitee, role: data.role }, orgRole),
     );
     const result = await response.json();
     if (response.ok) {
-      await directory(env).linkRoom(invitee.id, roomId, data.role, result.title);
+      await profiles.linkRoom(env, invitee.id, roomId, data.role, result.title);
       result.emailed = await directory(env).notifyInvite(
         invitee.email,
         result.title,
@@ -424,7 +486,7 @@ async function handleRooms(request, env, url) {
   if (action === "/publish" && request.method === "POST") {
     const publicId = `${roomId}.${result.nonce}`;
     if (account)
-      await directory(env).recordPublication(account.id, {
+      await profiles.recordPublication(env, account.id, {
         kind: "design",
         ref: roomId,
         title: result.title,
@@ -433,11 +495,11 @@ async function handleRooms(request, env, url) {
     return json({ publicId, revision: result.revision });
   }
   if (action === "/publish" && request.method === "DELETE")
-    await directory(env).removePublication("design", roomId);
+    await profiles.removePublication(env, "design", roomId);
   if (action === "/claim" && account)
-    await directory(env).linkRoom(account.id, roomId, "owner", result.title);
+    await profiles.linkRoom(env, account.id, roomId, "owner", result.title);
   if (action.startsWith("/members/") && request.method === "DELETE")
-    await directory(env).unlinkRoom(result.removed, roomId);
+    await profiles.unlinkRoom(env, result.removed, roomId);
   return json(result, response.status);
 }
 
@@ -446,19 +508,16 @@ async function handleApps(request, env, url) {
     const account = await requireAccount(env, request, url);
     if (request.method === "POST") {
       const data = await readJson(request, 16 * 1024);
-      return json(
-        { app: await rpc(directory(env).ensureApp(account.id, data.name, data.title)) },
-        201,
-      );
+      return json({ app: await profiles.ensureApp(env, account.id, data.name, data.title) }, 201);
     }
-    if (request.method === "GET") return json({ apps: await directory(env).apps(account.id) });
+    if (request.method === "GET") return json({ apps: await profiles.apps(env, account.id) });
     return null;
   }
   const match = url.pathname.match(APP_ROUTE);
   if (!match) return null;
   const account = await requireAccount(env, request, url);
   const appId = match[1];
-  const app = await directory(env).appInfo(appId);
+  const app = await profiles.appInfo(env, appId);
   if (!app || app.accountId !== account.id) fail(404, "App not found");
   const site = env.APPS.getByName(appId);
   const version = match[3] ? Number(match[3]) : null;
@@ -477,7 +536,7 @@ async function handleApps(request, env, url) {
     const data = await readJson(request);
     const sealed = await rpc(site.finalize(version, data.files));
     const info =
-      data.activate === false ? app : await rpc(directory(env).setActiveVersion(appId, version));
+      data.activate === false ? app : await profiles.setActiveVersion(env, appId, version);
     return json({
       ...sealed,
       app: info,
@@ -494,11 +553,11 @@ async function handleApps(request, env, url) {
     const data = await readJson(request, 16 * 1024);
     if (!Number.isSafeInteger(data.version) || !(await site.isReady(data.version)))
       fail(404, "Version not found");
-    return json({ app: await rpc(directory(env).setActiveVersion(appId, data.version)) });
+    return json({ app: await profiles.setActiveVersion(env, appId, data.version) });
   }
   if (match[2] === "/publish" && request.method === "DELETE")
     return json({
-      app: await rpc(directory(env).setActiveVersion(appId, null)),
+      app: await profiles.setActiveVersion(env, appId, null),
       unpublished: true,
     });
   return null;
@@ -511,7 +570,7 @@ async function serveApp(request, env, url) {
   const [, handle, name, pinned, rest] = match;
   if (rest === undefined)
     return Response.redirect(`${url.origin}${url.pathname}/${url.search}`, 301);
-  const app = await directory(env).resolveApp(handle, name);
+  const app = await profiles.resolveApp(env, handle, name);
   if (!app) return missingApp();
   const version = pinned ? Number(pinned) : app.activeVersion;
   if (version === null || version === undefined) return missingApp("This app was unpublished.");
@@ -555,6 +614,13 @@ export default {
     if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: corsHeaders });
     try {
+      // The directory moved to D1: copy the AccountDirectory data once, before it is read.
+      if (/^\/(api|u|apps)\//.test(url.pathname)) await profiles.migrateDirectory(env);
+      if (url.pathname === "/api/mcp") {
+        // Hosted MCP (cloud/mcp.js). Loaded on first use: it bundles the design engine.
+        const { handleMcp } = await import("./mcp.js");
+        return await handleMcp(request, env, url, { accountOf, limited });
+      }
       if (url.pathname.startsWith("/api/")) {
         const response =
           (await handleAuth(request, env, url)) ||
@@ -572,7 +638,7 @@ export default {
       }
       const profile = url.pathname.match(/^\/u\/([a-z0-9-]{1,30})\/?$/);
       if (profile && request.method === "GET")
-        return profilePage(await directory(env).profile(profile[1]));
+        return profilePage(await profiles.publicCreator(env, profile[1]));
       if (url.pathname.startsWith("/apps/"))
         return (await serveApp(request, env, url)) || missingApp();
       return env.ASSETS ? env.ASSETS.fetch(request) : new Response("Verynize API", { status: 200 });

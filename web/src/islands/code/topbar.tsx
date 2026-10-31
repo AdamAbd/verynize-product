@@ -1,31 +1,38 @@
 // Code workspace top bars: the breadcrumb + chat switcher (rendered into the window title bar) and the toolbar
-// row with the status line, "Start preview" split button and the right-panel toggle.
-import { useEffect, useRef, useState } from "react";
+// row with the status line, "Start preview" split button and the right-panel toggle. Preview logic: ./preview-state.
+import { useEffect, useState } from "react";
 import {
-  CameraIcon,
+  AppWindowIcon,
+  BoltIcon,
   ChevronDownIcon,
   ChevronsUpDownIcon,
-  ExternalLinkIcon,
-  FileDownIcon,
   FolderIcon,
   GitBranchIcon,
-  GitForkIcon,
   LoaderCircleIcon,
+  Maximize2Icon,
   MessageSquareIcon,
-  MonitorPlayIcon,
+  PauseIcon,
   PlayIcon,
-  SparklesIcon,
-  SquareIcon,
+  SquareArrowOutUpRightIcon,
 } from "lucide-react";
 import { PanelRightIcon, PlusIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
-import { presetImplementPrompt } from "../chat/changes";
 import { ChatMenu, ChatMenuContent, ChatMenuItem, ChatMenuLabel, ChatMenuSeparator, ChatMenuTrigger } from "../chat/menu";
 import type { ChatState } from "../chat/store";
-import { desktop, errorMessage, setStatus, workspace, type DevServerStatus } from "./api";
+import { workspace } from "./api";
 import { newChat, openChat, QUICK, repositoryByKey, useRepositories } from "./controller";
-import { PreviewConfiguration } from "./preview-configuration";
-import { markStep } from "./next-steps";
+import "./preview-settings";
+import {
+  canOpenInTab,
+  goToPreview,
+  openInBrowser,
+  openInTab,
+  setInvestigating,
+  startPreview,
+  stopPreview,
+  usePreview,
+  type PreviewPhase,
+} from "./preview-state";
 
 const iconButton =
   "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground-2 focus-visible:ring-1 focus-visible:ring-ring aria-pressed:text-foreground-2";
@@ -80,153 +87,74 @@ export function Breadcrumb({ state }: { state: ChatState }) {
   );
 }
 
-/** Dev server of the active root (desktop/dev-server.cjs via preload `devServer`). */
-function useDevServer(root: string | null | undefined) {
-  const [status, setDevStatus] = useState<DevServerStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    setDevStatus(null);
-    const api = desktop()?.devServer;
-    if (!root || !api) return;
-    let live = true;
-    const poll = () =>
-      api
-        .status({root})
-        .then((s) => live && s.root === root && setDevStatus(s))
-        .catch(() => {});
-    void poll();
-    const timer = window.setInterval(poll, 4000);
-    return () => {
-      live = false;
-      window.clearInterval(timer);
-    };
-  }, [root]);
-  const run = async (fn: () => Promise<DevServerStatus>, propagate = false) => {
-    setBusy(true);
-    try {
-      const next = await fn();
-      setDevStatus(next);
-      return next;
-    } catch (error) {
-      setStatus(errorMessage(error));
-      if (propagate) throw error;
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { status, busy, run };
+/** Play, spinner, or pause with a green dot: the preview's state at a glance (PS1, X5). */
+export function PreviewGlyph({ phase }: { phase: PreviewPhase }) {
+  if (phase === "starting" || phase === "investigating")
+    return <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" />;
+  if (phase === "running")
+    return (
+      <span className="relative flex size-3.5 shrink-0 items-center justify-center">
+        <PauseIcon className="size-3.5 fill-current text-muted-foreground" />
+        <span data-preview-dot className="absolute right-0 bottom-0 size-1.5 rounded-full bg-preview-running ring-1 ring-background" />
+      </span>
+    );
+  return <PlayIcon className="size-3 shrink-0 fill-current text-muted-foreground" />;
 }
 
-const showPreview = (url: string, separate: boolean, state: ChatState) => {
-  if (!separate && window.livePreview) {
-    workspace()?.openChat?.();
-    window.livePreview.show(url, {root: state.activeRoot || undefined, name: `${state.projectName} › ${state.conversations.find(c => c.id === state.conversationId)?.title || "App"}`, chatId: state.conversationId || undefined});
-  } else void desktop()?.previewApp?.({ url });
-};
-
+/** "Start preview / Stop preview" split button and its menu (PS1, X5). Shared by the chat dock and the Code toolbar. */
 export function PreviewButton({ state, idPrefix = "code" }: { state: ChatState; idPrefix?: string }) {
   const root = state.activeRoot;
-  const currentRoot = useRef(root);
-  currentRoot.current = root;
-  const [configure, setConfigure] = useState(false);
-  const { status, busy, run } = useDevServer(root);
-  const pending = useRef<{root: string; separate: boolean} | null>(null);
+  const { status, phase } = usePreview(root);
+  const running = phase === "running";
+  const live = running || phase === "starting";
+  // The agent investigation ends with the chat's turn.
   useEffect(() => {
-    if (pending.current?.root !== root) pending.current = null;
-    if (pending.current && status && status.root === root && status.state === "running" && status.url) {
-      showPreview(status.url, pending.current.separate, state);
-      pending.current = null;
-    }
-  }, [root, status, state]);
-  const api = desktop()?.devServer;
-  const running = status?.root === root && (status?.state === "running" || status?.state === "starting");
-  const actions = workspace()?.actions;
-  const start = async (separate = false, configured = false) => {
-    if (!configured && root && !status?.config && !running) { window.dispatchEvent(new CustomEvent("bd:setup-preview")); return; }
-    if (!api || !root) {
-      actions?.livePreview?.();
-      return;
-    }
-    if (running && status?.url) {
-      showPreview(status.url, separate, state);
-      return;
-    }
-    setStatus("Starting the dev server…");
-    const next = await run(() => api.start({root}), configured);
-    if (currentRoot.current !== root || !next || next.root !== root) return;
-    if (next.url && next.state === "running") {
-      markStep("published");
-      setStatus(`Preview running at ${next.url}`);
-      showPreview(next.url, separate, state);
-    } else if (next.state === "starting") { pending.current = {root, separate}; setStatus("The dev server is starting; its address will open when ready"); }
-    else {
-      const message = next.error || `The dev server ${next.state}${next.tail ? `: ${next.tail.split("\n").slice(-2).join(" ")}` : ""}`;
-      setStatus(message);
-      if (configured) throw new Error(message);
-    }
-  };
+    if (root && !state.busy) setInvestigating(root, false);
+  }, [root, state.busy]);
+  const label = live ? "Stop preview" : "Start preview";
+  const toggle = () => (live ? void stopPreview(state) : void startPreview(state));
   const segment =
     "flex h-6.5 items-center text-sm text-foreground-2 outline-none hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-muted disabled:opacity-60";
-  const label = busy ? "Starting…" : running ? "Stop preview" : "Start preview";
-  const toggle = () => running && api ? void run(() => api.stop({root: root || undefined})) : void start();
   return (
-    <div className="flex shrink-0 items-center rounded-md border border-card-border bg-settings">
-      {configure && root && <PreviewConfiguration key={root} root={root} status={status} onClose={() => setConfigure(false)} onStart={() => start(false, true)} />}
-      <button type="button" id={`${idPrefix}-start-preview`} disabled={busy} className={cn(segment, "gap-2 rounded-l-md pr-2.5 pl-2")} onClick={toggle}>
-        {busy ? (
-          <LoaderCircleIcon className="size-3 animate-spin text-muted-foreground motion-reduce:animate-none" />
-        ) : (
-          running ? <SquareIcon className="size-3 text-muted-foreground" /> : <PlayIcon className="size-3 fill-current text-muted-foreground" />
-        )}
+    <div data-preview-phase={phase} className="flex shrink-0 items-center rounded-md border border-edge bg-background">
+      <button
+        type="button"
+        id={`${idPrefix}-start-preview`}
+        disabled={!root || phase === "investigating"}
+        className={cn(segment, "gap-2.5 rounded-l-md pr-2.5 pl-2.5")}
+        onClick={toggle}
+      >
+        <PreviewGlyph phase={phase} />
         {label}
       </button>
-      <span className="h-6.5 w-px bg-card-border" />
+      <span className="h-6.5 w-px bg-edge" />
       <ChatMenu modal={false}>
-        <ChatMenuTrigger id={`${idPrefix}-preview-menu`} aria-label="Preview options" className={cn(segment, "w-5.5 justify-center rounded-r-md")}>
+        <ChatMenuTrigger id={`${idPrefix}-preview-menu`} aria-label="Preview options" className={cn(segment, "w-6 justify-center rounded-r-md")}>
           <ChevronDownIcon className="size-3 text-muted-foreground" />
         </ChatMenuTrigger>
-        <ChatMenuContent align="end" className="w-56">
-          <ChatMenuItem disabled={!root || state.busy} onSelect={() => window.dispatchEvent(new CustomEvent("bd:setup-preview"))}><SparklesIcon />Set up the Preview</ChatMenuItem>
-          <ChatMenuItem id={`${idPrefix}-configure-preview`} disabled={!root || busy || running} onSelect={() => setConfigure(true)}>
-            <MonitorPlayIcon />
-            Preview configuration…
-          </ChatMenuItem>
-          <ChatMenuItem onSelect={() => void start(true)} disabled={!root}>
-            <ExternalLinkIcon />
-            Preview in a separate window
+        {/* oxlint-disable-next-line shadcn/no-restyle -- Wonder's preview split menu: 176px wide, 12px radius (PS1, X5). */}
+        <ChatMenuContent align="end" className="w-44 rounded-2xl">
+          <ChatMenuItem id={`${idPrefix}-preview-tab`} className="h-6.25" disabled={!root || !canOpenInTab(running)} onSelect={() => openInTab(state)}>
+            <Maximize2Icon />
+            Open in a tab
+            <span className="ml-auto text-xs text-muted-foreground">⌘⌥P</span>
           </ChatMenuItem>
           {running && (
-            <ChatMenuItem id={`${idPrefix}-stop-preview`} onSelect={() => api && void run(() => api.stop({root: root || undefined}))}>
-              <SquareIcon />
-              Stop dev server
-            </ChatMenuItem>
+            <>
+              <ChatMenuItem id={`${idPrefix}-preview-go`} className="h-6.25" onSelect={() => goToPreview(state)}>
+                <AppWindowIcon />
+                Go to preview
+              </ChatMenuItem>
+              <ChatMenuItem id={`${idPrefix}-preview-browser`} className="h-6.25" disabled={!status?.url} onSelect={() => root && openInBrowser(root)}>
+                <SquareArrowOutUpRightIcon />
+                Open in browser
+              </ChatMenuItem>
+            </>
           )}
-          <ChatMenuItem id="project-preview" onSelect={() => actions?.livePreview?.()}>
-            <MonitorPlayIcon />
-            Open a local URL…
-          </ChatMenuItem>
           <ChatMenuSeparator />
-          <ChatMenuItem id="project-capture" onSelect={() => actions?.captureApp?.()}>
-            <CameraIcon />
-            Capture app to canvas
-          </ChatMenuItem>
-          <ChatMenuItem id="project-pdf" onSelect={() => actions?.exportPDF?.()}>
-            <FileDownIcon />
-            Export PDF
-          </ChatMenuItem>
-          <ChatMenuItem onSelect={presetImplementPrompt}>
-            <SparklesIcon />
-            Implement selection in code
-          </ChatMenuItem>
-          <ChatMenuSeparator />
-          <ChatMenuItem id="project-git" disabled={!root} onSelect={() => actions?.gitStatus?.()}>
-            <GitBranchIcon />
-            Git status
-          </ChatMenuItem>
-          <ChatMenuItem id="project-worktree" disabled={!root} onSelect={() => actions?.createWorktree?.()}>
-            <GitForkIcon />
-            Create worktree…
+          <ChatMenuItem id={`${idPrefix}-configure-preview`} className="h-6.25" disabled={!root} onSelect={() => root && window.previewSettings?.open(root)}>
+            <BoltIcon />
+            Preview settings
           </ChatMenuItem>
         </ChatMenuContent>
       </ChatMenu>

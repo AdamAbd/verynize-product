@@ -4,22 +4,13 @@
 import { legacyClick, legacySet } from "@/lib/bridge";
 import { errorMessage } from "../code/api";
 import { workspace } from "./store";
+import { OPEN_STYLE_PICKER_EVENT, hasStyleCatalog } from "./style-picker";
+import { platform } from "@/lib/platform";
 
 export type AgentCommand = { name: string; description: string; argumentHint: string; source: string };
 export type ReferenceCollection = { id: string; name: string; count: number; createdAt: number };
 
-type ChatDesktop = {
-  listAgentCommands?(options: { agent: string; root?: string | null }): Promise<{ commands: AgentCommand[] }>;
-  designReferencesList?(): Promise<ReferenceCollection[]>;
-  designReferencesSave?(options: { name: string; images: string[] }): Promise<ReferenceCollection>;
-  designReferencesAttach?(options: { id: string; chatId: string }): Promise<{ path: string; name: string }[]>;
-  worktreeAddFiles?(options: { root: string; folder: boolean }): Promise<{ added: string[] } | null>;
-  pickWorkingDirectory?(): Promise<string | null>;
-  terminalRecentOutput?(options: { cwd?: string | null }): Promise<{ id: string; cwd: string; text: string } | null>;
-  repositories?: { createChatWorktree(options: { repoId: string; chatId: string }): Promise<{ path: string; branch: string | null; shared: boolean }> };
-};
-
-export const chatDesktop = () => (window as unknown as { desktop?: ChatDesktop }).desktop;
+export const chatDesktop = () => platform.desktop;
 
 const status = (text: string) => workspace()?.setStatus?.(text);
 
@@ -143,6 +134,14 @@ export const BUILTIN_COMMANDS: BuiltinCommand[] = [
     description: "Start a fresh agent session; the transcript stays",
     source: "verynize",
     run: () => void attempt(() => workspace()?.clearSession?.()),
+  },
+  {
+    name: "style",
+    argumentHint: "",
+    description: "Choose the design style for the next messages",
+    source: "verynize",
+    when: hasStyleCatalog,
+    run: () => window.dispatchEvent(new Event(OPEN_STYLE_PICKER_EVENT)),
   },
   {
     name: "canvas-context",

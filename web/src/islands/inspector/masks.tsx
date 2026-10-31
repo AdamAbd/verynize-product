@@ -2,13 +2,18 @@
 // Image or a Custom CSS gradient, each with alpha, rotation, invert and visibility, plus Advanced options
 // (Mode, Repeat, Position, Size) and how the mask combines with the masks below it (Add, Subtract, Intersect,
 // Exclude). "Detach mask as shape" turns a mask into a separate layer. Several masks stack as mask-image
-// layers (web/node-style.js). The free-form CSS mask field stays for older documents.
+// layers (web/node-style.js). The free-form CSS mask field (`[name=mask]`) shows only for older documents that
+// still carry `node.mask`; new CSS masks use the Custom type (`[name=mask-<i>-css]`).
+// Shape masks (`type: "shape"`, made by "Use as mask", Wonder P5-mask-inspector) show as one row: frame icon, the
+// editable inset() field (`[name=mask-<i>-shape]`), Detach mask as shape, Remove mask (shape-mask.ts).
 import { useState } from "react";
 import {
   ChevronDown,
   Circle,
   CircleDot,
   Columns2,
+  CopyPlus,
+  Frame,
   Image as ImageIcon,
   Spline,
   SquareDashedBottom,
@@ -16,7 +21,8 @@ import {
 import { activePage } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import { Affix, Caption, Field, NativeSelect, Segmented } from "./controls";
+import { CheckField } from "./check-field";
+import { Affix, Caption, Field, IconButton, NativeSelect, Segmented } from "./controls";
 import {
   ListSection,
   RowTools,
@@ -28,6 +34,8 @@ import {
   type MaskType,
 } from "./effects";
 import { notify } from "./legacy";
+import { RemoveIcon } from "@/components/icons";
+import { detachShapeMask, isShapeInset, removeMask } from "./shape-mask";
 import { fmt, setField, type Node } from "./model";
 
 const MASK_LABEL: Record<MaskType, string> = {
@@ -36,6 +44,7 @@ const MASK_LABEL: Record<MaskType, string> = {
   conic: "Conic",
   image: "Image",
   custom: "Custom",
+  shape: "Shape",
 };
 const MASK_ICON = {
   linear: Columns2,
@@ -43,6 +52,7 @@ const MASK_ICON = {
   conic: CircleDot,
   image: ImageIcon,
   custom: Spline,
+  shape: Frame,
 };
 const MODES = [
   { value: "auto", label: "Auto" },
@@ -186,44 +196,93 @@ export function MaskSection({ node, selection }: EffectProps) {
   const masks = listOf<Mask>(node, "masks");
   const [editing, setEditing] = useState<number | null>(null);
   const edit = (fn: (list: Mask[]) => Mask[]) => editList<Mask>(selection, node, "masks", fn);
-  const [custom, setCustom] = useState(false);
-  const showCustom = custom || masks.length > 0 || !!node.mask;
+  // Wonder A6: the body exists only while there are masks; removing the last one collapses to the header.
+  const hasBody = masks.length > 0 || !!node.mask;
   return (
     <ListSection
       id="mask-section"
       title="Mask"
       addLabel="Add mask"
+      variant="rows"
       onAdd={() => {
         edit((list) => [...list, { type: "linear", rotation: 180, alpha: 100 }]);
         setEditing(masks.length);
-        setCustom(true);
       }}
     >
-      {showCustom ? (
+      {hasBody ? (
         <>
-          {masks.map((mask, index) => (
-            <MaskRow
-              key={index}
-              index={index}
-              node={node}
-              mask={mask}
-              open={editing === index}
-              onOpenChange={(open) => setEditing(open ? index : null)}
-              edit={edit}
-            />
-          ))}
-          <Caption label="Custom mask (CSS)">
-            <Field
-              name="mask"
-              label="Mask gradient (CSS)"
-              value={node.mask}
-              placeholder="linear-gradient(black, transparent)"
-              onCommit={(value) => setField(selection, node, "mask", value)}
-            />
-          </Caption>
+          {masks.map((mask, index) =>
+            mask.type === "shape" ? (
+              <ShapeMaskRow key={index} index={index} node={node} mask={mask} edit={edit} />
+            ) : (
+              <MaskRow
+                key={index}
+                index={index}
+                node={node}
+                mask={mask}
+                open={editing === index}
+                onOpenChange={(open) => setEditing(open ? index : null)}
+                edit={edit}
+              />
+            ),
+          )}
+          {node.mask ? (
+            <Caption label="Custom mask (CSS)">
+              <Field
+                name="mask"
+                label="Mask gradient (CSS)"
+                value={node.mask}
+                placeholder="linear-gradient(black, transparent)"
+                onCommit={(value) => setField(selection, node, "mask", value)}
+              />
+            </Caption>
+          ) : null}
         </>
       ) : null}
     </ListSection>
+  );
+}
+
+/** Wonder P5-mask-inspector: [frame icon] [inset(…) field] [detach] [remove]. */
+function ShapeMaskRow({
+  index,
+  node,
+  mask,
+  edit,
+}: {
+  index: number;
+  node: Node;
+  mask: Mask;
+  edit: (fn: (list: Mask[]) => Mask[]) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2" data-mask-row={index} data-mask-type="shape">
+      <Frame className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <Field
+        name={`mask-${index}-shape`}
+        label="Mask shape"
+        className="min-w-0 flex-1"
+        value={mask.shape ?? ""}
+        onCommit={(raw) => {
+          const shape = raw.trim().replace(/\s+/g, " ");
+          if (!isShapeInset(shape))
+            return "Use inset() with percentages, such as inset(10% 10% 10% 10%)";
+          edit((list) => list.map((item, i) => (i === index ? { ...item, shape } : item)));
+        }}
+      />
+      <IconButton
+        icon={CopyPlus}
+        label="Detach mask as shape"
+        data-mask-detach={index}
+        onClick={() => detachShapeMask(node.id, index)}
+      />
+      <IconButton
+        icon={RemoveIcon}
+        label="Remove mask"
+        data-effect-tool="remove"
+        onClick={() => removeMask(node.id, index)}
+      />
+    </div>
   );
 }
 
@@ -281,10 +340,10 @@ function MaskRow({
             data-mask-edit={index}
             aria-expanded={open}
             data-hidden={mask.hidden === true}
-            className="flex h-6 min-w-0 flex-1 items-center gap-2 rounded-md bg-input px-2 text-left text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring data-[hidden=true]:text-muted-foreground"
+            className="flex h-6 min-w-0 flex-1 items-center gap-2 rounded-md bg-input pr-2 pl-1.5 text-left text-xs text-foreground shadow-field hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring data-[hidden=true]:text-muted-foreground"
             onClick={() => onOpenChange(!open)}
           >
-            <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <span className="truncate">{label}</span>
             {mask.composite && mask.composite !== "add" ? (
               <span className="ml-auto text-muted-foreground">
@@ -400,16 +459,12 @@ function MaskRow({
             </div>
           ) : null}
           {gradient ? (
-            <label className="flex h-6 items-center gap-2 text-xs text-foreground">
-              <input
-                type="checkbox"
-                name={`mask-${index}-invert`}
-                checked={mask.invert === true}
-                className="size-3.5 accent-primary"
-                onChange={(event) => update({ invert: event.target.checked })}
-              />
-              Invert
-            </label>
+            <CheckField
+              name={`mask-${index}-invert`}
+              label="Invert"
+              checked={mask.invert === true}
+              onChange={(invert) => update({ invert })}
+            />
           ) : null}
           <NativeSelect
             name={`mask-${index}-composite`}

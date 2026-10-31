@@ -6,7 +6,8 @@ import { cssVarForToken } from "./jsx-codec.mjs";
 import { layerRecord } from "./export-html.mjs";
 import { styleSignature } from "./codec-html.mjs";
 import { sourceMeta } from "./codec-source.mjs";
-import { documentFontCss } from "./font-faces.mjs";
+import { documentFontCss, usedFontFaces } from "./font-faces.mjs";
+import { extractFontFamilies, familyKind } from "./fonts.mjs";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const decode = (s) =>
@@ -45,8 +46,40 @@ function rootVariables(tokens = {}, variables = {}, aliases = {}) {
   return lines.length ? `:root {\n${lines.join("\n")}\n}\n` : "";
 }
 
-/** A React component (Tailwind classes) for the given nodes, in the order given. */
-export function tailwindCode(document, pageId, nodeIds, name = "Export") {
+/**
+ * Google Fonts `<link>` tags for the web fonts that `nodes` use (Inter included). System and generic families
+ * and the document's embedded `fontFaces` are left out.
+ */
+function fontLinks(document, nodes, markup) {
+  const embedded = new Set(usedFontFaces(document, markup).map((f) => f.family.toLowerCase()));
+  const families = extractFontFamilies({ pages: [{ nodes }] }).filter(
+    (f) =>
+      ["web", "bundled"].includes(familyKind(f.family)) && !embedded.has(f.family.toLowerCase()),
+  );
+  if (!families.length) return [];
+  const query = families
+    .map((f) => {
+      const family = encodeURIComponent(f.family).replace(/%20/g, "+");
+      if (!f.styles.includes("italic")) return `family=${family}:wght@${f.weights.join(";")}`;
+      const axes = f.styles.flatMap((s) => f.weights.map((w) => `${s === "italic" ? 1 : 0},${w}`));
+      return `family=${family}:ital,wght@${axes.join(";")}`;
+    })
+    .join("&");
+  return [
+    '<link rel="preconnect" href="https://fonts.googleapis.com" />',
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin />',
+    `<link href="https://fonts.googleapis.com/css2?${query}&display=swap" rel="stylesheet" />`,
+  ];
+}
+
+const commentLine = (text) => ` * ${String(text).replace(/\*\//g, "* /")}\n`;
+
+/**
+ * A React component (Tailwind classes) for the given nodes, in the order given.
+ * `snippet` ({links, date}) gives the clipboard form used by Copy as code and Copy prompt: a "Made with Verynize"
+ * comment with the layer links and the date, then Google Fonts links and a box-sizing reset inside the fragment.
+ */
+export function tailwindCode(document, pageId, nodeIds, name = "Export", { snippet = null } = {}) {
   const d = clone(validateDocument(clone(document)));
   ensureShortIds(d);
   const page = getPage(d, pageId);
@@ -59,8 +92,8 @@ export function tailwindCode(document, pageId, nodeIds, name = "Export") {
     for (let p = byId.get(n.parentId); p; p = byId.get(p.parentId)) if (ids.has(p.id)) return true;
     return false;
   };
-  const code = nodes
-    .filter((n) => !covered(n))
+  const roots = nodes.filter((n) => !covered(n));
+  const code = roots
     .map((n) => elementCode(d, page, n))
     // Short ids are editor bookkeeping and are dropped. The artboard's canvas position is kept as
     // data-canvas-x/y (inert in React) so import_jsx / jsxToDocument put the artboard back where it was.
@@ -70,16 +103,28 @@ export function tailwindCode(document, pageId, nodeIds, name = "Export") {
         .replace(/ data-component-([xy])="/g, ' data-canvas-$1="'),
     )
     .join("\n");
-  const body = code
-    .split("\n")
-    .map((line) => "      " + line)
-    .join("\n");
+  let extras = [];
+  let made = "";
+  if (snippet) {
+    const rootIds = new Set(roots.map((n) => n.id));
+    const inRoots = (n) => {
+      for (let p = n; p; p = byId.get(p.parentId)) if (rootIds.has(p.id)) return true;
+      return false;
+    };
+    extras = [
+      ...fontLinks(d, page.nodes.filter(inRoots), code),
+      '<style>{"* { box-sizing: border-box; }"}</style>',
+    ];
+    const lines = ["Made with Verynize", ...(snippet.links || []), snippet.date].filter(Boolean);
+    made = `/**\n${lines.map(commentLine).join("")} */\n`;
+  }
+  const body = [...extras, ...code.split("\n")].map((line) => "      " + line).join("\n");
   const vars = rootVariables(d.tokens, d.variables, d.aliases);
   // The @verynize header lets the importer (codec-source.mjs jsxToDocument) restore variables and the page.
   const header = `/* @verynize ${JSON.stringify(sourceMeta(d, page)).replace(/\*\//g, "*\\/")} */\n`;
   // Embedded (captured) custom fonts used by the classes: the same @font-face rules as the HTML export.
   const fonts = documentFontCss(d, code);
-  return `${vars ? `/* Colour variables${d.variables && Object.keys(d.variables).length ? " and typed variables" : ""} used by the classes below:\n${vars}*/\n` : ""}${fonts ? `/* Embedded fonts used by the classes below (add to your global CSS):\n${fonts}\n*/\n` : ""}${header}export default function ${component(name)}() {\n  return (\n    <>\n${body}\n    </>\n  );\n}\n`;
+  return `${made}${vars ? `/* Colour variables${d.variables && Object.keys(d.variables).length ? " and typed variables" : ""} used by the classes below:\n${vars}*/\n` : ""}${fonts ? `/* Embedded fonts used by the classes below (add to your global CSS):\n${fonts}\n*/\n` : ""}${header}export default function ${component(name)}() {\n  return (\n    <>\n${body}\n    </>\n  );\n}\n`;
 }
 
 /**

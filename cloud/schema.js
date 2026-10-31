@@ -1,6 +1,6 @@
 // D1 schema matching the existing SQL migrations. Auth dates remain ISO text for
 // compatibility with the original Better Auth adapter; room dates remain epoch ms.
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, primaryKey, unique } from "drizzle-orm/sqlite-core";
 
 export const user = sqliteTable("user", {
   id: text("id").notNull().primaryKey(),
@@ -128,4 +128,88 @@ export const room = sqliteTable(
     updatedAt: integer("updatedAt").notNull(),
   },
   (table) => [index("room_organizationId_idx").on(table.organizationId)],
+);
+
+// Account directory (cloud/profiles.js, migration 0003). Ids are the former AccountDirectory ids.
+export const profile = sqliteTable("profile", {
+  id: text("id").notNull().primaryKey(),
+  email: text("email").notNull().unique(),
+  handle: text("handle").notNull().unique(),
+  displayName: text("displayName").notNull(),
+  avatarUrl: text("avatarUrl"),
+  verified: integer("verified", { mode: "boolean" }).notNull().default(false),
+  userId: text("userId")
+    .unique()
+    .references(() => user.id, { onDelete: "set null" }),
+  createdAt: integer("createdAt").notNull(),
+});
+
+export const roomMembership = sqliteTable(
+  "room_membership",
+  {
+    accountId: text("accountId").notNull(),
+    roomId: text("roomId").notNull(),
+    role: text("role").notNull(),
+    title: text("title"),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.accountId, table.roomId] }),
+    index("room_membership_roomId_idx").on(table.roomId),
+  ],
+);
+
+export const publication = sqliteTable(
+  "publication",
+  {
+    kind: text("kind").notNull(),
+    ref: text("ref").notNull(),
+    accountId: text("accountId").notNull(),
+    title: text("title").notNull(),
+    path: text("path").notNull(),
+    publishedAt: integer("publishedAt").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.kind, table.ref] }),
+    index("publication_accountId_idx").on(table.accountId),
+  ],
+);
+
+export const app = sqliteTable(
+  "app",
+  {
+    id: text("id").notNull().primaryKey(),
+    accountId: text("accountId").notNull(),
+    name: text("name").notNull(),
+    title: text("title").notNull(),
+    activeVersion: integer("activeVersion"),
+    createdAt: integer("createdAt").notNull(),
+  },
+  (table) => [unique().on(table.accountId, table.name)],
+);
+
+export const migrationState = sqliteTable("migration_state", {
+  name: text("name").notNull().primaryKey(),
+  state: text("state").notNull(),
+  updatedAt: integer("updatedAt").notNull(),
+});
+
+// Room assets (cloud/assets.js, migration 0004): R2 images referenced by URL from room documents.
+export const roomAsset = sqliteTable(
+  "room_asset",
+  {
+    id: text("id").notNull().primaryKey(),
+    roomId: text("roomId").notNull(),
+    sha256: text("sha256").notNull(),
+    size: integer("size").notNull(),
+    contentType: text("contentType").notNull(),
+    status: text("status").notNull(),
+    createdBy: text("createdBy"),
+    createdAt: integer("createdAt").notNull(),
+    uploadedAt: integer("uploadedAt"),
+  },
+  (table) => [
+    unique().on(table.roomId, table.sha256),
+    index("room_asset_roomId_idx").on(table.roomId),
+  ],
 );

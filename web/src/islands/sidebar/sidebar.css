@@ -53,3 +53,11 @@ body[data-layer-drag] #bd-layer-tree,
 body[data-layer-drag] #bd-layer-tree * {
   cursor: grabbing;
 }
+/* Page reorder insertion line (geometry set as a custom property by PagesSection's PageDropLine). */
+#bd-page-drop-indicator {
+  top: var(--drop-top, 0);
+}
+body[data-page-drag] #bd-page-list,
+body[data-page-drag] #bd-page-list * {
+  cursor: grabbing;
+}

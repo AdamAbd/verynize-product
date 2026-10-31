@@ -1,0 +1,43 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --ignore-scripts",
+  "buildCommand": "node scripts/vercel-build.mjs",
+  "outputDirectory": "dist/vercel-web",
+  "functions": {
+    "api/server.mjs": {
+      "maxDuration": 300,
+      "includeFiles": "{cloud/migrations/**,web/cloud-ops.js,web/shaders.js,node_modules/@iconify-json/*/icons.json,node_modules/tailwindcss/*.css}"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/server?__vz_path=/api/:path*"
+    },
+    {
+      "source": "/u/:path*",
+      "destination": "/api/server?__vz_path=/u/:path*"
+    },
+    {
+      "source": "/apps/:path*",
+      "destination": "/api/server?__vz_path=/apps/:path*"
+    },
+    {
+      "source": "/account/:path*",
+      "destination": "/api/server?__vz_path=/account/:path*"
+    },
+    {
+      "source": "/passkey",
+      "destination": "/api/server?__vz_path=/passkey"
+    },
+    {
+      "source": "/passkey.js",
+      "destination": "/api/server?__vz_path=/passkey.js"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

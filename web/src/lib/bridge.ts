@@ -41,8 +41,10 @@ export type DesignApi = {
   addNode(type: string, extra?: Partial<LayerNode>): string;
   /** Replace the file's icon library (validated, one undo step); an empty list removes it. */
   setIcons(icons: DesignIcon[]): boolean;
-  /** Patch the active page (validated, one undo step); `undefined` values remove the key. */
-  updatePage(patch: Partial<Omit<DesignPage, "id" | "nodes">>): boolean;
+  /** Patch the page `id` (default: the active page; validated, one undo step); `undefined` values remove the key. */
+  updatePage(patch: Partial<Omit<DesignPage, "id" | "nodes">>, id?: string): boolean;
+  /** Set (or with an empty id clear) the file's thumbnail layer, `document.thumbnailNodeId` (validated, one undo step). */
+  setThumbnail(id: string): boolean;
   setActivePage(id: string): void;
   canUndo(): boolean;
   canRedo(): boolean;
@@ -52,7 +54,7 @@ export type DesignApi = {
   setTool(tool: string): void;
   getTool(): string;
   commands(): { id: string; label?: string }[];
-  runCommand(id: string): void;
+  runCommand(id: string, arg?: unknown): boolean;
   /** Constraints of a positioned layer ({h, v}: start/end/stretch/center/scale), or null when it has none. */
   getConstraints?(id: string): { h: string; v: string } | null;
   /** Change constraints without moving the layers (one undo step). */
@@ -169,10 +171,18 @@ function claimPending() {
     pendingObserver?.disconnect();
     pendingObserver = null;
   }
+  checkUiReady();
 }
 
-/** Park a legacy element and hand its id to the island once the island renders it. Returns the legacy element. */
-export function takeOver(id: string, options: { park?: boolean } = {}): HTMLElement | null {
+/**
+ * Park a legacy element and hand its id to the island once the island renders it. Returns the legacy element.
+ * `deferred`: the island renders the id only on demand (a command inside a closed menu), so the id does not hold
+ * back the UI-ready signal.
+ */
+export function takeOver(
+  id: string,
+  options: { park?: boolean; deferred?: boolean } = {},
+): HTMLElement | null {
   const existing = taken.get(id);
   if (existing) return existing;
   const el = document.getElementById(id);
@@ -180,6 +190,7 @@ export function takeOver(id: string, options: { park?: boolean } = {}): HTMLElem
   if (options.park !== false) dock().append(el);
   taken.set(id, el);
   pending.set(id, el);
+  if (options.deferred) deferred.add(id);
   if (!pendingObserver) {
     pendingObserver = new MutationObserver(claimPending);
     pendingObserver.observe(document.documentElement, {
@@ -191,6 +202,63 @@ export function takeOver(id: string, options: { park?: boolean } = {}): HTMLElem
   }
   claimPending();
   return el;
+}
+
+/* ---------- UI ready ---------- */
+// One-shot signal that the shell's taken-over controls are claimed: every island mounted with mountIsland() has
+// committed its first render AND no non-deferred takeOver id is still pending (until claimed, the id resolves to the
+// hidden parked legacy element). Then `<html data-ui-ready="true">` is set and `bd:ui-ready` fires on window.
+// Content an island renders on demand (menus, dialogs, settings pages) is not part of it.
+declare global {
+  interface Window {
+    /** Diagnostics: what still holds back the UI-ready signal (empty `islands`/`ids` once ready). */
+    __bdPendingTakeovers?: () => { islands: string[]; ids: string[]; deferred: string[] };
+  }
+}
+const deferred = new Set<string>();
+const mounting = new Set<string>();
+let uiReady = false;
+let uiReadyStarted = false;
+const UI_READY_WARN_MS = 5000;
+
+function blockingIds() {
+  return [...pending.keys()].filter((id) => !deferred.has(id));
+}
+
+window.__bdPendingTakeovers = () => ({
+  islands: [...mounting],
+  ids: blockingIds(),
+  deferred: [...pending.keys()].filter((id) => deferred.has(id)),
+});
+
+function checkUiReady() {
+  if (uiReady || !uiReadyStarted || mounting.size || blockingIds().length) return;
+  uiReady = true;
+  document.documentElement.dataset.uiReady = "true";
+  window.dispatchEvent(new Event("bd:ui-ready"));
+}
+
+/** mountIsland() calls this before it renders: the island holds back the UI-ready signal until it commits. */
+export function registerIsland(name: string) {
+  if (uiReady) return;
+  mounting.add(name);
+  if (uiReadyStarted) return;
+  uiReadyStarted = true;
+  // Never sets the signal itself; it only names what is stuck so a missing claim is diagnosable.
+  setTimeout(() => {
+    if (!uiReady)
+      console.warn(
+        `[bd] UI not ready after ${UI_READY_WARN_MS} ms`,
+        JSON.stringify(window.__bdPendingTakeovers?.()),
+      );
+  }, UI_READY_WARN_MS);
+}
+
+/** mountIsland() calls this once the island's first render has committed. */
+export function markIslandCommitted(name: string) {
+  if (!mounting.delete(name)) return;
+  // Island elements usually claim their ids through the MutationObserver; this pass covers the case where none is pending.
+  claimPending();
 }
 
 /** The legacy element for an id, whether or not it has been taken over. */

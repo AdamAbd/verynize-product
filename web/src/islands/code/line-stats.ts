@@ -2,10 +2,10 @@
 // numstat totals as the Changes panel). Refreshed when a chat turn finishes, on window focus and every minute.
 import { useEffect, useState } from "react";
 import { appPreferencesApi } from "../settings/preference-runtime";
+import { platform } from "@/lib/platform";
 
 export type LineStat = { added: number; removed: number; files: number };
 
-type AgentEvents = { onAgentEvent?(callback: (event: { type: string }) => void): () => void };
 
 export function useLineStats(roots: string[], enabled: boolean): Record<string, LineStat> {
   const [stats, setStats] = useState<Record<string, LineStat>>({});
@@ -35,7 +35,7 @@ export function useLineStats(roots: string[], enabled: boolean): Record<string, 
       timer = window.setTimeout(load, delay);
     };
     load();
-    const off = (window as unknown as { desktop?: AgentEvents }).desktop?.onAgentEvent?.((event) => {
+    const off = platform.desktop?.onAgentEvent((event) => {
       if (event.type === "done") later(300);
     });
     const onFocus = () => later(150);

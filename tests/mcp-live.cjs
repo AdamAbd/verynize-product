@@ -1,6 +1,7 @@
 // Live MCP bridge: a real SDK client talks to the desktop app's loopback HTTP server and edits
 // the document open in the editor renderer (visible at once, undoable), plus headless fallback.
 const {_electron:electron}=require('@playwright/test');
+const {waitForUiReady}=require('./helpers/ui-ready.cjs');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
 const os=require('node:os');
@@ -10,11 +11,11 @@ const path=require('node:path');
   const {Client}=await import('@modelcontextprotocol/sdk/client/index.js');
   const {StreamableHTTPClientTransport}=await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
   const profile=await fs.mkdtemp(path.join(os.tmpdir(),'better-mcp-live-'));
-  const env={...process.env,VERYNIZE_PREFERENCES:path.join(profile,'design-preferences.json')};delete env.ELECTRON_RUN_AS_NODE;delete env.VERYNIZE_DISABLE_MCP;
+  const env={...process.env,VERYNIZE_PREFERENCES:path.join(profile,'design-preferences.json')};delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1';delete env.VERYNIZE_DISABLE_MCP;
   let app,client;
   try{
     app=await electron.launch({env,args:['.',`--user-data-dir=${profile}`]});
-    const page=await app.firstWindow();
+    const page=await app.firstWindow();await waitForUiReady(page);
     await page.waitForFunction(()=>!!window.desktop&&!!window.verynize);
     assert.equal(await page.evaluate(()=>typeof window.desktop.agentBridge.reply),'function');
     assert.equal(await page.evaluate(()=>typeof require),'undefined');
@@ -29,7 +30,7 @@ const path=require('node:path');
     const json=async(name,args)=>JSON.parse((await call(name,args)).content[0].text);
 
     const context=(await call('get_design_context')).content[0].text;
-    assert.match(context,/"live": true/);assert.ok(context.includes(`"toolsVersion": "${info.toolsVersion}"`));assert.match(context,/User design preferences — apply unless the brief overrides/);
+    assert.match(context,/"live": true/);assert.ok(context.includes(`"toolsVersion": "${info.toolsVersion}"`));assert.match(context,/## Saved design preferences\n/);
     assert.ok((await client.listTools()).tools.some(t=>t.name==='ask_agent'),'ask_agent is exposed live');
     const pref=(await json('save_design_preference',{text:'Live test: cards use 12px radius'})).preference;
     assert.ok((await json('list_design_preferences')).preferences.some(p=>p.id===pref.id));

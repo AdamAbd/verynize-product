@@ -3,6 +3,7 @@
 // through a local OpenAI-compatible fixture server and a generic HTTP fixture that return real PNG
 // bytes, insertion as an image layer, relaunch persistence and redacted provider errors.
 const { _electron } = require("@playwright/test");
+const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -52,6 +53,7 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "generation-image-"));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = '1';
   let logs = "";
   const launch = async () => {
     const app = await _electron.launch({
@@ -69,6 +71,7 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
       logs += m.text();
     });
     const page = await app.firstWindow({ timeout: 20000 });
+    await waitForUiReady(page);
     page.on("console", (m) => {
       logs += m.text();
     });

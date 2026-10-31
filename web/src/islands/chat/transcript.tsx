@@ -38,6 +38,7 @@ import { ChatActionButton, ChatIconButton, ChatPillButton, ChatSuggestionButton 
 import { Markdown, openAppLink } from "./markdown";
 import { ChatMenu, ChatMenuContent, ChatMenuItem, ChatMenuNote, ChatMenuSeparator, ChatMenuTrigger } from "./menu";
 import { MentionIcon } from "./mention-popover";
+import { PREVIEW_SETUP_REQUEST, PreviewSavedCard, savedPreview } from "./preview-setup";
 import { QuestionCard } from "./question-card";
 import { ChatTip } from "./tip";
 import { usageSummary } from "./usage-ring";
@@ -574,10 +575,18 @@ function UserMessage({ message, index, busy }: { message: ChatMessage; index: nu
     requestAnimationFrame(() => editButton.current?.querySelector("button")?.focus());
   };
   const mentions = message.mentions ?? [];
+  // The Preview's setup request is an app action, not typed text: logo + purple label, no context chips (PS2).
+  const setupRequest = message.text === PREVIEW_SETUP_REQUEST && !editing;
   return (
     <article className={cn(hook.userMessage, "group/msg relative m-0 flex w-full max-w-none flex-col items-end rounded-none border-0 bg-transparent p-0 text-base leading-5.25 text-foreground")}>
       <div className={cn("relative max-w-full rounded-2xl bg-input px-3 py-2", editing && "w-full")}>
-        {(!!message.images?.length || !!message.canvas || mentions.length > 0) && (
+        {setupRequest ? (
+          <div data-preview-request className={cn(hook.messageContent, "flex items-center gap-1.5 text-preview-request")}>
+            <LogoIcon className="size-3.5 shrink-0" />
+            {message.text}
+          </div>
+        ) : null}
+        {!setupRequest && (!!message.images?.length || !!message.canvas || mentions.length > 0) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {message.canvas && (
               <span className={cn(USER_CHIP)}>
@@ -599,7 +608,7 @@ function UserMessage({ message, index, busy }: { message: ChatMessage; index: nu
             ))}
           </div>
         )}
-        {editing ? (
+        {setupRequest ? null : editing ? (
           <EditBox
             initial={message.text}
             onCancel={close}
@@ -637,7 +646,8 @@ type Block =
   | { type: "permission"; key: string; item: Indexed }
   | { type: "question"; key: string; item: Indexed }
   | { type: "error"; key: string; text?: string }
-  | { type: "notice"; key: string; part: ChatPart };
+  | { type: "notice"; key: string; part: ChatPart }
+  | { type: "preview"; key: string; part: ChatPart };
 
 /** Visible blocks of a running turn: text, "Ran N commands" + live step, pending approvals, errors. */
 function runningBlocks(parts: ChatPart[], nesting: Nesting): Block[] {
@@ -654,6 +664,7 @@ function runningBlocks(parts: ChatPart[], nesting: Nesting): Block[] {
       }
       if (part.state === "running") last.live = { part, index };
       else last.done.push({ part, index });
+      if (savedPreview(part)) blocks.push({ type: "preview", key: `${key}-preview`, part });
     } else if (part.kind === "permission") blocks.push({ type: "permission", key, item: { part, index } });
     else if (part.kind === "question") blocks.push({ type: "question", key, item: { part, index } });
     else if (part.kind === "error") blocks.push({ type: "error", key, text: part.text });
@@ -728,6 +739,7 @@ function AssistantMessage({
           if (block.type === "text") return <Markdown key={block.key} text={block.text} />;
           if (block.type === "error") return <ErrorRow key={block.key} text={block.text} />;
           if (block.type === "notice") return <NoticeRow key={block.key} part={block.part} />;
+          if (block.type === "preview") return <PreviewSavedCard key={block.key} part={block.part} />;
           if (block.type === "question") return question(block.item.part, block.item.index, block.key);
           if (block.type === "permission")
             return block.item.part.state === "pending" ? (
@@ -772,6 +784,7 @@ function AssistantMessage({
           (p.kind === "text" && p.text?.trim()) ||
           p.kind === "error" ||
           p.kind === "question" ||
+          !!savedPreview(p) ||
           (p.kind === "autonomy" && !!p.text) ||
           (p.kind === "policy" && (p as ChatPart & { decision?: string }).decision === "limit"),
       );
@@ -788,6 +801,8 @@ function AssistantMessage({
             <NoticeRow key={partIndex} part={part} />
           ) : part.kind === "question" ? (
             question(part, partIndex, partIndex)
+          ) : part.kind === "tool" ? (
+            <PreviewSavedCard key={partIndex} part={part} />
           ) : (
             <Markdown key={partIndex} text={part.text ?? ""} />
           ),
@@ -844,11 +859,24 @@ function AssistantMessage({
   );
 }
 
-/** Empty chat (34, 35): logo + prompt, with the workspace's suggestions as cards that fill the composer. */
-function EmptyState({ suggestions }: { suggestions: { title: string; prompt: string }[] }) {
-  const fill = (prompt: string) => {
+type Suggestion = NonNullable<ChatState["suggestions"]>[number];
+const SHOWN_SUGGESTIONS = 4;
+/** A window of consecutive starter briefs, rotated per conversation (stable for a chat, varied across chats). */
+function pickSuggestions(suggestions: Suggestion[], seed: string | null): Suggestion[] {
+  if (suggestions.length <= SHOWN_SUGGESTIONS) return suggestions;
+  let hash = 0;
+  for (const char of seed ?? "") hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  const start = hash % suggestions.length;
+  return Array.from({ length: SHOWN_SUGGESTIONS }, (_, i) => suggestions[(start + i) % suggestions.length]);
+}
+
+/** Empty chat (34, 35): logo + prompt, with a few of the workspace's starter briefs as cards that fill the composer. */
+function EmptyState({ suggestions, seed }: { suggestions: Suggestion[]; seed: string | null }) {
+  // A brief written for a catalog style also pins that style in the composer picker, so the run carries `designStyle`.
+  const fill = ({ prompt, style }: Suggestion) => {
     const el = document.getElementById("project-prompt") as HTMLTextAreaElement | null;
     if (!el) return;
+    if (style) window.chatDesignStyle?.set(style);
     legacySet(el, prompt);
     el.focus();
     el.setSelectionRange(prompt.length, prompt.length);
@@ -859,9 +887,9 @@ function EmptyState({ suggestions }: { suggestions: { title: string; prompt: str
       <p className="text-base leading-5.25 font-medium text-foreground">What would you like to work on?</p>
       {suggestions.length > 0 && (
         <ul aria-label="Suggestions" className="m-0 mt-3 grid w-full max-w-100 list-none grid-cols-2 gap-1.5 p-0">
-          {suggestions.slice(0, 4).map((item) => (
-            <li key={item.title} className="flex">
-              <ChatSuggestionButton hook={hook.suggestion} title={item.prompt} onClick={() => fill(item.prompt)} className="w-full">
+          {pickSuggestions(suggestions, seed).map((item) => (
+            <li key={item.title} data-suggestion={item.title} className="flex">
+              <ChatSuggestionButton hook={hook.suggestion} title={item.prompt} onClick={() => fill(item)} className="w-full">
                 <span className="w-full truncate text-sm text-foreground-2">{item.title}</span>
                 <span className="line-clamp-2 text-xs leading-4 text-muted-foreground">{item.prompt}</span>
               </ChatSuggestionButton>
@@ -929,7 +957,7 @@ export function Transcript({ state }: { state: ChatState }) {
       <div ref={sessionSlot} className="contents" />
       {/* `--chat-column` is set by hosts with a centered column (Code workspace, 770px); unset in the dock. */}
       {state.messages.length === 0 ? (
-        <EmptyState suggestions={state.suggestions ?? []} />
+        <EmptyState suggestions={state.suggestions ?? []} seed={state.conversationId} />
       ) : (
         <div className="mx-auto flex w-full max-w-(--chat-column) flex-col gap-5">
           {state.messages.map((message, index) =>

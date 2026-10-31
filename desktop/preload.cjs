@@ -1,7 +1,7 @@
 const {contextBridge,ipcRenderer}=require('electron');
 const call=(method,...args)=>ipcRenderer.invoke('desktop:'+method,...args);
 contextBridge.exposeInMainWorld('desktop',{
- agentAccountStatus:options=>call('agentAccountStatus',options),startAgentLogin:options=>call('startAgentLogin',options),cancelAgentLogin:options=>call('cancelAgentLogin',options),agentLogout:options=>call('agentLogout',options),openExternal:url=>call('openExternal',url),
+ agentAccountStatus:options=>call('agentAccountStatus',options),startAgentLogin:options=>call('startAgentLogin',options),cancelAgentLogin:options=>call('cancelAgentLogin',options),agentLogout:options=>call('agentLogout',options),openExternal:url=>call('openExternal',url),onboardingState:()=>call('onboardingState'),
  onAuthEvent:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:auth-event',listener);return()=>ipcRenderer.removeListener('desktop:auth-event',listener)},
  notifyTask:options=>call('notifyTask',options),
  // Share › Publish app (desktop/app-publish.cjs): build the open project and upload it to the cloud server.
@@ -48,10 +48,13 @@ contextBridge.exposeInMainWorld('desktop',{
  designOpen:()=>call('designOpen'),designSave:options=>call('designSave',options),designReload:()=>call('designReload'),
  onDesignFileChanged:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('design:file-changed',listener);return()=>ipcRenderer.removeListener('design:file-changed',listener)},
  previewInput:options=>call('previewInput',options),
- previewOpenBrowser:()=>call('previewOpenBrowser'),
+ previewOpenBrowser:options=>call('previewOpenBrowser',options),previewLocation:options=>call('previewLocation',options),
  previewNavigate:options=>call('previewNavigate',options),
+ onPreviewNavigated:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:preview-navigated',listener);return()=>ipcRenderer.removeListener('desktop:preview-navigated',listener)},
  previewInspect:options=>call('previewInspect',options),
  previewEdit:options=>call('previewEdit',options),
+ previewClearData:options=>call('previewClearData',options),
+ previewDom:options=>call('previewDom',options),
  captureLivePreview:options=>call('captureLivePreview',options),
  // Web page capture and region picking (desktop/capture-remote.cjs, desktop/preview.cjs previewElementAt).
  captureRemote:options=>call('captureRemote',options),captureRemoteProbe:options=>call('captureRemoteProbe',options),previewElementAt:point=>call('previewElementAt',point),
@@ -65,6 +68,8 @@ contextBridge.exposeInMainWorld('desktop',{
  openProject:()=>call('openProject'), listFiles:()=>call('listFiles'),readFile:p=>call('readFile',p),writeFile:(p,c)=>call('writeFile',p,c),gitStatus:()=>call('gitStatus'),createWorktree:b=>call('createWorktree',b),discoverAgents:()=>call('discoverAgents'),runAgent:options=>call('runAgent',options),cancelAgent:id=>call('cancelAgent',id),respondAgentPermission:options=>call('respondAgentPermission',options),respondAgentQuestion:options=>call('respondAgentQuestion',options),steerAgent:options=>call('steerAgent',options),listAgentRuns:()=>call('listAgentRuns'),listAllowRules:options=>call('listAllowRules',options),removeAllowRule:options=>call('removeAllowRule',options),agentToolsVersion:()=>call('agentToolsVersion'),agentTitle:options=>call('agentTitle',options),
  gitChanges:options=>call('gitChanges',options),gitBranchChanges:options=>call('gitBranchChanges',options),gitDiff:options=>call('gitDiff',options),gitCommit:options=>call('gitCommit',options),gitDiscard:options=>call('gitDiscard',options),gitPush:options=>call('gitPush',options),gitPullRequest:options=>call('gitPullRequest',options),gitCreatePullRequest:options=>call('gitCreatePullRequest',options),
  designPreferences:{list:()=>call('designPreferencesList'),save:text=>call('designPreferencesSave',text),update:(id,text)=>call('designPreferencesUpdate',id,text),remove:id=>call('designPreferencesRemove',id)},
+ // Design style library (integrations/design-knowledge/styles): [{id,name,summary}] for the composer style picker; [] when unavailable.
+ designStylesList:()=>call('designStylesList'),
  // Settings › Agents behaviour (desktop/agent-behavior.cjs): follow-ups, response style, attribution, folder, branch prefix, modes, allowed rules.
  agentBehavior:{get:()=>call('agentBehaviorGet'),set:patch=>call('agentBehaviorSet',patch),chooseFolder:()=>call('agentBehaviorChooseFolder'),outputStyles:()=>call('agentOutputStyles'),commitAuthor:()=>call('agentCommitAuthor'),allowList:()=>call('agentAllowList'),allowRemove:id=>call('agentAllowRemove',id),allowOpen:groupId=>call('agentAllowOpen',groupId)},
  listAgentModels:options=>call('listAgentModels',options),listAgentCommands:options=>call('listAgentCommands',options),designReferencesList:()=>call('designReferencesList'),designReferencesSave:options=>call('designReferencesSave',options),designReferencesAttach:options=>call('designReferencesAttach',options),designReferencesRemove:id=>call('designReferencesRemove',id),worktreeAddFiles:options=>call('worktreeAddFiles',options),pickWorkingDirectory:()=>call('pickWorkingDirectory'),terminalRecentOutput:options=>call('terminalRecentOutput',options),saveAgentImage:options=>call('saveAgentImage',options),readMemory:()=>call('readMemory'),writeMemory:text=>call('writeMemory',text),

@@ -1,15 +1,17 @@
 // Headless layout for Verynize documents: a small CSS-like engine (block flow, flex row and
-// column with wrap/grow/shrink, equal-column grid, absolute children, free frames) that turns the
+// column with wrap/grow/shrink, grid with equal or fr-weighted tracks, absolute children, free frames) that turns the
 // node tree into x/y/w/h. Text is measured with a font-aware character-width estimate, so every
 // node it touches is marked `measured: false` until a real renderer measures it.
 //
 // What is authoritative:
-//   - Sizing: wMode/hMode. 'fixed' w/h (or wPct/hPct) are inputs; 'hug'/'fill' w/h are outputs.
+//   - Sizing: wMode/hMode. 'fixed' w/h (or wPct/hPct) and 'calc' (wCalc/hCalc) are inputs; 'hug'/'fill'/'auto' w/h are outputs.
 //   - Position: x/y are inputs only for artboards (no parent), children of `layout: 'free'`
 //     frames, and nothing else. Flow children (any other layout) get x/y computed here, relative
 //     to the parent's border box; absolute children (position: 'absolute') are placed from
 //     `inset`/`translate`. The canvas renderer lays flow children out with real CSS and ignores
 //     their stored x/y.
+
+import { parseCalc, BLOCK_ALIGN, trackWeight } from './node-style.mjs';
 
 const SIDES4 = [0, 0, 0, 0];
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -20,7 +22,8 @@ export function paddingOf(n) {
   return [n.paddingTop ?? p, n.paddingRight ?? p, n.paddingBottom ?? p, n.paddingLeft ?? p].map(num);
 }
 export function bordersOf(n) {
-  if (Array.isArray(n.strokeWidths) && n.strokeWidths.length === 4) return n.strokeWidths.map(num);
+  if (n.strokeHidden === true) return [0, 0, 0, 0];
+  if (Array.isArray(n.strokeWidths) && n.strokeWidths.length === 4) return n.strokeWidths.map((v, i) => (Array.isArray(n.strokeHiddenSides) && n.strokeHiddenSides[i] === true ? 0 : num(v)));
   const w = num(n.strokeWidth); return [w, w, w, w];
 }
 export const gapXOf = n => num(n.gapX ?? n.gap);
@@ -30,6 +33,10 @@ const numericMargin = v => (v === 'auto' ? 0 : num(v));
 const isAbsolute = n => n.position === 'absolute';
 const wMode = n => n.wMode || 'fixed';
 const hMode = n => n.hMode || 'fixed';
+// Calculate sizing: px + pct% of `base`; a % term without a definite base resolves to undefined (CSS: auto).
+const calcSize = (n, axis, base) => { const c = parseCalc(n[axis + 'Calc']); return !c ? undefined : c.pct && base === undefined ? undefined : c.px + c.pct / 100 * (base || 0); };
+// Fixed and Calculate sizes are inputs; the other modes are layout outputs.
+const definite = mode => mode === 'fixed' || mode === 'calc';
 const pctOf = (value, base) => { if (typeof value === 'string' && value.endsWith('%')) return base === undefined ? undefined : base * Number(value.slice(0, -1)) / 100; return value === undefined || value === null ? undefined : num(value); };
 
 // ---------------------------------------------------------------------------------------------
@@ -73,7 +80,7 @@ export function textIntrinsic(n) {
   const width = widthFn(n), text = transformText(n, String(n.text || ''));
   const lines = text.split('\n');
   const max = Math.max(1, ...lines.map(width));
-  const min = n.noWrap || n.truncate ? max : Math.max(1, ...lines.flatMap(line => line.split(/\s+/)).map(width));
+  const min = n.noWrap || n.truncate || n.whiteSpace === 'nowrap' || n.whiteSpace === 'pre' ? max : Math.max(1, ...lines.flatMap(line => line.split(/\s+/)).map(width));
   return { max: Math.ceil(max + 1), min: Math.ceil(n.truncate ? Math.min(min, num(n.fontSize) * 2) : min) };
 }
 
@@ -85,7 +92,7 @@ export function measureText(n, width) {
   const space = measure(' ');
   let rows = 0;
   for (const line of text.split('\n')) {
-    if (n.noWrap || n.truncate) { rows++; continue; }
+    if (n.noWrap || n.truncate || n.whiteSpace === 'nowrap' || n.whiteSpace === 'pre') { rows++; continue; }
     let cur = 0, lineRows = 1;
     for (const word of line.split(/\s+/).filter(Boolean)) {
       const ww = measure(word);
@@ -96,7 +103,8 @@ export function measureText(n, width) {
     rows += lineRows;
   }
   if (num(n.lineClamp) > 0) rows = Math.min(rows, num(n.lineClamp));
-  const lineHeight = (num(n.fontSize) || 16) * (num(n.lineHeight) || 1.15);
+  // lineHeight 'auto' is CSS `normal`, about 1.2 for most text faces.
+  const lineHeight = (num(n.fontSize) || 16) * (n.lineHeight === 'auto' ? 1.2 : num(n.lineHeight) || 1.15);
   return { w: Math.max(1, Math.ceil(w)), h: Math.max(1, Math.ceil(Math.max(1, rows) * lineHeight)) };
 }
 
@@ -133,6 +141,7 @@ export function layoutPage(page, rootIds = null) {
     if (memo.has(n)) return memo.get(n);
     let result;
     if (wMode(n) === 'fixed' && n.wPct === undefined) result = { max: num(n.w), min: num(n.w) };
+    else if (wMode(n) === 'calc') { const v = Math.max(0, calcSize(n, 'w', 0) ?? num(n.w)); result = { max: v, min: v }; }
     else if (n.type === 'text') result = textIntrinsic(n);
     else if (n.type !== 'frame') result = { max: num(n.w), min: num(n.w) };
     else {
@@ -141,7 +150,12 @@ export function layoutPage(page, rootIds = null) {
       let max = 0, min = 0;
       if (!parts.length) { max = 0; min = 0; }
       else if (n.layout === 'flex' && n.direction !== 'column') { max = parts.reduce((s, p) => s + p.max, 0) + gapXOf(n) * (parts.length - 1); min = n.flexWrap ? Math.max(...parts.map(p => p.min)) : parts.reduce((s, p) => s + p.min, 0) + gapXOf(n) * (parts.length - 1); }
-      else if (n.layout === 'grid') { const cols = Math.max(1, num(n.columns) || 1); max = Math.max(...parts.map(p => p.max)) * cols + gapXOf(n) * (cols - 1); min = Math.max(...parts.map(p => p.min)) * cols + gapXOf(n) * (cols - 1); }
+      else if (n.layout === 'grid') {
+        // Fill tracks share by fr weight: the narrowest track must still hold the widest item.
+        const cols = Math.max(1, num(n.columns) || 1), w = Array.from({ length: cols }, (_, i) => trackWeight(n.columnSizes, i));
+        const scale = w.reduce((a, b) => a + b, 0) / Math.min(...w);
+        max = Math.max(...parts.map(p => p.max)) * scale + gapXOf(n) * (cols - 1); min = Math.max(...parts.map(p => p.min)) * scale + gapXOf(n) * (cols - 1);
+      }
       else if (n.layout === 'free') { max = Math.max(...list.map(k => num(k.x) + num(k.w))); min = max; }
       else { max = Math.max(...parts.map(p => p.max)); min = Math.max(...parts.map(p => p.min)); }
       result = { max: clampW(n, max + c.x), min: clampW(n, min + c.x) };
@@ -155,7 +169,8 @@ export function layoutPage(page, rootIds = null) {
     const mode = wMode(k);
     let w;
     if (mode === 'fixed') w = k.wPct !== undefined ? avail * num(k.wPct) / 100 : num(k.w);
-    else if (mode === 'fill' || (stretch && mode !== 'hug' && k.type !== 'text')) w = avail;
+    else if (mode === 'calc') w = calcSize(k, 'w', avail) ?? num(k.w);
+    else if (mode === 'fill' || (stretch && mode !== 'hug' && (k.type !== 'text' || mode === 'auto'))) w = avail;
     else { const i = intrinsic(k); w = Math.max(Math.min(i.max, avail), Math.min(i.min, avail)); }
     if (mode === 'fill' && stretch === false) w = avail;
     return clampW(k, w, avail);
@@ -166,8 +181,8 @@ export function layoutPage(page, rootIds = null) {
     touched.add(n);
     n.w = Math.max(1, w);
     let h;
-    const fixedH = hMode(n) === 'fixed' ? (n.hPct !== undefined ? (parentInnerH !== undefined ? parentInnerH * num(n.hPct) / 100 : num(n.h)) : num(n.h)) : undefined;
-    const ratioH = n.aspectRatio && hMode(n) !== 'fixed' ? n.w / num(n.aspectRatio) : undefined;
+    const fixedH = hMode(n) === 'fixed' ? (n.hPct !== undefined ? (parentInnerH !== undefined ? parentInnerH * num(n.hPct) / 100 : num(n.h)) : num(n.h)) : hMode(n) === 'calc' ? calcSize(n, 'h', parentInnerH) : undefined;
+    const ratioH = n.aspectRatio && !definite(hMode(n)) ? n.w / num(n.aspectRatio) : undefined;
     const definiteH = forcedH ?? fixedH ?? ratioH;
     if (n.type === 'frame') {
       const contentH = layoutChildren(n, definiteH);
@@ -182,7 +197,7 @@ export function layoutPage(page, rootIds = null) {
     const c = chrome(n), cw = Math.max(0, n.w - c.x), innerH = definiteH !== undefined ? Math.max(0, definiteH - c.y) : undefined;
     const list = flowKids(n);
     if (n.layout === 'free') {
-      for (const k of childrenOf(n.id)) { const w = wMode(k) === 'hug' ? intrinsic(k).max : k.wPct !== undefined ? n.w * num(k.wPct) / 100 : num(k.w); layoutBox(k, w, undefined, n.h); }
+      for (const k of childrenOf(n.id)) { const w = wMode(k) === 'hug' || wMode(k) === 'auto' ? intrinsic(k).max : wMode(k) === 'calc' ? calcSize(k, 'w', n.w) ?? num(k.w) : k.wPct !== undefined ? n.w * num(k.wPct) / 100 : num(k.w); layoutBox(k, w, undefined, n.h); }
       return Math.max(1, ...childrenOf(n.id).map(k => num(k.y) + k.h));
     }
     if (!list.length) return c.y;
@@ -202,10 +217,12 @@ export function layoutPage(page, rootIds = null) {
   // Block flow and flex column share this: children stacked vertically.
   const column = (n, list, c, cw, innerH, flex) => {
     const gap = flex ? gapYOf(n) : num(n.gapY); // block flow only spaces children via space-y (gapY)
+    // Block alignment (justify-items on a block frame) places children narrower than the frame.
+    const blockAlign = flex ? undefined : { start: 'flex-start', center: 'center', end: 'flex-end' }[BLOCK_ALIGN[n.justifyItems]];
     for (const k of list) {
-      const align = flex ? crossAlign(n, k) : 'stretch';
+      const align = flex ? crossAlign(n, k) : blockAlign || 'stretch';
       const avail = Math.max(0, cw - hMarg(k));
-      const stretch = align === 'stretch' && wMode(k) !== 'hug' && wMode(k) !== 'fixed';
+      const stretch = align === 'stretch' && wMode(k) !== 'hug' && !definite(wMode(k));
       const w = stretch || wMode(k) === 'fill' ? clampW(k, avail, avail) : childWidth(k, avail, false);
       layoutBox(k, w, hMode(k) === 'fill' && innerH !== undefined && !flex ? Math.max(1, innerH - vMarg(k)) : undefined, innerH);
     }
@@ -234,7 +251,7 @@ export function layoutPage(page, rootIds = null) {
     const collapse = (a, b) => (a >= 0 && b >= 0 ? Math.max(a, b) : a < 0 && b < 0 ? Math.min(a, b) : a + b);
     let prevBottom = null;
     for (const [i, k] of list.entries()) {
-      const m = marginOf(k), align = flex ? crossAlign(n, k) : 'stretch';
+      const m = marginOf(k), align = flex ? crossAlign(n, k) : blockAlign || 'stretch';
       const space = cw - k.w - hMarg(k);
       if (!flex) {
         const top = numericMargin(m[0]);
@@ -244,6 +261,7 @@ export function layoutPage(page, rootIds = null) {
         let bx = c.left + numericMargin(m[3]);
         if (m[1] === 'auto' && m[3] === 'auto') bx = c.left + (cw - k.w) / 2;
         else if (m[3] === 'auto') bx = c.left + cw - k.w - numericMargin(m[1]);
+        else if (m[1] !== 'auto' && space > 0) bx += align === 'center' ? space / 2 : align === 'flex-end' ? space : 0;
         k.x = round(bx); k.y = round(y);
         y += k.h; prevBottom = bottom;
         if (i === list.length - 1) y += bottom;
@@ -265,10 +283,10 @@ export function layoutPage(page, rootIds = null) {
     const gapX = gapXOf(n), gapY = gapYOf(n);
     const items = list.map(k => {
       const mode = wMode(k);
-      let basis = k.basis !== undefined ? pctOf(k.basis, cw) : mode === 'fixed' ? (k.wPct !== undefined ? cw * num(k.wPct) / 100 : num(k.w)) : mode === 'fill' ? 0 : intrinsic(k).max;
+      let basis = k.basis !== undefined ? pctOf(k.basis, cw) : mode === 'fixed' ? (k.wPct !== undefined ? cw * num(k.wPct) / 100 : num(k.w)) : mode === 'calc' ? calcSize(k, 'w', cw) ?? num(k.w) : mode === 'fill' ? 0 : intrinsic(k).max;
       const grow = k.grow !== undefined ? num(k.grow) : mode === 'fill' ? 1 : 0;
-      const shrink = k.shrink !== undefined ? num(k.shrink) : mode === 'hug' ? 1 : 0;
-      const min = k.minW !== undefined ? pctOf(k.minW, cw) : mode === 'hug' || mode === 'fill' ? intrinsic(k).min : 0;
+      const shrink = k.shrink !== undefined ? num(k.shrink) : mode === 'hug' || mode === 'auto' ? 1 : 0;
+      const min = k.minW !== undefined ? pctOf(k.minW, cw) : mode === 'hug' || mode === 'fill' || mode === 'auto' ? intrinsic(k).min : 0;
       return { k, basis: Math.max(0, basis ?? 0), grow, shrink, min: Math.min(min ?? 0, Math.max(basis ?? 0, mode === 'fill' ? Infinity : 0)), outer: hMarg(k) };
     });
     // Break into lines.
@@ -298,7 +316,7 @@ export function layoutPage(page, rootIds = null) {
       const single = lines.length === 1 && innerH !== undefined;
       const lineH = single ? innerH : Math.max(...ln.map(it => it.k.h + vMarg(it.k)));
       // Stretch auto-height items to the line.
-      for (const it of ln) if (crossAlign(n, it.k) === 'stretch' && hMode(it.k) !== 'fixed' && !it.k.aspectRatio) layoutBox(it.k, it.k.w, Math.max(1, lineH - vMarg(it.k)), innerH);
+      for (const it of ln) if (crossAlign(n, it.k) === 'stretch' && !definite(hMode(it.k)) && !it.k.aspectRatio) layoutBox(it.k, it.k.w, Math.max(1, lineH - vMarg(it.k)), innerH);
       // Main-axis placement.
       const used = ln.reduce((s, it) => s + it.k.w + it.outer, 0) + gapX * (ln.length - 1);
       let x = c.left, between = gapX; const rest = cw - used;
@@ -328,7 +346,10 @@ export function layoutPage(page, rootIds = null) {
 
   const grid = (n, list, c, cw, innerH) => {
     const cols = Math.max(1, num(n.columns) || 1), gapX = gapXOf(n), gapY = gapYOf(n);
-    const colW = Math.max(1, (cw - gapX * (cols - 1)) / cols);
+    // Fill tracks (minmax(0, Nfr)) split the free width by their fr weights (columnSizes; equal by default).
+    const colWeights = Array.from({ length: cols }, (_, i) => trackWeight(n.columnSizes, i)), colTotal = colWeights.reduce((a, b) => a + b, 0);
+    const colWs = colWeights.map(w => Math.max(1, (cw - gapX * (cols - 1)) * w / colTotal));
+    const colX = colWs.map((_, i) => colWs.slice(0, i).reduce((a, b) => a + b + gapX, 0));
     const rows = []; let row = [], used = 0;
     for (const k of list) {
       const span = k.colSpan === 'full' ? cols : Math.min(cols, Math.max(1, num(k.colSpan) || 1));
@@ -336,23 +357,24 @@ export function layoutPage(page, rootIds = null) {
       row.push({ k, span, col: used }); used += span;
     }
     if (row.length) rows.push(row);
-    // Explicit equal rows (grid-template-rows: repeat(N, minmax(0, 1fr))) share a definite height; extra rows are auto.
-    const fixedRows = Math.floor(num(n.rows)), equalH = fixedRows >= 1 && innerH !== undefined ? Math.max(0, (innerH - gapY * (fixedRows - 1)) / fixedRows) : undefined;
+    // Explicit rows (grid-template-rows of minmax(0, Nfr)) share a definite height by weight; extra rows are auto.
+    const fixedRows = Math.floor(num(n.rows)), rowWeights = Array.from({ length: Math.max(0, fixedRows) }, (_, i) => trackWeight(n.rowSizes, i)), rowTotal = rowWeights.reduce((a, b) => a + b, 0);
+    const fixedH = ri => (fixedRows >= 1 && innerH !== undefined && ri < fixedRows ? Math.max(0, (innerH - gapY * (fixedRows - 1)) * rowWeights[ri] / rowTotal) : undefined);
     const offset = (align, space) => (space > 0 ? (align === 'center' ? space / 2 : align === 'flex-end' || align === 'end' ? space : 0) : 0);
     let y = c.top;
     for (const [ri, r] of rows.entries()) {
       for (const cell of r) {
-        const area = colW * cell.span + gapX * (cell.span - 1);
+        const area = colWs.slice(cell.col, cell.col + cell.span).reduce((a, b) => a + b, 0) + gapX * (cell.span - 1);
         const avail = Math.max(1, area - hMarg(cell.k));
-        layoutBox(cell.k, wMode(cell.k) === 'fixed' || wMode(cell.k) === 'hug' ? childWidth(cell.k, avail, false) : avail, undefined, innerH);
+        layoutBox(cell.k, wMode(cell.k) === 'fixed' || wMode(cell.k) === 'hug' || wMode(cell.k) === 'calc' ? childWidth(cell.k, avail, false) : avail, undefined, innerH);
         cell.area = area;
       }
-      const rowH = equalH !== undefined && ri < fixedRows ? equalH : Math.max(...r.map(cell => cell.k.h + vMarg(cell.k)));
+      const rowH = fixedH(ri) ?? Math.max(...r.map(cell => cell.k.h + vMarg(cell.k)));
       for (const cell of r) {
         const align = crossAlign(n, cell.k);
-        if (hMode(cell.k) !== 'fixed' && align === 'stretch' && !cell.k.aspectRatio) layoutBox(cell.k, cell.k.w, Math.max(1, rowH - vMarg(cell.k)), innerH);
+        if (!definite(hMode(cell.k)) && align === 'stretch' && !cell.k.aspectRatio) layoutBox(cell.k, cell.k.w, Math.max(1, rowH - vMarg(cell.k)), innerH);
         const m = marginOf(cell.k);
-        cell.k.x = round(c.left + cell.col * (colW + gapX) + numericMargin(m[3]) + offset(n.justifyItems, cell.area - cell.k.w - hMarg(cell.k)));
+        cell.k.x = round(c.left + colX[cell.col] + numericMargin(m[3]) + offset(n.justifyItems, cell.area - cell.k.w - hMarg(cell.k)));
         cell.k.y = round(y + numericMargin(m[0]) + offset(align, rowH - cell.k.h - vMarg(cell.k)));
       }
       y += rowH + gapY;
@@ -371,11 +393,12 @@ export function layoutPage(page, rootIds = null) {
       const [t, r, bt, l] = [pctOf(inset[0], cbH), pctOf(inset[1], cbW), pctOf(inset[2], cbH), pctOf(inset[3], cbW)];
       let w;
       if (wMode(k) === 'fixed') w = k.wPct !== undefined ? cbW * num(k.wPct) / 100 : num(k.w);
+      else if (wMode(k) === 'calc') w = calcSize(k, 'w', cbW) ?? num(k.w);
       else if (l !== undefined && r !== undefined) w = cbW - l - r;
       else if (wMode(k) === 'fill') w = cbW;
       else w = Math.min(intrinsic(k).max, cbW);
       let forced;
-      if (hMode(k) !== 'fixed' && t !== undefined && bt !== undefined) forced = Math.max(1, cbH - t - bt);
+      if (!definite(hMode(k)) && t !== undefined && bt !== undefined) forced = Math.max(1, cbH - t - bt);
       else if (hMode(k) === 'fill') forced = cbH;
       layoutBox(k, clampW(k, w, cbW), forced, cbH);
       const p = paddingOf(n);
@@ -388,7 +411,7 @@ export function layoutPage(page, rootIds = null) {
   };
 
   for (const root of roots) {
-    const w = wMode(root) === 'hug' ? Math.min(intrinsic(root).max, 4000) : num(root.w);
+    const w = wMode(root) === 'hug' || wMode(root) === 'auto' ? Math.min(intrinsic(root).max, 4000) : wMode(root) === 'calc' ? calcSize(root, 'w', 0) ?? num(root.w) : num(root.w);
     layoutBox(root, w, undefined, undefined);
   }
   for (const n of touched) {

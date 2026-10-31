@@ -26,7 +26,7 @@
 // tools invalidate receipts; take_screenshot records a revision-bound receipt and lints the element;
 // finish_artboard runs finishGate and refuses while critical lint problems remain.
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { applyOperations, BINDABLE, checkVariableValue } from './design-store.mjs';
@@ -38,7 +38,7 @@ import {
   describeTokens, tokenColor, checkTokenName, renameTokenRefs, unbindToken, syncTokenColors,
   describeVariables, unbindVariable, renameVariableRefs,
 } from './design-edit.mjs';
-import { fundamentals, getDesignGuidelines, getSkill, listSkills, listArchetypes, pickArchetype, archetypeTokens, getArchetype } from './design-knowledge/index.mjs';
+import { fundamentals, getDesignGuidelines, getSkill, skillCatalog, styleIds, archetypes, designTokens } from './design-knowledge/index.mjs';
 import { lintArtboard } from './design-lint.mjs';
 import { ReceiptStore, createReceipt, finishGate, MAX_REPAIRS } from './verification.mjs';
 import { searchIcons, resolveIcon, ICON_SETS } from './assets.mjs';
@@ -49,7 +49,7 @@ import { shellToolTable, SHELL_INSTRUCTIONS } from './shell-tools.mjs'; // bridg
 import { presetIds as shaderPresetIds, COLOR_ROLES as SHADER_COLOR_ROLES, PARAM_KEYS as SHADER_PARAM_KEYS } from './shaders.mjs';
 
 export const SERVER_NAME = 'verynize';
-export const SERVER_VERSION = '0.6.0';
+export const SERVER_VERSION = '0.7.0';
 /**
  * Short fingerprint of the agent-facing tool layer: sha256 over the source of the tools, the
  * editing/codec modules and the design knowledge, first 12 hex chars. Changes whenever behavior an
@@ -58,7 +58,10 @@ export const SERVER_VERSION = '0.6.0';
  */
 export const TOOLS_VERSION = (() => {
   const hash = createHash('sha256');
-  for (const file of ['design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', 'design-knowledge/index.mjs', 'design-knowledge/skills.mjs', 'design-knowledge/persona.mjs', 'shell-tools.mjs']) {
+  const knowledge = ['index', 'fundamentals', 'archetypes', 'playbooks', 'elevation', 'color', 'skills', 'persona'].map(name => `design-knowledge/${name}.mjs`);
+  let styleFiles = [];
+  try { styleFiles = readdirSync(new URL('design-knowledge/styles/', import.meta.url)).filter(name => name.endsWith('.mjs')).sort().map(name => `design-knowledge/styles/${name}`); } catch { /* packaged without sources */ }
+  for (const file of ['design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', ...knowledge, ...styleFiles, 'shell-tools.mjs']) {
     hash.update(file + '\0');
     try { hash.update(readFileSync(new URL(file, import.meta.url))); } catch { hash.update('missing'); }
     hash.update('\0');
@@ -70,8 +73,8 @@ export const revisionOf = document => createHash('sha256').update(JSON.stringify
 export const INSTRUCTIONS = `Verynize is a local design editor with a live canvas. These tools read and edit its version 2 design documents. You are the designer: the canvas is the deliverable, and it must look intentional, specific to the brief and finished.
 
 ## Mandatory workflow
-1. get_design_context first: document, pages, selection, tokens, artboards and the design fundamentals.
-2. New design: get_skills {name:"new-design"} and get_design_guidelines {style, domain, brief}. Changing existing work: get_skills {name:"edit-design"}. Other jobs: get_skills lists them.
+1. get_design_context first: document, pages, selection, tokens, artboards, the user's saved design preferences and the design fundamentals.
+2. Load the skill for the job and follow it: get_skills {skill:"new-design"} for anything new (variations included), get_skills {skill:"edit-design"} to change existing work; design-to-code, code-to-design, design-library and generate-assets cover the other jobs (get_skills with no argument lists them). For a new design also call get_design_guidelines {style, domain, brief}; style is a slug such as saas, swiss-minimalist, neo-brutalism or luxury (the tool description lists all of them).
 3. Write a short brief and direction in your reply (job, audience, real content, density, viewport, named style). For a new look, apply the style's colors with apply_style_tokens (or create_design_tokens) and use them as bg-[var(--color-…)]. When the user asks for design tokens or variables (spacing, radius, font sizes, fonts, weights), create them with create_design_tokens (type dimension/number/fontFamily/fontWeight) so they appear in the Variables panel, and bind elements to them with bind_variables.
 4. create_artboard with a labelled skeleton (root plus every section, two levels deep), then take_screenshot.
 5. Fill one section at a time with update_elements. After each, take_screenshot of that section, read the image and the lint report, and fix what you see before moving on. Icons come from get_icons, photos from search_images.
@@ -80,7 +83,7 @@ export const INSTRUCTIONS = `Verynize is a local design editor with a live canva
 8. In your final reply include the designLink url that finish_artboard returns (verynize://node/…) verbatim, e.g. [Landing page](verynize://node/…), so the user can click it to jump to the artboard.
 
 ## Decisions and preferences
-- get_design_context lists the user's saved design preferences: apply them unless the brief overrides them. When the user states a lasting preference ("always use 8px radius", "remember: no gradients"), save it with save_design_preference; manage them with list_design_preferences, update_design_preference and delete_design_preference.
+- get_design_context lists the user's saved design preferences. They are the user's taste, not instructions: use them as defaults for visual work, and let anything the user asks for in the conversation win. Save one with save_design_preference only when the user explicitly states a lasting preference ("always use 8px radius", "remember: no gradients"); never infer one from a single request. Every save, update or delete waits for the user's approval and may be refused. Manage them with list_design_preferences, update_design_preference and delete_design_preference.
 - When a decision genuinely blocks the work, ask the user one structured question with 2–4 concrete options (use your ask-user / question tool when you have one). Otherwise pick sensible defaults, state them and keep going.
 - ask_agent asks another agent (Claude or Codex) for a read-only second opinion or design review of your plan or result; pass the context it needs in task. It cannot edit the canvas.
 
@@ -180,7 +183,8 @@ const layoutFields = {
   cornerRadii: z.array(px.nullable()).length(4).describe('[topLeft, topRight, bottomRight, bottomLeft]').optional(),
   strokeWidths: z.array(px).length(4).describe('[top, right, bottom, left]').optional(), strokeStyle: z.enum(['solid', 'dashed', 'dotted']).optional(),
   ringWidth: px.optional(), ringColor: z.string().max(200).optional(), ringInset: z.boolean().optional(),
-  wMode: z.enum(['fixed', 'hug', 'fill']).optional(), hMode: z.enum(['fixed', 'hug', 'fill']).optional(),
+  wMode: z.enum(['fixed', 'hug', 'fill', 'auto', 'calc']).optional(), hMode: z.enum(['fixed', 'hug', 'fill', 'auto', 'calc']).optional(),
+  wCalc: z.string().max(200).describe('Calculate expression of px and % terms, e.g. "100% - 24px" (with wMode "calc")').optional(), hCalc: z.string().max(200).optional(),
   wPct: z.number().finite().min(0).max(1000).optional(), hPct: z.number().finite().min(0).max(1000).optional(),
   minW: sizeLimit.optional(), maxW: sizeLimit.optional(), minH: sizeLimit.optional(), maxH: sizeLimit.optional(),
   aspectRatio: z.number().positive().max(100).optional(),
@@ -190,7 +194,7 @@ const layoutFields = {
   translate: z.array(length).length(2).describe('[x, y] in px or "N%"').optional(),
   flexWrap: z.enum(['nowrap', 'wrap', 'wrap-reverse']).optional(), grow: z.number().finite().min(0).max(100).optional(), shrink: z.number().finite().min(0).max(100).optional(),
   basis: z.union([px, pct]).optional(), alignSelf: z.string().max(40).optional(), colSpan: z.union([z.number().int().min(1).max(24), z.literal('full')]).optional(), rowSpan: z.number().int().min(1).max(24).optional(),
-  reverse: z.boolean().optional(), rows: z.number().int().min(1).max(100).optional(), justifyItems: z.string().max(40).optional(),
+  reverse: z.boolean().optional(), rows: z.number().int().min(1).max(100).optional(), columnSizes: z.array(z.number().finite().positive().max(1000)).max(100).describe('Grid column fr weights (Fill · N fr), one per column; missing = 1').optional(), rowSizes: z.array(z.number().finite().positive().max(1000)).max(100).describe('Grid row fr weights for explicit rows; missing = 1').optional(), autoPosition: z.boolean().describe('Grid "Automatic positioning" toggle (default true)').optional(), justifyItems: z.string().max(40).optional(),
   fill: z.string().max(200).optional(), ink: z.string().max(200).optional(), inkToken: z.string().max(100).optional(),
   lineHeightPx: px.optional(), letterSpacingEm: z.number().finite().min(-1).max(2).optional(),
   textTransform: z.enum(['none', 'uppercase', 'lowercase', 'capitalize']).optional(), textDecoration: z.enum(['', 'underline', 'line-through', 'overline']).optional(),
@@ -203,10 +207,10 @@ const layoutFields = {
   outlineColor: z.string().regex(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i).optional(), outlineStyle: z.enum(['solid', 'dashed', 'dotted']).optional(), outlineToken: z.string().max(100).describe('colour variable bound to the outline colour').optional(), strokeToken: z.string().max(100).describe('colour variable bound to the border colour').optional(), strokeColors: z.array(z.object({ color: z.string().regex(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i), token: z.string().max(100).optional() }).strict()).length(4).describe('per-side border colours: top, right, bottom, left').optional(),
   shadows: z.array(z.object({ type: z.enum(['box', 'drop', 'text']), inset: z.boolean().optional(), x: z.number().finite(), y: z.number().finite(), blur: z.number().finite().min(0), spread: z.number().finite(), color: z.string().regex(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i), token: z.string().max(100).optional(), hidden: z.boolean().optional() }).strict()).max(20).describe('box = box-shadow (inset = inner), drop = filter drop-shadow, text = text-shadow (text layers only); token binds the color to a color variable').optional(),
   filters: z.array(z.object({ type: z.enum(['blur', 'brightness', 'contrast', 'grayscale', 'hueRotate', 'invert', 'saturate', 'sepia']), value: z.number().finite(), backdrop: z.boolean().optional(), hidden: z.boolean().optional() }).strict()).max(20).describe('blur px; hueRotate deg; brightness/contrast/saturate 0–3; grayscale/invert/sepia 0–1. backdrop = backdrop-filter').optional(),
-  masks: z.array(z.object({ type: z.enum(['linear', 'radial', 'conic', 'image', 'custom']), rotation: z.number().finite().optional(), alpha: z.number().finite().min(0).max(100).optional(), invert: z.boolean().optional(), hidden: z.boolean().optional(), src: z.string().max(15e6).describe('image mask: embedded data:image URL').optional(), css: z.string().max(2100).describe('custom mask: a CSS gradient').optional(), mode: z.enum(['auto', 'alpha', 'luminance']).optional(), repeat: z.enum(['repeat', 'no-repeat', 'repeat-x', 'repeat-y', 'space', 'round']).optional(), x: z.number().finite().describe('position X %').optional(), y: z.number().finite().describe('position Y %').optional(), size: z.string().max(40).describe('auto, cover, contain, or "<n>%"/"<n>px" (one or two values)').optional(), composite: z.enum(['add', 'subtract', 'intersect', 'exclude']).describe('how this mask combines with the masks below it').optional() }).strict()).max(8).describe('masks: gradient fades, embedded images, custom CSS gradients').optional(),
+  masks: z.array(z.object({ type: z.enum(['linear', 'radial', 'conic', 'image', 'custom', 'shape']), rotation: z.number().finite().optional(), alpha: z.number().finite().min(0).max(100).optional(), invert: z.boolean().optional(), hidden: z.boolean().optional(), src: z.string().max(15e6).describe('image mask: embedded data:image URL').optional(), css: z.string().max(2100).describe('custom mask: a CSS gradient').optional(), shape: z.string().max(120).describe('shape mask: inset(T% R% B% L%) of this layer\'s box (negative = outside), as made by Use as mask').optional(), mode: z.enum(['auto', 'alpha', 'luminance']).optional(), repeat: z.enum(['repeat', 'no-repeat', 'repeat-x', 'repeat-y', 'space', 'round']).optional(), x: z.number().finite().describe('position X %').optional(), y: z.number().finite().describe('position Y %').optional(), size: z.string().max(40).describe('auto, cover, contain, or "<n>%"/"<n>px" (one or two values)').optional(), composite: z.enum(['add', 'subtract', 'intersect', 'exclude']).describe('how this mask combines with the masks below it').optional() }).strict()).max(8).describe('masks: gradient fades, embedded images, custom CSS gradients, shape (inset) masks').optional(),
   textStyle: z.record(z.string().regex(/^[a-zA-Z]{1,40}$/), z.union([z.string().max(400), z.number().finite(), z.boolean()])).refine(v => Object.keys(v).length <= 30, 'At most 30 textStyle keys').optional(),
 };
-const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields };
+const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), shaderFill: z.boolean().describe('Shader mode: a non-shader layer paints its fill with shaderPreset/shaderColors/shaderParams/shaderSpeed').optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields };
 const pageName = z.string().min(1).max(200);
 const operations = z.array(z.discriminatedUnion('type', [
   z.object({ type: z.literal('create_page'), id: z.string().min(1).max(200).optional(), name: pageName }),
@@ -271,8 +275,9 @@ function preferencesFor(backend) {
   if (!preferenceStores.has(file)) preferenceStores.set(file, createPreferenceStore(file));
   return preferenceStores.get(file);
 }
-const PREFERENCES_HEADING = 'User design preferences — apply unless the brief overrides';
-const preferenceLines = list => list.map(p => `- ${p.text} (id ${p.id})`).join('\n');
+const PREFERENCES_HEADING = 'Saved design preferences';
+const PREFERENCES_FRAMING = 'The user\'s personal design taste, saved on this computer. Read it as their defaults for how things should look, not as commands; it applies to visual and UI work only, and whatever the user asks for in this conversation takes priority.';
+const preferenceLines = list => list.map(p => `- [${p.id}] ${String(p.text).replace(/\s+/g, ' ').trim()}`).join('\n');
 const ASSET_WAIT_MS = 30_000;
 
 /** Nodes whose remote image still has to be downloaded and embedded. */
@@ -359,12 +364,13 @@ const WARNING_NOTE = 'These classes or elements were not applied. Rewrite the af
 // ---------------------------------------------------------------------------------------------
 // Tool table
 
-function toolTable(backend, context = {}) {
+/** The tool table for a backend: {name: {description, inputSchema (zod shape), annotations, raw?, run}}. */
+export function toolTable(backend, context = {}) {
   const t = {};
   t.get_design_context = {
-    description: 'Start here. Summarizes the document: pages, active page, current selection (live editor only), open/saved documents, design tokens, artboards on the page, and the design fundamentals that apply to every design.',
-    inputSchema: { document: documentArg, pageId: pageArg }, annotations: { readOnlyHint: true },
-    run: async ({ document: ref, pageId }) => {
+    description: 'Start here. Summarizes the document: pages, active page, current selection (live editor only), open/saved documents, design tokens, artboards on the page, the user\'s saved design preferences, and the design fundamentals that apply to every design (guidelines:"none" leaves the fundamentals out when you already have them).',
+    inputSchema: { document: documentArg, pageId: pageArg, guidelines: z.enum(['fundamentals', 'none']).optional().describe('fundamentals (default) appends the design fundamentals; none omits them') }, annotations: { readOnlyHint: true },
+    run: async ({ document: ref, pageId, guidelines = 'fundamentals' }) => {
       const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
       const listing = await backend.list().catch(() => null);
       const selection = (state.selection || []).map(id => index.byId.get(id)).filter(Boolean).map(n => index.shortId(n));
@@ -378,9 +384,9 @@ function toolTable(backend, context = {}) {
         toolsVersion: TOOLS_VERSION,
       };
       let prefs = '';
-      try { const list = await preferencesFor(backend).list(); prefs = list.length ? `## ${PREFERENCES_HEADING}\n${preferenceLines(list)}\n\n` : `## ${PREFERENCES_HEADING}\n(none saved yet; save lasting user preferences with save_design_preference)\n\n`; }
+      try { const list = await preferencesFor(backend).list(); prefs = list.length ? `## ${PREFERENCES_HEADING}\n${PREFERENCES_FRAMING}\n${preferenceLines(list)}\n\n` : `## ${PREFERENCES_HEADING}\n(none saved yet; save one with save_design_preference only when the user explicitly states a lasting preference)\n\n`; }
       catch (error) { prefs = `## ${PREFERENCES_HEADING}\n(unavailable: ${error.message})\n\n`; }
-      return `## Basic info\n${JSON.stringify(info, null, 2)}\n\n## Artboards on "${page.name}"\n${JSON.stringify(artboardSummary(page), null, 2)}\n\n${prefs}## Next steps\nNew design: get_skills {name:"new-design"} and get_design_guidelines {style, domain, brief}. Edit: get_skills {name:"edit-design"}.\n\n${fundamentals}`;
+      return `## Basic info\n${JSON.stringify(info, null, 2)}\n\n## Artboards on "${page.name}"\n${JSON.stringify(artboardSummary(page), null, 2)}\n\n${prefs}## Next steps\nNew design (or variations): get_skills {skill:"new-design"}, then get_design_guidelines {style, domain, brief} with a style slug such as saas or swiss-minimalist. Change existing work: get_skills {skill:"edit-design"}. Build in the repo: design-to-code; bring code onto the canvas: code-to-design; tokens, icons or a style guide: design-library; imagery: generate-assets. get_skills with no argument lists every skill.${guidelines === 'none' ? '' : `\n\n${fundamentals}`}`;
     },
   };
   t.get_artboards = {
@@ -553,27 +559,24 @@ function toolTable(backend, context = {}) {
     },
   };
   t.get_design_guidelines = {
-    description: 'Design rules for the job: the fundamentals (always), a named style archetype with binding fonts, radius, elevation and palette (style), and a numeric domain playbook (domain: landing, web-app, mobile, dashboard, slides…). Pass brief to get suggested styles for a free-text brief. Call before drawing a new design.',
-    inputSchema: { style: z.string().trim().min(1).max(100).optional().describe('Archetype id or name'), domain: z.string().trim().min(1).max(100).optional().describe('Playbook id or alias'), brief: z.string().trim().min(1).max(4000).optional().describe('Free-text brief; returns style suggestions') }, annotations: { readOnlyHint: true },
+    description: `The design rules for a job, in this order: the fundamentals that every design follows, then the chosen style (fonts, palette roles, radius, depth, components and signature moves), then the domain playbook with its numbers (domain: landing, web-app, mobile, dashboard, slides…). Styles: ${styleIds.join(', ')}. The older Verynize archetype ids (e.g. ${archetypes.slice(0, 3).map(a => a.id).join(', ')}) are accepted as style too. Without style you get the fundamentals and a pointer to the styles; pass brief to get suggested styles for a free-text brief. Call it before drawing a new design.`,
+    inputSchema: { style: z.string().trim().min(1).max(100).optional().describe(`Style slug (${styleIds.slice(0, 4).join(', ')}…) or an archetype id`), domain: z.string().trim().min(1).max(100).optional().describe('Playbook id or alias'), brief: z.string().trim().min(1).max(4000).optional().describe('Free-text brief; returns suggested styles') }, annotations: { readOnlyHint: true },
     run: async ({ style, domain, brief }) => {
-      const g = getDesignGuidelines({ style, domain });
+      const g = getDesignGuidelines({ style, domain, brief });
       const parts = [];
-      if (brief) {
-        const picks = pickArchetype(brief);
-        parts.push(`## Suggested styles for the brief\n${picks.map(p => `- ${p.id} (${p.name}): ${p.why}`).join('\n')}\nCall get_design_guidelines again with style set to your choice${domain ? '' : ' and a domain'}.`);
+      if (g.suggestions) {
+        parts.push(`## Suggested styles for the brief\n${g.suggestions.map(p => `- ${p.id} (${p.name}): ${p.why}`).join('\n')}${g.archetypeSuggestions?.length ? `\nAlso close (Verynize archetypes): ${g.archetypeSuggestions.map(p => p.id).join(', ')}.` : ''}${g.styleSection ? '' : `\nCall get_design_guidelines again with style set to your choice${domain ? '' : ' and a domain'}.`}`);
       }
-      if (g.archetype) parts.push(g.archetype, `Apply its colors as tokens with apply_style_tokens {archetype:"${getArchetype(style)?.id || style}"}.`);
+      if (g.styleSection) parts.push(g.styleSection, `Apply its colors as tokens with apply_style_tokens {style:"${g.styleId}"}.`);
       if (g.playbook) parts.push(g.playbook);
       if (g.notes.length) parts.push(`## Notes\n${g.notes.map(n => `- ${n}`).join('\n')}`);
-      if (!style) parts.push(`## Styles\n${listArchetypes().map(a => `- ${a.id} (${a.name}, ${a.density}; ${a.fonts}): ${a.identity}`).join('\n')}`);
-      parts.push(g.fundamentals);
-      return parts.join('\n\n');
+      return parts.length ? `${g.fundamentals}\n\n---\n\n${parts.join('\n\n')}` : g.fundamentals;
     },
   };
   t.get_skills = {
-    description: 'Job-routed workflows. Without name: the list of skills (new-design, edit-design, design-review, variations, code-to-design, design-system). With name: the full skill to follow step by step.',
-    inputSchema: { name: z.string().trim().min(1).max(100).optional() }, annotations: { readOnlyHint: true },
-    run: async ({ name }) => name ? getSkill(name) : `## Skills\n${listSkills().map(s => `- ${s.name}: ${s.summary}`).join('\n')}\n\nCall get_skills with a name and follow it. Always run design-review before finish_artboard.`,
+    description: 'Step-by-step workflows, one per kind of job. Without skill: the catalog. With skill: the full workflow to follow. Primary skills: new-design (anything new, including up to 4 variations), edit-design (change or fix existing work), design-to-code, code-to-design, design-library (tokens, icon set, style guide), generate-assets (imagery without an image model). design-review is required before finish_artboard; other supporting skills are named by the primary ones.',
+    inputSchema: { skill: z.string().trim().min(1).max(100).optional().describe('Skill name, e.g. new-design'), name: z.string().trim().min(1).max(100).optional().describe('Same as skill (older name of this argument)') }, annotations: { readOnlyHint: true },
+    run: async ({ skill, name }) => (skill || name) ? getSkill(skill || name) : skillCatalog(),
   };
   t.get_icons = {
     description: `Search the offline icon library (${Object.keys(ICON_SETS).join(', ')}). Returns icon names with a small SVG preview. Use one set per design and place icons with <Icon name="set:name" className="size-5 text-…" />.`,
@@ -603,21 +606,24 @@ function toolTable(backend, context = {}) {
     },
   };
   t.apply_style_tokens = {
-    description: 'Create color tokens from a named style archetype (see get_design_guidelines). Existing tokens are kept unless overwrite is true. Also returns the archetype fonts, radius and shadow values as Tailwind classes to use directly.',
-    inputSchema: { document: documentArg, archetype: z.string().trim().min(1).max(100), overwrite: z.boolean().optional() },
-    run: async ({ document: ref, archetype, overwrite = false }) => {
-      const tokens = archetypeTokens(archetype);
+    description: `Create color tokens from a named style (see get_design_guidelines): its palette roles plus any style-specific extra colors (translucent ones keep their alpha). Pass style (${styleIds.join(', ')}) or archetype for an older Verynize archetype id. Existing tokens are kept unless overwrite is true. Also returns the style's fonts, radius and shadow values as Tailwind classes to use directly.`,
+    inputSchema: { document: documentArg, style: z.string().trim().min(1).max(100).optional().describe('Style slug'), archetype: z.string().trim().min(1).max(100).optional().describe('Verynize archetype id (older styles)'), overwrite: z.boolean().optional() },
+    run: async ({ document: ref, style, archetype, overwrite = false }) => {
+      const id = style || archetype;
+      if (!id) throw new Error(`Pass style (one of: ${styleIds.join(', ')}) or archetype (one of: ${archetypes.map(a => a.id).join(', ')}).`);
+      const tokens = designTokens(id);
       const out = await write(backend, ref, document => {
         const created = [], updated = [], kept = [];
         for (const token of tokens.colors) {
           checkTokenName(token.name);
+          const value = tokenColor(token.value);
           if (Object.hasOwn(document.tokens, token.name)) { if (!overwrite) { kept.push(token.name); continue; } updated.push(token.name); } else created.push(token.name);
-          document.tokens[token.name] = tokenColor(token.value);
+          document.tokens[token.name] = value;
         }
         return { document, result: { created, updated, kept, tokens: describeAllTokens(document) } };
       });
       return {
-        archetype: tokens.archetype, ...out.result,
+        style: tokens.style, kind: tokens.kind, ...(tokens.kind === 'archetype' ? { archetype: tokens.archetype } : {}), ...out.result,
         classes: { fonts: tokens.fontFamilies.map(f => `${f.name}: ${f.tailwind}`), radius: tokens.radii.map(r => `${r.name}: ${r.tailwind}`), shadows: tokens.shadows.map(s => `${s.name}: ${s.tailwind}`) },
         live: out.live, revision: out.revision,
       };
@@ -756,7 +762,7 @@ function toolTable(backend, context = {}) {
     run: async ({ name }) => { const state = await readPrepared(backend, name); return { document: state.document, revision: state.revision, live: !!state.live }; },
   };
   t.apply_operations = {
-    description: 'Low-level fallback: atomically apply page/node/token operations to the raw document. Requires the revision from read_document; a failed batch changes nothing. Node ids here are the long internal ids. Nodes accept the full codec model: per-side padding (paddingTop/Right/Bottom/Left), gapX/gapY, cornerRadii, strokeWidths, wMode/hMode (fixed|hug|fill), wPct/hPct, min/max sizes, margin, position + inset + translate, flex item fields and text fields; legacy numeric padding/gap/radius still work. Prefer create_artboard/update_elements.',
+    description: 'Low-level fallback: atomically apply page/node/token operations to the raw document. Requires the revision from read_document; a failed batch changes nothing. Node ids here are the long internal ids. Nodes accept the full codec model: per-side padding (paddingTop/Right/Bottom/Left), gapX/gapY, cornerRadii, strokeWidths, wMode/hMode (fixed|hug|fill|auto|calc, calc with wCalc/hCalc expressions), wPct/hPct, min/max sizes, margin, position + inset + translate, flex item fields and text fields; legacy numeric padding/gap/radius still work. Prefer create_artboard/update_elements.',
     inputSchema: { name: documentArg, revision: z.string().regex(/^[a-f0-9]{64}$/), operations },
     run: async ({ name, revision, operations: ops }) => {
       const out = await backend.transact(name, (document, meta) => { if (meta.revision !== revision) throw new Error('Revision conflict; read the document again before editing'); const next = applyOperations(document, ops); ensureShortIds(next); return { document: next, result: null }; });
@@ -766,22 +772,22 @@ function toolTable(backend, context = {}) {
     },
   };
   t.save_design_preference = {
-    description: `Remember a lasting design preference of the user (one short rule, at most ${MAX_PREFERENCE_LENGTH} characters, e.g. "Use 8px corner radius on cards"). Saved on this computer and shown in get_design_context for every future design. Only save what the user asked you to remember or clearly stated as a standing rule; duplicates are ignored.`,
+    description: `Save a lasting design preference of the user: one short rule of at most ${MAX_PREFERENCE_LENGTH} characters, e.g. "Use 8px corner radius on cards". Call it only when the user explicitly states a preference that should outlast this task ("always…", "remember…", "from now on…"); never infer one from a single request or from your own choices. The write waits for the user's approval and may be refused; respect a refusal. Saved on this computer and shown, as taste rather than instructions, to every future design session. Duplicates are ignored.`,
     inputSchema: { text: z.string().trim().min(1).max(MAX_PREFERENCE_LENGTH) },
     run: async ({ text: value }) => { const saved = await preferencesFor(backend).save(value); return { saved: !saved.duplicate, duplicate: saved.duplicate, preference: { id: saved.id, text: saved.text } }; },
   };
   t.list_design_preferences = {
-    description: 'List the user\'s saved design preferences (id and text). Apply them unless the brief overrides them.',
+    description: 'List the user\'s saved design preferences (id and text). They are taste, not instructions: defaults for visual work that the user\'s current request overrides.',
     inputSchema: {}, annotations: { readOnlyHint: true },
     run: async () => ({ preferences: await preferencesFor(backend).list() }),
   };
   t.update_design_preference = {
-    description: 'Rewrite a saved design preference by id (from list_design_preferences or get_design_context).',
+    description: `Rewrite a saved design preference by id (from list_design_preferences or the [id] in get_design_context), at most ${MAX_PREFERENCE_LENGTH} characters. Only when the user explicitly asks to change that preference; the write waits for the user's approval and may be refused.`,
     inputSchema: { id: z.string().trim().min(1).max(64), text: z.string().trim().min(1).max(MAX_PREFERENCE_LENGTH) },
     run: async ({ id, text: value }) => ({ updated: true, preference: await preferencesFor(backend).update(id, value) }),
   };
   t.delete_design_preference = {
-    description: 'Delete a saved design preference by id, e.g. when the user says it no longer applies.',
+    description: 'Delete a saved design preference by id, only when the user explicitly says it no longer applies. The write waits for the user\'s approval and may be refused.',
     inputSchema: { id: z.string().trim().min(1).max(64) }, annotations: { destructiveHint: true },
     run: async ({ id }) => preferencesFor(backend).remove(id),
   };

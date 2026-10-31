@@ -2,6 +2,8 @@
 //
 // EMAIL_PROVIDER selects the transport:
 // - "cloudflare": sends through the EMAIL binding from EMAIL_FROM (an onboarded sending domain).
+// - "smtp": the Node server (server/node.mjs) sends through SMTP_MAILER, an SMTP transport with the
+//   same send(message) shape as the EMAIL binding, from EMAIL_FROM.
 // - "outbox": development/test only. Messages are stored in the account directory and can be
 //   read back through GET /api/dev/outbox?to=<email>. Never enable this on a public deployment.
 // - "webhook": POSTs {to,subject,text} JSON to EMAIL_WEBHOOK_URL with a bearer EMAIL_WEBHOOK_TOKEN,
@@ -29,15 +31,16 @@ export async function sendMail(env, directory, message) {
     if (!response.ok) rpcFail(502, "Email delivery failed; try again later");
     return { provider };
   }
-  if (provider === "cloudflare") {
-    if (!env.EMAIL || !env.EMAIL_FROM)
-      rpcFail(503, "Email delivery is not configured on this server");
+  // A Mailer: {send({from: {email, name}, to, subject, text, html})} (cloud/platform/README.md).
+  const mailer = { cloudflare: env.EMAIL, smtp: env.SMTP_MAILER }[provider];
+  if (provider === "cloudflare" || provider === "smtp") {
+    if (!mailer || !env.EMAIL_FROM) rpcFail(503, "Email delivery is not configured on this server");
     const html = message.text.replace(
       /[&<>"']/g,
       (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char],
     );
     try {
-      await env.EMAIL.send({
+      await mailer.send({
         from: { email: env.EMAIL_FROM, name: "Verynize" },
         to: message.to,
         subject: message.subject,

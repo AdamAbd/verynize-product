@@ -1,7 +1,7 @@
 // Narrow subscriptions to the legacy design store. The store notifies after *every* legacy render
 // (including each pointer move while dragging on the canvas); the sidebar only re-renders when the
 // slice it shows actually changes.
-import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { activePage, design, type DesignDocument, type LayerNode } from "@/lib/bridge";
 
 /** Subscribe to a JSON-serialisable slice of the document; re-renders only when the slice changes. */
@@ -43,6 +43,8 @@ export type TreeNode = Pick<LayerNode, "id" | "name" | "type" | "parentId" | "hi
   layout?: string;
   direction?: string;
   ellipse?: boolean;
+  /** A live preview frame (preview audit PF7): drawn with a browser-window icon. */
+  preview?: true;
 };
 
 export function useTreeNodes(): TreeNode[] {
@@ -57,6 +59,40 @@ export function useTreeNodes(): TreeNode[] {
       layout: typeof n.layout === "string" ? n.layout : undefined,
       direction: typeof n.direction === "string" ? n.direction : undefined,
       ellipse: n.ellipse === true || undefined,
+      preview: n.preview ? (true as const) : undefined,
     })),
   );
+}
+
+/** A canvas drag's pending re-parent (`bd:layer-preview` from canvas-interactions.js); null when none. */
+export type LayerPreview = { ids: string[]; parentId: string | null; index?: number } | null;
+
+/** The live hierarchy preview of a canvas drag (Wonder R1-row-drag-out/-far): view state only, never the document. */
+export function useLayerPreview(): LayerPreview {
+  const [preview, setPreview] = useState<LayerPreview>(null);
+  useEffect(() => {
+    const on = (event: Event) => setPreview((event as CustomEvent<LayerPreview>).detail ?? null);
+    window.addEventListener("bd:layer-preview", on);
+    return () => window.removeEventListener("bd:layer-preview", on);
+  }, []);
+  return preview;
+}
+
+/** Tree nodes as they will be after the previewed drop: moved under the new parent at the slot release would use
+ * (the same placement as `relocate` in canvas-interactions.js; top-most when no stack slot applies). */
+export function applyLayerPreview(nodes: TreeNode[], preview: LayerPreview): TreeNode[] {
+  if (!preview) return nodes;
+  const ids = new Set(preview.ids);
+  const moved = nodes.filter((n) => ids.has(n.id)).map((n) => ({ ...n, parentId: preview.parentId }));
+  if (!moved.length) return nodes;
+  const rest = nodes.filter((n) => !ids.has(n.id));
+  const siblings = rest.filter((n) => (n.parentId || null) === preview.parentId);
+  const index = preview.index;
+  const at =
+    index !== undefined && index < siblings.length
+      ? rest.indexOf(siblings[index])
+      : siblings.length
+        ? rest.indexOf(siblings[siblings.length - 1]) + 1
+        : rest.length;
+  return [...rest.slice(0, at), ...moved, ...rest.slice(at)];
 }

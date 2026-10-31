@@ -1,15 +1,20 @@
 const {_electron}=require(process.cwd()+'/node_modules/@playwright/test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const os=require('node:os');
+const {waitForUiReady}=require('./helpers/ui-ready.cjs');
 (async()=>{
-  const profile=await fs.mkdtemp(os.tmpdir()+'/bd-page-'),env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
+  const profile=await fs.mkdtemp(os.tmpdir()+'/bd-page-'),env={...process.env};delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1';
   const app=await _electron.launch({timeout:20000,env,args:['.',`--user-data-dir=${profile}`]});
   try{
-    const p=await app.firstWindow({timeout:15000});await p.waitForSelector('#canvas .layer');
+    const p=await app.firstWindow({timeout:15000});await waitForUiReady(p);await p.waitForSelector('#canvas .layer');
     // A new page is empty: no white artboard behind it.
     await p.locator('#add-page').click();
     assert.equal(await p.locator('#canvas .layer').count(),0);
     assert.equal(await p.locator('#canvas').evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)');
     // Frames carry no grey outline unless selected.
+    // The toolbar Frame button arms the tool (Wonder D1); a click on the canvas makes the frame.
     await p.locator('#add-frame').click();
+    assert.equal(await p.locator('#canvas .layer').count(),0,'arming the frame tool creates nothing');
+    await p.locator('#canvas-wrap').click();
+    assert.equal(await p.locator('#canvas .frame-layer').count(),1);
     await p.evaluate(()=>window.design.setSelection([]));
     assert.equal(await p.locator('#canvas .frame-layer').evaluate(e=>getComputedStyle(e).outlineStyle),'none');
     // Nothing selected: Variables collapsed, Properties shows the page colour.
@@ -19,6 +24,24 @@ const {_electron}=require(process.cwd()+'/node_modules/@playwright/test');const 
     await p.waitForFunction(()=>{const d=window.design.getDocument();return d.pages.find(x=>x.id===d.activePage).background==='#112233'});
     assert.equal(await p.locator('#workspace').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(17, 34, 51)');
     assert.equal(await p.evaluate(()=>{try{window.design.updatePage({background:'red'});return false}catch{return true}}),true);
+    // Page eye (properties-audit C8, Wonder H8): hides the page background and keeps the colour. The page turns
+    // transparent: the canvas shows a checkerboard, the field reads 0 % (dimmed) and still shows the hex.
+    const opacity=()=>p.locator('#page-section [data-page-opacity]').innerText().then(t=>t.replace(/\s+/g,' ').trim());
+    assert.equal(await opacity(),'100 %');
+    await p.locator('[aria-label="Hide page background"]').click();
+    assert.equal(await p.evaluate(()=>{const d=window.design.getDocument();const pg=d.pages.find(x=>x.id===d.activePage);return [pg.background,pg.backgroundHidden].join()}),'#112233,true');
+    const ws=await p.locator('#workspace').evaluate(e=>{const s=getComputedStyle(e);return{img:s.backgroundImage,color:s.backgroundColor,inline:e.style.backgroundColor,cls:e.classList.contains('page-transparent')}});
+    assert.ok(ws.cls&&!ws.inline,'hidden page background drops the page colour');
+    assert.match(ws.img,/^repeating-conic-gradient/,'hidden page background shows a checkerboard');
+    assert.notEqual(ws.color,'rgb(17, 34, 51)');
+    assert.equal(await opacity(),'0 %');
+    assert.equal(await p.locator('#page-section input').inputValue(),'112233','the hex is kept');
+    assert.equal(await p.evaluate(()=>{try{window.design.updatePage({backgroundHidden:false});return false}catch{return true}}),true,'backgroundHidden is true or absent');
+    await p.locator('[aria-label="Show page background"]').click();
+    assert.equal(await p.evaluate(()=>{const d=window.design.getDocument();return 'backgroundHidden' in d.pages.find(x=>x.id===d.activePage)}),false);
+    assert.equal(await p.locator('#workspace').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(17, 34, 51)');
+    assert.equal(await p.locator('#workspace').evaluate(e=>getComputedStyle(e).backgroundImage),'none','unhide removes the checkerboard');
+    assert.equal(await opacity(),'100 %');
     await p.locator('[aria-label="Reset page colour"]').click();
     assert.equal(await p.evaluate(()=>{const d=window.design.getDocument();return 'background' in d.pages.find(x=>x.id===d.activePage)}),false);
     // Selecting a layer keeps Variables collapsed and hides the page section.

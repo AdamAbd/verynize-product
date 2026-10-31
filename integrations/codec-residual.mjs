@@ -10,6 +10,7 @@
 import { effectsOf } from "./node-style.mjs";
 import { normalizeColorsIn } from "./codec-css.mjs";
 import { CORNER_KEYS, PADDING_AXES } from "./variables.mjs";
+import { shaderError } from "./shaders.mjs";
 
 export const RESIDUAL_ATTR = "data-vn";
 const NODE_KEEP = new Set(["id", "parentId", "shortId"]);
@@ -34,6 +35,38 @@ function shadowSig(node, tokens) {
 function filterSig(node, tokens) {
   const fx = effectsOf(node, tokens);
   return `${norm(fx.filter.join(" "))}|${norm(fx.backdrop.join(" "))}`;
+}
+// A hidden border / outline (the inspector's eye) writes no classes: restore it only while the classes
+// draw no border / outline either.
+const STROKE_KEYS = [
+  "strokeWidth",
+  "strokeWidths",
+  "strokeColor",
+  "strokeColors",
+  "strokeToken",
+  "strokeStyle",
+  "strokeHidden",
+  "strokeHiddenSides",
+];
+const OUTLINE_KEYS = [
+  "outlineWidth",
+  "outlineOffset",
+  "outlineColor",
+  "outlineStyle",
+  "outlineToken",
+  "outlineHidden",
+];
+function borderSig(node) {
+  if (node.strokeHidden === true) return "0,0,0,0";
+  const hidden = Array.isArray(node.strokeHiddenSides) ? node.strokeHiddenSides : [];
+  const widths =
+    Array.isArray(node.strokeWidths) && node.strokeWidths.length === 4
+      ? node.strokeWidths.map((v, i) => (hidden[i] === true ? 0 : v))
+      : Array(4).fill(node.strokeWidth);
+  return widths.map((v) => Math.max(0, Number(v) || 0)).join(",");
+}
+function outlineSig(node, tokens) {
+  return JSON.stringify(effectsOf(node, tokens).outline);
 }
 function maskSig(node, tokens) {
   const fx = effectsOf(node, tokens);
@@ -96,6 +129,14 @@ const DORMANT = [
     (n) => n.type === "frame" && n.layout !== "grid" && n.columns !== undefined && n.columns !== 2,
   ],
   ["rows", (n) => n.type === "frame" && n.layout !== "grid" && n.rows !== undefined],
+  ["columnSizes", (n) => n.type === "frame" && n.layout !== "grid" && n.columnSizes !== undefined],
+  [
+    "rowSizes",
+    (n) =>
+      n.type === "frame" &&
+      (n.layout !== "grid" || !(Number(n.rows) >= 1)) &&
+      n.rowSizes !== undefined,
+  ],
   [
     "direction",
     (n) =>
@@ -156,6 +197,10 @@ const DORMANT = [
   ],
 ];
 const BOX = ["x", "y", "w", "h"];
+// Shader mode (shaderFill) and the shader settings of a non-shader layer have no class; Shader layers write
+// them as JSX attributes instead (shaders.mjs). Values equal to the node defaults are left out.
+const SHADER_KEYS = ["shaderFill", "shaderPreset", "shaderSpeed", "shaderIntensity", "shaderColors", "shaderParams"];
+const SHADER_DEFAULTS = { shaderFill: false, shaderPreset: "aurora", shaderSpeed: 1, shaderIntensity: 1 };
 
 // --- write ---------------------------------------------------------------------------------------
 
@@ -171,16 +216,30 @@ export function residualOf(node) {
     r.masks = node.masks;
     if (node.mask) r.mask = node.mask;
   }
+  for (const [flag, keys] of [
+    ["strokeHidden", STROKE_KEYS],
+    ["strokeHiddenSides", STROKE_KEYS],
+    ["outlineHidden", OUTLINE_KEYS],
+  ])
+    if (node[flag] === true || (Array.isArray(node[flag]) && node[flag].includes(true)))
+      for (const key of keys) if (node[key] !== undefined) r[key] = node[key];
   if (node.bindings && typeof node.bindings === "object" && Object.keys(node.bindings).length) {
     r.bindings = node.bindings;
     r.bound = boundValues(node, node.bindings);
   }
   if (Array.isArray(node.textRuns) && node.textRuns.length) r.textRuns = node.textRuns;
   if (node.locked === true) r.locked = true;
+  // Grid "Automatic positioning" off has no class (it changes no CSS).
+  if (node.type === "frame" && node.autoPosition === false) r.autoPosition = false;
+  // "Hide label" on a top-level frame (canvas context menu) has no class either.
+  if (node.type === "frame" && !node.parentId && node.labelHidden === true) r.labelHidden = true;
   if (node.preview && typeof node.preview === "object" && !node.parentId) r.preview = node.preview;
   const name = typeof node.name === "string" ? node.name : "";
   if (name && (name !== name.trim() || name.length > 200)) r.name = name;
   for (const [key, dormant] of DORMANT) if (dormant(node)) r[key] = node[key];
+  if (node.type !== "shader")
+    for (const key of SHADER_KEYS)
+      if (node[key] !== undefined && node[key] !== SHADER_DEFAULTS[key]) r[key] = node[key];
   // Hidden layers are skipped by layout, so their last geometry cannot be recomputed on import.
   if (node.hidden === true && node.parentId) r.box = BOX.map((key) => node[key]);
   return Object.keys(r).length ? r : null;
@@ -247,6 +306,9 @@ export function applyResidual(node, attrs, { tokens = {}, warnings = [], where =
   if (r.shadows !== undefined) group(["shadows", "shadow"], shadowSig);
   if (r.filters !== undefined) group(["filters"], filterSig);
   if (r.masks !== undefined) group(["masks", "mask"], maskSig);
+  if (r.strokeHidden === true || (Array.isArray(r.strokeHiddenSides) && r.strokeHiddenSides.includes(true)))
+    group(STROKE_KEYS, borderSig);
+  if (r.outlineHidden === true) group(OUTLINE_KEYS, outlineSig);
   if (r.textRuns !== undefined && node.type === "text") {
     if (
       canonicalRuns(node.text, r.textRuns) === canonicalRuns(node.text, node.textRuns) &&
@@ -264,6 +326,8 @@ export function applyResidual(node, attrs, { tokens = {}, warnings = [], where =
     if (Object.keys(kept).length < Object.keys(r.bindings).length) stale.push("bindings");
   }
   if (r.locked === true) node.locked = true;
+  if (r.autoPosition === false && node.type === "frame") node.autoPosition = false;
+  if (r.labelHidden === true && node.type === "frame" && !node.parentId) node.labelHidden = true;
   if (r.preview && typeof r.preview === "object" && !node.parentId)
     node.preview = structuredClone(r.preview);
   if (typeof r.name === "string" && r.name.trim() && r.name.trim().slice(0, 200) === node.name)
@@ -273,6 +337,12 @@ export function applyResidual(node, attrs, { tokens = {}, warnings = [], where =
       const next = { ...node, [key]: r[key] };
       if (dormant(next)) node[key] = r[key];
     }
+  if (node.type !== "shader" && SHADER_KEYS.some((key) => r[key] !== undefined)) {
+    const next = { ...node };
+    for (const key of SHADER_KEYS) if (r[key] !== undefined) next[key] = structuredClone(r[key]);
+    if (shaderError(next)) stale.push("shaderFill");
+    else for (const key of SHADER_KEYS) if (r[key] !== undefined) node[key] = next[key];
+  }
   if (
     Array.isArray(r.box) &&
     node.hidden === true &&

@@ -1,0 +1,9 @@
+/* The window has a hidden-inset title bar: the top strip of the onboarding drags the window. */
+#onboarding [data-drag] {
+  -webkit-app-region: drag;
+}
+#onboarding button,
+#onboarding input,
+#onboarding a {
+  -webkit-app-region: no-drag;
+}

@@ -14,3 +14,27 @@ export function parsePreviewCommand(value: string): string[] {
 }
 export const formatCommand = (args?: string[]) => args?.map(arg => /^[a-zA-Z0-9_./:=@+-]+$/.test(arg) ? arg : "'" + arg.replaceAll("'", "'\"'\"'") + "'").join(" ") || "";
 
+
+/** `a && b` → [argvA, argvB]: steps run one after another, the next only when the previous one succeeds. */
+export function parsePreviewSteps(value: string): string[][] {
+  const steps: string[][] = [];
+  let current = "", quote = "";
+  const push = () => {
+    const argv = parsePreviewCommand(current);
+    if (!argv.length) throw new Error("Add a command on both sides of &&.");
+    steps.push(argv);
+    current = "";
+  };
+  const text = value.trim();
+  if (!text) return [];
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quote) { if (char === quote) quote = ""; current += char; }
+    else if (char === '"' || char === "'") { quote = char; current += char; }
+    else if (char === "&" && text[i + 1] === "&") { push(); i++; }
+    else current += char;
+  }
+  push();
+  return steps;
+}
+export const formatSteps = (steps?: string[][] | null) => (steps || []).map(formatCommand).filter(Boolean).join(" && ");

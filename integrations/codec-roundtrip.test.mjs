@@ -1,7 +1,7 @@
 // General source round trips: document -> JSX -> document and document -> HTML/CSS -> document are the
 // identity (modulo ids) for a "kitchen sink" page that sets every layer property of the schema, and a
-// coverage check enumerates the schema from the validators (validate() in web/app.js,
-// validateDocument in design-store.mjs, the effect/paint/shader validators in web/node-style.js and
+// coverage check enumerates the schema from the validators (the shared validateDocument in
+// web/document-core.js, the effect/paint/shader validators in web/node-style.js and
 // web/shaders.js) plus the codec node model, and fails when a property is neither exercised by the
 // kitchen sink nor explicitly exempt.
 import test from "node:test";
@@ -42,13 +42,13 @@ function body(src, marker) {
 /** Layer property names the validators and the codec node model know about. */
 export function schemaKeys() {
   const app = read("web/app.js"),
-    store = read("integrations/design-store.mjs"),
+    core = read("web/document-core.js"),
     style = read("web/node-style.js"),
     shaders = read("web/shaders.js"),
     edit = read("integrations/design-edit.mjs");
   const texts = [
-    body(app, "function validate(d)"),
-    body(store, "export function validateDocument"),
+    body(core, "function validateNode(node)"),
+    body(core, "function normalizeDocument("),
     body(style, "function validateEffects"),
     body(style, "function paintError"),
     body(shaders, "function validate"),
@@ -59,6 +59,9 @@ export function schemaKeys() {
     for (const m of t.matchAll(/for\s*\(\s*const\s+(?:key|\[key,\s*\w+\])\s+of\s+\[([^\]]*)\]/g))
       for (const k of m[1].matchAll(/'([a-zA-Z]\w*)'/g)) keys.add(k[1]);
   }
+  // Per-type key lists of the shared validator (NUMERIC_KEYS, STRING_KEYS, BOOLEAN_KEYS).
+  for (const m of core.matchAll(/const [A-Z]+_KEYS = \[([^\]]*)\]/g))
+    for (const k of m[1].matchAll(/'([a-zA-Z]\w*)'/g)) keys.add(k[1]);
   for (const k of Object.keys(NODE_DEFAULTS)) keys.add(k);
   const defaults = app.match(/const defaults=\{([^}]*)\}/);
   if (defaults) for (const m of defaults[1].matchAll(/([a-zA-Z]\w*):/g)) keys.add(m[1]);
@@ -107,15 +110,19 @@ const SINK_JSX = `
     <img data-node-label="Photo" src="${PNG}" className="absolute left-[300px] top-[20px] w-[90px] h-[60px] object-cover" />
     <img data-node-label="Vector" src="${SVG}" className="absolute left-[400px] top-[20px] w-[40px] h-[40px]" />
     <Shader data-node-label="Glow" preset="waves" speed={2} intensity={1.5} className="absolute left-[450px] top-[100px] w-[120px] h-[90px]" />
+    <p data-node-label="Type" className="absolute left-[24px] top-[100px] w-[200px] h-[80px] content-center whitespace-pre-line break-all -indent-[6px] antialiased leading-[normal] text-nowrap">Centred\nlines</p>
   </div>
   <div data-node-label="Row" className="flex items-baseline gap-3 min-h-[40px] max-w-[800px]">
     <p data-node-label="Grow" className="flex-1 truncate font-['Inter'] font-[450]">Grows and truncates</p>
     <div data-node-label="Badge" className="absolute top-0 right-[-4px] w-[10px] h-[10px] rounded-full bg-red-500" />
     <span data-node-label="Pill" className="shrink-0 basis-[120px] self-center mx-auto px-2 py-0.5 rounded-md bg-gradient-to-r from-indigo-500 to-pink-500 text-white text-xs whitespace-nowrap">Pill</span>
     <div data-node-label="Fixed pct" className="w-[25%] h-[20px] min-w-[40px] max-h-[30px] bg-zinc-300 animate-[aurora] [mask-image:linear-gradient(black,transparent)]" />
+    <div data-node-label="Calc" className="w-[calc(50%_-_12px)] h-[calc(10px_*_2)] bg-zinc-400" />
+    <p data-node-label="Auto" className="w-auto h-auto text-xs">Auto sized</p>
   </div>
   <div data-node-label="Flow" className="space-y-2 inline-flow">
     <p data-node-label="Inline A" className="text-xs tracking-[0.5px] normal-case">Inline flow</p>
+    <p data-node-label="Inline B" className="h-[48px] content-end whitespace-normal break-normal indent-4 subpixel-antialiased">Type settings</p>
   </div>
   <hr data-node-label="Rule" className="h-px bg-zinc-200 w-full" />
 </section>
@@ -147,8 +154,9 @@ function buildSink() {
     return n;
   };
   Object.assign(by("Board"), {
-    preview: { root: "/", name: "Site", url: "http://localhost:5173/" },
+    preview: { root: "/", name: "Site", url: "http://localhost:5173/", template: "Desktop" },
     locked: true,
+    labelHidden: true,
     bindings: { padding: "space/md", gap: "space/md" },
     padding: 16,
     gap: 16,
@@ -173,6 +181,11 @@ function buildSink() {
       { start: 6, end: 11, bold: false, italic: false, fontSize: 30 },
     ],
     shadows: [{ type: "text", x: 1, y: 1, blur: 2, spread: 0, color: "#22d3ee", token: "glow" }],
+    // Text Background Fill (properties-audit A10, WP-6).
+    backgroundFills: [
+      { type: "solid", color: "#4f46e5", token: "brand", opacity: 80 },
+      { type: "linear", angle: 45, stops: [{ position: 0, color: "#000000" }, { position: 100, color: "#ffffff" }] },
+    ],
   });
   Object.assign(by("Cell A"), {
     filters: [
@@ -216,7 +229,9 @@ function buildSink() {
     shaderColors: { center: { color: "#ff0000" }, edge: { color: "#00ff00", token: "glow" } },
     shaderParams: { size: 40, grain: 10 },
   });
-  Object.assign(by("Free"), { columns: 4, direction: "column", gap: 12, clipContent: true });
+  Object.assign(by("Free"), { columns: 4, direction: "column", gap: 12, clipContent: true, columnSizes: [2, 1, 1, 1] });
+  // Grid settings: fr-weighted Fill tracks and Automatic positioning off (G5 / H7).
+  Object.assign(by("Grid"), { columnSizes: [1, 2, 1], rowSizes: [1, 3], autoPosition: false });
   Object.assign(by("Grow"), {
     fontFamily: "Inter",
     bindings: { fontFamily: "font/body", fontWeight: "weight/strong" },
@@ -240,9 +255,29 @@ function buildSink() {
       { color: "#ff00ff" },
       { color: "#22d3ee", token: "glow" },
     ],
+    // The right side is hidden with its own eye (inspector side entry): it draws nothing, data-vn keeps it.
+    strokeHiddenSides: [false, true, false, false],
   });
   Object.assign(by("Inline A"), { name: "  Inline A ", textDecoration: "line-through" });
+  // A border and an outline hidden with the inspector's eye: nothing drawn, both kept.
+  Object.assign(by("CTA"), {
+    strokeWidth: 3,
+    strokeColor: "#ff0000",
+    strokeStyle: "dashed",
+    strokeHidden: true,
+    outlineWidth: 2,
+    outlineColor: "#00ff00",
+    outlineHidden: true,
+  });
   Object.assign(by("Second"), { variantClasses: "md:p-8 hover:opacity-90 dark:bg-black" });
+  // Shader mode (Wonder H6): a frame paints its fill with a shader preset; the paint stack stays as the fallback.
+  Object.assign(by("Second"), {
+    shaderFill: true,
+    shaderPreset: "ripple-pool-2",
+    shaderSpeed: 2,
+    shaderColors: { center: { color: "#ff0000" }, ripple: { color: "#22d3ee", token: "glow" } },
+    shaderParams: { density: 60 },
+  });
   reflow(page, null, [], doc);
   return validateDocument(doc);
 }

@@ -31,6 +31,7 @@
 </details>
 <details class="cloud-section" id="cloud-access-section"><summary>People & access</summary>
  <p>Your role: <strong id="cloud-role">Not connected</strong></p>
+ <p id="cloud-workspace" hidden>Workspace: <strong id="cloud-workspace-name"></strong> · members of this workspace reach the room</p>
  <ul id="cloud-members" class="cloud-list"></ul>
  <div id="cloud-owner-tools" hidden>
   <label>Invite by email<input id="cloud-member-email" type="email" placeholder="teammate@studio.com"></label>
@@ -39,6 +40,7 @@
   <div class="cloud-row"><select id="cloud-link-role" aria-label="Role for the new link"><option value="viewer">Viewer</option><option value="commenter">Commenter</option><option value="editor">Editor</option><option value="owner">Owner</option></select><button id="cloud-link-create">Create link</button></div>
   <input id="cloud-link-output" readonly aria-label="New link" hidden>
   <div class="cloud-actions"><button id="cloud-rotate">Rotate all links</button></div>
+  <div class="cloud-row" id="cloud-move-row" hidden><select id="cloud-move-organization" aria-label="Workspace to move this room to"></select><button id="cloud-move">Move to workspace</button></div>
  </div>
  <div class="cloud-actions"><button id="cloud-claim" hidden>Add this room to my account</button><button id="cloud-access-refresh">Refresh</button></div>
 </details>
@@ -198,6 +200,7 @@
     }
   };
   let account = loadAccount();
+  if (account && !$("cloud-server").value) $("cloud-server").value = account.server;
   const sessionFor = (server) => (account && account.server === server ? account.session : null);
   async function request(path, options = {}, info = connection) {
     const server = info?.server || base();
@@ -306,6 +309,8 @@
   /** Editor document = confirmed server state + local unacknowledged operations. */
   function rebuild() {
     if (!confirmed) return;
+    // cloud-assets: while held images upload, remote state is applied once they finish.
+    if (window.cloudAssets?.holding?.()) return;
     let doc = confirmed;
     for (const batch of pending) doc = Ops.apply(doc, batch.ops).doc;
     const current = window.design.getDocument();
@@ -339,6 +344,7 @@
     else pending.push({ n: ++batchNumber, ops: stamped, sent: false });
     clearTimeout(sendTimer);
     sendTimer = setTimeout(sendPending, 40);
+    saveOutbox();
   }
   function localChange() {
     drawPeers();
@@ -360,6 +366,8 @@
       rebuild();
       return;
     }
+    // cloud-assets: embedded images upload first; their URL is sent instead of the data URI.
+    if (window.cloudAssets?.hold?.(now, () => (localChange(), rebuild()))) return;
     const ops = Ops.diff(lastLocalDoc, now, { ignore: LOCAL_KEYS });
     const before = lastLocalDoc;
     lastLocalDoc = now;
@@ -503,6 +511,7 @@
       else status(`Saved shared revision ${revision}`);
     } else if (message.ops?.length) status(`Synced revision ${revision}`);
     rebuild();
+    saveOutbox();
   }
   /** Make sure local operations reached the server (used before publishing). */
   async function flushOps() {
@@ -530,8 +539,97 @@
     }
   }
 
+  // ---- persistent outbox ----------------------------------------------------------------------
+  // Per room (IndexedDB, so the file library's localStorage quota is untouched): this device's
+  // client id and batch counter, the unacknowledged batches and the last confirmed document. After a
+  // restart or a reconnect the same client id makes the server's `acked` say which batches it
+  // applied; the rest are resent. Beyond the limits only the confirmed document is kept and the
+  // file's own document is diffed against it again (whole-document fallback).
+  const OUTBOX_DB = "verynize-cloud",
+    OUTBOX_STORE = "outbox",
+    OUTBOX_OPS = 4000,
+    OUTBOX_BYTES = 1500000;
+  let outboxDb = null,
+    outboxTimer = null;
+  const roomKey = (info) => `${info.server}|${info.id}`;
+  function openOutbox() {
+    outboxDb ||= new Promise((resolve, reject) => {
+      const request = indexedDB.open(OUTBOX_DB, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(OUTBOX_STORE);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    }).catch(() => null);
+    return outboxDb;
+  }
+  async function outbox(mode, run) {
+    const db = await openOutbox();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(OUTBOX_STORE, mode),
+          request = run(tx.objectStore(OUTBOX_STORE));
+        tx.oncomplete = () => resolve(request.result ?? null);
+        tx.onerror = tx.onabort = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+  const readOutbox = (key) => outbox("readonly", (store) => store.get(key));
+  const clearOutbox = (key) => outbox("readwrite", (store) => store.delete(key));
+  function outboxState() {
+    if (!connection || protocol < 2 || !confirmed || !clientId) return null;
+    let batches = pending.map((batch) => ({ n: batch.n, ops: batch.ops }));
+    const count = batches.reduce((sum, batch) => sum + batch.ops.length, 0);
+    const overflow = count > OUTBOX_OPS || JSON.stringify(batches).length > OUTBOX_BYTES;
+    if (overflow) batches = [];
+    return {
+      server: connection.server,
+      id: connection.id,
+      clientId,
+      batch: batchNumber,
+      pending: batches,
+      overflow,
+      confirmed,
+      revision,
+      role,
+      savedAt: Date.now(),
+    };
+  }
+  /** Persist the outbox soon (or now): every queued batch, acknowledgement and remote change. */
+  function saveOutbox(now = false) {
+    clearTimeout(outboxTimer);
+    outboxTimer = null;
+    if (!connection) return;
+    const write = () => {
+      outboxTimer = null;
+      const state = outboxState();
+      if (state) outbox("readwrite", (store) => store.put(state, roomKey(state)));
+    };
+    if (now) write();
+    else outboxTimer = setTimeout(write, 150);
+  }
+  window.addEventListener("pagehide", () => {
+    if (outboxTimer) saveOutbox(true);
+  });
+  const library = () => window.fileLibrary || null;
+  /** Mark the room's library record as detached (left, revoked) and forget its stored outbox. */
+  function forgetRoom(info) {
+    if (!info) return;
+    clearOutbox(roomKey(info));
+    const lib = library(),
+      id = info.fileId || lib?.findCloud?.(info.server, info.id),
+      cloud = id && lib?.cloudOf?.(id);
+    if (cloud) lib.setCloud(id, { ...cloud, detached: true });
+  }
+
   // ---- connection -----------------------------------------------------------------------------
-  function disconnect(message = "Disconnected. Local design retained.") {
+  /** `leave` ends this file's link to the room (Disconnect, revocation); otherwise the file stays cloud-backed. */
+  function disconnect(message = "Disconnected. Local design retained.", leave = false) {
+    if (outboxTimer && !leave) saveOutbox(true);
+    if (leave) forgetRoom(connection);
+    // Leaving drops a matching #room= invite fragment, which the shell router otherwise keeps.
+    if (leave && connection) window.shellNavigation?.clearRoomHash?.(connection.id);
     generation++;
     resetHistory();
     clearTimeout(timer);
@@ -614,6 +712,7 @@
           for (const batch of pending) batch.sent = false;
           rebuild();
           sendPending();
+          saveOutbox();
           return;
         }
         if (message.type === "ops") return receiveOps(message);
@@ -623,7 +722,8 @@
           return;
         }
         if (message.type === "revoked") {
-          if (!rotating) disconnect("Your access to this room was revoked. Local design retained.");
+          if (!rotating)
+            disconnect("Your access to this room was revoked. Local design retained.", true);
           return;
         }
         if (message.type === "comment") {
@@ -644,60 +744,168 @@
         status("Live connection unavailable; changes will retry.");
     };
   }
+  /**
+   * Open a room as a file. `load` opens the room's library record (creating it on first join, or
+   * reusing the open one); without it the current file becomes the room's record (Create room).
+   * A stored outbox is restored, and when the server is unreachable the file opens offline.
+   */
   async function connect(info, load = true, expected) {
     const u = new URL(info.server);
+    const lib = library();
+    let fileId = lib?.findCloud?.(u.origin, info.id) || null;
+    const record = fileId ? lib.cloudOf(fileId) : null;
+    const token = info.token || record?.token || null;
     const session = sessionFor(u.origin);
     if (
       !["http:", "https:"].includes(u.protocol) ||
       !/^[0-9a-f-]{36}$/.test(info.id) ||
-      (info.token ? !/^[0-9a-f]{64}$/.test(info.token) : !session)
+      (token ? !/^[0-9a-f]{64}$/.test(token) : !session)
     )
       throw Error(
-        info.token || session
-          ? "Invalid room invite"
-          : "Sign in to open a room without a link token",
+        token || session ? "Invalid room invite" : "Sign in to open a room without a link token",
       );
-    info = { id: info.id, token: info.token || null, server: u.origin };
+    info = { id: info.id, token, server: u.origin };
     if (expected !== undefined && expected !== generation) return;
     if (expected === undefined) disconnect();
     const epoch = generation;
-    const current = await request(`/api/rooms/${info.id}`, {}, info);
+    const [stored, fetched] = await Promise.all([
+      readOutbox(roomKey(info)),
+      request(`/api/rooms/${info.id}`, {}, info).then(
+        (value) => ({ value }),
+        (error) => ({ error }),
+      ),
+    ]);
     if (epoch !== generation) return;
-    if (load && window.fileLibrary?.createFromDocument) {
-      await window.fileLibrary.createFromDocument(current.document, {
+    let current = fetched.value,
+      offline = false;
+    if (fetched.error) {
+      const e = fetched.error;
+      if (fileId && [401, 403, 404].includes(e.status)) {
+        // Access ended (revoked, removed, deleted): the local copy stays, detached.
+        forgetRoom({ ...info, fileId });
+        throw Error(`${e.message}. The local copy of this file is kept.`);
+      }
+      // Unreachable server: a room this device has state for opens offline and reconnects.
+      if (e.status || !stored?.confirmed || !fileId) throw e;
+      offline = true;
+      current = { document: null, revision: stored.revision, role: stored.role, protocol: 2 };
+    }
+    // A detached copy edited since leaving stays a separate local file; the room gets a new record.
+    if (load && record?.detached && !offline) {
+      const file = lib.list().find((f) => f.id === fileId);
+      if (file && shared(file.document) !== shared(current.document)) {
+        lib.setCloud(fileId, null);
+        fileId = null;
+      }
+    }
+    const cloud = {
+      server: info.server,
+      roomId: info.id,
+      ...(info.token ? { token: info.token } : {}),
+      role: current.role || "owner",
+    };
+    let restoreFile = false;
+    if (load && fileId) {
+      if (lib.currentId !== fileId) {
+        await lib.open(fileId, { cloudJoinEpoch: epoch, isCurrent: () => epoch === generation });
+        if (epoch !== generation) return;
+      }
+      lib.setCloud(fileId, cloud);
+      // With stored state the file's own document is kept and rebased; otherwise the room's loads.
+      restoreFile = !!stored?.confirmed || offline;
+      load = !restoreFile;
+    } else if (load && lib?.createFromDocument) {
+      fileId = await lib.createFromDocument(current.document, {
         cloudJoinEpoch: epoch,
         isCurrent: () => epoch === generation,
+        cloud,
       });
       if (epoch !== generation) return;
       load = false;
     } else if (load && window.documentLifecycle) {
       await window.documentLifecycle.prepareSwitch({ cloudJoinEpoch: epoch });
       if (epoch !== generation) return;
+    } else if (!load && lib?.setCloud && lib.currentId) {
+      // Create room: the open file becomes the room's file.
+      fileId = lib.currentId;
+      lib.setCloud(fileId, cloud);
     }
-    connection = info;
+    connection = { ...info, fileId };
     protocol = Number.isSafeInteger(current.protocol) && Ops ? current.protocol : 1;
-    clientId = randomId();
+    const restore = restoreFile && protocol >= 2 && stored?.clientId ? stored : null;
+    if (restoreFile && !restore && current.document) load = true;
+    clientId = restore ? restore.clientId : randomId();
     clock = Ops ? Ops.createClock(clientId) : null;
-    pending = [];
-    batchNumber = 0;
+    pending = restore
+      ? (restore.pending || []).map((batch) => ({ n: batch.n, ops: batch.ops, sent: false }))
+      : [];
+    batchNumber = restore ? restore.batch || 0 : 0;
+    for (const batch of pending) for (const op of batch.ops) if (op.s) clock.observe(op.s);
     resetHistory();
-    confirmed = current.document;
+    // Restored batches were made on the stored confirmed document. The socket snapshot replaces it
+    // and drops the batches the server acknowledged for this client id.
+    confirmed = restore ? restore.confirmed : current.document;
     setRole(current.role || "owner");
     $("cloud-server").value = info.server;
     updateInvite();
-    revision = current.revision;
+    revision = restore ? restore.revision || 0 : current.revision;
     if (load) apply(current.document);
     lastLocalDoc = window.design.getDocument();
     lastLocal = shared(lastLocalDoc);
     unsub = window.design.subscribe(localChange);
+    if (restore) {
+      // Edits the file holds beyond confirmed + pending (made while the room was closed, or not yet
+      // stored when the app quit) become one more batch.
+      let base = confirmed;
+      for (const batch of pending) base = Ops.apply(base, batch.ops).doc;
+      const ops = Ops.diff(base, lastLocalDoc, { ignore: LOCAL_KEYS });
+      if (ops.length && canEdit()) queueOps(ops);
+    }
+    if (protocol >= 2) saveOutbox(true);
     openSocket(epoch);
-    status(`Connected · revision ${revision}`);
+    status(
+      offline
+        ? "Offline. Edits stay on this device and are sent when the room is reachable."
+        : `Connected · revision ${revision}`,
+    );
   }
+  /** Reconnect a cloud-backed file that was just opened (or reopened after a restart). */
+  function reconnectFile(id, cloud) {
+    if (!id || !cloud || cloud.detached) return;
+    if (connection && connection.id === cloud.roomId && connection.server === cloud.server) return;
+    connect({ server: cloud.server, id: cloud.roomId, token: cloud.token }).catch((e) => {
+      if (library()?.currentId === id) status(e.message);
+    });
+  }
+  window.addEventListener("library-file-opened", (event) => {
+    const detail = event.detail || {};
+    if (detail.cloudJoinEpoch === undefined) reconnectFile(detail.id, detail.cloud);
+  });
+  window.addEventListener("DOMContentLoaded", () => {
+    const lib = library(),
+      id = lib?.currentId;
+    if (id && !new URLSearchParams(location.hash.slice(1)).has("room"))
+      reconnectFile(id, lib.cloudOf?.(id));
+  });
   window.cloudWorkspace = {
-    disconnect: () => disconnect(),
+    disconnect: () => disconnect(undefined, true),
     isConnected: () => !!connection,
+    /** The open room ({server, id, fileId}) or null. */
+    room: () =>
+      connection
+        ? { server: connection.server, id: connection.id, fileId: connection.fileId }
+        : null,
+    /** Open a room as a file (Files home): its library record, created on first open. */
+    openRoom: (info) => connect({ server: info.server, id: info.id, token: info.token }),
+    /** Unacknowledged local batches of the open room. */
+    pendingCount: () => pending.length,
+    /** The stored outbox of a room (client id, batches, confirmed document), for diagnostics. */
+    storedOutbox: (server, id) => readOutbox(roomKey({ server, id })),
     role: () => role,
     account: () => (account ? { ...account.account } : null),
+    // cloud-assets (web/cloud-assets.js): the connected room and authenticated room requests.
+    room: () => (connection ? { server: connection.server, id: connection.id } : null),
+    request: (path, options) => request(path, options),
   };
   window.addEventListener("document-will-change", (event) => {
     if (event.detail?.cloudJoinEpoch !== generation) disconnect();
@@ -715,7 +923,18 @@
     const epoch = generation,
       result = await request(
         "/api/rooms",
-        { method: "POST", body: JSON.stringify({ document: window.design.getDocument() }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            document: window.design.getDocument(),
+            // Email accounts create rooms in the workspace chosen in the file browser.
+            ...(account?.server === server &&
+            !account.session.startsWith("vs_") &&
+            activeOrganization()
+              ? { organizationId: activeOrganization() }
+              : {}),
+          }),
+        },
         { server },
       );
     if (epoch !== generation) return;
@@ -735,12 +954,17 @@
     const input = $("cloud-invite").value;
     if (!input) return;
     const info = parseInvite(input);
-    if (!window.confirm("Open this shared design as a separate file?")) return;
+    // A room this device already has a file for opens that file; others become a new file.
+    if (
+      !library()?.findCloud?.(info.server, info.id) &&
+      !window.confirm("Open this shared design as a separate file?")
+    )
+      return;
     await connect(info);
   });
-  $("cloud-leave").onclick = () => disconnect();
+  $("cloud-leave").onclick = () => disconnect(undefined, true);
   const openLink = (event) => {
-    if (window.desktop?.openExternal) {
+    if (window.verynizePlatform.can("externalLinks")) {
       event.preventDefault();
       window.desktop.openExternal(event.currentTarget.href).catch((e) => status(e.message));
     }
@@ -812,6 +1036,7 @@
     apply(current.document);
     conflict = false;
     $("cloud-conflict").hidden = true;
+    saveOutbox();
     status("Loaded shared version");
   });
   $("cloud-overwrite").onclick = action(async () => {
@@ -897,6 +1122,10 @@
     }
     if (!members.children.length)
       members.append(listItem("No account members yet. People with a link can still join."));
+    // Organization that owns the room (cloud/orgs.js) and, for owners, where it can move.
+    $("cloud-workspace").hidden = !data.organization;
+    $("cloud-workspace-name").textContent = data.organization?.name || "";
+    renderMoveTargets(data.organization?.id || null).catch(() => {});
     for (const link of data.links || [])
       links.append(
         listItem(`${ROLE_LABEL[link.role]} link${link.label ? " · " + link.label : ""}`, [
@@ -904,6 +1133,39 @@
         ]),
       );
   }
+  async function renderMoveTargets(currentId) {
+    const row = $("cloud-move-row"),
+      select = $("cloud-move-organization");
+    const emailSession =
+      role === "owner" &&
+      account &&
+      !account.session.startsWith("vs_") &&
+      account.server === connection?.server;
+    row.hidden = true;
+    if (!emailSession) return;
+    const organizations = await request(
+      "/api/auth/organization/list",
+      {},
+      { server: account.server },
+    );
+    select.replaceChildren(
+      ...organizations
+        .filter((org) => org.id !== currentId)
+        .map((org) => new Option(org.name, org.id)),
+    );
+    row.hidden = !select.options.length;
+  }
+  $("cloud-move").onclick = action(async () => {
+    if (!connection) throw Error("Create or join a room first");
+    const target = $("cloud-move-organization").value;
+    if (!target) return;
+    const result = await request(`/api/rooms/${connection.id}/organization`, {
+      method: "PUT",
+      body: JSON.stringify({ organizationId: target }),
+    });
+    status(`Moved to ${result.organization.name}`);
+    await refreshAccess();
+  });
   async function refreshAccess() {
     if (!connection) throw Error("Create or join a room first");
     const epoch = generation,
@@ -928,7 +1190,7 @@
   async function removeMember(accountId) {
     await request(`/api/rooms/${connection.id}/members/${accountId}`, { method: "DELETE" });
     if (account && accountId === account.account.id && !connection.token) {
-      disconnect("You left the room. Local design retained.");
+      disconnect("You left the room. Local design retained.", true);
       return;
     }
     await refreshAccess();
@@ -983,6 +1245,9 @@
       const result = await request(`/api/rooms/${info.id}/tokens/rotate`, { method: "POST" }, info);
       if (epoch !== generation) return;
       connection = { ...info, token: result.token };
+      const lib = library(),
+        cloud = info.fileId && lib?.cloudOf?.(info.fileId);
+      if (cloud) lib.setCloud(info.fileId, { ...cloud, token: result.token });
       updateInvite();
       const old = socket;
       socket = null;
@@ -1080,9 +1345,8 @@
     if (!email) throw Error("Enter your email address");
     return { email, password: $("cloud-password").value };
   };
-  $("cloud-signin").onclick = action(async () => {
-    const server = base();
-    const { email, password } = credentials();
+  async function signInWith(server, email, password) {
+    if (!email) throw Error("Enter your email address");
     if (!password) throw Error("Enter your password");
     const response = await fetch(server + "/api/auth/sign-in/email", {
       method: "POST",
@@ -1090,8 +1354,11 @@
       body: JSON.stringify({ email, password, callbackURL: "/account/verified" }),
     });
     const data = await response.json().catch(() => null);
-    if (response.status === 403 && data?.code === "EMAIL_NOT_VERIFIED")
-      throw Error(`Verify your email first. A new link was sent to ${email}.`);
+    if (response.status === 403 && data?.code === "EMAIL_NOT_VERIFIED") {
+      const e = Error(`Verify your email first. A new link was sent to ${email}.`);
+      e.code = "EMAIL_NOT_VERIFIED";
+      throw e;
+    }
     if (response.status === 401) throw Error("Email or password is incorrect");
     if (!response.ok)
       throw Error(data?.message || data?.error || `Server returned ${response.status}`);
@@ -1102,33 +1369,56 @@
       { headers: { "X-Verynize-Session": session } },
       { server, session: false },
     );
-    saveAccount({ server, session, account: me.account });
-    $("cloud-password").value = "";
-    status(`Signed in as ${me.account.email}`);
+    saveAccount({
+      server,
+      session,
+      account: me.account,
+      personalOrganizationId: me.personalOrganizationId || null,
+    });
+    $("cloud-server").value = server;
     refreshRooms().catch(() => {});
-  });
-  $("cloud-signup").onclick = action(async () => {
-    const { email, password } = credentials();
+    return { ...me.account };
+  }
+  async function signUpWith(server, email, password, name) {
+    if (!email) throw Error("Enter your email address");
     if (password.length < 10) throw Error("Choose a password of at least 10 characters");
-    const name = $("cloud-signup-name").value.trim() || email.split("@")[0];
     await request(
       "/api/auth/sign-up/email",
       {
         method: "POST",
-        body: JSON.stringify({ email, password, name, callbackURL: "/account/verified" }),
+        body: JSON.stringify({
+          email,
+          password,
+          name: name || email.split("@")[0],
+          callbackURL: "/account/verified",
+        }),
       },
-      { server: base(), session: false },
+      { server, session: false },
     );
+  }
+  async function forgotPasswordWith(server, email) {
+    if (!email) throw Error("Enter your email address");
+    await request(
+      "/api/auth/request-password-reset",
+      { method: "POST", body: JSON.stringify({ email, redirectTo: "/account/reset-password" }) },
+      { server, session: false },
+    );
+  }
+  $("cloud-signin").onclick = action(async () => {
+    const { email, password } = credentials();
+    const signedIn = await signInWith(base(), email, password);
+    $("cloud-password").value = "";
+    status(`Signed in as ${signedIn.email}`);
+  });
+  $("cloud-signup").onclick = action(async () => {
+    const { email, password } = credentials();
+    await signUpWith(base(), email, password, $("cloud-signup-name").value.trim());
     $("cloud-password").value = "";
     status(`Check ${email} for a verification link, then sign in here with your password.`);
   });
   $("cloud-forgot").onclick = action(async () => {
     const { email } = credentials();
-    await request(
-      "/api/auth/request-password-reset",
-      { method: "POST", body: JSON.stringify({ email, redirectTo: "/account/reset-password" }) },
-      { server: base(), session: false },
-    );
+    await forgotPasswordWith(base(), email);
     status(`If ${email} has an account, a password reset link is on its way.`);
   });
   $("cloud-profile-save").onclick = action(async () => {
@@ -1145,7 +1435,7 @@
   });
   $("cloud-profile-open").onclick = action(async () => {
     const href = `${account.server}/u/${account.account.handle}`;
-    if (window.desktop?.openExternal) await window.desktop.openExternal(href);
+    if (window.verynizePlatform.can("externalLinks")) await window.desktop.openExternal(href);
     else window.open(href, "_blank", "noopener");
   });
   async function signOut(everywhere) {
@@ -1166,16 +1456,60 @@
     }
     status(everywhere ? "Signed out on every device" : "Signed out");
   }
+  // Shared with the islands (onboarding, workspace switcher, Settings › Members): one account,
+  // one session store and one change event ("cloud-account-changed").
+  const ORG_KEY = "verynize.cloud.organization";
+  const DEFAULT_SERVER = "https://verynize.gayaloo.app";
+  const activeOrganization = () => {
+    if (!account) return null;
+    try {
+      const stored = JSON.parse(localStorage.getItem(ORG_KEY) || "null");
+      if (stored?.server === account.server && stored.email === account.account.email)
+        return stored.id;
+    } catch {}
+    return account.personalOrganizationId || null;
+  };
+  window.cloudAccount = {
+    defaultServer: () =>
+      account?.server ||
+      $("cloud-server").value ||
+      (location.protocol.startsWith("http") ? location.origin : DEFAULT_SERVER),
+    get: () =>
+      account
+        ? {
+            server: account.server,
+            account: { ...account.account },
+            emailAccount: !account.session.startsWith("vs_"),
+            personalOrganizationId: account.personalOrganizationId || null,
+          }
+        : null,
+    signIn: ({ server, email, password }) => signInWith(server, email, password),
+    signUp: ({ server, email, password, name }) => signUpWith(server, email, password, name),
+    forgotPassword: ({ server, email }) => forgotPasswordWith(server, email),
+    signOut: (everywhere = false) => signOut(everywhere),
+    /** Authenticated JSON request to the account's server. */
+    request: (path, options = {}) => accountRequest(path, options),
+    activeOrganization,
+    setActiveOrganization(id) {
+      if (!account) return;
+      localStorage.setItem(
+        ORG_KEY,
+        JSON.stringify({ server: account.server, email: account.account.email, id }),
+      );
+      window.dispatchEvent(new CustomEvent("cloud-organization-changed", { detail: { id } }));
+    },
+  };
   $("cloud-signout").onclick = action(() => signOut(false));
   $("cloud-signout-all").onclick = action(() => signOut(true));
   // ---- passkeys ---------------------------------------------------------------------------------
-  // The ceremony runs on the server's /passkey page (a file:// renderer cannot be a WebAuthn relying
+  // The ceremony runs on the server's /passkey page (the app://verynize renderer cannot be the server's WebAuthn relying
   // party). Sign-in uses a handoff: this window keeps the secret and claims the session afterwards.
   let passkeyRun = 0;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   async function openPasskeyPage(server, hash) {
     const url = `${server}/passkey#${hash}`;
-    if (window.desktop?.cloudPasskeyOpen) await window.desktop.cloudPasskeyOpen({ url });
+    if (window.verynizePlatform.can("passkeyWindow"))
+      await window.desktop.cloudPasskeyOpen({ url });
     else window.open(url, "verynize-passkey", "popup,width=440,height=520");
   }
   const closePasskeyPage = () => window.desktop?.cloudPasskeyClose?.().catch(() => {});
@@ -1239,7 +1573,8 @@
       server = base();
     const email = $("cloud-email").value.trim();
     // Embedded windows have no passkey chooser, so the desktop names the account by email.
-    if (window.desktop && !email) throw Error("Enter your email, then sign in with a passkey");
+    if (window.verynizePlatform.kind === "desktop" && !email)
+      throw Error("Enter your email, then sign in with a passkey");
     const handoff = await request(
       "/api/auth/handoff",
       { method: "POST", body: "{}" },
@@ -1257,7 +1592,10 @@
         body: JSON.stringify({
           id: handoff.id,
           secret: handoff.secret,
-          label: window.desktop ? "Verynize desktop (passkey)" : "Verynize web (passkey)",
+          label:
+            window.verynizePlatform.kind === "desktop"
+              ? "Verynize desktop (passkey)"
+              : "Verynize web (passkey)",
         }),
       });
       const data = await response.json();
@@ -1330,7 +1668,7 @@
     $("cloud-app-status").textContent = text;
   };
   async function detectApp() {
-    if (!window.desktop?.cloudAppDetect) {
+    if (!window.verynizePlatform.can("publishApps")) {
       $("cloud-app-project").textContent = "App publishing runs in the Verynize desktop app.";
       return;
     }
@@ -1388,7 +1726,7 @@
     if ($("cloud-app-section").open) detectApp();
   });
   $("cloud-app-publish").onclick = action(async () => {
-    if (!window.desktop?.cloudAppPublish)
+    if (!window.verynizePlatform.can("publishApps"))
       throw Error("App publishing runs in the Verynize desktop app");
     if (!account) throw Error("Sign in (Account) before publishing an app");
     appStatus("Building and uploading…");

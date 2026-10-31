@@ -1,13 +1,12 @@
 // Passkeys end to end in Electron: the Share panel opens the server's /passkey window, Chromium's
 // virtual authenticator (CDP WebAuthn domain) performs the real ceremony, and the desktop claims
 // the session through the handoff. Runs against local workerd only.
-import { Miniflare } from "miniflare";
 import { _electron as electron } from "@playwright/test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cloudOptions } from "./cloud-harness.mjs";
+import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-passkeys-ui-"));
 const mf = new Miniflare(await cloudOptions(path.join(dir, "state")));
@@ -17,6 +16,7 @@ try {
   const server = direct.replace("127.0.0.1", "localhost"); // WebAuthn relying parties must be domains, not IPs
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.VERYNIZE_SKIP_ONBOARDING = "1";
   app = await electron.launch({ env, args: [".", `--user-data-dir=${path.join(dir, "profile")}`] });
   const page = await app.firstWindow();
   await page.waitForFunction(() => !!window.design && !!window.cloudWorkspace);

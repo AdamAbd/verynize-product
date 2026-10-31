@@ -42,6 +42,7 @@ import {
   type OutputStyle,
 } from "./behavior-store";
 import { Card, CommitField, IconTile, NativeSelect, Row, Section, SettingsButton, Toggle } from "./controls";
+import { platform } from "@/lib/platform";
 
 const message = (error: unknown) => (error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "") : String(error));
 const save = (patch: BehaviorPatch) => setBehavior(patch).catch((error) => toast(message(error)));
@@ -336,11 +337,11 @@ function ModesSection({ behavior }: { behavior: AgentBehavior }) {
   const [repositories, setRepositories] = useState<Repository[] | null>(null);
   const [fallback, setFallback] = useState<Access>(() => asAccess(chatWorkspace()?.getDefaults?.().access));
   useEffect(() => {
-    const list = (window as unknown as { desktop?: { repositories?: { list(): Promise<{ repositories: Repository[] }> } } }).desktop?.repositories
-      ?.list;
-    if (!list) return setRepositories([]);
+    const repositories = platform.desktop?.repositories;
+    if (!repositories) return setRepositories([]);
     let live = true;
-    list()
+    repositories
+      .list()
       .then((value) => live && setRepositories(value?.repositories ?? []))
       .catch(() => live && setRepositories([]));
     return () => {

@@ -1,98 +1,87 @@
 // Design fundamentals returned with every design-context call. Written for Verynize; keep it
-// short enough to read on every turn (~1,300 words) and concrete enough to act on.
+// short enough to read on every turn (~1,500 words) and concrete enough to act on.
 
 export const fundamentals = `# Design fundamentals
 
-Read this before you draw. Each rule is a default. Break one only on purpose, and say why in your summary.
+Defaults for structure, readability and content in any look. **Layering:** a chosen style (get_design_guidelines with \`style\`) overrides them where they disagree: palette, grounds, fonts, texture, hero art, numbering, shadows, charts, loudness. Contrast, legible sizes and realistic content never yield. When two options feel equal, take less clutter, more air and clearer hierarchy. Break other rules only on purpose, and say why.
 
-## 1. Decide the direction first
-Before any JSX, write a three-line brief: **job** (impress or present clearly), **audience**, **density** (airy, comfortable, compact).
-- **Impress** (landing, launch, portfolio, campaign): one bold idea per screen, big type, real imagery, generous space.
-- **Present clearly** (app, dashboard, settings, docs): calm surfaces, strong alignment, compact rhythm, color only for meaning.
-- Then pick one archetype (get_design_guidelines with \`style\`) or the existing system in the file. Never mix two archetypes on one screen.
+## 1. Direction
+Write a three-line brief before any JSX: **job** (impress or present clearly), **audience**, **density**.
+- **Impress** (launch, portfolio, campaign): one bold idea, big type, real imagery, room to breathe. Games, food, kids or events may go playful; finance, health, legal and luxury stay restrained.
+- **Present clearly** (app, dashboard, settings): calm surfaces, strict alignment, color for meaning.
+- One style, or the file's existing system, per screen. A vague request on an empty canvas gets one excellent design, not several average ones.
 
-## 2. Hierarchy
-- One focal point per section. If two things shout, demote one.
-- One primary action per section. It is the only filled, accent-colored button. Secondary actions are outline or ghost.
-- Use exactly three emphasis levels: **primary** (foreground, heavier weight, bigger), **secondary** (muted color), **tertiary** (smaller and muted, for meta like dates and counts).
-- Build contrast with size and weight first, color second. Heading-to-body size ratio is at least 1.5× in apps and 2.5× or more in marketing heroes.
+## 2. Hierarchy and composition
+- One focal point and one filled accent primary action per section; others are outline or ghost. Three emphasis levels: dominant, supporting, tertiary meta. Contrast comes from size and weight first, color second.
+- Spend boldness once per artboard (one huge headline, image or color block); keep the rest calm.
+- **First viewport** is a single composition: brand, one headline, one supporting line, one primary action, one dominant visual. Stats, logo rows and badges go further down.
+- **One job per section:** one headline, one takeaway. If it does two jobs, split it.
+- **Vary layout families** down a page (split, card grid, full-bleed feature, stat band, alternating rows); never one family three times running.
+- **Structure tells the truth:** cards only for things people pick or act on (a plan, a file, a product); numbered markers only for a real sequence; plain heading and paragraph sit straight on the section. A style may make cards or numbers its signature.
+- **Siblings match:** tiers, tiles and rows share one treatment with aligned actions; a featured item keeps the same structure.
 
-## 3. Layout
-- Choose flow by content shape: a row or column of things → \`flex\` with \`gap\`; a matrix of peers → \`grid grid-cols-N gap-*\`; a stack of prose → block flow.
-- Containers hug their content. Do not set heights except for intrinsic things: images, media, avatars, icons, charts, the artboard itself.
-- Use \`w-full\`/\`flex-1\` to fill; use \`max-w-*\` to cap line length. Use \`absolute\` only for overlays (badges, floating labels, decorative layers) and say so with explicit \`absolute\` classes.
-- Align to a 4px grid. One left edge per column. Center only short, symmetric content (hero statements, empty states).
-- Standard viewports: desktop 1440×900+, tablet 834×1194, mobile 390×844, slide 1920×1080.
+## 3. Layout and sizing
+- Pick display by content shape: one direction (row, column, stack) → \`flex\` with \`items-*\`, \`justify-*\`, \`gap-*\`; items sharing tracks (cards, pricing, gallery, bento, dashboard) → \`grid grid-cols-N\` or a track list, with \`col-span-*\`; full-width stacked prose → \`block\`; a chip inside text → \`inline-flex\`.
+- Size by what a box holds. Growing content (text, lists, sections, card bodies) hugs: \`h-fit\` or no height. A floor that may grow: \`min-h-*\`. Leftover space: \`flex-1\` in a flex parent. Fixed \`h-*\`/\`w-*\` only for intrinsic pieces: icons, avatars, a nav bar, a fixed sidebar, a cropped image, a divider, or the root of a fixed format such as a slide. Pieces beside a \`flex-1\` sibling get \`shrink-0\`.
+- \`absolute\` only for real overlap (a badge on an avatar). Sibling cards are \`flex flex-col\` with the action pushed down by \`mt-auto\`.
+- 4px grid; one left edge per column; center only short content. Viewports: desktop 1440×900, mobile 390×844, slide 1920×1080.
+- **Mobile status bar:** a full mobile screen built from scratch starts with a status bar as the root's first child: an \`h-[54px] px-6\` flex row, the time "9:41" in 17px semibold on the left, signal, wifi and battery icons on the right, colored for the ground. Components, sheets and screens reproduced from code skip it.
 
-## 4. Spacing tiers
-Pick from three tiers and keep each one consistent.
-- **Tight** (inside a component — icon to label, label to input): \`gap-1\` to \`gap-2\` (4–8px).
-- **Group** (between related items — fields in a form, cards in a row, stacked paragraphs): \`gap-3\` to \`gap-6\` (12–24px). Card padding \`p-4\` to \`p-6\`.
-- **Section** (between unrelated blocks): \`gap-12\` to \`gap-16\` in apps, \`py-20\` to \`py-32\` in marketing pages. Page side padding: \`px-6\` mobile, \`px-10\` to \`px-20\` desktop.
-- The space between groups must be visibly larger than the space within them, by at least 2×. Equal spacing everywhere reads as a list of unrelated parts.
+## 4. Spacing rhythm
+One rhythm per artboard, chosen by surface; similar containers share padding:
+- **Generous** (premium marketing, editorial): sections \`py-24\`–\`py-32\`, gaps \`gap-10\`–\`gap-12\`, cards \`p-10\`.
+- **Balanced** (most landing and content pages): sections \`py-14\`–\`py-20\`, gaps \`gap-6\`–\`gap-8\`, cards \`p-6\`–\`p-8\`.
+- **Tight** (dashboards, settings, dense data): sections \`py-6\`–\`py-10\`, gaps \`gap-3\`–\`gap-4\`, cards \`p-4\`.
+Inside components \`gap-1\`–\`gap-2\`. Space between groups is at least 2× the space within. Sections separate by their own padding, not child margins.
 
 ## 5. Typography
-- Use a modular scale (1.2 for apps, 1.25–1.333 for marketing). App: 12 / 14 / 16 / 20 / 24 / 32. Marketing: 14 / 16 / 20 / 28 / 40 / 56 / 72–96.
-- Body text is at least 14px in apps and 16px in marketing. Meta text is never below 12px. Mobile body is 15–17px.
-- Line length 45–75 characters: cap prose with \`max-w-[60ch]\` or \`max-w-prose\`.
-- Line height: body 1.5–1.65 (\`leading-6\` on 16px), headings 1.05–1.2 (\`leading-tight\`), display 0.95–1.05.
-- Tracking: display sizes 40px+ get \`tracking-tight\` (−0.02em) or tighter; body stays 0; all-caps labels get \`tracking-wider\` and 11–12px.
-- Fonts: load real families with \`font-['Family_Name']\`. Do not default to Inter, Roboto, Arial or system-ui unless the brief or the repo asks for them. The archetype's fonts are binding.
-- Use at most two families plus an optional mono. Use two or three weights, not five.
-- Numbers in tables and stats: \`tabular-nums\`. Headlines use \`text-balance\`; avoid single-word last lines.
+- Distinctive families that fit the style, via \`font-['Family_Name']\`. Inter, Roboto, Arial and system-ui only when the style, brief or repo names them. Two families plus optional mono; two or three weights; bold only for real emphasis.
+- Three tiers per section: heading, body, caption. Scale ratio about 1.2 in apps, 1.25–1.333 in marketing. Body 16px+ on marketing and reading surfaces, 14px in product UI, meta 12–13px; nothing smaller outside dense data or uppercase labels.
+- Measure 45–75 characters: cap prose with \`max-w-prose\` or \`max-w-xl\`. Line height: display 1.0–1.15, body 1.5–1.6, compact labels 1.3–1.4.
+- Display 40px+ gets \`tracking-tight\`, small caps labels \`tracking-wider\`; stats \`tabular-nums\`, headlines \`text-balance\`.
 
 ## 6. Color
-- Derive the palette from a concrete concept: a material, a scene, or a brand fact ("oxidised copper and slate", "night ferry deck lights", "hospital-grade white and ink"). Name it in your brief.
-- Assign semantic roles: background, surface, surfaceAlt, foreground, muted, border, accent, accentForeground, success, warning, danger, info. Use roles, not raw hex, across the screen; bind repeated values to design tokens.
-- One accent, reserved for actions and the current selection. Do not use it for decoration, headings or icons in passing.
-- About 90% of the screen is neutrals. Tint neutrals slightly toward the accent's hue instead of using pure grey.
-- **Banned defaults (these read as machine-made):** purple-to-blue or pink-to-purple gradients; washed-out pastel rainbows; beige, cream or ivory backgrounds paired with terracotta or sage; neon-on-black "cyber" with glow on everything; teal-and-orange stock pairings; gradient text on body copy. Use one only if the brief asks for it by name.
-- Dark mode is not inverted light mode: use a near-black with a hue (#0d1014, not #000), lift surfaces with lighter fills instead of shadows, and drop saturation of the accent by 10–20%.
+- **Start from a scene, not a wheel.** Name a physical condition (sun-bleached, mineral, harbor at night, reading room, workshop) and the object behind each role, e.g. "quarry": pale limestone ground, graphite text, oxidized copper accent. Keep the first idea only if it fits this brand rather than its category default (fintech navy, wellness sage); fit still beats novelty.
+- Roles: background, surface, surfaceAlt, foreground, muted, border, accent, accentForeground, success, warning, danger, info. One dominant hue and one sharp accent, spent on actions and key signals. Extra hues (categories, chart series) come from the same scene at modest saturation.
+- About 90% neutrals. Plain white is the normal ground for product and docs; tinted grounds suit specific moods. On a tinted ground, borders, muted text and shadows take that hue, not grey. Dark mode is a hued near-black (#0d1014), lighter surfaces instead of shadows, accent desaturated 10–20%.
+- Depth comes from alternating sections (tinted band, inverted block, image hero); grain and gradients only where the scene has them.
+- **Avoid palettes that look generated:** purple-to-blue or pink-to-purple gradients, purple on white, washed pastels, cream or beige with terracotta or sage, navy or charcoal with electric violet, lime or teal, neon glow on black, gradient body text. Use one only if the brief asks by name.
+- **Tokens: reuse before you add.** Read get_design_tokens first; reuse a token that matches by value and role instead of adding a near-duplicate or a literal beside it. New palette values become role-named tokens (create_design_tokens or apply_style_tokens) used as \`bg-[var(--color-…)]\`. Rename or delete tokens only when asked.
 
 ## 7. Elevation and shape
-- One light source, from above. Shadows are layered and low-alpha: a 1px contact shadow plus a soft ambient one, each at 4–12% opacity. Example: \`shadow-[0_1px_2px_rgba(15,23,42,0.06),0_8px_24px_rgba(15,23,42,0.08)]\`. Never a single dark hard shadow.
-- Use at most three elevation levels: flat, raised (cards, inputs), overlay (menus, dialogs).
-- Radii are concentric: inner radius = outer radius − padding. A \`rounded-2xl\` (16px) card with \`p-2\` holds \`rounded-lg\` (8px) children.
-- Pick one radius family from the archetype and keep it. Mixing sharp and pill shapes needs a reason.
-- Borders are 1px in the \`border\` role. Prefer a border or a fill difference over a shadow on flat UI.
+- One light source from above. Shadows are layered and low-alpha (contact plus ambient, 4–12%), never one hard dark shadow. Three levels at most: flat, raised, overlay.
+- Radii are concentric: inner radius = outer radius − padding (\`rounded-2xl\` with \`p-2\` holds \`rounded-lg\`). One radius family per design. Prefer a 1px border or fill difference over a shadow on flat UI.
 
-## 8. Contrast and accessibility
-- Text contrast is at least 4.5:1; large text (24px+, or 19px+ bold) at least 3:1. Check muted text on surfaceAlt, not only on background.
-- Text on images needs a scrim or a quiet image area. Check it in the screenshot.
-- Touch targets are at least 44×44 on mobile; desktop controls at least 32px tall.
-- Never rely on color alone for status: pair it with an icon or label.
+## 8. Contrast
+- Text, labels and buttons included, reaches 4.5:1 against its real backdrop; aim higher below 16px. Large text (24px+) at least 3:1. Muted grey on light grounds is #5a5a5a or darker. Check muted text on surfaceAlt too.
+- Icons and shapes stand off their surface; a dark icon on a dark card is a defect. Reduced opacity is for a few elements only.
+- Text on images needs a scrim. Touch targets 44×44 on mobile. Status never by color alone.
 
-## 9. Content realism
-- Write real content for the product in the brief. No lorem ipsum, no "Title", "Button", "Feature 1".
-- Use realistic, uneven numbers: $48,210.37, 1,284 orders, 3.7%, "updated 6 min ago". Not 1,000 / 50% / $10,000.
-- Use plausible, varied names from more than one culture; avoid celebrity names.
-- Use proper typography: curly quotes “ ” and ‘ ’, apostrophes ’, en dash – for ranges (9–5), em dash — for breaks, ellipsis …, × for dimensions, non-breaking units (12 GB).
-- Do not invent claims: no fake customer logos, no "Trusted by 10,000+ teams", no made-up awards or percentages for a real brand. Use clearly fictional proof or leave the slot out.
+## 9. Content
+- **Realistic:** real copy for this product; no lorem ipsum, "Title" or "Button". Uneven numbers ($48,210.37, 3.7%), names from several cultures, no invented logos, awards or user counts.
+- **Typeset:** curly quotes “ ” and ’, en dash for ranges (9–5), em dash for breaks, ellipsis …, non-breaking units (12 GB).
+- **Short:** headings three to eight words, support text one or two sentences, buttons one to three specific words ("Save API key", not "Continue"). Say each idea once; most drafts improve by cutting a third.
+- **Microcopy** names the thing: "Loading your invoices…"; "Delete ‘Q3 report’? This can’t be undone." with "Delete report" / "Keep it".
+- **Long lists** (over ~5 items) get labeled groups, a grid or a featured few.
+- **Charts:** data first, quiet gridlines, units on axes, direct labels on short series, bars instead of a pie past five categories.
 
 ## 10. States
-- Every data view designs empty, loading and error states, not only the happy path. Empty states say what the area is for and give one action.
-- Interactive components show default, hover or focus, disabled and selected where relevant. Focus rings are visible: 2px in the accent with a 2px offset.
-- Forms show helper text, an inline error under the field (danger color plus icon), and a success confirmation.
+- **Unhappy paths** are designed, not skipped: empty, loading, error and no-permission states each get an icon, a heading, one line and a next action.
+- Interactive parts show default, hover or focus, disabled and selected; focus rings are visible. Forms show helper text and inline errors.
 
 ## 11. Icons
-- One icon set per design: lucide, ph (phosphor) or tabler. Fetch names with get_icons, then use \`<Icon name="lucide:arrow-right" className="size-5 text-…" />\`.
-- One size per context (16 in dense UI, 20 in standard UI, 24 in navigation) and one stroke weight.
-- Icons support labels; they do not replace them, except for universal actions (close, search, more).
-- Never use emoji as icons or bullets.
+- One set (lucide, ph or tabler) from get_icons, one stroke weight, sized to the text: \`<Icon name="lucide:arrow-right" className="size-5 text-…" />\`. Icons support labels rather than replace them, except universal actions. Never use emoji as icons or bullets.
 
 ## 12. Imagery
-- Art-direct every image: role (hero, texture, product, person), subject, viewpoint, light, crop, and where the quiet area for text sits.
-- A hero is one stage: a full-bleed photo or rendered scene with the statement on it. Not a text column next to a floating photo card.
-- If no image tool is available, degrade with intent: a gradient mesh in the palette, a \`<Shader>\` fill, a large typographic crop, or abstract shapes cut from the accent and surface colors. Never a grey box labelled "Image" or a broken placeholder.
+- Art-direct each image: role, subject, viewpoint, light, crop, quiet area for text. Find photos with search_images; a hero is one stage, not text beside a floating photo card. Images keep proportions; a grid shares one ratio.
+- With no fitting photo, degrade with intent: a \`<Shader>\` fill, a gradient in the palette, a large typographic crop or shapes in the accent. Never a grey box labelled "Image".
 
 ## 13. The reduction pass
-Before you finish, walk every element and ask: what gets harder if this disappears? If nothing, remove it.
-- No card inside a card. A section with a background does not also need a bordered card.
-- No decorative dividers, badges or icons that repeat what the text already says.
-- No three identical feature cards in a row followed by another identical grid. Vary the layout: a large lead item, a list, a split, a stat row.
-- One heading per idea; delete subtitles that restate the heading.
-- Remove wrappers that have no padding, background, border or layout role.
+Ask of every element: what gets worse without it? If nothing, delete it.
+- No card inside a card; a tinted section needs no bordered card too.
+- No decorative dividers, badges or icons that repeat the text. One heading per idea; drop subtitles that restate it.
+- No wrapper without padding, background, border or layout role.
 
 ## 14. Verify
-Screenshot after every section. Check clipping, overflow, overlap, leftover placeholder text, contrast and alignment in the image, not in your head. Run the design-review skill before you call finish.
+Screenshot after every section and trust the image over your intent: clipping, overflow, overlap, placeholders, contrast, alignment. Run the design-review skill before finish_artboard.
 `;

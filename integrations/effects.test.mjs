@@ -1,5 +1,5 @@
 // Structured effects (blend, outline, shadows, filters, masks): one CSS mapping for canvas and export,
-// shared validation (design-store validateDocument mirrors web/app.js validate()), and the JSX codec.
+// shared validation (validateDocument, web/document-core.js, shared with the canvas), and the JSX codec.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { nodeStyle, effectsOf, validateEffects, BLEND_MODES } from './node-style.mjs';
@@ -69,7 +69,7 @@ test('gradient masks: linear / radial / conic with alpha, rotation, invert and v
   assert.equal(decls(rect({ masks: [masks[2]] }))['mask-image'], undefined);
 });
 
-test('validateDocument enforces the effect schema (mirrors web/app.js validate)', () => {
+test('validateDocument enforces the effect schema (shared with the canvas)', () => {
   assert.doesNotThrow(() => validateDocument(doc([rect({ blendMode: 'luminosity', outlineWidth: 2, outlineColor: '#000000', shadows: [{ type: 'drop', x: 0, y: 0, blur: 1, spread: 0, color: '#000000' }], filters: [{ type: 'invert', value: 1 }], masks: [{ type: 'linear' }] })])));
   for (const bad of [{ blendMode: 'burn' }, { outlineWidth: -1 }, { outlineColor: 'red' }, { shadows: {} }, { shadows: [{ type: 'box', x: 0, y: 0, blur: -1, spread: 0, color: '#000000' }] },
     { shadows: [{ type: 'drop', inset: true, x: 0, y: 0, blur: 0, spread: 0, color: '#000000' }] }, { filters: [{ type: 'blur', value: 1, backdrop: 'yes' }] }, { masks: [{ type: 'linear', alpha: 101 }] }])
@@ -111,4 +111,29 @@ test('JSX codec writes effects as Tailwind classes and reads them back', () => {
   // The rebuilt layer renders the same CSS as the original.
   const before = decls(node), after = decls(frame);
   for (const prop of ['mix-blend-mode', 'outline', 'outline-offset', 'box-shadow', 'filter', 'backdrop-filter']) assert.equal(after[prop], before[prop], prop);
+});
+
+test('shape masks ("Use as mask"): an inset() rectangle as an alpha SVG layer stretched over the box', () => {
+  const masks = [{ type: 'shape', shape: 'inset(25% 25% 50% 25%)' }];
+  const svgOf = value => Buffer.from(value.match(/^url\("data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)"\)$/)[1], 'base64').toString();
+  const css = decls(rect({ masks }));
+  assert.equal(svgOf(css['mask-image']), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><rect x="25" y="25" width="50" height="25"/></svg>');
+  assert.deepEqual([css['mask-mode'], css['mask-repeat'], css['mask-size'], css['mask-position']], ['alpha', 'no-repeat', '100% 100%', undefined]);
+  // CSS shorthand: one value applies to every side; a mask larger than the box keeps all of it.
+  assert.match(svgOf(effectsOf(rect({ masks: [{ type: 'shape', shape: 'inset(-50%)' }] })).masks[0]), /<rect x="-50" y="-50" width="200" height="200"\/>/);
+  // Stacks with the other masks.
+  assert.equal(effectsOf(rect({ masks: [{ type: 'linear' }, ...masks] })).masks.length, 2);
+  assert.doesNotThrow(() => validateDocument(doc([rect({ masks })])));
+  for (const bad of [[{ type: 'shape' }], [{ type: 'shape', shape: 'inset(10px)' }], [{ type: 'shape', shape: 'circle(50%)' }], [{ type: 'shape', shape: 'inset(1% 2% 3% 4% 5%)' }], [{ type: 'linear', shape: 'inset(0%)' }]])
+    assert.throws(() => validateDocument(doc([rect({ masks: bad })])), undefined, JSON.stringify(bad));
+  assert.match(exportHTML(doc([rect({ masks })])), /mask-image:url\((&quot;|")data:image\/svg\+xml;base64,/);
+});
+
+test('JSX codec round-trips a shape mask through the side channel', () => {
+  const node = { ...rect({ layout: 'block', masks: [{ type: 'shape', shape: 'inset(-50% -50% -50% -50%)' }] }), type: 'frame' };
+  const source = doc([node]); ensureShortIds(source);
+  const code = serializeNode(node, indexPage(source.pages[0]), {});
+  assert.match(code, /\[mask-image:url\(/);
+  const back = createArtboards(doc([]), 'p', code).document.pages[0].nodes[0];
+  assert.deepEqual(back.masks, node.masks);
 });
