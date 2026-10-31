@@ -89,12 +89,26 @@ function registerPreview(handle, parent) {
     return {enabled:true};
   });
   handle('previewOpenBrowser', () => shell.openExternal(localURL(previewFrame(parent).url)));
-  handle('previewNavigate', async ({direction} = {}) => {
+  handle('previewNavigate', async ({direction, ignoreCache = false} = {}) => {
     if (!['back','forward','reload'].includes(direction)) throw Error('Invalid preview navigation');
     const frame = previewFrame(parent);
+    // ⇧-click Reload: drop the app's cached responses first, so the reload refetches every resource.
+    if (direction === 'reload' && ignoreCache === true) {
+      const session = parent.webContents.session, origin = new URL(frame.url).origin;
+      try { await session.clearData({dataTypes:['cache'], origins:[origin]}); } catch { await session.clearCache(); }
+    }
     await frame.executeJavaScript(direction === 'reload' ? 'location.reload()' : direction === 'back' ? 'history.back()' : 'history.forward()');
     return {navigated: true};
   });
+  // The frame's address follows in-app navigation (links, redirects, history.pushState) in the toolbar path field.
+  const navigated = (url, pid, rid) => {
+    let frame = null; try { frame = webFrameMain.fromId(pid, rid); } catch {}
+    if (!frame || frame.name !== PREVIEW_FRAME || frame.parent !== parent.webContents.mainFrame || parent.webContents.isDestroyed()) return;
+    try { localURL(url); } catch { return; }
+    parent.webContents.send('desktop:preview-navigated', {url});
+  };
+  parent.webContents.on('did-frame-navigate', (_event, url, _code, _status, isMain, pid, rid) => { if (!isMain) navigated(url, pid, rid); });
+  parent.webContents.on('did-navigate-in-page', (_event, url, isMain, pid, rid) => { if (!isMain) navigated(url, pid, rid); });
   handle('previewInspect', options => edit(options, true));
   handle('previewEdit', options => edit(options));
   automations.set(parent,createPreviewAutomation(parent)); // agent shell tools (desktop/agent-shell.cjs)

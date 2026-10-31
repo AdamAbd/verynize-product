@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('desktop',{
  previewInput:options=>call('previewInput',options),
  previewOpenBrowser:()=>call('previewOpenBrowser'),
  previewNavigate:options=>call('previewNavigate',options),
+ onPreviewNavigated:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:preview-navigated',listener);return()=>ipcRenderer.removeListener('desktop:preview-navigated',listener)},
  previewInspect:options=>call('previewInspect',options),
  previewEdit:options=>call('previewEdit',options),
  captureLivePreview:options=>call('captureLivePreview',options),

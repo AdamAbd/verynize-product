@@ -172,7 +172,7 @@ function registerDevServerIPC(handle, { getProject, resolveRoot }) {
   handle('devServerStatus', async options => {
     const projectRoot = options?.root ? await previewRoot(options.root) : getProject()?.root;
     if (!projectRoot) return {state:'stopped',root:null};
-    const status = await processManager().status(projectRoot), pending = setups.get(projectRoot);
+    const status = await processManager().status(projectRoot, {tail: options?.tail}), pending = setups.get(projectRoot);
     if (pending) { const job = await pending; const proc = processManager().find(job.id, projectRoot); if (proc && !proc.exited) status.setup = processManager().jobInfo(proc, {tail:20}); }
     return status;
   });

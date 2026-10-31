@@ -262,7 +262,7 @@ class ProcessManager {
   }
 
   // ---- dev server ----
-  describe(proc, root) {
+  describe(proc, root, tailLines = 30) {
     if (!proc) return { state: 'stopped', root };
     const running = !proc.exited;
     return {
@@ -270,16 +270,18 @@ class ProcessManager {
       root, command: proc.argv, source: proc.source, pid: proc.child?.pid || null, url: proc.url || null, urlSource: proc.urlSource || null,
       startedAt: new Date(proc.startedAt).toISOString(), ...(proc.exited ? { exitCode: proc.exitCode, signal: proc.signal } : {}),
       ...(proc.error ? { error: proc.error } : {}),
-      logId: proc.id, latestSeq: proc.log.seq, tail: proc.log.tail(30),
+      logId: proc.id, latestSeq: proc.log.seq, tail: proc.log.tail(Math.max(1, Math.min(400, Math.floor(Number(tailLines)) || 30))),
     };
   }
-  async status(root) {
+  async status(root, { tail } = {}) {
     const [config, detected] = await Promise.all([this.projectConfig(root), this.detect(root)]);
-    return { ...this.describe(this.servers.get(root), root), config, detected, proposal: await this.proposal(root) };
+    return { ...this.describe(this.servers.get(root), root, tail), config, detected, proposal: await this.proposal(root) };
   }
   async start(root, { command, url, waitMs = 20000 } = {}) {
     const existing = this.servers.get(root);
     if (existing && !existing.exited) return { ...(await this.status(root)), alreadyRunning: true };
+    // A new attempt supersedes the previous run's exit record, so status() never reports that old failure for it.
+    if (existing) this.servers.delete(root);
     const resolved = await this.resolveCommand(root, command);
     if (!resolved) throw new Error('No dev server command found: package.json has no dev/start/serve/preview script. Pass command (an argument array) or save one with configure_dev_server.');
     const fixedURL = url ? normalizeLocalURL(url) : resolved.url || null;
