@@ -1688,7 +1688,7 @@
       if (existing) Object.assign(existing, command); else commands.push({keys: [], ...command});
       keyIndex.clear(); for (const c of commands) for (const k of c.keys) keyIndex.set(k, c);
     }
-    const context = {ed, find, sel, selectedNodes, topSelected, worldRect, union, placeInView, isFlow, inStack, footer, writeSystemClipboard, register, hooks, getClipboard: () => clipboard, paste: (data, options) => paste(data, options)};
+    const context = {ed, find, sel, selectedNodes, topSelected, worldRect, union, placeInView, screenToWorld, frameAt, isFlow, inStack, footer, writeSystemClipboard, register, hooks, getClipboard: () => clipboard, paste: (data, options) => paste(data, options)};
     for (const extend of extensions) extend(context);
 
     return {
