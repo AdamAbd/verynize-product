@@ -10,7 +10,7 @@ const { pathToFileURL } = require("node:url");
 const appProtocol = require("../desktop/app-protocol.cjs");
 const { MARKER } = require("../desktop/storage-migration.cjs");
 
-const ENTRY = "app://verynize/index.html";
+const ENTRY = "app://verynize/editor";
 const SECRET = "registerSchemes(protocol)"; // text from desktop/main.cjs: must never be served
 
 const env = { ...process.env, VERYNIZE_SKIP_ONBOARDING: "1" };

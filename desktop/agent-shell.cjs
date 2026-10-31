@@ -98,7 +98,7 @@ function createShell({ activeEditor, request, options = () => ({}) }) {
     if (!kind) throw new Error(`Unknown shell operation ${op}`);
     const access = parseAccess(context.access);
     if (access === 'readonly' && kind !== 'read') throw new Error('This agent has read-only access: it may inspect the dev server, preview and terminal output, but not change them.');
-    const entry = activeEditor();
+    const entry = await activeEditor();
     if (!entry) throw new Error('No Verynize editor window is open');
     const pm = processManager();
     switch (op) {

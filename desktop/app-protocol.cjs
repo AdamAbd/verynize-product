@@ -10,11 +10,13 @@
 //   resolveRequest(url)              {status, file?} for a request URL (exported for tests)
 const fsp = require("node:fs/promises");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 const SCHEME = "app";
 const HOST = "verynize";
 const ORIGIN = `${SCHEME}://${HOST}`;
-const ENTRY_URL = `${ORIGIN}/index.html`;
+// Legacy startup opens the editor; "/" is the files home route (web/src/lib/router/shell-router.ts).
+const ENTRY_URL = `${ORIGIN}/editor`;
 const WEB_ROOT = path.resolve(__dirname, "../web");
 const INDEX = path.join(WEB_ROOT, "index.html");
 
@@ -150,7 +152,9 @@ const text = (status, body) =>
     headers: { ...HEADERS, "content-type": "text/plain; charset=utf-8" },
   });
 
-async function serve(request) {
+const readBody = (file) => fsp.readFile(file);
+
+async function serve(request, { load = readBody } = {}) {
   if (request.method !== "GET" && request.method !== "HEAD") return text(405, "Method not allowed");
   const result = await resolveRequest(request.url);
   if (result.status !== 200)
@@ -160,15 +164,26 @@ async function serve(request) {
     );
   const type = MIME[path.extname(result.file).toLowerCase()] || "application/octet-stream";
   try {
-    const body = request.method === "HEAD" ? null : await fsp.readFile(result.file);
+    const body = request.method === "HEAD" ? null : await load(result.file);
     return new Response(body, { status: 200, headers: { ...HEADERS, "content-type": type } });
   } catch {
     return text(404, "Not found");
   }
 }
 
-function registerHandler(protocol) {
-  protocol.handle(SCHEME, (request) => serve(request).catch(() => text(500, "Internal error")));
+// In Electron, stream files through Chromium's file loader (net.fetch) instead of buffering each one in
+// the main process: the renderer's scripts load as fast as file:// did.
+function registerHandler(protocol, net) {
+  const load = net
+    ? async (file) => {
+        const res = await net.fetch(pathToFileURL(file).href);
+        if (!res.ok) throw Error("unreadable");
+        return res.body;
+      }
+    : readBody;
+  protocol.handle(SCHEME, (request) =>
+    serve(request, { load }).catch(() => text(500, "Internal error")),
+  );
 }
 
 module.exports = {

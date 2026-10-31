@@ -1,5 +1,5 @@
 const {onWindowClosed}=require('./window-cleanup.cjs');
-const { app, BrowserWindow, session, dialog, Notification, shell, screen, protocol } = require('electron');
+const { app, BrowserWindow, session, dialog, Notification, shell, screen, protocol, net } = require('electron');
 const path = require('node:path');
 const {Project}=require('./projects.cjs');
 const agents=require('./agents.cjs');
@@ -22,7 +22,7 @@ let primaryRuntime=null,repositories=null,behaviorStore=null,agentStores=null;co
 app.setName('Verynize');
 require('./app-preferences.cjs').attachDeepLinks(app); // verynize:// design links (Settings › Preferences › Advanced)
 app.whenReady().then(async () => {
-  appProtocol.registerHandler(protocol);
+  appProtocol.registerHandler(protocol, net);
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   await require('./storage-migration.cjs').migrateStorage({app,BrowserWindow}); // one-time file:// → app://verynize localStorage/IndexedDB copy
   // Design preferences: one file shared by the agent persona (agent-runtime.cjs) and the MCP tools.
