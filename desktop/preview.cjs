@@ -97,6 +97,21 @@ function registerPreview(handle, parent) {
     await frame.executeJavaScript(direction === 'reload' ? 'location.reload()' : direction === 'back' ? 'history.back()' : 'history.forward()');
     return {navigated: true};
   });
+  // "Clear preview data" (preview audit PF5): the embedded preview shares the editor window's session, so the clear is
+  // scoped to the app's localhost origin. Site storage goes; cookies (logins) only when asked. Cookies are host-scoped,
+  // not port-scoped, so the logins variant clears the cookies of every port on that host. sessionStorage lives in the
+  // page, so it is cleared there before the reload.
+  handle('previewClearData', async ({url, logins = false} = {}) => {
+    if (typeof logins !== 'boolean') throw Error('Invalid preview data option');
+    const origin = new URL(localURL(url)).origin;
+    const storages = ['filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage'];
+    if (logins) storages.push('cookies');
+    await parent.webContents.session.clearStorageData({origin, storages});
+    const frame = parent.webContents.mainFrame.frames.find(candidate => candidate.name === PREVIEW_FRAME);
+    let reloaded = false;
+    try { if (frame && new URL(frame.url).origin === origin) { await frame.executeJavaScript('try{sessionStorage.clear()}catch{}location.reload()'); reloaded = true; } } catch {}
+    return {cleared: true, origin, logins, reloaded};
+  });
   handle('previewInspect', options => edit(options, true));
   handle('previewEdit', options => edit(options));
   automations.set(parent,createPreviewAutomation(parent)); // agent shell tools (desktop/agent-shell.cjs)

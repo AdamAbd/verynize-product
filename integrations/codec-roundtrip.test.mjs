@@ -151,7 +151,7 @@ function buildSink() {
     return n;
   };
   Object.assign(by("Board"), {
-    preview: { root: "/", name: "Site", url: "http://localhost:5173/" },
+    preview: { root: "/", name: "Site", url: "http://localhost:5173/", template: "Desktop" },
     locked: true,
     labelHidden: true,
     bindings: { padding: "space/md", gap: "space/md" },
