@@ -6,20 +6,24 @@
 // - CM2-frame-ready (+ copy-as / select-layer / arrange / layout): the frame menu M.
 // - CM3-text-menu: M without Hide label. CM5-multi-verified: no Copy link to selection, Use as mask after Layout.
 // - CM6-hidden / CM6-locked: Show / Unlock follow the layer state. CM7-row: M without Select layer and its separator.
-// - CM9-label: the frame menu. CM10: the paste family stays listed.
+// - CM9-label: the layer-row menu (no Select layer, Copy link to selection runs straight into Paste). CM10: the paste
+//   family stays listed.
+// - P3-inside-menu / P3-normal-context / P4 / P5 (notes-2026-10-31-b, taken after "Copy styles" in P1): "Paste styles
+//   ⌘⌥V" sits between Paste and Paste to replace. The earlier CM2/CM5/CM9/CM10 captures (no styles copied yet) do not
+//   list it, so it is shown only while styles are on the clipboard (assumption from those two states).
 // - P4 (notes-2026-10-31-b): "Set as file thumbnail" is the last row after a separator in every layer menu (frame,
 //   nested frame, text, multi-selection, layer row: CM2/CM3/CM5/CM7/P4 captures). Choosing it toasts "Thumbnail
 //   updated" and the label stays the same. Only a single frame was exercised in Wonder; for a multi-selection
 //   Verynize uses the first selected layer (unproven).
 //
-// - P5-mask-menu: "Use as mask" follows Layout for two selected siblings. P5-mask-result-menu: a layer with a shape mask
+// - P5-mask-menu: "Use as mask" follows Layout for two selected siblings; CM5-multi-verified offers it for four too. P5-mask-result-menu: a layer with a shape mask
 //   gets "Detach mask as shape" and "Remove mask" there instead (inspector/shape-mask.ts).
 import { toast } from "sonner";
 import { toggleBodyClass } from "../chrome/hooks";
 import { design, activePage, type LayerNode } from "@/lib/bridge";
 import {
   detachShapeMask,
-  maskPair,
+  maskGroup,
   removeMask,
   shapeMaskIndex,
   useAsMask,
@@ -46,7 +50,7 @@ type ChatWorkspace = {
   searchElements?: (query: string) => ChatMention[];
   addMention?: (mention: ChatMention) => void;
 };
-type CanvasModule = { canPaste?: () => boolean };
+type CanvasModule = { canPaste?: () => boolean; canPasteStyle?: () => boolean };
 
 const registered = () =>
   new Set(
@@ -61,6 +65,10 @@ const chat = () => window.agentWorkspace as unknown as ChatWorkspace | undefined
 /** The in-app clipboard (layers copied with ⌘C); unknown means the canvas cannot tell, so Paste stays enabled. */
 const canPaste = () =>
   (window as unknown as { BetterCanvas?: CanvasModule }).BetterCanvas?.canPaste?.() ?? true;
+
+/** Whether "Copy styles" has filled the canvas's style clipboard. */
+const canPasteStyle = () =>
+  !!(window as unknown as { BetterCanvas?: CanvasModule }).BetterCanvas?.canPasteStyle?.();
 
 function join(groups: Entry[][]): Entry[] {
   const out: Entry[] = [];
@@ -141,9 +149,10 @@ export function emptyCanvasMenu(point: Point | null): Entry[] {
 
 /**
  * The layer menu for the current selection (CM2–CM7, CM9).
- * `under` lists the layers under the pointer, top-most first (canvas only; rows have no Select layer).
+ * `under` lists the layers under the pointer, top-most first (canvas only; rows and the artboard label have no
+ * Select layer, Wonder CM7-row / CM9-label).
  */
-export function layerMenu(surface: "canvas" | "row", under: string[] = []): Entry[] {
+export function layerMenu(surface: "canvas" | "label" | "row", under: string[] = []): Entry[] {
   const have = registered();
   const doc = design().getDocument();
   const nodes = activePage(doc)?.nodes ?? [];
@@ -175,6 +184,7 @@ export function layerMenu(surface: "canvas" | "row", under: string[] = []): Entr
   const pasting: Entry[] = [
     // Menu Paste puts the clipboard inside a selected frame, centred (Wonder P3); ⌘V keeps the canvas paste.
     commandItem(have, "edit.paste", "Paste", "⌘V", { disabled: paste, arg: { menu: true } }),
+    ...(canPasteStyle() ? [commandItem(have, "edit.pasteStyle", "Paste styles", "⌘⌥V")] : []),
     commandItem(have, "clipboard.pasteToReplace", "Paste to replace", "⌘⇧R", { disabled: paste }),
     commandItem(have, "clipboard.pasteOverSelection", "Paste over selection", "⌘⇧V", {
       disabled: paste,
@@ -218,7 +228,7 @@ export function layerMenu(surface: "canvas" | "row", under: string[] = []): Entr
   }
 
   const masking: Entry[] = [];
-  if (multi && maskPair())
+  if (multi && maskGroup())
     masking.push({ type: "item", command: "menu.useAsMask", label: "Use as mask", run: useAsMask });
   const shapeMask = multi ? -1 : shapeMaskIndex(selected[0]);
   if (shapeMask >= 0) {
