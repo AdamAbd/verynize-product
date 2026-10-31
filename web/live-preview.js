@@ -45,6 +45,7 @@
     if (!api || !entry.node.preview.root) { paint(entry, 'error', 'Connect this preview to a repository through chat.'); return; }
     try {
       if (entry.state === 'running' || entry.state === 'starting') {
+        if (window.previewEdits?.confirmBeforeStop && !(await window.previewEdits.confirmBeforeStop(entry.node.id))) return;
         await api.stop({root: entry.node.preview.root}); entry.settingUp=false; entry.frame.removeAttribute('src'); paint(entry, 'paused');
       } else {
         paint(entry, 'starting');
@@ -64,15 +65,25 @@
     for (const face of captured.document.fontFaces || []) if (!known.has(key(face)) && faces.length < 40) { faces.push(face); known.add(key(face)); }
     if (faces.length) doc.fontFaces = faces;
     window.design.setDocument(doc);
+    return nodes.filter(n => !n.parentId).map(n => ids.get(n.id));
   }
-  async function capture(entry, region = null) {
+  // Select the captured layers and pan the camera to them, keeping the zoom.
+  function revealCaptured(ids) {
+    const doc = window.design.getDocument(), nodes = doc.pages.find(p => p.id === doc.activePage).nodes.filter(n => ids.includes(n.id));
+    if (!nodes.length) return;
+    window.design.setSelection(ids);
+    const x = Math.min(...nodes.map(n => n.x)), y = Math.min(...nodes.map(n => n.y)), w = Math.max(...nodes.map(n => n.x + n.w)) - x, h = Math.max(...nodes.map(n => n.y + n.h)) - y;
+    const rect = document.getElementById('canvas-wrap').getBoundingClientRect(), cam = window.design.getCamera();
+    window.design.setCamera(rect.width / 2 - (x + w / 2) * cam.zoom, rect.height / 2 - (y + h / 2) * cam.zoom, cam.zoom);
+  }
+  async function capture(entry, region = null, element = null) {
     activate(entry);
     const fileId = window.fileLibrary?.currentId;
     entry.capturing=true;changed();
     try {
-      const captured = await window.desktop.captureLivePreview({url: entry.url, ...(region ? {region} : {})});
+      const captured = await window.desktop.captureLivePreview({url: entry.url, ...(region ? {region} : {}), ...(element ? {element} : {})});
       if (fileId !== window.fileLibrary?.currentId) throw Error('Document changed during capture.');
-      if (captured.document) insertCaptured(captured, () => ({x: entry.node.x + entry.node.w + 80, y: entry.node.y}));
+      if (captured.document) { if (element) for (const n of captured.document.pages.flatMap(p => p.nodes)) n.name = n.type[0].toUpperCase() + n.type.slice(1); const ids = insertCaptured(captured, () => ({x: entry.node.x + entry.node.w + 100, y: entry.node.y})); revealCaptured(ids); }
       else window.design.importHTML(captured.html);
       entry.controls.message.textContent = 'Captured editable layers beside the preview.';
     } catch (error) { entry.controls.message.textContent = error.message; }
@@ -122,14 +133,14 @@
     if (region) await capture(entry, region);
   }
   function create(node, el) {
-    el.innerHTML = `<div class="preview-breadcrumb"><span data-part="breadcrumb"></span><span class="preview-local">Local</span></div><section class="preview-surface"><div class="live-preview-bar"><button data-part="back" aria-label="Back">‹</button><button data-part="forward" aria-label="Forward">›</button><button data-part="live-reload" aria-label="Reload preview">↻</button><span data-part="state"></span><input data-part="live-url" aria-label="Preview path" value="/"/><button data-part="toggle">▶ Start</button><button data-part="live-pick" aria-label="Pick capture region" title="Capture a region">⬚</button><button data-part="live-expand" aria-label="Expand preview" aria-pressed="false">⤢</button></div><div class="live-frame-wrap"><iframe title="Running local application" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads"></iframe><div class="preview-placeholder" data-part="placeholder"><div class="preview-setup-card"><strong data-part="title">Ready to start your preview</strong><small data-part="project"></small><p data-part="message">Start this preview to connect to your local app.</p><button data-part="start">▶ Start preview</button></div></div></div></section><form class="preview-edit" hidden><label>Element selector<input name="selector" value="body"/></label><button type="button" data-part="inspect">Inspect</button><label>Text<input name="text"/></label><label>Text color<input name="color" placeholder="#ffffff"/></label><label>Background<input name="backgroundColor" placeholder="#171717"/></label><label>Font size<input name="fontSize" placeholder="16px"/></label><div><button type="submit">Apply</button><button type="button" data-part="undo">Undo</button></div><p role="status"></p></form>`;
+    el.innerHTML = `<div class="preview-breadcrumb"><span data-part="breadcrumb"></span><span class="preview-local">Local</span></div><section class="preview-surface"><div class="live-preview-bar"><button data-part="back" aria-label="Back">‹</button><button data-part="forward" aria-label="Forward">›</button><button data-part="live-reload" aria-label="Reload preview">↻</button><span data-part="state"></span><input data-part="live-url" aria-label="Preview path" value="/"/><button data-part="toggle">▶ Start</button><button data-part="live-pick" aria-label="Pick capture region" title="Capture a region">⬚</button><button data-part="live-expand" aria-label="Expand preview" aria-pressed="false">⤢</button></div><div class="live-frame-wrap"><iframe title="Running local application" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads"></iframe><div class="preview-placeholder" data-part="placeholder"><div class="preview-setup-card"><strong data-part="title">Ready to start your preview</strong><small data-part="project"></small><p data-part="message">Start this preview to connect to your local app.</p><button data-part="start">▶ Start preview</button></div></div></div></section>`;
     const controls = Object.fromEntries([...el.querySelectorAll('[data-part]')].map(control => [control.dataset.part, control]));
     const entry = {el, node, controls, frame: el.querySelector('iframe'), url: '', state: 'paused', mode:'select', inputToApp:false, fileId: window.fileLibrary?.currentId, identity: JSON.stringify([node.preview.root,node.preview.chatId])};
     entry.frame.style.pointerEvents='none';
     entries.set(node.id, entry);
     el.classList.add('canvas-preview');
     // Toolbar inputs own pointer gestures; frame borders and resize handles retain canvas gestures.
-    for (const region of el.querySelectorAll('.live-preview-bar,.preview-context,.preview-placeholder,.preview-edit')) region.addEventListener('pointerdown', event => {
+    for (const region of el.querySelectorAll('.live-preview-bar,.preview-context,.preview-placeholder')) region.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
       if (!window.design.getSelection().includes(entry.node.id)) window.design.setSelection([entry.node.id]);
       activate(entry);
@@ -148,10 +159,6 @@
       if (expanded) { entry.view = window.design.getView(); window.design.setSelection([node.id]); const rect = document.getElementById('canvas-wrap').getBoundingClientRect(); const zoom = Math.min((rect.width - 100) / node.w, (rect.height - 140) / node.h, 2); window.design.setCamera(50 - node.x * zoom, 60 - node.y * zoom, zoom); }
       else if (entry.view) window.design.setView(entry.view);
     };
-    const form = el.querySelector('form');
-    controls.inspect.onclick = async () => { try { activate(entry); const result = await window.desktop.previewInspect({selector: form.elements.selector.value}); form.elements.text.disabled=result.text===null; for (const key of ['text','color','backgroundColor','fontSize']) form.elements[key].value = key === 'text' ? result.text || '' : result.styles?.[key] || ''; } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
-    form.onsubmit = async event => { event.preventDefault(); try { activate(entry); const styles = {}; for (const key of ['color','backgroundColor','fontSize']) if (form.elements[key].value) styles[key] = form.elements[key].value; await window.desktop.previewEdit({selector: form.elements.selector.value, ...(form.elements.text.disabled?{}:{text: form.elements.text.value}), styles}); form.querySelector('[role=status]').textContent = 'Applied to the running page.'; } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
-    controls.undo.onclick = async () => { try { activate(entry); await window.desktop.previewEdit({undo: true}); } catch (error) { form.querySelector('[role=status]').textContent = error.message; } };
     paint(entry, 'paused');
     return entry;
   }
@@ -184,20 +191,22 @@
   function hide() { document.body.classList.remove('live-preview-open'); window.design.setSelection([]); }
   function reveal() { const entry = current(); if (!entry) return false; window.design.setSelection([entry.node.id]); return true; }
   function selectionState() {const entry=selected();return entry?{nodeId:entry.node.id,state:entry.state,mode:entry.mode,inputToApp:entry.inputToApp,url:entry.url,capturing:!!entry.capturing}:null;}
-  function navigateMode(){const entry=selected();if(!entry)return;activate(entry);entry.mode='navigate';entry.el.querySelector('form').hidden=true;entry.frame.style.pointerEvents=entry.state==='running'?'auto':'none';changed();}
-  function editMode(){const entry=selected();if(!entry)return;activate(entry);releaseInput(entry);entry.mode='edit';entry.frame.style.pointerEvents='none';entry.el.querySelector('form').hidden=false;changed();}
+  function navigateMode(){const entry=selected();if(!entry)return;activate(entry);entry.mode='navigate';entry.frame.style.pointerEvents=entry.state==='running'?'auto':'none';changed();}
+  // Edit and Capture: the iframe stays inert; web/preview-edit.js draws the element overlay and handles input.
+  function setMode(mode){const entry=selected();if(!entry)return;activate(entry);if(mode!=='navigate')releaseInput(entry);if(mode==='navigate')return navigateMode();entry.mode=['edit','capture'].includes(mode)&&entry.state==='running'?mode:'select';entry.frame.style.pointerEvents='none';changed();}
+  function editMode(){setMode('edit');}
   async function sendAllInput(){const entry=selected();if(!entry||entry.state!=='running')return;activate(entry);const enabled=!entry.inputToApp;if(enabled)navigateMode();await window.desktop.previewInput({enabled});entry.inputToApp=enabled;if(enabled)entry.frame.focus();changed();}
   async function openInBrowser(){const entry=selected();if(!entry||!entry.url)return;activate(entry);await window.desktop.previewOpenBrowser();}
   document.addEventListener('pointerdown',event=>{const entry=current();if(entry?.inputToApp&&!event.target.closest('#preview-toolbar')){releaseInput(entry);changed();}},true);
   window.addEventListener('message',event=>{const entry=current();if(entry?.inputToApp&&event.source===entry.frame.contentWindow&&event.data?.type==='verynize-preview-release-input'){releaseInput(entry);changed();}});
   window.addEventListener('bd:preview-input-released',()=>{for(const entry of entries.values())entry.inputToApp=false;changed();});
-  window.livePreview = {show, hide, reveal, ensure, renderNode, getSelectionState:selectionState,navigateMode,editMode,captureSelected:()=>{const entry=selected();return entry?capture(entry):Promise.resolve();},captureRegion:()=>{const entry=selected()||current();return entry?pickAndCapture(entry):Promise.resolve();},pickRegion,insertCaptured,sendAllInput,openInBrowser, nodeElement: id => entries.get(id)?.el, getURL: () => current()?.url || '', getNodeId: () => activeId};
+  window.livePreview = {show, hide, reveal, ensure, renderNode, getSelectionState:selectionState,navigateMode,editMode,setMode,captureMode:()=>setMode('capture'),captureElement:path=>{const entry=selected();return entry?capture(entry,null,path):Promise.resolve();},captureSelected:()=>{const entry=selected();return entry?capture(entry):Promise.resolve();},captureRegion:()=>{const entry=selected()||current();return entry?pickAndCapture(entry):Promise.resolve();},pickRegion,insertCaptured,sendAllInput,openInBrowser, nodeElement: id => entries.get(id)?.el, getURL: () => current()?.url || '', getNodeId: () => activeId};
   window.addEventListener('bd:preview-setup-state', event => {for(const entry of entries.values())if(entry.node.preview.root===event.detail.root){entry.settingUp=event.detail.state==='setting-up';paint(entry,event.detail.state==='failed'?'error':'starting',event.detail.message||'');}});
   window.design.subscribe(doc => {
     const alive = new Set(doc.pages.find(p => p.id === doc.activePage).nodes.filter(n => n.preview).map(n => n.id));
     for (const [id, entry] of entries) if (!alive.has(id)) { releaseInput(entry);entry.frame.removeAttribute('src'); entries.delete(id); if (id === activeId) activeId = null; }
     const chosen=selected();
-    for(const entry of entries.values()){if(entry!==chosen){releaseInput(entry);entry.mode='select';entry.el.querySelector('form').hidden=true;}entry.frame.style.pointerEvents=entry===chosen&&entry.state==='running'&&entry.mode==='navigate'?'auto':'none';}
+    for(const entry of entries.values()){if(entry!==chosen){releaseInput(entry);entry.mode='select';}entry.frame.style.pointerEvents=entry===chosen&&entry.state==='running'&&entry.mode==='navigate'?'auto':'none';}
     if(chosen)activate(chosen);changed();
   });
   // Rehydrate persisted frames, but never auto-run code when opening a document.
