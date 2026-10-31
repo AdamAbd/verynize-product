@@ -706,6 +706,40 @@ const LOGO = svg(
       ["PNG", "JPG", "WEBP", "PDF", "CODE"],
       "no SVG for a frame",
     );
+    // Wonder G2: size and format are styled menus (✓ on the current item, separators between the size groups),
+    // 152px wide with 24px rows; the hidden selects above stay in sync for scripts.
+    const exportMenu = async (id) => {
+      await page.locator(`[data-export-menu="${id}"]`).click();
+      const menu = page.getByRole("menu");
+      await menu.waitFor();
+      // Measure after the open (zoom-in) animation.
+      await menu.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+      return {
+        menu,
+        items: await menu.locator("[data-export-option]").evaluateAll((els) =>
+          els.map((e) => e.innerText.trim() + (e.querySelector("svg") ? " ✓" : "")),
+        ),
+        separators: await menu.locator('[role="separator"]').count(),
+        width: (await menu.boundingBox()).width,
+        rows: await menu.locator("[data-export-option]").evaluateAll((els) => [
+          ...new Set(els.map((e) => e.getBoundingClientRect().height)),
+        ]),
+      };
+    };
+    let menu = await exportMenu("artwork-scale");
+    assert.deepEqual(menu.items, ["0.5x", "1x", "2x ✓", "3x", "4x", "720p", "1080p", "1440p", "2160p", "512w", "512h"]);
+    assert.deepEqual([menu.separators, menu.width, menu.rows], [2, 152, [24]]);
+    await menu.menu.locator('[data-export-option="1080p"]').click();
+    await menu.menu.waitFor({ state: "detached" });
+    assert.equal(await page.locator("#artwork-scale").inputValue(), "1080p");
+    assert.equal(await page.locator('[data-export-menu="artwork-scale"]').innerText(), "1080p");
+    menu = await exportMenu("artwork-format");
+    assert.deepEqual(menu.items, ["PNG ✓", "JPG", "WebP", "PDF", "Code"]);
+    assert.deepEqual([menu.separators, menu.width, menu.rows], [0, 152, [24]]);
+    await menu.menu.locator('[data-export-option="JPG"]').click();
+    await menu.menu.waitFor({ state: "detached" });
+    assert.equal(await page.locator("#artwork-format").inputValue(), "JPG");
+    assert.equal(await page.locator("#artwork-download").innerText(), "Export as JPG");
     await page.locator("#artwork-format").selectOption("PNG");
     for (const [preset, size, name] of [
       ["720p", [900, 720], "Card@720p.png"],
