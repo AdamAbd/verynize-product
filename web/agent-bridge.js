@@ -151,7 +151,7 @@
   // the same commands as the shortcuts and context menu, so each one is undoable like a user action.
   // OS clipboard commands stay with the user.
   const BLOCKED_ACTIONS = new Set(['edit.copy', 'edit.cut', 'edit.paste', 'edit.pasteInPlace']);
-  const actionList = () => (editor().commands?.() || []).filter(command => !BLOCKED_ACTIONS.has(command.id));
+  const actionList = () => (editor().commands?.() || []).filter(command => !BLOCKED_ACTIONS.has(command.id) && !command.id.startsWith('clipboard.'));
   ops.actions = () => ({ actions: actionList() });
   ops.action = ({ id, ids, pageId }) => {
     if (!actionList().some(command => command.id === id)) throw new Error(`Unknown action ${id}; call execute_action without an id to list actions`);

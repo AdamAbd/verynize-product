@@ -128,12 +128,15 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal((await node('a')).x, 150, 'a mirrored to the right'); assert.equal((await node('b')).x, 0, 'b mirrored to the left');
     assert.equal((await node('b')).flipX, true);
     await undo();
-    // Rotate 90° from the context menu.
+    // Rotate 90° left the context menu (Wonder's Arrange submenu only flips); it stays a command with ⌥⇧R.
     await page.evaluate(() => window.design.setSelection(['b']));
     const bc = await canvasRect('b');
     await page.mouse.click(bc.left + 10, bc.top + 10, {button: 'right'});
-    for (const id of ['transform.flipH', 'transform.flipV', 'transform.rotate90', 'edit.copyPng', 'edit.copyCode', 'select.inverse', 'select.matching']) assert.ok(await page.locator(`#canvas-menu [data-command="${id}"]`).isVisible(), id + ' in context menu');
-    await page.locator('#canvas-menu [data-command="transform.rotate90"]').click();
+    await page.locator('#canvas-menu [data-command="menu.arrange"]').hover();
+    await page.locator('[data-submenu="menu.arrange"]').waitFor({timeout: 3000});
+    for (const id of ['transform.flipH', 'transform.flipV']) assert.ok(await page.locator(`[data-submenu="menu.arrange"] [data-command="${id}"]`).isVisible(), id + ' in the Arrange submenu');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.design.runCommand('transform.rotate90'));
     assert.equal((await node('b')).rotation, 90, 'rotate 90°');
     await page.keyboard.press('Alt+Shift+KeyR');
     assert.equal((await node('b')).rotation, 180, '⌥⇧R rotates again');
@@ -151,7 +154,8 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
 
     // ---- 7. Eyedropper ----
     await seed([rect('a', 0, 0), rect('b', 200, 0, 100, 80, {color: '#00aa00'}), {id: 't', name: 't', type: 'text', x: 0, y: 200, w: 200, h: 40, text: 'Hi', color: '#222222'}]);
-    assert.ok(await page.locator('#eyedropper-tool').isVisible(), 'toolbar has an eyedropper');
+    // Wonder T1 has no eyedropper button: the tool is on I (and ⌃C), and in the command registry.
+    assert.equal(await page.locator('#canvas-toolbar #eyedropper-tool').count(), 0, 'no toolbar eyedropper');
     await page.evaluate(() => { window.EyeDropper = class { open() { return Promise.resolve({sRGBHex: '#123456'}); } }; window.design.setSelection(['a', 't']); });
     await page.keyboard.press('i');
     await page.waitForFunction(() => window.design.getTool() === 'move');
@@ -161,9 +165,9 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal((await node('a')).color, '#8844cc', 'eyedropper is one undo step'); assert.equal((await node('t')).color, '#222222');
     // Without the EyeDropper API the tool samples the layer under the pointer.
     await page.evaluate(() => { window.EyeDropper = undefined; window.design.setSelection(['a']); });
-    await page.locator('#eyedropper-tool').click();
+    await page.keyboard.press('i');
     assert.equal(await page.evaluate(() => window.design.getTool()), 'eyedropper');
-    assert.equal(await page.locator('#eyedropper-tool').getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator('#workspace').getAttribute('data-tool'), 'eyedropper');
     const bb = await canvasRect('b');
     await page.mouse.click(bb.left + 20, bb.top + 20);
     assert.equal((await node('a')).color, '#00aa00', 'fallback samples the clicked layer');
@@ -181,8 +185,10 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     let ellipse = (await nodesOf()).find(n => n.ellipse);
     assert.ok(ellipse, 'O + drag draws an ellipse'); near(ellipse.w, 120); near(ellipse.h, 80); assert.equal(ellipse.type, 'rectangle');
     assert.equal(await page.locator(`#canvas [data-id="${ellipse.id}"]`).evaluate(e => e.style.borderRadius), '50%');
-    await page.locator('#add-ellipse').click();
-    assert.equal((await nodesOf()).filter(n => n.ellipse).length, 2, 'toolbar inserts an ellipse');
+    // No toolbar button (Wonder T1): O + click inserts a default-size ellipse.
+    await page.keyboard.press('o');
+    await page.mouse.click(sx + 300, sy);
+    assert.equal((await nodesOf()).filter(n => n.ellipse).length, 2, 'O + click inserts an ellipse');
     // Select matching / inverse.
     await page.evaluate(id => window.design.setSelection([id]), ellipse.id);
     assert.ok(await page.evaluate(() => window.design.runCommand('select.matching')));
