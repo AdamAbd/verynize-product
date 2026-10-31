@@ -5,7 +5,7 @@
 // directives, short ids) runs in the main process; nothing here evaluates agent-supplied code.
 (() => {
   'use strict';
-  const api = window.desktop?.agentBridge;
+  const api = window.verynizePlatform.can('agentBridge') ? window.desktop.agentBridge : null;
   const editor = () => window.verynize;
   if (!api || !editor()) return;
   // Every editor render bumps the stamp; commits carry the stamp they were computed from, so a
@@ -67,7 +67,7 @@
   const syncFonts = () => {
     clearTimeout(fontState.timer);
     fontState.timer = setTimeout(async () => {
-      if (!window.desktop?.fontFaces) return;
+      if (!window.verynizePlatform.can('localFonts')) return;
       const families = documentFonts(editor().getDocument());
       const key = JSON.stringify(families);
       if (!families.length || key === fontState.requested) return;

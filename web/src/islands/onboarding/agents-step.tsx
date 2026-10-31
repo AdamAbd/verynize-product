@@ -6,6 +6,7 @@ import { CircleCheckIcon, ExternalLinkIcon, LoaderCircleIcon, RotateCwIcon } fro
 import { Button } from "@/components/ui/button";
 import { ClaudeMark, CodexMark, CursorMark } from "@/components/icons";
 import { cn } from "@/lib/utils";
+import { platform } from "@/lib/platform";
 
 type ProviderAccount = { email?: string; organization?: string; plan?: string };
 type Provider = {
@@ -16,15 +17,7 @@ type Provider = {
   comingSoon?: boolean;
   accounts: ProviderAccount[];
 };
-type AuthEvent = { id: string; agent: string; profile?: string; type: string; message?: string };
-type AgentDesktop = {
-  agentTools?: { accounts(): Promise<Provider[]> };
-  startAgentLogin?(o: { agent: string }): Promise<unknown>;
-  cancelAgentLogin?(o: { id: string }): Promise<unknown>;
-  onAuthEvent?(callback: (event: AuthEvent) => void): () => void;
-  openExternal?(url: string): Promise<unknown>;
-};
-const desktop = () => (window as unknown as { desktop?: AgentDesktop }).desktop;
+const desktop = () => platform.desktop;
 
 const SHOWN = ["claude", "codex", "cursor"];
 const MARKS: Record<string, (props: { className?: string }) => React.ReactNode> = {

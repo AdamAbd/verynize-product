@@ -3,6 +3,7 @@
 // enabled but leads nowhere real. Replace each URL before release; a null value disables its item again. They open
 // through the desktop's validated `openExternal` (HTTP/HTTPS only).
 // TODO(help-links): replace the placeholder URLs.
+import { can, platform } from "@/lib/platform";
 export const HELP_LINKS: Record<
   "docs" | "feedback" | "contact" | "discord" | "diagnostics" | "whatsNew",
   string | null
@@ -30,9 +31,6 @@ export const WHATS_NEW: WhatsNewEntry[] = [
 ];
 
 export function openExternal(url: string) {
-  const desktop = (
-    window as unknown as { desktop?: { openExternal?: (url: string) => Promise<unknown> } }
-  ).desktop;
-  if (desktop?.openExternal) void desktop.openExternal(url).catch(() => undefined);
+  if (can("externalLinks")) void platform.desktop?.openExternal(url).catch(() => undefined);
   else window.open(url, "_blank", "noopener,noreferrer");
 }
