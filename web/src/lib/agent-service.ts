@@ -216,8 +216,9 @@ type WebRun = {
 
 export function createWebAgentService(deps: WebAgentDeps): AgentService {
   const listeners = new Set<AgentListener>();
-  /** Pending approval request id → run id (the approvals endpoint is per run). */
-  const approvals = new Map<string, string>();
+  /** Pending approval request id → its run (the approvals endpoint is per run) and the call's `argsHash`, which an
+   *  approval must echo (the server answers 409 when it does not match the pending call). */
+  const approvals = new Map<string, { runId: string; argsHash?: string }>();
   const delays = deps.retryDelays ?? [250, 1000, 2000, 4000, 8000];
 
   const emit = (event: AgentEvent) => {
@@ -313,13 +314,16 @@ export function createWebAgentService(deps: WebAgentDeps): AgentService {
         }
         const event = normalizeWebEvent(raw);
         if (event.type === "permission-request" && typeof event.requestId === "string")
-          approvals.set(event.requestId, run.runId);
+          approvals.set(event.requestId, {
+            runId: run.runId,
+            ...(typeof event.argsHash === "string" ? { argsHash: event.argsHash } : {}),
+          });
         if (event.type === "permission-resolved" && typeof event.requestId === "string")
           approvals.delete(event.requestId);
         if (event.type === "done") {
           run.done = true;
-          for (const [requestId, runId] of approvals)
-            if (runId === run.runId) approvals.delete(requestId);
+          for (const [requestId, pending] of approvals)
+            if (pending.runId === run.runId) approvals.delete(requestId);
         }
         emit(event);
       };
@@ -379,11 +383,12 @@ export function createWebAgentService(deps: WebAgentDeps): AgentService {
       if (!response.ok) throw Error(await errorMessage(response));
     },
     async respondPermission({ requestId, allow }) {
-      const runId = approvals.get(requestId);
-      if (!runId) throw Error("This approval request is no longer pending");
-      const response = await post(`/api/ai/runs/${encodeURIComponent(runId)}/approvals`, {
+      const pending = approvals.get(requestId);
+      if (!pending) throw Error("This approval request is no longer pending");
+      const response = await post(`/api/ai/runs/${encodeURIComponent(pending.runId)}/approvals`, {
         requestId,
         allow,
+        ...(pending.argsHash ? { argsHash: pending.argsHash } : {}),
       });
       // 409: already decided (timeout, cancel, another tab); the run's permission-resolved event settles the card.
       if (!response.ok && response.status !== 409) throw Error(await errorMessage(response));

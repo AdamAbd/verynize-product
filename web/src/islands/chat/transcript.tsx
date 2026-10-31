@@ -33,6 +33,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Spinner } from "@/components/ui/spinner";
 import { legacySet } from "@/lib/bridge";
+import { platform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { ChatActionButton, ChatIconButton, ChatPillButton, ChatSuggestionButton } from "./controls";
 import { Markdown, openAppLink } from "./markdown";
@@ -357,11 +358,14 @@ function PermissionCard({ part, onAnswer }: { part: ChatPart; onAnswer: (allow: 
             <ChatActionButton variant="outline" hook={hook.deny} onClick={() => onAnswer(false)}>
               Deny
             </ChatActionButton>
-            <ChatTip label={`Allow ${part.toolName || "this tool"} for the rest of this chat`}>
-              <ChatActionButton variant="outline" onClick={() => onAnswer(true, true)}>
-                Always allow
-              </ChatActionButton>
-            </ChatTip>
+            {/* The model API (web) decides each call on its own: it has no "always allow" (docs/ai-runtime.md). */}
+            {platform.kind !== "web" && (
+              <ChatTip label={`Allow ${part.toolName || "this tool"} for the rest of this chat`}>
+                <ChatActionButton variant="outline" onClick={() => onAnswer(true, true)}>
+                  Always allow
+                </ChatActionButton>
+              </ChatTip>
+            )}
             <ChatActionButton hook={hook.allow} onClick={() => onAnswer(true)}>
               Allow
             </ChatActionButton>
