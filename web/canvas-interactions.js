@@ -899,8 +899,15 @@
         line.setAttribute('x1', toScreenX(g.x1)); line.setAttribute('y1', toScreenY(g.y1)); line.setAttribute('x2', toScreenX(g.x2)); line.setAttribute('y2', toScreenY(g.y2));
         line.setAttribute('class', 'guide guide-' + g.type + (className ? ' ' + className : ''));
         guideSvg.append(line);
+        // Alignment guides end in small dots on the aligned points (Wonder TR4).
+        if (g.type === 'line') for (const [x, y] of [[g.x1, g.y1], [g.x2, g.y2]]) {
+          const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          dot.setAttribute('cx', toScreenX(x)); dot.setAttribute('cy', toScreenY(y)); dot.setAttribute('r', 2); dot.setAttribute('class', 'guide-dot');
+          guideSvg.append(dot);
+        }
         if (g.label !== undefined) {
           const label = document.createElement('span'); label.className = 'guide-label'; label.textContent = String(g.label);
+          label.dataset.axis = Math.abs(g.x2 - g.x1) >= Math.abs(g.y2 - g.y1) ? 'x' : 'y'; if (className) label.classList.add(className);
           label.style.left = (toScreenX(g.x1) + toScreenX(g.x2)) / 2 + 'px'; label.style.top = (toScreenY(g.y1) + toScreenY(g.y2)) / 2 + 'px';
           guideLabels.append(label);
         }
@@ -1026,10 +1033,23 @@
       const guides = [], cy = a.y + a.h / 2, cx = a.x + a.w / 2;
       const inside = b.x <= a.x && b.y <= a.y && b.x + b.w >= a.x + a.w && b.y + b.h >= a.y + a.h;
       const seg = (x1, y1, x2, y2) => { const len = Math.abs(x2 - x1) + Math.abs(y2 - y1); if (len > 0.01) guides.push({type: 'measure', x1, y1, x2, y2, label: Math.round(len * 10) / 10}); };
+      const extend = (x1, y1, x2, y2) => { if (Math.abs(x2 - x1) + Math.abs(y2 - y1) > 0.01) guides.push({type: 'extend', x1, y1, x2, y2}); };
       if (inside) { seg(b.x, cy, a.x, cy); seg(a.x + a.w, cy, b.x + b.w, cy); seg(cx, b.y, cx, a.y); seg(cx, a.y + a.h, cx, b.y + b.h); }
       else {
         if (b.x >= a.x + a.w) seg(a.x + a.w, cy, b.x, cy); else if (a.x >= b.x + b.w) seg(b.x + b.w, cy, a.x, cy);
         if (b.y >= a.y + a.h) seg(cx, a.y + a.h, cx, b.y); else if (a.y >= b.y + b.h) seg(cx, b.y + b.h, cx, a.y);
+        // Wonder (TR5): when the hovered layer sits above/below the selection, its side edges are extended (dashed) to the
+        // selection's centre line and the edge offsets are labelled; the same rotated when it sits beside the selection.
+        const overlapX = b.x < a.x + a.w && a.x < b.x + b.w, overlapY = b.y < a.y + a.h && a.y < b.y + b.h;
+        if (overlapX && !overlapY) {
+          const edge = b.y + b.h <= a.y ? b.y + b.h : b.y;
+          if (a.x > b.x) { extend(b.x, edge, b.x, cy); seg(b.x, cy, a.x, cy); }
+          if (b.x + b.w > a.x + a.w) { extend(b.x + b.w, edge, b.x + b.w, cy); seg(a.x + a.w, cy, b.x + b.w, cy); }
+        } else if (overlapY && !overlapX) {
+          const edge = b.x + b.w <= a.x ? b.x + b.w : b.x;
+          if (a.y > b.y) { extend(edge, b.y, cx, b.y); seg(cx, b.y, cx, a.y); }
+          if (b.y + b.h > a.y + a.h) { extend(edge, b.y + b.h, cx, b.y + b.h); seg(cx, a.y + a.h, cx, b.y + b.h); }
+        }
       }
       drawGuides(guides, 'measure');
     }
