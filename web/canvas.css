@@ -61,12 +61,6 @@
 #canvas-toolbar #select-tool:not(.tool-active){background:transparent}
 #canvas-toolbar button.tool-active img{opacity:1}
 
-#canvas-menu{position:fixed;z-index:60;min-width:210px;background:#262626;border:1px solid #3a3a3a;border-radius:8px;padding:4px;box-shadow:0 10px 30px #0007}
-#canvas-menu button{display:flex;width:100%;justify-content:space-between;gap:20px;background:transparent;border:0;padding:6px 8px;font-size:11px;color:#ddd;border-radius:5px;text-align:left}
-#canvas-menu button:hover{background:var(--shell-accent,#b93cdb);color:#fff}
-#canvas-menu kbd{font:inherit;color:#8a8a8a}
-#canvas-menu button:hover kbd{color:#fff}
-#canvas-menu hr{border:0;border-top:1px solid #383838;margin:4px 2px}
 
 #layers .layer-row{position:relative}
 #layers .layer-row.is-hidden{opacity:.45}
@@ -77,8 +71,6 @@
 .layer-row:hover .layer-toggle,.layer-toggle.on{display:flex}
 .layer-toggle.on img{opacity:1!important}
 #inspector select.sizing-mode{margin-top:4px;height:24px!important;font-size:10px!important;padding:2px 6px!important}
-html[data-ui-theme=light] #canvas-menu{background:#fff;border-color:#ddd}
-html[data-ui-theme=light] #canvas-menu button{color:#333}
 
 /* Measuring a child's smallest width for spacing drags: words do not break mid-word. */
 #canvas.measuring-min .layer{overflow-wrap:normal!important;word-break:normal!important}
