@@ -22,10 +22,10 @@ export const HELP_LINKS: Record<
 export type WhatsNewEntry = { id: string; title: string; date: string; url: string };
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
-    id: "0.16",
-    title: "Verynize 0.16",
+    id: "0.17",
+    title: "Verynize 0.17",
     date: "October 31",
-    url: "https://verynize.example/changelog/0.16",
+    url: "https://verynize.example/changelog/0.17",
   },
 ];
 

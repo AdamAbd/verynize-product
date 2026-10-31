@@ -78,7 +78,7 @@ const nodes = [
     // ---- T5: the `?` help menu.
     await p.locator('#bd-canvas-help').click();
     const help = await p.locator('#bd-help-menu [role=menuitem]').evaluateAll(list => list.map(i => [i.textContent.trim(), i.hasAttribute('data-disabled')]));
-    assert.deepEqual(help.map(h => h[0]), ['Docs', 'Keyboard shortcuts', 'Restart onboarding', 'Give feedback', 'Contact us', 'Discord community', 'Export diagnostic logs', "Verynize 0.16October 31", 'View all']);
+    assert.deepEqual(help.map(h => h[0]), ['Docs', 'Keyboard shortcuts', 'Restart onboarding', 'Give feedback', 'Contact us', 'Discord community', 'Export diagnostic logs', "Verynize 0.17October 31", 'View all']);
     assert.deepEqual(help.filter(h => h[1]).map(h => h[0]), [], 'every help item is enabled (placeholder URLs in help-links.ts)');
     assert.equal(await p.locator('#bd-help-menu').getByText("What's new", {exact: true}).count(), 1);
     // What's new lists placeholder entries (title over date, two-line 44px rows like Wonder T5-help) before View all.
