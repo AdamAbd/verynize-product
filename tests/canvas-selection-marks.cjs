@@ -42,8 +42,8 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal(await shown('#canvas-overlay .hidden-outline'), true, 'hidden layer is outlined');
     const outline = await boxOf('#canvas-overlay .hidden-outline'), at = await screen(500, 20);
     near(outline.x, at.x, 1, 'outline x'); near(outline.y, at.y, 1, 'outline y'); near(outline.w, 120, 1, 'outline w'); near(outline.h, 120, 1, 'outline h');
-    assert.deepEqual(await page.locator('#canvas-overlay .hidden-outline').evaluate(e => { const cs = getComputedStyle(e); return [cs.borderTopWidth, cs.borderTopColor, cs.backgroundColor]; }),
-      ['1px', PURPLE, 'rgba(0, 0, 0, 0)'], 'empty 1px #c468f7 outline');
+    assert.deepEqual(await page.locator('#canvas-overlay .hidden-outline').evaluate(e => { const cs = getComputedStyle(e); return [cs.outlineWidth, cs.outlineOffset, cs.outlineColor, cs.backgroundColor]; }),
+      ['1px', '-0.5px', PURPLE, 'rgba(0, 0, 0, 0)'], 'empty 1px #c468f7 outline straddling the edge');
     assert.equal(await page.locator('#canvas [data-id=ghost]').evaluate(e => getComputedStyle(e).display), 'none', 'the layer itself stays hidden');
     for (const sel of ['#selection-name', '#selection-measure', '#selection-chat-chip']) assert.equal(await shown('#canvas-overlay ' + sel), false, sel + ' is not drawn for a hidden layer');
     await select(['board']);
@@ -91,9 +91,40 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal(await page.locator('#canvas-overlay .hover-box ~ *[class*=hover], #canvas-overlay .hover-children, #canvas-overlay .hover-child').count(), 0, 'its children are not outlined');
     const label = page.locator('#canvas-overlay .frame-label[data-id=board]');
     assert.equal(await label.evaluate(e => e.classList.contains('hovered')), true, 'the frame label is marked hovered');
-    assert.equal(await label.evaluate(e => getComputedStyle(e).color), await page.locator('#canvas-overlay .hover-box').evaluate(e => getComputedStyle(e).borderTopColor), 'label takes the outline purple');
+    assert.equal(await label.evaluate(e => getComputedStyle(e).color), await page.locator('#canvas-overlay .hover-box').evaluate(e => getComputedStyle(e).outlineColor), 'label takes the outline purple');
+    // Wonder S1-hover-final / R4: 1px #c468f7 straddling the edge, axis-aligned for an unrotated frame.
+    assert.deepEqual(await page.locator('#canvas-overlay .hover-box').evaluate(e => { const cs = getComputedStyle(e); return [cs.outlineWidth, cs.outlineOffset, cs.outlineColor, cs.borderTopWidth, cs.transform]; }),
+      ['1px', '-0.5px', PURPLE, '0px', 'none'], 'hover outline is 1px #c468f7');
+    assert.equal(await label.evaluate(e => getComputedStyle(e).color), PURPLE, 'hovered label is #c468f7');
     await page.mouse.move(5, 5);
     assert.equal(await label.evaluate(e => e.classList.contains('hovered')), false, 'the tint leaves with the pointer');
+
+    // ---- R4: hovering an unselected rotated frame turns the outline with it (not its axis-aligned bounds) ----
+    await seed([frame('tilt', 100, 100, 150, 100, {rotation: -30})]);
+    const mid = await screen(175, 150); await page.mouse.move(mid.x, mid.y, {steps: 2}); await page.mouse.move(mid.x + 1, mid.y + 1);
+    assert.equal(await page.locator('#canvas-overlay').getAttribute('data-hover'), 'tilt');
+    const tilt = await page.locator('#canvas-overlay .hover-box').evaluate(e => ({transform: e.style.transform, w: e.offsetWidth, h: e.offsetHeight, r: e.getBoundingClientRect()}));
+    assert.equal(tilt.transform, 'rotate(-30deg)', 'hover outline rotates with the frame');
+    assert.deepEqual([tilt.w, tilt.h], [150, 100], 'the outline keeps the frame size, not its rotated bounds');
+    near(tilt.r.x + tilt.r.width / 2, mid.x, 1, 'rotated outline centre x'); near(tilt.r.y + tilt.r.height / 2, mid.y, 1, 'rotated outline centre y');
+    await page.mouse.move(5, 5);
+
+    // ---- R5 / S4: selection chrome on Wonder's pixels: 1px #c468f7 ring straddling the edge, 9px white handles with
+    // a 1px #c468f7 border centred on the corners, badge #a245d3 ----
+    await seed([frame('pick', 0, 0, 100, 60)]);
+    await select(['pick']);
+    const chrome = await page.evaluate(() => {
+      const el = document.querySelector('#canvas [data-id=pick]'), cs = getComputedStyle(el), h = el.querySelector('.handle[data-corner=nw]'), hs = getComputedStyle(h);
+      const r = el.getBoundingClientRect(), hr = h.getBoundingClientRect(), badge = getComputedStyle(document.getElementById('selection-measure')), name = getComputedStyle(document.getElementById('selection-name'));
+      return {ring: [cs.outlineStyle, cs.outlineWidth, cs.outlineOffset, cs.outlineColor], handle: [hr.width, hr.height, hs.borderTopWidth, hs.borderTopColor, hs.backgroundColor],
+        centre: [hr.x + hr.width / 2 - r.x, hr.y + hr.height / 2 - r.y], badge: badge.backgroundColor, name: name.color};
+    });
+    assert.deepEqual(chrome.ring, ['solid', '1px', '-0.5px', PURPLE], 'selection ring');
+    assert.deepEqual(chrome.handle, [9, 9, '1px', PURPLE, 'rgb(255, 255, 255)'], 'handle 9×9 white with a 1px purple border');
+    assert.deepEqual(chrome.centre, [0, 0], 'handle centred on the corner');
+    assert.equal(chrome.badge, 'rgb(162, 69, 211)', 'badge #a245d3');
+    assert.equal(chrome.name, PURPLE, 'name label #c468f7');
+    await select([]);
 
     // ---- TR5: Alt distances are whole numbers ----
     await seed([rect('a', 0, 0, 100, 80), rect('b', 136.4, 0, 100, 80)]);

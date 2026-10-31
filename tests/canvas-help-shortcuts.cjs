@@ -85,6 +85,30 @@ const nodes = [
     const entry = p.locator('#bd-help-menu [data-whats-new]');
     assert.equal(await entry.count(), 1);
     assert.equal(await entry.evaluate(el => el.offsetHeight), 44);
+    // Wonder R6-help-menu: 180px menu; labels start 34px in and end in an ellipsis at 112px beside ↗ ("Discord commu…")
+    // or 128px without it ("Export diagnostic l…").
+    const fit = await p.evaluate(async () => {
+      await Promise.all(document.getElementById('bd-help-menu').getAnimations().map(a => a.finished)); // zoom-in-95
+      const menu = document.getElementById('bd-help-menu').getBoundingClientRect();
+      // Characters drawn before the ellipsis: the longest prefix whose width plus "…" fits the label box.
+      const visible = span => {
+        const probe = document.createElement('span'); // a sibling inherits the same font settings
+        probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+        span.after(probe);
+        let n = span.textContent.length;
+        if (span.scrollWidth > span.clientWidth) for (; n > 0; n--) { probe.textContent = span.textContent.slice(0, n) + '…'; if (probe.getBoundingClientRect().width <= span.clientWidth) break; }
+        probe.remove(); return span.textContent.slice(0, n);
+      };
+      return {menu: menu.width, labels: [...document.querySelectorAll('#bd-help-menu [data-help-label]')].map(s => {
+        const r = s.getBoundingClientRect(), cs = getComputedStyle(s);
+        return {id: s.closest('[role=menuitem]').id, left: r.left - menu.left, max: cs.maxWidth, overflow: cs.textOverflow, cut: s.scrollWidth > s.clientWidth, shown: visible(s)};
+      })};
+    });
+    assert.equal(fit.menu, 180, 'help menu is 180px wide');
+    for (const l of fit.labels) { assert.equal(l.overflow, 'ellipsis', l.id); assert.equal(l.left, 34, l.id + ' text starts 34px in'); }
+    const label = id => fit.labels.find(l => l.id === id);
+    assert.equal(label('help-discord').max, '112px'); assert.equal(label('help-diagnostics').max, '128px');
+    assert.deepEqual(fit.labels.filter(l => l.cut).map(l => [l.id, l.shown]), [['help-discord', 'Discord commu'], ['help-diagnostics', 'Export diagnostic l']], 'only Discord and Export truncate, like Wonder');
     await p.locator('#help-onboarding').click();
     await p.locator('#onboarding').waitFor();
     await p.evaluate(() => { localStorage.setItem('verynize.onboarding', 'done'); });
