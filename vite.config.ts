@@ -23,7 +23,26 @@ export default defineConfig({
           "shadcn/require-static-classes": "error",
           "shadcn/no-inline-styles": "warn",
           "shadcn/no-restyle": ["warn", { allow: ["layout"] }],
+          // Shell navigation goes through navigate() so routing rules (cloud fragment, settings
+          // history) stay in one module (docs/spikes/tanstack-router.md).
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: [
+                {
+                  name: "@/lib/router/shell-router",
+                  importNames: ["shellRouter"],
+                  message: "Navigate with navigate() from @/lib/router/shell-router.",
+                },
+              ],
+            },
+          ],
         },
+      },
+      {
+        // The router island mounts the router itself.
+        files: ["web/src/islands/router.tsx"],
+        rules: { "no-restricted-imports": "off" },
       },
       {
         // Vendored shadcn/ui sources are the design system itself.
