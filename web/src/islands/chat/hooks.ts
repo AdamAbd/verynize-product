@@ -34,6 +34,9 @@ export const hook = {
   artboardLink: "chat-artboard-link",
   steer: "chat-steer",
   mentionPopover: "chat-mention-popover",
+  auth: "chat-auth",
+  authSignIn: "chat-auth-signin",
+  authRetry: "chat-auth-retry",
 } as const;
 /** Tool / permission state modifiers (running, done, error, interrupted, pending, allowed, denied, expired). */
 export const stateHook = (state: string | undefined) => state ?? "";

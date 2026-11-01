@@ -255,7 +255,7 @@ class AgentProfiles {
 }
 
 /** Display account of a profile (email/plan claims only). */
-async function profileAccount(agent, dir, { claudeStatus } = {}) {
+async function profileAccount(agent, dir, { claudeStatus, executable, spawnProcess } = {}) {
   const tools = require("./agent-tools.cjs");
   const readJson = async (file) => {
     try {
@@ -264,8 +264,8 @@ async function profileAccount(agent, dir, { claudeStatus } = {}) {
       return null;
     }
   };
-  if (agent === "codex")
-    return tools.codexAccountFromAuth(await readJson(path.join(dir, "auth.json")));
+  // Codex: app-server `account/read` with the account's CODEX_HOME, auth.json claims only as a fallback.
+  if (agent === "codex") return tools.codexAccount({ executable, codexHome: dir, spawnProcess });
   return tools.claudeAccountFrom(claudeStatus, await readJson(path.join(dir, ".claude.json")));
 }
 
