@@ -599,7 +599,32 @@ try {
     await settings.locator("#settings-openrouter-disconnect").click();
     await settings.locator('#settings-openrouter-card[data-status="missing"]').waitFor();
     assert.equal((await credentials()).connected, false);
-    await settings.locator("#settings-openrouter-connect").waitFor();
+    // Connect from Settings: the OAuth round-trip comes back to the Start-rendered /settings/agents screen with the
+    // outcome parameter dropped and the section still open.
+    const settingsBack = settings.waitForURL(
+      (url) => url.searchParams.get("openrouter") === "connected",
+      { timeout: 20000 },
+    );
+    await settings.locator("#settings-openrouter-connect").click();
+    await settingsBack;
+    await settings.waitForURL(
+      (url) => url.pathname === "/settings/agents" && !url.searchParams.has("openrouter"),
+      { timeout: 20000 },
+    );
+    await settings.locator('#settings-openrouter-card[data-status="connected"]').waitFor();
+    assert.equal(
+      await settings.evaluate(() => window.shellRouter?.state.location.pathname),
+      "/settings/agents",
+      "Start's router is on the settings section after the return",
+    );
+    assert.equal(
+      await settings.evaluate(() => window.shellRouter?.state.location.searchStr || ""),
+      "",
+      "Start's location dropped the outcome parameter too",
+    );
+    assert.equal((await credentials()).source, "oauth");
+    await settings.locator("#settings-openrouter-disconnect").click();
+    await settings.locator('#settings-openrouter-card[data-status="missing"]').waitFor();
     await settings.locator("#settings-openrouter-paste").click();
     const SETTINGS_KEY = "sk-or-v1-web-settings-key-7777";
     fake.keys.add(SETTINGS_KEY);
