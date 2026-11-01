@@ -64,7 +64,12 @@ async function credentialKey(secret) {
     "deriveKey",
   ]);
   return crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: encoder.encode(HKDF_SALT), info: encoder.encode(HKDF_INFO) },
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: encoder.encode(HKDF_SALT),
+      info: encoder.encode(HKDF_INFO),
+    },
     material,
     { name: "AES-GCM", length: 256 },
     false,
@@ -229,10 +234,15 @@ export async function startOAuth(env, { accountId, origin, returnTo }, now = Dat
  * from another flow).
  */
 export async function claimOAuth(env, { state, browser }, now = Date.now()) {
-  if (typeof state !== "string" || !/^[\w-]{20,128}$/.test(state)) return { error: "invalid_state" };
+  if (typeof state !== "string" || !/^[\w-]{20,128}$/.test(state))
+    return { error: "invalid_state" };
   const db = database(env);
   const stateHash = await digestHex(state);
-  const row = await db.select().from(aiOauthState).where(eq(aiOauthState.stateHash, stateHash)).get();
+  const row = await db
+    .select()
+    .from(aiOauthState)
+    .where(eq(aiOauthState.stateHash, stateHash))
+    .get();
   if (!row) return { error: "invalid_state" };
   const claimed = await db.delete(aiOauthState).where(eq(aiOauthState.stateHash, stateHash)).run();
   if (!claimed.meta?.changes) return { error: "invalid_state" };
@@ -258,7 +268,6 @@ export function exchangeOAuthCode(env, { code, verifier }) {
     code,
     codeVerifier: verifier,
     codeChallengeMethod: "S256",
-    fetchImpl: (input, init) =>
-      fetch(String(input).replace(DEFAULT_OPENROUTER_BASE, base), init),
+    fetchImpl: (input, init) => fetch(String(input).replace(DEFAULT_OPENROUTER_BASE, base), init),
   });
 }

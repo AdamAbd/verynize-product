@@ -5,7 +5,10 @@
 // checks (owner, argsHash, replay, ended run), cancel and timeout while waiting, at most once per
 // tool call (re-POST, reconnect, repeated id), plan and helper runs, revocation mid-run, edit
 // access with a live room socket, and the same write through hosted MCP and the runtime giving
-// the same document. The LLM provider is the only fake: a local OpenAI-compatible server
+// the same document. Per-account credentials: no key → credentials_required, pasted keys, the
+// OAuth PKCE round-trip and its refusals (replay, forged, expired, another browser), encryption at
+// rest, each account's runs on its own key, a key deleted mid-run, 401/402 from the provider.
+// The LLM provider and OpenRouter's key endpoints are the only fake: a local server
 // (tests/helpers/fake-openrouter.mjs) set as OPENROUTER_BASE_URL.
 // Runs on workerd (default), Node and Vercel (CLOUD_RUNTIME, tests/cloud-harness.mjs).
 import assert from "node:assert/strict";
@@ -342,7 +345,9 @@ try {
   assert.ok(!anaRow.ciphertext.includes(ANA_KEY) && !atob(anaRow.ciphertext).includes(ANA_KEY));
   assert.notEqual(anaRow.ciphertext, ANA_KEY);
   assert.equal(await openSecret(AUTH_SECRET, anaRow, `${anaId}:openrouter`), ANA_KEY);
-  await assert.rejects(openSecret("another-secret-of-the-same-length-00000", anaRow, `${anaId}:openrouter`));
+  await assert.rejects(
+    openSecret("another-secret-of-the-same-length-00000", anaRow, `${anaId}:openrouter`),
+  );
   await assert.rejects(
     openSecret(AUTH_SECRET, anaRow, `${dodiId}:openrouter`),
     "a row copied to another account does not decrypt",
@@ -388,7 +393,10 @@ try {
   assert.match(dodiStart.cookie, /^vz_openrouter_oauth=[\w-]+$/);
   const dodiCallback = await authorize(dodiStart.authorizeUrl);
   assert.equal(dodiCallback.origin + dodiCallback.pathname, `${ORIGIN}${OAUTH}/callback`);
-  assert.equal(await callback(dodiCallback, dodiStart.cookie), "/editor?file=1&openrouter=connected");
+  assert.equal(
+    await callback(dodiCallback, dodiStart.cookie),
+    "/editor?file=1&openrouter=connected",
+  );
   const exchange = fake.exchanges.at(-1);
   assert.equal(exchange.code, dodiCallback.searchParams.get("code"));
   assert.equal(exchange.code_challenge_method, "S256");
@@ -419,7 +427,10 @@ try {
   // An expired pending sign-in (ten minutes); its return path was not same-origin, so the
   // redirect falls back to Settings (no open redirect).
   const lateStart = await startOAuth(dodi, "//evil.example/steal");
-  await db.prepare(`update ai_oauth_state set "expiresAt" = ?`).bind(Date.now() - 1000).run();
+  await db
+    .prepare(`update ai_oauth_state set "expiresAt" = ?`)
+    .bind(Date.now() - 1000)
+    .run();
   assert.equal(
     await callback(await authorize(lateStart.authorizeUrl), lateStart.cookie),
     "/settings/agents?openrouter=error&openrouter_error=expired",
@@ -443,14 +454,14 @@ try {
   assert.equal((await credentialOf(anaId)).ciphertext, anaRow.ciphertext, "Ana unchanged");
   // Ana's own flow without its cookie is refused too.
   const anaBack = await authorize(anaStart.authorizeUrl);
-  assert.equal(
-    await callback(anaBack),
-    "/editor?openrouter=error&openrouter_error=wrong_browser",
-  );
+  assert.equal(await callback(anaBack), "/editor?openrouter=error&openrouter_error=wrong_browser");
   assert.equal((await credentialOf(anaId)).source, "manual");
   // Disconnect and reconnect: delete removes the row; the next run start needs a key again.
   assert.deepEqual(
-    await data(await request("/api/ai/credentials/openrouter", { method: "DELETE", token: dodi }), 200),
+    await data(
+      await request("/api/ai/credentials/openrouter", { method: "DELETE", token: dodi }),
+      200,
+    ),
     { ok: true, removed: true },
   );
   assert.equal(await credentialOf(dodiId), null);
@@ -820,7 +831,10 @@ try {
     200,
   );
   const goneEvents = await gone.all();
-  assert.ok(goneEvents.some((e) => e.type === "tool-result"), "the first turn finished");
+  assert.ok(
+    goneEvents.some((e) => e.type === "tool-result"),
+    "the first turn finished",
+  );
   assert.match(
     goneEvents.find((e) => e.type === "error").message,
     /Your OpenRouter account was disconnected during this run/,

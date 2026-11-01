@@ -34,7 +34,8 @@ function describe(credential: OpenRouterCredential) {
   const parts = [`Key ending ${credential.last4} · ${via}`];
   if (credential.label) parts.push(credential.label);
   if (credential.state === "rejected") parts.push("OpenRouter rejects this key: reconnect");
-  if (credential.state === "unreadable") parts.push("This key can no longer be read on the server: reconnect");
+  if (credential.state === "unreadable")
+    parts.push("This key can no longer be read on the server: reconnect");
   if (typeof credential.usage === "number")
     parts.push(
       typeof credential.limit === "number"
@@ -170,13 +171,21 @@ export function OpenRouterSection() {
               disabled={busy}
               onChange={(event) => setKey(event.target.value)}
             />
-            <SettingsButton id="settings-openrouter-save" type="submit" disabled={busy || !key.trim()}>
+            <SettingsButton
+              id="settings-openrouter-save"
+              type="submit"
+              disabled={busy || !key.trim()}
+            >
               Save key
             </SettingsButton>
           </form>
         )}
         {error && (
-          <p id="settings-openrouter-error" role="alert" className="m-0 py-3 text-sm text-destructive">
+          <p
+            id="settings-openrouter-error"
+            role="alert"
+            className="m-0 py-3 text-sm text-destructive"
+          >
             {error}
           </p>
         )}

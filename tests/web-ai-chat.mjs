@@ -218,7 +218,10 @@ try {
   await page.locator("#chat-web-paste-key").click();
   await page.locator("#chat-web-openrouter-key").fill("sk-or-v1-not-known-to-openrouter");
   await page.locator("#chat-web-save-key").click();
-  await page.locator("#chat-web-key-error").getByText(/OpenRouter rejected this key/).waitFor();
+  await page
+    .locator("#chat-web-key-error")
+    .getByText(/OpenRouter rejected this key/)
+    .waitFor();
   const PASTED = "sk-or-v1-web-pasted-key-4321";
   fake.keys.add(PASTED);
   await page.locator("#chat-web-openrouter-key").fill(PASTED);
@@ -615,7 +618,10 @@ try {
     workers: [
       {
         ...worker,
-        config: { ...worker.config, env: { ...baseEnv, VERYNIZE_AI: { type: "text", value: "off" } } },
+        config: {
+          ...worker.config,
+          env: { ...baseEnv, VERYNIZE_AI: { type: "text", value: "off" } },
+        },
       },
     ],
   });

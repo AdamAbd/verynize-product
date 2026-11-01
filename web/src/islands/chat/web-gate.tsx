@@ -61,7 +61,11 @@ function OpenRouterConnect() {
   return (
     <div className="mt-1.5 flex w-full flex-col items-start gap-2">
       <div className="flex items-center gap-2">
-        <ChatActionButton id="chat-web-connect-openrouter" disabled={busy} onClick={() => void connect()}>
+        <ChatActionButton
+          id="chat-web-connect-openrouter"
+          disabled={busy}
+          onClick={() => void connect()}
+        >
           Connect OpenRouter
         </ChatActionButton>
         <ChatActionButton

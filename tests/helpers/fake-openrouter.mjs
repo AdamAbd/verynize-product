@@ -80,7 +80,11 @@ export async function startFakeOpenRouter(scenarios) {
       authRequests.push(params);
       const code = `code-${++issued}-${Math.random().toString(36).slice(2)}`;
       const key = `sk-or-v1-oauth-${issued}-${Math.random().toString(36).slice(2, 10)}`;
-      codes.set(code, { key, challenge: params.code_challenge, method: params.code_challenge_method });
+      codes.set(code, {
+        key,
+        challenge: params.code_challenge,
+        method: params.code_challenge_method,
+      });
       keys.add(key);
       const back = new URL(params.callback_url);
       back.searchParams.set("code", code);
@@ -120,7 +124,10 @@ export async function startFakeOpenRouter(scenarios) {
       if (refused) {
         requests.push({ headers: req.headers, body: JSON.parse(raw || "{}"), refused });
         return sendJson(res, refused, {
-          error: { message: refused === 401 ? "User not found." : "Insufficient credits", code: refused },
+          error: {
+            message: refused === 401 ? "User not found." : "Insufficient credits",
+            code: refused,
+          },
         });
       }
     }
