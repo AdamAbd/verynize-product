@@ -37,7 +37,7 @@
     "test:web": "node tests/web-cloudflare.mjs && node tests/web-node.mjs && node tests/ai-routing.mjs && node tests/web-ai-chat.mjs",
     "test:web:nitro": "node tests/web-nitro.mjs",
     "test:integrations": "node --test integrations/*.test.mjs",
-    "test:cloud": "node tests/cloud-rooms.mjs && node tests/cloud-auth.mjs && node tests/cloud-auth-bridge.mjs && node tests/cloud-orgs.mjs && node tests/cloud-directory-migration.mjs && node tests/cloud-merge.mjs && node tests/cloud-accounts.mjs && node tests/cloud-passkeys.mjs && node tests/cloud-apps.mjs && node tests/cloud-email.mjs && node tests/cloud-mcp.mjs && node tests/cloud-ai.mjs && node tests/cloud-assets.mjs",
+    "test:cloud": "node tests/cloud-rooms.mjs && node tests/cloud-auth.mjs && node tests/cloud-auth-bridge.mjs && node tests/cloud-orgs.mjs && node tests/cloud-directory-migration.mjs && node tests/cloud-merge.mjs && node tests/cloud-accounts.mjs && node tests/cloud-passkeys.mjs && node tests/cloud-apps.mjs && node tests/cloud-email.mjs && node tests/cloud-mcp.mjs && node tests/cloud-ai.mjs && node tests/cloud-ai-cancel.mjs && node tests/cloud-assets.mjs",
     "test:cloud:node": "node tests/run-cloud-node.mjs",
     "test:cloud:vercel": "node tests/run-cloud-vercel.mjs",
     "mcp": "node integrations/mcp-server.mjs",

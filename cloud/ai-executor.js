@@ -109,6 +109,23 @@ export async function argsHash(name, args) {
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * The OpenRouter text adapter of one run. Its requests are aborted by `signal` (the run's cancel).
+ *
+ * The SDK sends `request.clone()`, and on Node (undici) a cloned Request does not always follow its original's
+ * abort signal (seen on the first request of a process): Stop would leave the model stream open until the
+ * provider ended it. So requests are fetched with the run's own signal. `request(req)` is the only method the SDK
+ * calls on its HTTP client (@openrouter/sdk lib/sdks.js). tests/cloud-ai-cancel.mjs covers it.
+ */
+export function openRouterAdapter(model, provider, signal) {
+  return createOpenRouterText(model, provider.apiKey, {
+    ...(provider.baseUrl ? { serverURL: provider.baseUrl } : {}),
+    ...(provider.origin ? { httpReferer: provider.origin } : {}),
+    appTitle: "Verynize",
+    httpClient: { request: (request) => fetch(request, { signal }) },
+  });
+}
+
 /** A short label for an approval card. */
 export function toolTitle(name, args = {}) {
   const ids = Array.isArray(args?.ids) ? args.ids.length : 0;
@@ -540,11 +557,7 @@ export async function executeRun(options) {
       { role: "user", content: prompt },
     ];
     const stream = chat({
-      adapter: createOpenRouterText(run.model, provider.apiKey, {
-        ...(provider.baseUrl ? { serverURL: provider.baseUrl } : {}),
-        ...(provider.origin ? { httpReferer: provider.origin } : {}),
-        appTitle: "Verynize",
-      }),
+      adapter: openRouterAdapter(run.model, provider, abortController.signal),
       threadId: run.chatId,
       runId: run.id,
       systemPrompts: [
