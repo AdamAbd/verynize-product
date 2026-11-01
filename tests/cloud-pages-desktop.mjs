@@ -43,6 +43,7 @@ const roomDocument = {
     page("p3", "Flows", [rect("flow-a"), rect("flow-b", { x: 260 })]),
     page("p4", "Archive", [rect("archive-a")]),
     page("p5", "Notes", [rect("notes-a")]),
+    page("p6", "Trash", [rect("trash-a"), rect("trash-b", { x: 300 })]),
   ],
 };
 const apps = [];
@@ -100,13 +101,13 @@ try {
 
   // ---- joining loads the active page only --------------------------------------------------
   await join(b);
-  await b.waitForFunction(() => window.cloudWorkspace.pages().unloaded.length === 4);
-  assert.deepEqual((await pages(b)).unloaded.sort(), ["p2", "p3", "p4", "p5"]);
+  await b.waitForFunction(() => window.cloudWorkspace.pages().unloaded.length === 5);
+  assert.deepEqual((await pages(b)).unloaded.sort(), ["p2", "p3", "p4", "p5", "p6"]);
   assert.deepEqual(await nodesOf(b, "p1"), ["cover-a", "cover-b"]);
   assert.deepEqual(await nodesOf(b, "p2"), [], "unloaded pages are stubs");
   assert.deepEqual(
     await b.evaluate(() => window.design.getDocument().pages.map((p) => p.name)),
-    ["Cover", "Screens", "Flows", "Archive", "Notes"],
+    ["Cover", "Screens", "Flows", "Archive", "Notes", "Trash"],
     "the page list is complete before the pages load",
   );
   assert.equal(await b.locator("#page-loading").isHidden(), true);
@@ -179,6 +180,31 @@ try {
   );
   assert.deepEqual(await nodesOf(b, "p3"), aFlow);
 
+  // ---- deleting a page that has not loaded waits for it, so undo restores its layers ------
+  const removal = await b.evaluate(() => {
+    window.design.setActivePage("p6");
+    document.getElementById("delete-page").click(); // the Pages sidebar's Delete runs this
+    return {
+      pages: window.design.getDocument().pages.map((p) => p.id),
+      state: window.cloudWorkspace.pages(),
+    };
+  });
+  assert.equal(removal.pages.includes("p6"), false, "the page disappears at once");
+  assert.equal(removal.state.deferred, 1, "its removal waits for the page");
+  assert.ok(removal.state.requested.includes("p6"));
+  await a.waitForFunction(() => !window.design.getDocument().pages.some((p) => p.id === "p6"));
+  assert.equal((await pages(b)).deferred, 0);
+  await b.evaluate(() => window.design.runCommand("edit.undo"));
+  for (const p of [a, b])
+    await p.waitForFunction(
+      () =>
+        window.design
+          .getDocument()
+          .pages.find((x) => x.id === "p6")
+          ?.nodes.map((n) => n.id)
+          .join() === "trash-a,trash-b",
+    );
+
   // ---- whole-document features load the remaining pages first ------------------------------
   await b.evaluate(() => window.pageLoader.ensure(["p4"]));
   assert.deepEqual(await nodesOf(b, "p4"), ["archive-a"]);
@@ -227,7 +253,7 @@ try {
   assert.deepEqual(await nodesOf(b, "p5"), []);
   if (SHOTS) await b.screenshot({ path: path.join(SHOTS, "lazy-pages-offline.png") });
   console.log(
-    "PASS lazy pages: join with the active page only, loading state on page switch, remote edits on unloaded pages kept, local edits while loading held and merged, undo across the load, ensure() before whole-document work, restart with the room outbox, offline page state",
+    "PASS lazy pages: join with the active page only, loading state on page switch, remote edits on unloaded pages kept, local edits while loading held and merged, undo across the load, deleting an unloaded page then undo, ensure() before whole-document work, restart with the room outbox, offline page state",
   );
 } finally {
   await Promise.all(apps.map((app) => app.close()));
