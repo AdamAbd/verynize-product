@@ -103,7 +103,10 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
   `window.cloudAccount.fetch(path, init)` is the authenticated raw-Response variant of `request` (streamed bodies).
   `cloud-room-changed` fires when the editor joins or leaves a cloud room (`window.cloudWorkspace.room()`).
 - **Web chat gate**: on the web the chat island replaces the composer with `#chat-web-gate[data-state=signed-out|
-  not-configured|no-room|loading|error]` (`#chat-web-sign-in`, `#chat-web-share`) until the model API can run a turn.
+  not-configured|needs-credentials|no-room|loading|error]` (`#chat-web-sign-in`, `#chat-web-share`,
+  `#chat-web-connect-openrouter`, `#chat-web-paste-key` → `#chat-web-openrouter-key` + `#chat-web-save-key`) until the
+  model API can run a turn. The user's own OpenRouter credential is `web/src/lib/ai-credentials.ts` (connect, paste,
+  disconnect; the key never comes back to the browser); Settings › Agents shows it on the web (`#settings-openrouter-card[data-status]`).
 - **UI ready** (`web/src/lib/bridge.ts` + `mount.tsx`): `<html data-ui-ready="true">` is set and `bd:ui-ready` fires on
   `window`, once per page load, when every island started with `mountIsland()` has committed its first render AND no
   `takeOver()` id is still pending (until claimed, an id such as `#files-home` or `#add-page` resolves to the hidden

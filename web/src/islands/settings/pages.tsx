@@ -13,6 +13,7 @@ import { AdvancedSection, ChatSoundRow } from "./preferences-extra";
 import { useToolsInfo } from "./agent-memory";
 import { AgentAccessSection, AgentToolsSection, ProviderAccountList } from "./agents-tools";
 import { AgentBehaviorSections } from "./agents-behavior";
+import { OpenRouterSection } from "./openrouter";
 import { MemoryView } from "./memory";
 import { UsageView } from "./usage";
 import { agentWorkspace, type AgentInfo, type Preferences, type SettingsApi } from "./api";
@@ -299,6 +300,7 @@ export function AgentsPage({ api, accounts }: PageProps) {
         >
           <ProviderAccountList api={api} agents={agents} error={error} accounts={accounts} />
         </Section>
+        <OpenRouterSection />
         <AgentToolsSection />
         <AgentAccessSection />
         <Section

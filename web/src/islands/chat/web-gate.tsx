@@ -1,7 +1,17 @@
 // Web chat gate (in place of the composer): why the model API chat cannot run a turn here yet. The three credentials
-// stay separate: the Verynize account (sign in), the server's OpenRouter key (an operator setting), and Claude Code /
-// Codex sign-ins, which only the desktop app uses. Test contract: `#chat-web-gate[data-state]`.
+// stay separate: the Verynize account (sign in), the user's own OpenRouter account (Connect OpenRouter, or a pasted
+// key; lib/ai-credentials.ts), and Claude Code / Codex sign-ins, which only the desktop app uses.
+// Test contract: `#chat-web-gate[data-state]`, `#chat-web-connect-openrouter`, `#chat-web-paste-key`,
+// `#chat-web-openrouter-key`, `#chat-web-save-key`, `#chat-web-key-error`.
+import { useState, type FormEvent } from "react";
+import { Input } from "@/components/ui/input";
 import type { AgentTransport } from "@/lib/agent-transport";
+import {
+  connectOpenRouter,
+  openRouterReturn,
+  openRouterReturnMessage,
+  saveOpenRouterKey,
+} from "@/lib/ai-credentials";
 import { openSignIn } from "@/lib/cloud-account";
 import { ChatActionButton } from "./controls";
 
@@ -9,10 +19,86 @@ const DETAIL: Partial<Record<AgentTransport["state"], string>> = {
   "signed-out":
     "The web chat runs on this server's model API with your Verynize account. Claude Code and Codex sign-ins work in the desktop app only.",
   "not-configured":
-    "This server has no OpenRouter key, so its model API is off. Claude Code and Codex run in the desktop app.",
+    "The operator turned the model API off on this server. Claude Code and Codex run in the desktop app.",
+  "needs-credentials":
+    "The web chat runs on your own OpenRouter account and its credits. Your key is stored encrypted on this server and used only for your turns. This is separate from Claude Code and Codex, which run in the desktop app.",
   "no-room":
     "The model API works on shared cloud rooms. Share this design or open one of your rooms, then chat here.",
 };
+
+function OpenRouterConnect() {
+  const [pasting, setPasting] = useState(false);
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const returned = openRouterReturn();
+  const [error, setError] = useState(
+    returned?.status === "error" ? openRouterReturnMessage(returned.reason) : "",
+  );
+  const connect = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await connectOpenRouter();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!key.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await saveOpenRouterKey(key.trim());
+      setKey("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-1.5 flex w-full flex-col items-start gap-2">
+      <div className="flex items-center gap-2">
+        <ChatActionButton id="chat-web-connect-openrouter" disabled={busy} onClick={() => void connect()}>
+          Connect OpenRouter
+        </ChatActionButton>
+        <ChatActionButton
+          id="chat-web-paste-key"
+          variant="ghost"
+          aria-expanded={pasting}
+          onClick={() => setPasting(!pasting)}
+        >
+          Paste API key
+        </ChatActionButton>
+      </div>
+      {pasting && (
+        <form className="flex w-full items-center gap-2" onSubmit={(event) => void save(event)}>
+          <Input
+            id="chat-web-openrouter-key"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="OpenRouter API key"
+            placeholder="sk-or-v1-…"
+            value={key}
+            disabled={busy}
+            onChange={(event) => setKey(event.target.value)}
+          />
+          <ChatActionButton id="chat-web-save-key" type="submit" disabled={busy || !key.trim()}>
+            Save key
+          </ChatActionButton>
+        </form>
+      )}
+      {error && (
+        <p id="chat-web-key-error" role="alert" className="m-0 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export function WebChatGate({ transport }: { transport: AgentTransport }) {
   const detail = DETAIL[transport.state];
@@ -30,6 +116,7 @@ export function WebChatGate({ transport }: { transport: AgentTransport }) {
           Sign in
         </ChatActionButton>
       )}
+      {transport.state === "needs-credentials" && <OpenRouterConnect />}
       {transport.state === "no-room" && (
         <ChatActionButton
           id="chat-web-share"
