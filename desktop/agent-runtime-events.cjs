@@ -23,6 +23,9 @@
 //                        (Claude init `mcp_servers`, Codex `mcpServer/startupStatus/updated`). status: connected |
 //                        starting | failed | needs-auth | disabled | not-started. `partial`: merge by name.
 //   error                {text}
+//   auth-required        {agent, text, account?:{id, name, system}}  the provider account is signed out or its sign-in
+//                        was rejected (401). Sent at most once per run; the run then ends without further errors. The
+//                        runtime adds `account`; the renderer shows one "Sign in" card (desktop/agent-runtime.cjs).
 //   done                 {code, stopped, sessionId?}
 //
 // The translators are pure: they take one provider message and return an array of partial events
@@ -225,7 +228,10 @@ function codexItemResult(item) {
  */
 function createCodexMapper({ parentToolCallId } = {}) {
   const streamedItems = new Set();
-  let sawText = false;
+  let sawText = false, authRetries = 0, authSignaled = false;
+  // A rejected sign-in: the first retry gets one status line, the second (or a final error) becomes auth-required and
+  // every later retry/error of the turn is dropped, so the transcript shows one sign-in card instead of ~10 retries.
+  const authRequired = () => { if (authSignaled) return []; authSignaled = true; return [{ type: 'auth-required', agent: 'codex', text: CODEX_SIGNED_OUT }]; };
   const child = typeof parentToolCallId === 'string' && parentToolCallId;
   return function map(message) {
     const out = mapOne(message);
@@ -258,10 +264,20 @@ function createCodexMapper({ parentToolCallId } = {}) {
       case 'thread/tokenUsage/updated': { const event = params.tokenUsage && usageEvent(codexUsage(params.tokenUsage)); if (event) out.push(event); break; }
       case 'mcpServer/startupStatus/updated': { const server = mcpServer(params); if (server) out.push({ type: 'mcp-status', agent: 'codex', partial: true, servers: [server] }); break; }
       case 'account/rateLimits/updated': { const rateLimit = codexRateLimits(params.rateLimits); if (rateLimit.length) out.push(usageEvent({ rateLimit })); break; }
-      case 'error': if (!params.willRetry) out.push({ type: 'error', text: clip(params.error?.message || 'Codex error', 4000) }); else out.push({ type: 'status', text: 'Retrying: ' + (params.error?.message || '') }); break;
+      case 'error': {
+        if (authSignaled) break;
+        if (isAuthError(params.error)) {
+          if (params.willRetry && ++authRetries < 2) out.push({ type: 'status', text: 'Codex rejected the sign-in; trying again.' });
+          else out.push(...authRequired());
+          break;
+        }
+        if (!params.willRetry) out.push({ type: 'error', text: clip(params.error?.message || 'Codex error', 4000) }); else out.push({ type: 'status', text: 'Retrying: ' + (params.error?.message || '') });
+        break;
+      }
       case 'turn/completed': {
         const turn = params.turn || {};
-        if (turn.status === 'failed' && turn.error?.message) out.push({ type: 'error', text: clip(turn.error.message, 4000) });
+        if (turn.status === 'failed' && (authSignaled || isAuthError(turn.error))) out.push(...authRequired());
+        else if (turn.status === 'failed' && turn.error?.message) out.push({ type: 'error', text: clip(turn.error.message, 4000) });
         out.push({ type: 'turn-complete', ok: turn.status === 'completed', interrupted: turn.status === 'interrupted', sawText });
         break;
       }
@@ -272,11 +288,33 @@ function createCodexMapper({ parentToolCallId } = {}) {
   }
 }
 
+// --- Codex sign-in errors ---------------------------------------------------------------------
+const CODEX_SIGNED_OUT = 'Codex is signed out. Sign in to Codex, then retry your message.';
+// Texts Codex uses for a missing or rejected ChatGPT/API sign-in (`codex exec` errors carry no structured info).
+const AUTH_TEXT = /\b401 Unauthorized\b|Missing bearer or basic authentication|refresh token (?:was|has been|is) (?:revoked|expired|already used|invalid)|please (?:log|sign) in again|not logged in|codex login\b/i;
+/** HTTP status inside an app-server `codexErrorInfo` ({responseStreamDisconnected:{httpStatusCode}} etc.), else 0. */
+function codexHttpStatus(info) {
+  if (!info || typeof info !== 'object') return 0;
+  for (const value of Object.values(info)) if (value && typeof value === 'object' && Number.isInteger(value.httpStatusCode)) return value.httpStatusCode;
+  return 0;
+}
+/** App-server TurnError {message, codexErrorInfo} (or plain text from exec) that means "sign in again". */
+function isAuthError(error) {
+  if (!error) return false;
+  if (typeof error === 'string') return AUTH_TEXT.test(error);
+  const info = error.codexErrorInfo;
+  if (info === 'unauthorized' || codexHttpStatus(info) === 401) return true;
+  return typeof error.message === 'string' && AUTH_TEXT.test(error.message);
+}
+
 // --- `codex exec --json` (fallback runner) ----------------------------------------------------
 function createCodexExecMapper() {
+  let authSignaled = false;
   return function map(data) {
     const out = [];
     if (!data || typeof data !== 'object') return out;
+    if (authSignaled && (data.type === 'error' || data.type === 'turn.failed')) return out;
+    if ((data.type === 'error' || data.type === 'turn.failed') && isAuthError(data.message || data.error?.message || '')) { authSignaled = true; out.push({ type: 'auth-required', agent: 'codex', text: CODEX_SIGNED_OUT }); return out; }
     const item = data.item || {};
     if (data.type === 'thread.started' && data.thread_id) out.push({ type: 'session', sessionId: data.thread_id });
     else if (data.type === 'item.started' && item.type && item.type !== 'agent_message' && item.type !== 'reasoning') {
@@ -293,4 +331,4 @@ function createCodexExecMapper() {
   };
 }
 
-module.exports = { mcpServer, mcpServers, createClaudeMapper, createCodexMapper, createCodexExecMapper, toolTitle, clip, usageEvent, claudeUsage, claudeRateLimit, codexUsage, codexRateLimits };
+module.exports = { CODEX_SIGNED_OUT, isAuthError, codexHttpStatus, mcpServer, mcpServers, createClaudeMapper, createCodexMapper, createCodexExecMapper, toolTitle, clip, usageEvent, claudeUsage, claudeRateLimit, codexUsage, codexRateLimits };
