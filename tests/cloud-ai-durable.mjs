@@ -58,6 +58,9 @@ const options = await cloudOptions(path.join(dir, "state"));
 const config = options.workers[0].config;
 const enabledEnv = {
   ...config.env,
+  // The operator-opted-in server key (docs/ai-runtime.md "Credentials"); per-account keys are
+  // covered by tests/cloud-ai.mjs.
+  VERYNIZE_AI_SERVER_KEY: { type: "text", value: "1" },
   OPENROUTER_API_KEY: { type: "text", value: "test-openrouter-key" },
   OPENROUTER_BASE_URL: { type: "text", value: fake.baseUrl },
   VERYNIZE_AI_MODELS: { type: "text", value: "fake/model-a" },

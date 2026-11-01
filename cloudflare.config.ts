@@ -22,9 +22,10 @@ export default defineConfig({
       AUTH_LIMIT: bindings.rateLimit({ namespace: "1002", simple: { limit: 10, period: 60 } }),
       // Hosted MCP (POST /api/mcp): per IP and per account.
       MCP_LIMIT: bindings.rateLimit({ namespace: "1003", simple: { limit: 240, period: 60 } }),
-      // Model API runtime (POST /api/ai/runs, cloud/ai.js): new runs per account. The runtime is
-      // off until the OPENROUTER_API_KEY secret is set (`cf secret put OPENROUTER_API_KEY`); it is
-      // not declared here so deployments without it stay valid (docs/ai-runtime.md).
+      // Model API runtime (cloud/ai.js): new runs, and key checks / OAuth starts, per account. Each
+      // account connects its own OpenRouter key (stored encrypted under a key derived from
+      // BETTER_AUTH_SECRET), so no OPENROUTER_API_KEY secret is needed; a server-wide key is used
+      // only as a fallback when VERYNIZE_AI_SERVER_KEY=1 and that secret is set (docs/ai-runtime.md).
       AI_LIMIT: bindings.rateLimit({ namespace: "1004", simple: { limit: 20, period: 60 } }),
       ROOMS: bindings.durableObject({ worker: "verynize", exportName: "DesignRoom" }),
       ACCOUNTS: bindings.durableObject({ worker: "verynize", exportName: "AccountDirectory" }),

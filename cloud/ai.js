@@ -9,14 +9,21 @@
 // running run subscribes to it. Without the binding (Vercel) the run executes inside the request
 // that started it (`ctx.waitUntil`), as documented in docs/ai-runtime.md.
 //
-//   GET  /api/ai/config                       {enabled, provider, models, defaultModel, limits}
+//   GET  /api/ai/config                       {enabled, provider, models, defaultModel, limits,
+//                                              credentials: {openrouter}}
+//   GET  /api/ai/credentials                  {openrouter: {connected, source, last4, label, …}}
+//   PUT  /api/ai/credentials/openrouter       {apiKey} → checked with OpenRouter, stored encrypted
+//   DELETE /api/ai/credentials/openrouter     {ok, removed}
+//   POST /api/ai/credentials/openrouter/oauth/start     {returnTo?} → {authorizeUrl} + cookie
+//   GET  /api/ai/credentials/openrouter/oauth/callback  ?code=&state= → redirect to returnTo
 //   POST /api/ai/runs                         start (or replay, by idempotencyKey) → SSE
 //   GET  /api/ai/runs/:id/events?after=<seq>  stored events after seq, then live → SSE
 //   POST /api/ai/runs/:id/cancel              {ok: true}
 //   POST /api/ai/runs/:id/approvals           {requestId, allow, argsHash} → {ok} | 404 | 403 | 409
 //
 // Every endpoint needs a signed-in account (the router's accountOf); the account never comes from
-// the request body or the model.
+// the request body or the model. The OAuth callback is the exception: it is a top-level navigation
+// back from openrouter.ai and authenticates through its pending state (cloud/ai-credentials.js).
 import { corsHeaders, readJson, json, fail } from "./http.js";
 import { createRoomBackend, ROOM_ID } from "./design-backend.js";
 import {
@@ -36,6 +43,22 @@ import {
   runByKey,
 } from "./ai-store.js";
 import { APPROVAL_TIMEOUT_MS, DESIGN_STYLE, createEventLog, executeRun } from "./ai-executor.js";
+import {
+  DEFAULT_RETURN,
+  OAUTH_COOKIE,
+  OAUTH_PATH,
+  OAUTH_TTL_MS,
+  OPENROUTER,
+  checkOpenRouterKey,
+  claimOAuth,
+  credentialRow,
+  deleteCredential,
+  exchangeOAuthCode,
+  openRouterBase,
+  readCredential,
+  saveCredential,
+  startOAuth,
+} from "./ai-credentials.js";
 
 export const AI_PREFIX = "/api/ai/";
 const RUN_ROUTE = /^\/api\/ai\/runs\/([0-9a-f-]{36})\/(events|cancel|approvals)$/;
@@ -72,7 +95,8 @@ export function aiConfig(env) {
     })
     .filter((model) => /^[\w.:/-]{1,120}$/.test(model.id));
   return {
-    enabled: !!env.OPENROUTER_API_KEY && models.length > 0,
+    // Available unless the operator turned it off (`VERYNIZE_AI=off`); each account brings its key.
+    enabled: env.VERYNIZE_AI !== "off" && models.length > 0,
     provider: "openrouter",
     models,
     defaultModel: models[0]?.id || null,
@@ -297,19 +321,44 @@ const sse = ({ body, source }) =>
     headers: { ...sseHeaders, "x-verynize-ai-stream": source },
   });
 
+/** The operator opted in to the server-wide key as a fallback (`VERYNIZE_AI_SERVER_KEY=1`). */
+const serverKey = (env) =>
+  env.VERYNIZE_AI_SERVER_KEY === "1" && env.OPENROUTER_API_KEY ? env.OPENROUTER_API_KEY : null;
+
+/**
+ * Whether the account can start a run: `connected` (its own key), `server` (no key of its own, the
+ * operator's opted-in fallback) or `missing`. Reads the row only; nothing is decrypted.
+ */
+export async function credentialState(env, account) {
+  if (account?.id && (await credentialRow(env, account.id))) return "connected";
+  return serverKey(env) ? "server" : "missing";
+}
+
 /**
  * The provider credential and endpoint of a run, for the account that owns it. This is the only
  * place a run obtains its credential (cloud/ai-host.js and the request-scoped path both go through
- * launchRun); per-account keys replace the server-wide key here. Nothing it returns is stored.
- * @returns {Promise<{apiKey: string, baseUrl?: string, origin?: string} | null>}
+ * launchRun): the account's own OpenRouter key (cloud/ai-credentials.js), else the server key only
+ * when the operator opted in (`VERYNIZE_AI_SERVER_KEY=1`). Nothing it returns is stored.
+ * `current()` re-reads the credential before every model request, so a key deleted mid-run fails
+ * the next call and a reconnected key is used from then on.
+ * @returns {Promise<{apiKey: string, baseUrl?: string, origin?: string, source: "account"|"server",
+ *   current: () => Promise<string|null>} | null>}
  */
 export async function resolveProvider(env, account, origin) {
-  if (!env.OPENROUTER_API_KEY || !account?.id) return null;
-  return {
-    apiKey: env.OPENROUTER_API_KEY,
-    baseUrl: env.OPENROUTER_BASE_URL || undefined,
-    origin,
-  };
+  if (!account?.id) return null;
+  const baseUrl = env.OPENROUTER_BASE_URL ? openRouterBase(env) : undefined;
+  const own = await readCredential(env, account.id);
+  if (own)
+    return {
+      apiKey: own,
+      baseUrl,
+      origin,
+      source: "account",
+      current: () => readCredential(env, account.id),
+    };
+  const shared = serverKey(env);
+  if (!shared) return null;
+  return { apiKey: shared, baseUrl, origin, source: "server", current: async () => serverKey(env) };
 }
 
 /** The account a run acts for, rebuilt from ids (all the room backend reads of it). */
@@ -347,7 +396,7 @@ export async function launchRun(env, options) {
     if (!role || !provider) {
       await log.emit("error", {
         message: role
-          ? "The model API runtime is not configured for this account"
+          ? CREDENTIALS_MESSAGE
           : "You have no access to this room",
       });
       await log.emit("done", { code: "error", stopped: false, sessionId: run.id });
@@ -413,6 +462,176 @@ async function notifyRun(env, runId) {
   }
 }
 
+const CREDENTIALS_MESSAGE = "Connect your OpenRouter account in Settings to use the model API.";
+const MAX_KEY = 512;
+
+const tooMany = () =>
+  new Response(JSON.stringify({ error: "Too many requests. Try again in a minute." }), {
+    status: 429,
+    headers: { ...corsHeaders, "content-type": "application/json", "retry-after": "60" },
+  });
+
+/** The OAuth browser-binding cookie (HttpOnly, only sent to the OAuth paths, ten minutes). */
+const oauthCookie = (url, value, maxAge) =>
+  `${OAUTH_COOKIE}=${value}; Path=${OAUTH_PATH}; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${
+    url.protocol === "https:" ? "; Secure" : ""
+  }`;
+const cookieValue = (request, name) => {
+  for (const part of (request.headers.get("cookie") || "").split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key === name) return rest.join("=");
+  }
+  return null;
+};
+
+/** What GET /api/ai/credentials reports for the account (never the key). */
+async function credentialStatus(env, account) {
+  const row = await credentialRow(env, account.id);
+  if (!row)
+    return {
+      connected: false,
+      ...(serverKey(env) ? { serverFallback: true } : {}),
+    };
+  const status = {
+    connected: true,
+    source: row.source,
+    last4: row.last4,
+    label: row.label || null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+  // Live key details from OpenRouter (limit and usage), best effort.
+  const apiKey = await readCredential(env, account.id);
+  if (!apiKey) return { ...status, state: "unreadable" };
+  try {
+    const check = await checkOpenRouterKey(env, apiKey, AbortSignal.timeout(4000));
+    if (!check.ok) return { ...status, state: "rejected" };
+    const { limit, usage, limit_remaining: limitRemaining, is_free_tier: freeTier } = check.info;
+    return {
+      ...status,
+      state: "ok",
+      ...(typeof limit === "number" || limit === null ? { limit } : {}),
+      ...(typeof usage === "number" ? { usage } : {}),
+      ...(typeof limitRemaining === "number" || limitRemaining === null ? { limitRemaining } : {}),
+      ...(typeof freeTier === "boolean" ? { freeTier } : {}),
+    };
+  } catch {
+    return { ...status, state: "unknown" };
+  }
+}
+
+/**
+ * /api/ai/credentials[/openrouter[/oauth/start]] for the signed-in account. The key is accepted
+ * from the account's own browser once (PUT, or the OAuth callback), checked with OpenRouter,
+ * stored encrypted, and never returned.
+ */
+async function handleCredentials(request, env, url, account, limited) {
+  const path = url.pathname;
+  if (path === "/api/ai/credentials") {
+    if (request.method !== "GET") fail(405, "Use GET");
+    return json({ [OPENROUTER]: await credentialStatus(env, account) });
+  }
+  if (path === "/api/ai/credentials/openrouter") {
+    if (request.method === "DELETE")
+      return json({ ok: true, removed: await deleteCredential(env, account.id) });
+    if (request.method !== "PUT") fail(405, "Use PUT or DELETE");
+    if (await limited(env.AI_LIMIT, `credentials:${account.id}`)) return tooMany();
+    const body = await readJson(request, 4 * 1024);
+    const apiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
+    if (!apiKey || apiKey.length > MAX_KEY || !/^[\x21-\x7e]+$/.test(apiKey))
+      fail(400, "apiKey must be an OpenRouter API key");
+    let check;
+    try {
+      check = await checkOpenRouterKey(env, apiKey, AbortSignal.timeout(10_000));
+    } catch {
+      fail(502, "OpenRouter could not be reached to check this key. Try again.");
+    }
+    if (!check.ok)
+      return json(
+        {
+          error:
+            check.status === 402
+              ? "This OpenRouter key has no credits left."
+              : "OpenRouter rejected this key. Check it and try again.",
+          code: "invalid_key",
+        },
+        400,
+      );
+    await saveCredential(env, account.id, {
+      apiKey,
+      source: "manual",
+      label: check.info?.label,
+    });
+    return json({ [OPENROUTER]: await credentialStatus(env, account) });
+  }
+  if (path === `${OAUTH_PATH}/start`) {
+    if (request.method !== "POST") fail(405, "Use POST");
+    if (await limited(env.AI_LIMIT, `credentials:${account.id}`)) return tooMany();
+    const body = request.body ? await readJson(request, 4 * 1024).catch(() => ({})) : {};
+    const { authorizeUrl, browser } = await startOAuth(env, {
+      accountId: account.id,
+      origin: url.origin,
+      returnTo: body?.returnTo,
+    });
+    return new Response(JSON.stringify({ authorizeUrl }), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        "content-type": "application/json",
+        "cache-control": "no-store",
+        "set-cookie": oauthCookie(url, browser, OAUTH_TTL_MS / 1000),
+      },
+    });
+  }
+  fail(404, "Not found");
+}
+
+/**
+ * GET …/oauth/callback?code=&state=: claims the pending sign-in of `state` (once), checks the
+ * browser cookie, exchanges the code with the stored PKCE verifier and stores the key for the
+ * account that started the flow. Always answers with a redirect to a same-origin path, carrying
+ * `openrouter=connected` or `openrouter=error&openrouter_error=<code>`.
+ */
+async function oauthCallback(request, env, url) {
+  const redirect = (returnTo, outcome) => {
+    const target = new URL(returnTo || DEFAULT_RETURN, url.origin);
+    if (outcome === "connected") target.searchParams.set("openrouter", "connected");
+    else {
+      target.searchParams.set("openrouter", "error");
+      target.searchParams.set("openrouter_error", outcome);
+    }
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: target.pathname + target.search,
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+        "set-cookie": oauthCookie(url, "", 0),
+      },
+    });
+  };
+  const state = url.searchParams.get("state");
+  const code = url.searchParams.get("code");
+  const claim = await claimOAuth(env, { state, browser: cookieValue(request, OAUTH_COOKIE) });
+  if (claim.error) return redirect(claim.returnTo, claim.error);
+  if (!code || code.length > 2048) return redirect(claim.returnTo, "denied");
+  let apiKey;
+  try {
+    apiKey = await exchangeOAuthCode(env, { code, verifier: claim.verifier });
+  } catch (error) {
+    console.error("openrouter oauth exchange failed", error?.message);
+    return redirect(claim.returnTo, "exchange_failed");
+  }
+  if (!apiKey || apiKey.length > MAX_KEY) return redirect(claim.returnTo, "exchange_failed");
+  let label = null;
+  try {
+    const check = await checkOpenRouterKey(env, apiKey, AbortSignal.timeout(5000));
+    if (check.ok) label = check.info?.label || null;
+  } catch {}
+  await saveCredential(env, claim.accountId, { apiKey, source: "oauth", label });
+  return redirect(claim.returnTo, "connected");
+}
+
 /**
  * /api/ai/*. `accountOf(env, request, url)` and `limited(binding, key)` come from the router
  * (cloud/worker.js). Without AI_RUNS, `ctx.waitUntil` (when the platform offers it) keeps a
@@ -421,6 +640,11 @@ async function notifyRun(env, runId) {
 export async function handleAi(request, env, url, { accountOf, limited, ctx }) {
   const path = url.pathname;
   const config = aiConfig(env);
+  // A top-level navigation back from openrouter.ai: no session header, its state authenticates it.
+  if (path === `${OAUTH_PATH}/callback`) {
+    if (request.method !== "GET") fail(405, "Use GET");
+    return oauthCallback(request, env, url);
+  }
   // Browsers send Origin: only the server's own pages may call it from a browser.
   const origin = request.headers.get("origin");
   if (origin && origin !== url.origin) fail(403, "Cross-origin requests are not allowed");
@@ -429,21 +653,22 @@ export async function handleAi(request, env, url, { accountOf, limited, ctx }) {
 
   if (path === "/api/ai/config") {
     if (request.method !== "GET") fail(405, "Use GET");
-    return json(config);
+    return json({ ...config, credentials: { openrouter: await credentialState(env, account) } });
   }
+
+  if (path === "/api/ai/credentials" || path.startsWith("/api/ai/credentials/"))
+    return handleCredentials(request, env, url, account, limited);
 
   if (path === "/api/ai/runs") {
     if (request.method !== "POST") fail(405, "Use POST");
     if (!config.enabled) fail(503, "The model API runtime is not configured on this server");
-    if (await limited(env.AI_LIMIT, `account:${account.id}`))
-      return new Response(JSON.stringify({ error: "Too many requests. Try again in a minute." }), {
-        status: 429,
-        headers: { ...corsHeaders, "content-type": "application/json", "retry-after": "60" },
-      });
+    if (await limited(env.AI_LIMIT, `account:${account.id}`)) return tooMany();
     const input = validRunRequest(await readJson(request, MAX_BODY), config);
     // A retried request: replay the existing run's events, then follow it.
     const existing = await runByKey(env, account.id, input.idempotencyKey);
     if (existing) return sse(await runStream(env, existing, 0));
+    if ((await credentialState(env, account)) === "missing")
+      return json({ error: CREDENTIALS_MESSAGE, code: "credentials_required" }, 409);
 
     const backend = createRoomBackend(env, request, url, account, { roomId: input.roomId });
     const { role, title } = await backend.role(input.roomId);
