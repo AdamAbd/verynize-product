@@ -609,7 +609,7 @@ async function serveApp(request, env, url) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: corsHeaders });
@@ -620,6 +620,11 @@ export default {
         // Hosted MCP (cloud/mcp.js). Loaded on first use: it bundles the design engine.
         const { handleMcp } = await import("./mcp.js");
         return await handleMcp(request, env, url, { accountOf, limited });
+      }
+      if (url.pathname.startsWith("/api/ai/")) {
+        // Model API runtime (cloud/ai.js, docs/ai-runtime.md). Loaded on first use like mcp.js.
+        const { handleAi } = await import("./ai.js");
+        return await handleAi(request, env, url, { accountOf, limited, ctx });
       }
       if (url.pathname.startsWith("/api/")) {
         const response =
