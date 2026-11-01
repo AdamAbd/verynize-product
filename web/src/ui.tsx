@@ -9,6 +9,7 @@ import "./islands/chat";
 import "./islands/settings";
 import "./islands/code";
 import "./islands/onboarding";
+import "./islands/storage";
 
 import "./islands/router";
 
