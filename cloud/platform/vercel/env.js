@@ -43,6 +43,10 @@ export function createVercelEnv({ classes, bindings, redisUrl, database, dataDir
       case "durable-object": {
         const Class = classes[binding.exportName];
         if (!Class) throw new Error(`${name}: no Durable Object class named ${binding.exportName}`);
+        // A class that needs an instance to stay in memory for minutes (AiRun) cannot run as a
+        // turn under a lease on any instance: the binding is left out and the code falls back
+        // (model API runs stay request-scoped on Vercel; docs/ai-runtime.md, "Hosting").
+        if (Class.longLived) break;
         const namespace = actors.namespace(Class, binding.exportName);
         namespaces.push(namespace);
         env[name] = namespace;
@@ -116,6 +120,7 @@ export function bindingsFromEnvironment(vars) {
     "VERYNIZE_AI_MODELS",
     "VERYNIZE_AI_MAX_TURNS",
     "VERYNIZE_AI_MAX_TOOL_CALLS",
+    "VERYNIZE_AI_APPROVAL_TIMEOUT_MS",
   ])
     if (vars[name]) bindings[name] = text(vars[name]);
   // Function instances share no disk: blobs live in S3-compatible storage (R2, S3, B2, MinIO).
