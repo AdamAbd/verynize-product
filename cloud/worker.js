@@ -36,6 +36,7 @@ import { passkeyPage, passkeyScript } from "./passkey-page.js";
 import { verifiedPage, resetPasswordPage, resetPasswordScript } from "./account-pages.js";
 import * as profiles from "./profiles.js";
 import { handleRoomAssets } from "./assets.js";
+import { requireRoomAccount } from "./web-access.js";
 
 export { DesignRoom } from "./rooms.js";
 export { AccountDirectory } from "./accounts.js";
@@ -260,6 +261,8 @@ async function handleAuth(request, env, url) {
       sessions: (await directory(env).sessionCount(account.id)) + authSessions,
       profilePath: `/u/${account.handle}`,
       personalOrganizationId,
+      // Web onboarding: when the AI setup steps were finished or skipped, null before.
+      aiSetupAt: await profiles.aiSetupAt(env, account.id),
     });
   }
   if (path === "/api/me" && request.method === "PATCH") {
@@ -273,7 +276,12 @@ async function handleAuth(request, env, url) {
       }),
     );
     await directory(env).mirrorAccount(updated);
-    return json({ account: updated, profilePath: `/u/${updated.handle}` });
+    // `aiSetup: true` records the web AI setup as finished (or skipped); false shows it again.
+    const aiSetupAt =
+      data.aiSetup === undefined
+        ? await profiles.aiSetupAt(env, account.id)
+        : await profiles.setAiSetup(env, account.id, data.aiSetup === true);
+    return json({ account: updated, profilePath: `/u/${updated.handle}`, aiSetupAt });
   }
   if (path === "/api/me/rooms" && request.method === "GET") {
     const account = await requireAccount(env, request, url);
@@ -367,9 +375,11 @@ async function handleRooms(request, env, url) {
   if (url.pathname === "/api/rooms" && request.method === "POST") {
     if (await limited(env.ROOM_CREATION, ip(request)))
       return json({ error: "Too many new rooms. Try again in a minute." }, 429);
+    const account = await accountOf(env, request, url);
+    // The web app (and, with ROOM_ACCOUNT_REQUIRED=all, every client) creates rooms signed in.
+    requireRoomAccount(env, request, url, account, { creating: true });
     const data = await readJson(request);
     documentText(data.document);
-    const account = await accountOf(env, request, url);
     // Email accounts create rooms in an organization: the one named, or their personal one.
     let organizationId = null;
     if (account?.authUser) {
@@ -424,6 +434,7 @@ async function handleRooms(request, env, url) {
   const roomId = match[1],
     action = match[2] || "/room";
   const account = await accountOf(env, request, url);
+  requireRoomAccount(env, request, url, account);
   const orgRole = account?.authUser ? await orgRoomRole(env, roomId, account.authUser.id) : null;
   const forward = new URL("https://room" + action);
   if (action === "/socket")
