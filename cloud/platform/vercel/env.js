@@ -114,6 +114,8 @@ export function bindingsFromEnvironment(vars) {
     "EMAIL_FROM",
     "EMAIL_WEBHOOK_URL",
     "EMAIL_WEBHOOK_TOKEN",
+    // Web sign-in (cloud/web-access.js): web (default), all or off.
+    "ROOM_ACCOUNT_REQUIRED",
     // Model API runtime (cloud/ai.js): each account brings its own OpenRouter key; the server key
     // is a fallback only with VERYNIZE_AI_SERVER_KEY=1. VERYNIZE_AI=off turns the runtime off.
     "VERYNIZE_AI",

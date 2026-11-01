@@ -1,6 +1,8 @@
 // First-run account step: sign in or create a Verynize cloud account (email + password through
-// window.cloudAccount, the same session the Share panel uses). Skippable: the editor is local-first.
-import { useState, type FormEvent } from "react";
+// window.cloudAccount, the same session the Share panel uses). Skippable on the desktop: the editor
+// is local-first. The web app's sign-in screen (web-sign-in.tsx) renders the same form before the
+// editor boots, bound to its own server (lib/web-session.ts), without the server field or a skip.
+import { useState, type FormEvent, type ReactNode } from "react";
 import { LoaderCircleIcon, MailCheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,10 +11,34 @@ import { cloudAccount } from "@/lib/cloud-account";
 
 type Mode = "signin" | "signup" | "verify";
 
+/** What the form needs from an account store: window.cloudAccount, or the web app's (lib/web-session.ts). */
+export type AccountFormApi = {
+  defaultServer(): string;
+  signIn(o: { server: string; email: string; password: string }): Promise<unknown>;
+  signUp(o: { server: string; email: string; password: string; name?: string }): Promise<void>;
+  forgotPassword(o: { server: string; email: string }): Promise<void>;
+};
+
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-export function AccountStep({ onDone }: { onDone(): void }) {
-  const api = cloudAccount();
+export function AccountStep({
+  onDone,
+  api = cloudAccount(),
+  serverEditable = true,
+  skippable = true,
+  intro = "Share designs, edit together and work in team workspaces. Everything else works offline too.",
+  footer,
+}: {
+  onDone(): void;
+  api?: AccountFormApi | null;
+  /** Show the server and let the user change it (desktop). */
+  serverEditable?: boolean;
+  /** Offer "Continue without an account" (desktop). */
+  skippable?: boolean;
+  intro?: string;
+  /** Extra sign-in options under the form (the web app's passkey button). */
+  footer?: ReactNode;
+}) {
   const [mode, setMode] = useState<Mode>("signin");
   const [server, setServer] = useState(() => api?.defaultServer() ?? "");
   const [editingServer, setEditingServer] = useState(false);
@@ -87,9 +113,7 @@ export function AccountStep({ onDone }: { onDone(): void }) {
       <h1 className="mt-5 text-xl font-medium text-foreground">
         {signup ? "Create your Verynize account" : "Sign in to Verynize"}
       </h1>
-      <p className="mt-2 text-center text-sm text-muted-foreground">
-        Share designs, edit together and work in team workspaces. Everything else works offline too.
-      </p>
+      <p className="mt-2 text-center text-sm text-muted-foreground">{intro}</p>
 
       <form id="onboarding-form" className="mt-8 flex w-full flex-col gap-3" onSubmit={submit}>
         {signup ? (
@@ -178,8 +202,10 @@ export function AccountStep({ onDone }: { onDone(): void }) {
         ) : null}
       </div>
 
+      {footer}
+
       <div className="mt-8 flex w-full flex-col items-center gap-2 text-xs text-subtle-foreground">
-        {editingServer ? (
+        {!serverEditable ? null : editingServer ? (
           <label className="m-0 flex w-full flex-col gap-1.5">
             Server
             <Input
@@ -201,14 +227,16 @@ export function AccountStep({ onDone }: { onDone(): void }) {
             Server: {server.replace(/^https?:\/\//, "") || "not set"} · Change
           </button>
         )}
-        <button
-          id="onboarding-skip"
-          type="button"
-          className="hover:text-foreground"
-          onClick={onDone}
-        >
-          Continue without an account
-        </button>
+        {skippable ? (
+          <button
+            id="onboarding-skip"
+            type="button"
+            className="hover:text-foreground"
+            onClick={onDone}
+          >
+            Continue without an account
+          </button>
+        ) : null}
       </div>
     </div>
   );
