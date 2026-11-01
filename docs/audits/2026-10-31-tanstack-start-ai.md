@@ -103,3 +103,16 @@ Divalidasi ulang dengan tiga agent terpisah (klaim repository, Start/Nitro via C
 - Hosted MCP juga tidak menyediakan `ask_agent`, `import_html`, dan `export_document`, selain screenshot, preferences, dan shell.
 
 Kesimpulan: tidak ada temuan yang membatalkan keputusan yang disarankan. Langkah 1 (kontrak dan ownership `/api/ai/*`) dan langkah 3 (AI read-only vertikal, mulai di target Node lokal) bisa dimulai. Langkah 2 tetap spike berbatas: Nitro hanya untuk Node/Vercel, Cloudflare tetap plugin native, dan entry produksi Vercel tidak diganti sebelum preview nyata membuktikan WebSocket, routing, dan auth.
+
+## Status implementasi (2026-11-01, branch `feat/ai-runtime`)
+
+| Langkah                  | Status                                                                                                                                                              | Lokasi                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 1. Kontrak dan ownership | Selesai. Backend memiliki `/api/ai/*` di ketiga target; `tests/ai-routing.mjs`                                                                                      | `docs/ai-runtime.md`                                              |
+| 2. Spike Start + Nitro   | Selesai sebagai opt-in. Rekomendasi: adopsi untuk Node saja; preset `vercel` tidak bisa digabung dengan `api/server.mjs` dalam satu project dan butuh preview nyata | `vite.nitro.config.ts`, `web-start/nitro/`, `tests/web-nitro.mjs` |
+| 3. AI read-only vertikal | Selesai. `@tanstack/ai@1.0.1` + `@tanstack/ai-openrouter@1.0.1`, berjalan di workerd, Node, Vercel                                                                  | `cloud/ai.js`, `cloud/ai-executor.js`, `tests/cloud-ai.mjs`       |
+| 4. Mutation dan approval | Selesai. Approval terikat akun/run/tool-call/hash argumen, at-most-once, revocation, plan/helper                                                                    | `cloud/ai-executor.js`, migrasi `0005`/`0006`                     |
+| 5. Integrasi UI          | Selesai untuk web. `AgentService` (IPC desktop, HTTP web); desktop tetap Claude/Codex                                                                               | `web/src/lib/agent-service.ts`, `tests/web-ai-chat.mjs`           |
+| 6. Kurangi shell legacy  | Sebagian. Router Start menjadi satu-satunya pemilik history di web; view masih legacy DOM + islands di `ui.js`                                                      | `web-start/src/legacy/shell-host.ts`                              |
+
+Belum divalidasi: OpenRouter live, deployment Vercel nyata, dan migrasi D1 `0005`/`0006` di production. Run AI hidup di dalam request yang memulainya, sehingga approval yang lama dapat terputus oleh batas durasi platform (Vercel 300 detik, Cloudflare sekitar 30 detik setelah client putus).
