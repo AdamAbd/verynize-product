@@ -36,6 +36,8 @@ export const queryKeys = {
   /** Rooms of a workspace (or none) plus rooms shared with the account directly. */
   rooms: (scope: AccountScope, organizationId: string | null) =>
     [...queryKeys.account(scope), "rooms", organizationId] as const,
+  /** The model API runtime configuration of the account's server (GET /api/ai/config). */
+  aiConfig: (scope: AccountScope) => [...queryKeys.account(scope), "ai-config"] as const,
 };
 
 /**

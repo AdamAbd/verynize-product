@@ -210,12 +210,25 @@ export function useModels(agent: string, enabled: boolean): AgentModel[] {
       });
       modelCache.set(agent, request);
     }
-    request.then((value) => live && setModels(value.filter((m) => m.id !== "default")));
+    request.then((value) => {
+      // An empty list (web: signed out, model API off) is asked again next time instead of being kept.
+      if (!value.length) modelCache.delete(agent);
+      if (live) setModels(value.filter((m) => m.id !== "default"));
+    });
     return () => {
       live = false;
     };
   }, [agent, enabled]);
   return models;
+}
+
+/**
+ * The agents this runtime offers, from desktop-panel's `#project-agent` options (Claude/Codex on the desktop, the model
+ * API `openrouter` on the web); `available` is false for one the transport did not detect.
+ */
+export function agentOptions(): { id: string; label: string; available: boolean }[] {
+  const select = document.getElementById("project-agent") as HTMLSelectElement | null;
+  return select ? [...select.options].map((o) => ({ id: o.value, label: o.text, available: !o.disabled })) : [];
 }
 
 /** Whether a provider was detected (desktop-panel disables the `<option>` of missing ones). */

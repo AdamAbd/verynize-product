@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { PanelLeftIcon, PlusIcon } from "@/components/icons";
 import { useBodyClass } from "@/lib/bridge";
+import { can } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import {
   ChatMenu,
@@ -128,6 +129,9 @@ function Switcher({ state }: { state: ChatState }) {
             Open in Code workspace
           </ChatMenuItem>
         )}
+        {/* Repositories and worktrees are desktop-only (the `git` capability); the web chat has its chats only. */}
+        {can("git") && (
+          <>
         <ChatMenuSeparator />
         <ChatMenuLabel>Repositories</ChatMenuLabel>
         {attached && (
@@ -154,6 +158,8 @@ function Switcher({ state }: { state: ChatState }) {
           <LaptopIcon />
           Start from local folder
         </ChatMenuItem>
+          </>
+        )}
       </ChatMenuContent>
     </ChatMenu>
   );

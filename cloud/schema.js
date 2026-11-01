@@ -213,3 +213,72 @@ export const roomAsset = sqliteTable(
     index("room_asset_roomId_idx").on(table.roomId),
   ],
 );
+
+// Model API runtime (cloud/ai.js, migration 0005): runs, their events, approvals and the
+// recorded results of write tool calls. Times are epoch ms.
+export const aiRun = sqliteTable(
+  "ai_run",
+  {
+    id: text("id").notNull().primaryKey(),
+    accountId: text("accountId").notNull(),
+    roomId: text("roomId").notNull(),
+    chatId: text("chatId").notNull(),
+    model: text("model").notNull(),
+    access: text("access").notNull(),
+    status: text("status").notNull(),
+    code: text("code"),
+    idempotencyKey: text("idempotencyKey").notNull(),
+    cancelRequested: integer("cancelRequested", { mode: "boolean" }).notNull().default(false),
+    leaseUntil: integer("leaseUntil").notNull(),
+    createdAt: integer("createdAt").notNull(),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => [
+    unique().on(table.accountId, table.idempotencyKey),
+    index("ai_run_account_status_idx").on(table.accountId, table.status),
+  ],
+);
+
+export const aiRunEvent = sqliteTable(
+  "ai_run_event",
+  {
+    runId: text("runId").notNull(),
+    seq: integer("seq").notNull(),
+    event: text("event").notNull(),
+    createdAt: integer("createdAt").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.seq] })],
+);
+
+export const aiApproval = sqliteTable(
+  "ai_approval",
+  {
+    runId: text("runId").notNull(),
+    requestId: text("requestId").notNull(),
+    accountId: text("accountId").notNull().default(""),
+    toolCallId: text("toolCallId").notNull(),
+    toolName: text("toolName").notNull(),
+    argsHash: text("argsHash").notNull(),
+    decision: text("decision"),
+    reason: text("reason"),
+    createdAt: integer("createdAt").notNull(),
+    decidedAt: integer("decidedAt"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.requestId] }),
+    unique().on(table.runId, table.toolCallId),
+  ],
+);
+
+export const aiToolResult = sqliteTable(
+  "ai_tool_result",
+  {
+    runId: text("runId").notNull(),
+    toolCallId: text("toolCallId").notNull(),
+    toolName: text("toolName").notNull(),
+    output: text("output").notNull(),
+    isError: integer("isError", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("createdAt").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.toolCallId] })],
+);

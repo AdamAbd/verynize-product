@@ -87,6 +87,7 @@ export function bindingsFromEnvironment(vars, { webRoot }) {
     ROOM_CREATION: { type: "rate-limit", simple: { limit: 10, period: 60 } },
     AUTH_LIMIT: { type: "rate-limit", simple: { limit: 10, period: 60 } },
     MCP_LIMIT: { type: "rate-limit", simple: { limit: 240, period: 60 } },
+    AI_LIMIT: { type: "rate-limit", simple: { limit: 20, period: 60 } },
     ROOMS: { type: "durable-object", exportName: "DesignRoom" },
     ACCOUNTS: { type: "durable-object", exportName: "AccountDirectory" },
     APPS: { type: "durable-object", exportName: "PublishedApp" },
@@ -102,6 +103,12 @@ export function bindingsFromEnvironment(vars, { webRoot }) {
     "EMAIL_FROM",
     "EMAIL_WEBHOOK_URL",
     "EMAIL_WEBHOOK_TOKEN",
+    // Model API runtime (cloud/ai.js): off without OPENROUTER_API_KEY.
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+    "VERYNIZE_AI_MODELS",
+    "VERYNIZE_AI_MAX_TURNS",
+    "VERYNIZE_AI_MAX_TOOL_CALLS",
   ])
     if (vars[name]) bindings[name] = text(vars[name]);
   const blobs = (vars.BLOB_STORE || "file").toLowerCase();

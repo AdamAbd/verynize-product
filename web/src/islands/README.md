@@ -61,6 +61,12 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
   fails until the typed contract matches `desktop/preload.cjs`. New capability: add it to `CAPABILITY_METHODS` in
   `web/platform.js` and `CAPABILITIES` in `platform.ts` (the same test compares them).
 - `tests/web-platform.cjs` loads the app in plain Chromium (no preload) and checks the web behaviour.
+- Chat turns are not a desktop capability: they go through the `AgentService` on `platform.agents` (`service()`,
+  `ready()`, `subscribe`, `changed()`, `provide`), registered by `installAgentTransport()` (`web/src/lib/agent-transport.ts`):
+  Claude/Codex over IPC on the desktop, the cloud backend's model API (`/api/ai/*`, agent `openrouter`) on the web.
+  Never call `runAgent`/`cancelAgent`/`respondAgentPermission`/`onAgentEvent`/`listAgentModels`/`discoverAgents` on
+  `platform.desktop` from chat code; `useAgentTransport()` tells the UI whether a turn can start and why not.
+  Details: `docs/ai-runtime.md` "Clients".
 
 ## Cross-island contracts
 
@@ -75,7 +81,11 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
   view — `/` (`files-view`), `/editor`, `/code` (`code-mode`), `/settings/<section>` (`settings-open`). Never toggle
   those three body classes yourself: navigate with `navigate()` or call the legacy request APIs
   (`fileLibrary.showHome/showEditor`, `appSettings.open/close/select`, `agentWorkspace.setCodeMode`), which update the
-  URL and apply the view synchronously. The `apply*` functions on those objects are for the router only.
+  URL and apply the view synchronously. The `apply*` functions on those objects are for the router only. One router
+  owns navigation per page: standalone (desktop, `file://`) the shell router creates its own history and routes; in
+  the web app it runs hosted on TanStack Start's router (`window.verynizeShellHost`, `web-start/README.md` "One
+  router"), `window.shellRouter` is Start's router and Start's routes apply the area via
+  `window.shellNavigation.applyLocation(area, location)`. Never create another router or browser history in an island.
 - **Code mode**: `body.code-mode` (toggle with `window.agentWorkspace.setCodeMode(on)`, which navigates to `/code` or `/editor`; `openProject()` enters it, `#project-toggle`
   toggles it). Tests use `#code-add-repository` then `#project-open` / `#project-new` / `#project-clone`, `#code-new-chat`,
   `#code-new-quick-chat`, `[data-repository=<name>]`, `[data-chat-id=<id>]`, `#code-file-tree[data-root=<path>]
@@ -90,6 +100,10 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
   `[data-org-member=<email>]`, `[data-org-member-role=<email>]`, `#members-invite*`, `#members-room-role`, `#members-leave`,
   `[data-accept-invitation]`, `#onboarding[data-step]`, `#onboarding-*`, `[data-agent=<id>] [data-status]`. The legacy Share
   dialog already uses `data-member` / `data-remove-member`, so organization rows must not.
+  `window.cloudAccount.fetch(path, init)` is the authenticated raw-Response variant of `request` (streamed bodies).
+  `cloud-room-changed` fires when the editor joins or leaves a cloud room (`window.cloudWorkspace.room()`).
+- **Web chat gate**: on the web the chat island replaces the composer with `#chat-web-gate[data-state=signed-out|
+  not-configured|no-room|loading|error]` (`#chat-web-sign-in`, `#chat-web-share`) until the model API can run a turn.
 - **UI ready** (`web/src/lib/bridge.ts` + `mount.tsx`): `<html data-ui-ready="true">` is set and `bd:ui-ready` fires on
   `window`, once per page load, when every island started with `mountIsland()` has committed its first render AND no
   `takeOver()` id is still pending (until claimed, an id such as `#files-home` or `#add-page` resolves to the hidden

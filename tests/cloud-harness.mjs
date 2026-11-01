@@ -130,6 +130,11 @@ export async function cloudOptions(persistence, extra = {}) {
               namespace: "1003",
               simple: { limit: 240, period: 60 },
             },
+            AI_LIMIT: {
+              type: "rate-limit",
+              namespace: "1004",
+              simple: { limit: 30, period: 60 },
+            },
             ROOMS: { type: "durable-object", worker: "verynize", exportName: "DesignRoom" },
             ACCOUNTS: {
               type: "durable-object",

@@ -659,6 +659,15 @@
     $("cloud-presence").textContent = "";
     renderAccess(null);
     status(message);
+    roomChanged();
+  }
+  /** `cloud-room-changed`: the open room changed (joined, left); detail = window.cloudWorkspace.room(). */
+  function roomChanged() {
+    window.dispatchEvent(
+      new CustomEvent("cloud-room-changed", {
+        detail: connection ? { server: connection.server, id: connection.id } : null,
+      }),
+    );
   }
   function scheduleReconnect(epoch) {
     if (epoch !== generation || !connection) return;
@@ -863,6 +872,7 @@
     }
     if (protocol >= 2) saveOutbox(true);
     openSocket(epoch);
+    roomChanged();
     status(
       offline
         ? "Offline. Edits stay on this device and are sent when the room is reachable."
@@ -1489,6 +1499,18 @@
     signOut: (everywhere = false) => signOut(everywhere),
     /** Authenticated JSON request to the account's server. */
     request: (path, options = {}) => accountRequest(path, options),
+    /** Authenticated request to the account's server, raw Response (streamed model API runs, web/src/lib/agent-transport.ts). */
+    fetch: (path, options = {}) => {
+      if (!account) return Promise.reject(Error("Sign in first"));
+      return fetch(account.server + path, {
+        ...options,
+        headers: {
+          ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+          "X-Verynize-Session": account.session,
+          ...options.headers,
+        },
+      });
+    },
     activeOrganization,
     setActiveOrganization(id) {
       if (!account) return;
