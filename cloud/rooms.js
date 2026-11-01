@@ -17,6 +17,7 @@ import {
   MAX_JSON,
   rpcFail,
 } from "./http.js";
+import { mayHoldInline, rejectInline, screenOps } from "./inline-binaries.js";
 
 const Ops = globalThis.VerynizeOps;
 const CLIENT = /^[A-Za-z0-9_-]{1,64}$/;
@@ -126,6 +127,7 @@ export class DesignRoom extends DurableObject {
   async create(data, account) {
     if (this.row()) fail(409, "Room exists");
     const text = documentText(data.document);
+    rejectInline(this.env, data.document);
     this.sql.exec(
       "INSERT INTO room (id,token_hash,document,revision) VALUES (1,'migrated',?,0)",
       text,
@@ -197,6 +199,7 @@ export class DesignRoom extends DurableObject {
     if (!Number.isSafeInteger(baseRevision) || baseRevision < 0)
       fail(400, "baseRevision must be a nonnegative integer");
     const text = documentText(document);
+    rejectInline(this.env, document);
     const row = this.row();
     if (row.revision !== baseRevision)
       return json({ error: "Revision conflict", ...this.snapshot() }, 409);
@@ -249,7 +252,9 @@ export class DesignRoom extends DurableObject {
         error: "Your role in this room cannot edit",
       };
     const limit = Date.now() + FUTURE_SKEW;
-    const stamped = ops.map((op) => {
+    // Large inline binaries never reach room storage (cloud/inline-binaries.js).
+    const screened = screenOps(this.env, ops);
+    const stamped = screened.ops.map((op) => {
       const parsed = Ops.decode(op?.s);
       // Missing or far-future stamps would win forever; the server restamps them.
       const s = parsed && parsed.wall <= limit ? op.s : this.clock.next();
@@ -263,8 +268,17 @@ export class DesignRoom extends DurableObject {
       normalize: true,
       stamp: this.clock.next(),
     });
+    result.rejected.unshift(...screened.rejected);
     if (!result.applied.length)
-      return { type: "ops", client, batch, revision, ops: [], rejected: result.rejected.length };
+      return {
+        type: "ops",
+        client,
+        batch,
+        revision,
+        ops: [],
+        rejected: result.rejected.length,
+        reasons: result.rejected.slice(0, 20),
+      };
     const text = documentText(result.doc);
     store.flush();
     this.sql.exec("UPDATE room SET document=?,revision=revision+1 WHERE id=1", text);
@@ -330,6 +344,32 @@ export class DesignRoom extends DurableObject {
       reasons: message.reasons || [],
       ...this.snapshot(),
     };
+  }
+
+  /**
+   * Room migration (cloud/inline-binaries.js migrateRoomInline): the snapshot when the stored
+   * document may still hold large inline binaries, else null. Each revision is offered once per
+   * activation, so a room that cannot be migrated is not rescanned on every open.
+   */
+  inlineSnapshot() {
+    const row = this.row();
+    if (!row || this.inlineChecked === row.revision) return null;
+    this.inlineChecked = row.revision;
+    if (!mayHoldInline(row.document)) return null;
+    return { document: JSON.parse(row.document), revision: row.revision };
+  }
+  /** Apply the asset URL swap of a migration as a server batch; a newer revision is a conflict. */
+  migrateInline({ baseRevision, ops } = {}) {
+    const row = this.row();
+    if (!row) rpcFail(404, "Room not found");
+    if (row.revision !== baseRevision) return { conflict: true, revision: row.revision };
+    const client = "server-assets";
+    const last =
+      this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
+        ?.last_batch ?? 0;
+    const message = this.applyBatch({ client, batch: last + 1, ops }, "owner");
+    if (message.ops.length) this.broadcast(message);
+    return { applied: message.ops.length, rejected: message.rejected, revision: message.revision };
   }
 
   accessSummary(role) {

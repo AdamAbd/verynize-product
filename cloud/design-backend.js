@@ -26,6 +26,7 @@ import {
 } from "./orgs.js";
 import { createAuth } from "./auth.js";
 import * as profiles from "./profiles.js";
+import { extractInline } from "./inline-binaries.js";
 
 const Ops = globalThis.VerynizeOps;
 const MAX_IMAGE = 512 * 1024; // room documents are limited to 2 MB in total
@@ -249,7 +250,9 @@ export function createRoomBackend(env, request, url, account, { roomId: scope } 
           );
         const out = fn(clone(state.document), { revision: revisionOf(state.document) });
         validateDocument(out.document);
-        const ops = Ops.diff(state.document, out.document);
+        // Inline images and fonts the tools produced become room assets (cloud/inline-binaries.js).
+        const stored = (await extractInline(env, url.origin, id, out.document, account.id)).value;
+        const ops = Ops.diff(state.document, stored);
         if (!ops.length)
           return {
             result: out.result,
