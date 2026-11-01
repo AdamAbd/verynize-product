@@ -12,8 +12,9 @@ import assert from "node:assert/strict";
 const ROOM = "11111111-1111-4111-8111-111111111111";
 const INVITE = `#room=${ROOM}&token=${"ab".repeat(32)}`;
 
-export async function checkWebRouter(browser, origin) {
-  const page = await browser.newPage();
+/** `context`: where to open the page; the web app needs a signed-in one (helpers/web-app.mjs signedInContext). */
+export async function checkWebRouter(browser, origin, context = browser) {
+  const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   // A second React copy shows up as hook errors once an island hook runs under the other renderer.

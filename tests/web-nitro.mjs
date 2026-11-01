@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import { publicWebFiles } from "../web-start/build/legacy-web.mjs";
 import { WORKER_PATH_PATTERNS, isWorkerPath } from "../web-start/worker-paths.mjs";
-import { freePort, launchBrowser } from "./helpers/web-app.mjs";
+import { freePort, launchBrowser, signedInContext } from "./helpers/web-app.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const dist = path.join(root, "dist/web-nitro");
@@ -306,9 +306,16 @@ try {
   assert.equal((await get(bare, "/editor")).status, 200);
   await assert.rejects(connect(bare.replace("http", "ws") + "/api/rooms/x/socket"), /HTTP 404/);
 
-  // ---- the editor boots ----
+  // ---- the editor boots (signed in: the web app shows its sign-in screen otherwise) ----
   browser = await launchBrowser();
-  const page = await browser.newPage();
+  // A real account on the real backend, through the Nitro proxy (outbox email provider).
+  const { passwordUser } = await import("./cloud-harness.mjs");
+  const token = await passwordUser(origin, "nitro@example.test", "Nitro");
+  const me = await (
+    await get(origin, "/api/me", { headers: { "x-verynize-session": token } })
+  ).json();
+  const context = await signedInContext(browser, origin, { session: token, ...me });
+  const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(origin + "/editor");

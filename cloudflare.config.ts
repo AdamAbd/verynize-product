@@ -42,6 +42,10 @@ export default defineConfig({
       // Signs room image upload and read URLs. Generate with `openssl rand -base64 32`; never rotate
       // it casually, since every image URL stored in documents depends on it.
       ASSET_SIGNING_SECRET: bindings.secret(),
+      // Web sign-in (cloud/web-access.js): the web app needs a signed-in account for every room
+      // request. "all" would also require one for desktop room creation (no anonymous desktop
+      // sharing); "off" restores anonymous web use.
+      ROOM_ACCOUNT_REQUIRED: bindings.text("web"),
       // Native transactional email. Never use "outbox" in production.
       EMAIL_PROVIDER: bindings.text("cloudflare"),
       EMAIL_FROM: bindings.text("mada@gayaloo.app"),
