@@ -3,7 +3,8 @@
 // (web-start/src/legacy/shell-host.ts). Checks UI clicks, app navigation and Back/Forward between
 // /, /editor, /code and /settings/<section>; that the editor never remounts; that Start's router
 // location always matches the address bar and Back/Forward move exactly one entry; deep links; and
-// that the #room= fragment survives navigation.
+// that the #room= fragment survives navigation. Areas moved out of web/dist/ui.js are rendered by
+// Start's routes from the same React copy as the islands: the settings overlay (settings.tsx).
 import assert from "node:assert/strict";
 
 const ROOM = "11111111-1111-4111-8111-111111111111";
@@ -13,6 +14,11 @@ export async function checkWebRouter(browser, origin) {
   const page = await browser.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  // A second React copy shows up as hook errors once an island hook runs under the other renderer.
+  page.on("console", (message) => {
+    if (/Invalid hook call|more than one copy of React/i.test(message.text()))
+      errors.push(message.text());
+  });
   const ready = async () => {
     await page.waitForFunction(() => document.documentElement.dataset.legacyEditor === "ready");
     await page.waitForFunction(() => document.documentElement.dataset.uiReady === "true", null, {
@@ -43,6 +49,7 @@ export async function checkWebRouter(browser, origin) {
         const routed = window.shellRouter.state.location;
         const settings = path.startsWith("/settings/");
         const body = document.body.classList;
+        const screen = document.getElementById("settings-screen");
         return (
           window.shellRouter.state.status === "idle" &&
           location.pathname === path &&
@@ -50,6 +57,14 @@ export async function checkWebRouter(browser, origin) {
             location.pathname + location.search + location.hash &&
           body.contains("settings-open") === settings &&
           (!settings || window.appSettings.getState().section === path.slice(10)) &&
+          // Start's settings route renders the overlay (route-area.tsx), not the settings island.
+          !!screen &&
+          screen.hidden === !settings &&
+          (screen.dataset.routeOwner === "start") === settings &&
+          (!settings ||
+            screen
+              .querySelector(`#settings-nav [data-section="${path.slice(10)}"]`)
+              ?.getAttribute("aria-current") === "page") &&
           body.contains("files-view") === home &&
           body.contains("code-mode") === code
         );
@@ -73,6 +88,16 @@ export async function checkWebRouter(browser, origin) {
     ),
     true,
     "the shell router runs hosted on Start's router",
+  );
+  // One React: the islands run from source inside Start's client build; web/dist/ui.js (the
+  // desktop IIFE with its own React) is not loaded.
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      shared: document.documentElement.dataset.sharedReact,
+      uiBundle: document.querySelectorAll('script[src*="dist/ui.js"]').length,
+    })),
+    { shared: "true", uiBundle: 0 },
+    "one React copy on the page",
   );
   // Markers that a remount would lose: the canvas element, a window property, one boot.
   await page.evaluate(() => {
@@ -117,11 +142,17 @@ export async function checkWebRouter(browser, origin) {
     return button?.textContent.trim();
   });
   assert.ok(other, "another settings section to click");
+  await page.evaluate(() => (window.__settingsNav = document.getElementById("settings-nav")));
   await page.locator("#settings-nav button").filter({ hasText: other }).first().click();
   await page.waitForFunction(() => location.pathname !== "/settings/preferences");
   const section = await page.evaluate(() => location.pathname);
   at = await expectShell(section);
   assert.equal(at.index, start.index + 1, "switching sections replaces the entry");
+  assert.equal(
+    await page.evaluate(() => window.__settingsNav === document.getElementById("settings-nav")),
+    true,
+    "switching sections keeps the route's settings screen mounted",
+  );
   await back();
   at = await expectShell("/editor");
   assert.equal(at.index, start.index, "Back closes settings in one step");

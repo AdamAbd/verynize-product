@@ -9,7 +9,14 @@
 //    parallel);
 // 4. a DOMContentLoaded event. A parsed page fires it after its scripts; legacy listeners
 //    registered during startup (cloud-panel.js reconnects the open file's room on it) need it.
+//
+// web/dist/ui.js is not loaded: at its place in the order the same UI runs from source, bundled into
+// this app (legacy/ui.ts), so the islands and Start's routes share one React.
 import shell from "virtual:verynize/legacy-shell";
+import { loadLegacyUi } from "./ui";
+
+/** The desktop UI bundle; on the web its source is part of Start's client build instead. */
+const isUiBundle = (src: string | undefined) => !!src && /(^|\/)dist\/ui\.js(\?|$)/.test(src);
 
 let booted: Promise<void> | undefined;
 
@@ -55,7 +62,19 @@ async function run() {
   document.body.prepend(template.content);
 
   let last: Promise<void> = Promise.resolve();
+  let afterUi = false;
   for (const script of shell.scripts) {
+    if (isUiBundle(script.attrs.src)) {
+      // Runs after the scripts before it, like the ordered script it replaces.
+      last = last.then(loadLegacyUi).then(
+        () => undefined,
+        (error: Error) => console.error(error),
+      );
+      afterUi = true;
+      continue;
+    }
+    // Inserted scripts only keep their order among themselves: anything after the UI waits for it.
+    if (afterUi) await last;
     const element = document.createElement("script");
     for (const [name, value] of Object.entries(script.attrs)) element.setAttribute(name, value);
     element.async = false;
