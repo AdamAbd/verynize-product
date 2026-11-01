@@ -2,6 +2,7 @@
 // keeps the new size and detaches the binding of each changed axis, so later variable edits no longer move it.
 // One undo restores both the size and the binding. Scale-tool resizes detach scaled child bindings too.
 const { _electron } = require('@playwright/test');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -15,7 +16,7 @@ const path = require('node:path');
   let app;
   try {
     app = await _electron.launch({ env, args: ['.', `--user-data-dir=${profile}`], timeout: 20000 });
-    const page = await app.firstWindow({ timeout: 20000 });
+    const page = await app.firstWindow({ timeout: 20000 }); await moveOffCursor(app);
     await page.waitForSelector('#canvas .layer');
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));

@@ -3,6 +3,7 @@
 // (web page dialog and live preview). Two real HTTP servers on different ports make every asset
 // cross-origin; the fonts are real woff2 files from @fontsource/inter served under custom names.
 const { _electron } = require("@playwright/test");
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -85,7 +86,7 @@ s.__reactFiber$fixture={_debugSource:{fileName:'/repo/src/components/Fiber.jsx',
     timeout: 20000,
   });
   try {
-    const page = await app.firstWindow({ timeout: 20000 });
+    const page = await app.firstWindow({ timeout: 20000 }); await moveOffCursor(app);
     await page.waitForFunction(() => !!window.desktop?.captureRemote && !!window.webCapture);
     const { validateDocument } = await import("../integrations/design-store.mjs");
 

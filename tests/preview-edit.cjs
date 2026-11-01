@@ -2,6 +2,7 @@
 // values, staged style and direct-text edits with the "N changes" popover (hide, revert), undo/redo, add to chat,
 // the discard-before-stop dialog, and element capture as native layers 100 px right of the preview.
 const { _electron } = require("@playwright/test");
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -25,7 +26,7 @@ const HTML =
   env.VERYNIZE_SKIP_ONBOARDING = "1";
   const app = await _electron.launch({ env, args: [".", `--user-data-dir=${profile}`] });
   try {
-    const page = await app.firstWindow();
+    const page = await app.firstWindow(); await moveOffCursor(app);
     await page.setViewportSize({ width: 1440, height: 870 });
     page.on("console", (m) => {
       if (m.type() === "warning" || m.type() === "error") console.log("PAGE", m.text());
