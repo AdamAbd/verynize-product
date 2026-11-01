@@ -4,8 +4,9 @@
 // - Desktop (the `agents` capability): Claude/Codex over IPC. The model API is not offered there: the backend
 //   refuses browser requests from another origin (app://verynize), see docs/ai-runtime.md "Clients".
 // - Web: the model API (`openrouter`) of the server the page came from. It can run a turn when the cloud account is
-//   signed in on this server, `GET /api/ai/config` (shared query cache, keyed by server + account) says enabled, and
-//   the editor has a cloud room of this server open.
+//   signed in on this server, `GET /api/ai/config` (shared query cache, keyed by server + account) says enabled with
+//   an OpenRouter credential for the account (./ai-credentials.ts), and the editor has a cloud room of this server
+//   open.
 //
 // `useAgentTransport()` is the React view of the same facts, for the chat island's gate and model picker.
 import { queryOptions, useQuery } from "@tanstack/react-query";
@@ -18,8 +19,10 @@ import {
   createDesktopAgentService,
   createWebAgentService,
   WEB_AGENT_MESSAGES,
+  canRun,
   type AiConfig,
 } from "./agent-service";
+import { completeOpenRouterReturn, credentialsChanged } from "./ai-credentials";
 
 type CloudRoom = { server: string; id: string };
 declare global {
@@ -86,9 +89,11 @@ export function installAgentTransport() {
       return scope ? queryClient.fetchQuery(aiConfigQuery(scope)) : null;
     },
     room: () => currentRoom()?.id ?? null,
-    ready: () => configFor(currentWebScope())?.enabled === true,
+    ready: () => canRun(configFor(currentWebScope())),
+    credentialsRequired: () => void credentialsChanged(),
   });
   platform.agents.provide(service);
+  completeOpenRouterReturn();
   // Readiness follows the account (sign in/out, another server) and its config.
   const refresh = () => {
     const scope = currentWebScope();
@@ -111,6 +116,7 @@ export type AgentTransportState =
   | "loading"
   | "error"
   | "not-configured"
+  | "needs-credentials"
   | "no-room"
   | "unavailable";
 export type AgentTransport = {
@@ -157,6 +163,13 @@ export function useAgentTransport(): AgentTransport {
       runtime: "web",
       state: "not-configured",
       message: WEB_AGENT_MESSAGES.notConfigured,
+      config,
+    };
+  if (!canRun(config))
+    return {
+      runtime: "web",
+      state: "needs-credentials",
+      message: WEB_AGENT_MESSAGES.needsCredentials,
       config,
     };
   if (!room)

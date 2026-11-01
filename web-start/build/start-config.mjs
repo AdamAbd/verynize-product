@@ -8,4 +8,4 @@ export const webDir = fileURLToPath(new URL("../../web", import.meta.url));
 export const srcDirectory = "web-start/src";
 
 /** Plugins common to both targets (Start itself is added by each config). */
-export const sharedPlugins = () => [legacyWeb({ webDir })];
+export const sharedPlugins = () => [...legacyWeb({ webDir })];

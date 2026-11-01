@@ -6,11 +6,12 @@ import {
   createRoute,
   createRouter,
   useLocation,
-  type AnyRouter,
   type NavigateOptions,
   type RouterHistory,
 } from "@tanstack/react-router";
 import type { SectionId } from "@/islands/settings/api";
+import { DEFAULT_SETTINGS_SECTION, isSettingsSection } from "@/lib/router/settings-sections";
+import { hosted, shellHost } from "@/lib/router/host";
 import "@/lib/bridge";
 
 // Shell routes (docs/spikes/tanstack-router.md). The URL is the single source of truth for the top-level shell:
@@ -31,44 +32,26 @@ import "@/lib/bridge";
 //   the route components below.
 // - Hosted (the web app, web-start/): TanStack Start registers window.verynizeShellHost before booting the legacy
 //   editor. This module then creates no history and no router: it uses Start's router and history, navigate() goes
-//   through Start's router, and Start's route components (web-start/src/routes/_editor/*) apply their location with
-//   window.shellNavigation.applyLocation. Requests, settings history and the cloud fragment rules are the same.
+//   through Start's router, and Start's route components (web-start/src/routes/_editor/*) hand their location to
+//   window.shellNavigation.applyLocation. Those routes render the Files home, Code workspace and settings overlay
+//   themselves, so applyShell() calls no legacy applier there; this module keeps the history rules only. Requests,
+//   settings history (the view underneath, closing via history.back()), canonical settings URLs and the cloud
+//   fragment rules are the same.
 
 export type ViewPath = "/" | "/editor" | "/code";
 type Shell = { view: ViewPath; settings: SectionId | null };
 type EntryState = { settingsUnder?: ViewPath; settingsPushed?: boolean; __TSR_key?: string };
 export type ShellRequest = { view: ViewPath } | { settings: string | null };
 
-const SECTIONS: readonly SectionId[] = [
-  "account",
-  "preferences",
-  "agents",
-  "accounts",
-  "tools",
-  "projects",
-  "usage",
-  "models",
-  "connections",
-  "memory",
-  "members",
-  "permissions",
-];
-const DEFAULT_SECTION: SectionId = "preferences";
-const isSection = (value: unknown): value is SectionId => SECTIONS.includes(value as SectionId);
+const DEFAULT_SECTION = DEFAULT_SETTINGS_SECTION;
+const isSection = isSettingsSection;
 const VIEWS: readonly string[] = ["/", "/editor", "/code"];
 const isView = (value: unknown): value is ViewPath => VIEWS.includes(value as string);
 const isSettingsPath = (path: string) => path === "/settings" || path.startsWith("/settings/");
 
-/** Registered by the Start app (web-start/src/legacy/shell-host.ts) before the legacy editor boots. */
-type ShellHost = {
-  /** Start's router: the only router and history on the page. */
-  router: AnyRouter;
-  /** window.history.state as the page was loaded, before Start's history keyed the entry. */
-  initialState: unknown;
-};
-const host = (window as unknown as { verynizeShellHost?: ShellHost }).verynizeShellHost;
+const host = shellHost();
 /** Whether Start's router owns navigation (the web app). Desktop and file:// run standalone. */
-export const hosted = !!host;
+export { hosted };
 
 /* ---------- Legacy appliers (DOM + body classes only; they never touch history) ---------- */
 
@@ -99,6 +82,10 @@ function shown(): Shell {
 const same = (a: Shell, b: Shell) => a.view === b.view && a.settings === b.settings;
 
 function applyShell(next: Shell) {
+  // Hosted, Start's routes render the Files home, the Code workspace and the settings overlay and own their shown
+  // state (each area's route; the settings route also renders the view underneath, from history state:
+  // web-start/src/routes/_editor/). The editor is what shows when none of them is rendered.
+  if (hosted) return;
   const { fileLibrary, appSettings, agentWorkspace } = legacy();
   agentWorkspace?.applyCodeMode?.(next.view === "/code");
   if (next.view === "/") fileLibrary?.applyHome?.();
@@ -416,7 +403,8 @@ function createShellRouter() {
     defaultNotFoundComponent: () => null,
   });
 }
-type ShellRouter = ReturnType<typeof createShellRouter>;
+// Registered as the app router in register.d.ts (desktop program only; the web app registers Start's router).
+export type ShellRouter = ReturnType<typeof createShellRouter>;
 
 /* ---------- Startup ---------- */
 
@@ -454,12 +442,6 @@ if (queued.length) {
  * navigation go through one router and one history.
  */
 export const shellRouter: ShellRouter = host ? (host.router as ShellRouter) : createShellRouter();
-
-declare module "@tanstack/react-router" {
-  interface Register {
-    router: ShellRouter;
-  }
-}
 
 /**
  * The one entry point for shell navigation from app code. Search is kept, scroll is left alone, and

@@ -40,6 +40,7 @@ import { handleRoomAssets } from "./assets.js";
 export { DesignRoom } from "./rooms.js";
 export { AccountDirectory } from "./accounts.js";
 export { PublishedApp } from "./apps.js";
+export { AiRun } from "./ai-run.js";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const ROOM_ROUTE = new RegExp(

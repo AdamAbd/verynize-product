@@ -3,23 +3,38 @@
 // cloud/ai-executor.js with TanStack AI against OpenRouter and the hosted design tools of one room
 // (cloud/design-backend.js); its state lives in the database (cloud/ai-store.js).
 //
-//   GET  /api/ai/config                       {enabled, provider, models, defaultModel, limits}
+// Hosting: where the AI_RUNS binding exists (Cloudflare Durable Object, Node in-process actor), a
+// run executes in its own AiRun object (cloud/ai-run.js, cloud/ai-host.js), not in the request
+// that started it: it outlives the client, cancel and approvals notify it, and every stream of a
+// running run subscribes to it. Without the binding (Vercel) the run executes inside the request
+// that started it (`ctx.waitUntil`), as documented in docs/ai-runtime.md.
+//
+//   GET  /api/ai/config                       {enabled, provider, models, defaultModel, limits,
+//                                              credentials: {openrouter}}
+//   GET  /api/ai/credentials                  {openrouter: {connected, source, last4, label, …}}
+//   PUT  /api/ai/credentials/openrouter       {apiKey} → checked with OpenRouter, stored encrypted
+//   DELETE /api/ai/credentials/openrouter     {ok, removed}
+//   POST /api/ai/credentials/openrouter/oauth/start     {returnTo?} → {authorizeUrl} + cookie
+//   GET  /api/ai/credentials/openrouter/oauth/callback  ?code=&state= → redirect to returnTo
 //   POST /api/ai/runs                         start (or replay, by idempotencyKey) → SSE
 //   GET  /api/ai/runs/:id/events?after=<seq>  stored events after seq, then live → SSE
 //   POST /api/ai/runs/:id/cancel              {ok: true}
 //   POST /api/ai/runs/:id/approvals           {requestId, allow, argsHash} → {ok} | 404 | 403 | 409
 //
 // Every endpoint needs a signed-in account (the router's accountOf); the account never comes from
-// the request body or the model.
+// the request body or the model. The OAuth callback is the exception: it is a top-level navigation
+// back from openrouter.ai and authenticates through its pending state (cloud/ai-credentials.js).
 import { corsHeaders, readJson, json, fail } from "./http.js";
 import { createRoomBackend, ROOM_ID } from "./design-backend.js";
 import {
   activeRuns,
   claimExpired,
+  claimUnstarted,
   createRun,
   decideApproval,
   denyPending,
   eventsAfter,
+  finishRun,
   getApproval,
   getRun,
   lastSeq,
@@ -28,6 +43,22 @@ import {
   runByKey,
 } from "./ai-store.js";
 import { APPROVAL_TIMEOUT_MS, DESIGN_STYLE, createEventLog, executeRun } from "./ai-executor.js";
+import {
+  DEFAULT_RETURN,
+  OAUTH_COOKIE,
+  OAUTH_PATH,
+  OAUTH_TTL_MS,
+  OPENROUTER,
+  checkOpenRouterKey,
+  claimOAuth,
+  credentialRow,
+  deleteCredential,
+  exchangeOAuthCode,
+  openRouterBase,
+  readCredential,
+  saveCredential,
+  startOAuth,
+} from "./ai-credentials.js";
 
 export const AI_PREFIX = "/api/ai/";
 const RUN_ROUTE = /^\/api\/ai\/runs\/([0-9a-f-]{36})\/(events|cancel|approvals)$/;
@@ -40,7 +71,7 @@ const MAX_HISTORY = 50;
 const MAX_HISTORY_TEXT = 20_000;
 const MAX_ACTIVE_RUNS = 3;
 const POLL_MS = 400;
-const HEARTBEAT_MS = 15_000;
+export const HEARTBEAT_MS = 15_000;
 const encoder = new TextEncoder();
 
 const positive = (value, fallback) => {
@@ -64,7 +95,8 @@ export function aiConfig(env) {
     })
     .filter((model) => /^[\w.:/-]{1,120}$/.test(model.id));
   return {
-    enabled: !!env.OPENROUTER_API_KEY && models.length > 0,
+    // Available unless the operator turned it off (`VERYNIZE_AI=off`); each account brings its key.
+    enabled: env.VERYNIZE_AI !== "off" && models.length > 0,
     provider: "openrouter",
     models,
     defaultModel: models[0]?.id || null,
@@ -75,14 +107,14 @@ export function aiConfig(env) {
   };
 }
 
-const sseHeaders = {
+export const sseHeaders = {
   ...corsHeaders,
   "content-type": "text/event-stream; charset=utf-8",
   "cache-control": "no-store, no-transform",
   "x-accel-buffering": "no",
 };
-const frame = (event) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
-const heartbeat = encoder.encode(": keep-alive\n\n");
+export const frame = (event) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
+export const heartbeat = encoder.encode(": keep-alive\n\n");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -138,8 +170,22 @@ function liveStream() {
  * Finish a run whose executing instance stopped renewing its lease: it is marked done and gets
  * `error` + `done {code: "error"}` events, once, by whichever reader claims it first.
  */
-async function closeExpired(env, run) {
+export async function closeExpired(
+  env,
+  run,
+  message = "The run stopped: the server running it went away.",
+) {
   if (!(await claimExpired(env, run.id))) return;
+  await closeClaimed(env, run, message);
+}
+
+/** End a running run that never got an executor (its host could not start it). */
+async function closeRun(env, run, message) {
+  if (!(await claimUnstarted(env, run.id))) return;
+  await closeClaimed(env, run, message);
+}
+
+async function closeClaimed(env, run, message) {
   let seq = await lastSeq(env, run.id);
   const base = { id: run.id, chatId: run.chatId };
   // Approvals the dead executor was waiting for are denied, as when a run ends.
@@ -156,7 +202,7 @@ async function closeExpired(env, run) {
     ...base,
     seq: ++seq,
     type: "error",
-    message: "The run stopped: the server running it went away.",
+    message,
   });
   await appendEvent(env, run.id, {
     ...base,
@@ -172,7 +218,7 @@ async function closeExpired(env, run) {
  * The SSE stream of a stored run: events after `after`, then new ones as they are stored (polled
  * from the database, so the run may execute on another instance) until `done`.
  */
-function followStream(env, runId, after) {
+export function followStream(env, runId, after) {
   let open = true;
   return new ReadableStream({
     async start(controller) {
@@ -264,16 +310,339 @@ async function ownedRun(env, runId, account) {
   return run;
 }
 
-const sse = (stream) => new Response(stream, { status: 200, headers: sseHeaders });
+/**
+ * An SSE response. `X-Verynize-AI-Stream` says where its events come from: `object` (pushed by the
+ * run's AiRun object), `request` (the request-scoped executor of this request) or `database`
+ * (stored events, polled). Diagnostics only; clients do not depend on it.
+ */
+const sse = ({ body, source }) =>
+  new Response(body, {
+    status: 200,
+    headers: { ...sseHeaders, "x-verynize-ai-stream": source },
+  });
+
+/** The operator opted in to the server-wide key as a fallback (`VERYNIZE_AI_SERVER_KEY=1`). */
+const serverKey = (env) =>
+  env.VERYNIZE_AI_SERVER_KEY === "1" && env.OPENROUTER_API_KEY ? env.OPENROUTER_API_KEY : null;
+
+/**
+ * Whether the account can start a run: `connected` (its own key), `server` (no key of its own, the
+ * operator's opted-in fallback) or `missing`. Reads the row only; nothing is decrypted.
+ */
+export async function credentialState(env, account) {
+  if (account?.id && (await credentialRow(env, account.id))) return "connected";
+  return serverKey(env) ? "server" : "missing";
+}
+
+/**
+ * The provider credential and endpoint of a run, for the account that owns it. This is the only
+ * place a run obtains its credential (cloud/ai-host.js and the request-scoped path both go through
+ * launchRun): the account's own OpenRouter key (cloud/ai-credentials.js), else the server key only
+ * when the operator opted in (`VERYNIZE_AI_SERVER_KEY=1`). Nothing it returns is stored.
+ * `current()` re-reads the credential before every model request, so a key deleted mid-run fails
+ * the next call and a reconnected key is used from then on.
+ * @returns {Promise<{apiKey: string, baseUrl?: string, origin?: string, source: "account"|"server",
+ *   current: () => Promise<string|null>} | null>}
+ */
+export async function resolveProvider(env, account, origin) {
+  if (!account?.id) return null;
+  const baseUrl = env.OPENROUTER_BASE_URL ? openRouterBase(env) : undefined;
+  const own = await readCredential(env, account.id);
+  if (own)
+    return {
+      apiKey: own,
+      baseUrl,
+      origin,
+      source: "account",
+      current: () => readCredential(env, account.id),
+    };
+  const shared = serverKey(env);
+  if (!shared) return null;
+  return { apiKey: shared, baseUrl, origin, source: "server", current: async () => serverKey(env) };
+}
+
+/** The account a run acts for, rebuilt from ids (all the room backend reads of it). */
+export function runAccount({ accountId, authUserId }) {
+  const account = { id: accountId };
+  // Like accountOf: the Better Auth user (organization roles), not serialized.
+  if (authUserId)
+    Object.defineProperty(account, "authUser", { value: { id: authUserId }, enumerable: false });
+  return account;
+}
+
+/**
+ * Execute a stored run to completion (never throws). Shared by the AiRun object and the
+ * request-scoped path, so both resolve the room role and the provider the same way.
+ * @param {object} env
+ * @param {object} options
+ * @param {object} options.run the ai_run row
+ * @param {object} options.account runAccount(...) or the router's account
+ * @param {Request} options.request the starting request, or a synthetic one with its origin
+ * @param {{prompt: string, history: Array<object>, designStyle?: string, plan: boolean, helper: boolean}} options.input
+ * @param {{role: string, title: string|null}} [options.room] already resolved by the caller
+ * @param {(event: object) => void} [options.onEvent] live delivery after each event is stored
+ * @param {AbortSignal} [options.signal] cancel notification
+ * @param {boolean} [options.heartbeat] see executeRun
+ * @param {(ms: number) => Promise<unknown>} [options.waitForChange] see createRunPolicy
+ */
+export async function launchRun(env, options) {
+  const { run, account, request, input, onEvent, signal, heartbeat, waitForChange } = options;
+  const url = new URL(request.url);
+  const log = createEventLog(env, run, { onEvent });
+  try {
+    const backend = createRoomBackend(env, request, url, account, { roomId: run.roomId });
+    const { role, title } = options.room || (await backend.role(run.roomId));
+    const provider = role ? await resolveProvider(env, account, url.origin) : null;
+    if (!role || !provider) {
+      await log.emit("error", {
+        message: role ? CREDENTIALS_MESSAGE : "You have no access to this room",
+      });
+      await log.emit("done", { code: "error", stopped: false, sessionId: run.id });
+      await finishRun(env, run.id, "error");
+      return "error";
+    }
+    return await executeRun({
+      env,
+      run,
+      backend,
+      room: { id: run.roomId, title },
+      role,
+      prompt: input.prompt,
+      history: input.history,
+      designStyle: input.designStyle,
+      plan: input.plan,
+      helper: input.helper,
+      approvalTimeoutMs: approvalTimeout(env),
+      limits: aiConfig(env).limits,
+      provider,
+      log,
+      signal,
+      heartbeat,
+      waitForChange,
+    });
+  } catch (error) {
+    console.error("ai run failed", run.id, error?.message);
+    return "error";
+  }
+}
+
+/**
+ * The SSE body of a run from `after`: a running run hosted by an AiRun object streams from it
+ * (stored events, then live ones pushed as they are stored); otherwise the database is followed.
+ */
+async function runStream(env, run, after) {
+  if (env.AI_RUNS && run?.status === "running") {
+    try {
+      const response = await env.AI_RUNS.getByName(run.id).fetch(
+        new Request(`https://ai-run.internal/events?run=${run.id}&after=${after}`),
+      );
+      if (response.ok && response.body)
+        return {
+          body: response.body,
+          source: response.headers.get("x-verynize-ai-stream") || "object",
+        };
+      await response.body?.cancel();
+    } catch (error) {
+      console.error("ai run stream unavailable", run.id, error?.message);
+    }
+  }
+  return { body: followStream(env, run.id, after), source: "database" };
+}
+
+/** Tell the run's AiRun object that its cancel flag or an approval changed (best effort). */
+async function notifyRun(env, runId) {
+  if (!env.AI_RUNS) return;
+  try {
+    await env.AI_RUNS.getByName(runId).wake();
+  } catch (error) {
+    // The object re-reads the database on its alarm and before every tool call.
+    console.error("ai run notify failed", runId, error?.message);
+  }
+}
+
+const CREDENTIALS_MESSAGE = "Connect your OpenRouter account in Settings to use the model API.";
+const MAX_KEY = 512;
+
+const tooMany = () =>
+  new Response(JSON.stringify({ error: "Too many requests. Try again in a minute." }), {
+    status: 429,
+    headers: { ...corsHeaders, "content-type": "application/json", "retry-after": "60" },
+  });
+
+/** The OAuth browser-binding cookie (HttpOnly, only sent to the OAuth paths, ten minutes). */
+const oauthCookie = (url, value, maxAge) =>
+  `${OAUTH_COOKIE}=${value}; Path=${OAUTH_PATH}; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${
+    url.protocol === "https:" ? "; Secure" : ""
+  }`;
+const cookieValue = (request, name) => {
+  for (const part of (request.headers.get("cookie") || "").split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key === name) return rest.join("=");
+  }
+  return null;
+};
+
+/** What GET /api/ai/credentials reports for the account (never the key). */
+async function credentialStatus(env, account) {
+  const row = await credentialRow(env, account.id);
+  if (!row)
+    return {
+      connected: false,
+      ...(serverKey(env) ? { serverFallback: true } : {}),
+    };
+  const status = {
+    connected: true,
+    source: row.source,
+    last4: row.last4,
+    label: row.label || null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+  // Live key details from OpenRouter (limit and usage), best effort.
+  const apiKey = await readCredential(env, account.id);
+  if (!apiKey) return { ...status, state: "unreadable" };
+  try {
+    const check = await checkOpenRouterKey(env, apiKey, AbortSignal.timeout(4000));
+    if (!check.ok) return { ...status, state: "rejected" };
+    const { limit, usage, limit_remaining: limitRemaining, is_free_tier: freeTier } = check.info;
+    return {
+      ...status,
+      state: "ok",
+      ...(typeof limit === "number" || limit === null ? { limit } : {}),
+      ...(typeof usage === "number" ? { usage } : {}),
+      ...(typeof limitRemaining === "number" || limitRemaining === null ? { limitRemaining } : {}),
+      ...(typeof freeTier === "boolean" ? { freeTier } : {}),
+    };
+  } catch {
+    return { ...status, state: "unknown" };
+  }
+}
+
+/**
+ * /api/ai/credentials[/openrouter[/oauth/start]] for the signed-in account. The key is accepted
+ * from the account's own browser once (PUT, or the OAuth callback), checked with OpenRouter,
+ * stored encrypted, and never returned.
+ */
+async function handleCredentials(request, env, url, account, limited) {
+  const path = url.pathname;
+  if (path === "/api/ai/credentials") {
+    if (request.method !== "GET") fail(405, "Use GET");
+    return json({ [OPENROUTER]: await credentialStatus(env, account) });
+  }
+  if (path === "/api/ai/credentials/openrouter") {
+    if (request.method === "DELETE")
+      return json({ ok: true, removed: await deleteCredential(env, account.id) });
+    if (request.method !== "PUT") fail(405, "Use PUT or DELETE");
+    if (await limited(env.AI_LIMIT, `credentials:${account.id}`)) return tooMany();
+    const body = await readJson(request, 4 * 1024);
+    const apiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
+    if (!apiKey || apiKey.length > MAX_KEY || !/^[\x21-\x7e]+$/.test(apiKey))
+      fail(400, "apiKey must be an OpenRouter API key");
+    let check;
+    try {
+      check = await checkOpenRouterKey(env, apiKey, AbortSignal.timeout(10_000));
+    } catch {
+      fail(502, "OpenRouter could not be reached to check this key. Try again.");
+    }
+    if (!check.ok)
+      return json(
+        {
+          error:
+            check.status === 402
+              ? "This OpenRouter key has no credits left."
+              : "OpenRouter rejected this key. Check it and try again.",
+          code: "invalid_key",
+        },
+        400,
+      );
+    await saveCredential(env, account.id, {
+      apiKey,
+      source: "manual",
+      label: check.info?.label,
+    });
+    return json({ [OPENROUTER]: await credentialStatus(env, account) });
+  }
+  if (path === `${OAUTH_PATH}/start`) {
+    if (request.method !== "POST") fail(405, "Use POST");
+    if (await limited(env.AI_LIMIT, `credentials:${account.id}`)) return tooMany();
+    const body = request.body ? await readJson(request, 4 * 1024).catch(() => ({})) : {};
+    const { authorizeUrl, browser } = await startOAuth(env, {
+      accountId: account.id,
+      origin: url.origin,
+      returnTo: body?.returnTo,
+    });
+    return new Response(JSON.stringify({ authorizeUrl }), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        "content-type": "application/json",
+        "cache-control": "no-store",
+        "set-cookie": oauthCookie(url, browser, OAUTH_TTL_MS / 1000),
+      },
+    });
+  }
+  fail(404, "Not found");
+}
+
+/**
+ * GET …/oauth/callback?code=&state=: claims the pending sign-in of `state` (once), checks the
+ * browser cookie, exchanges the code with the stored PKCE verifier and stores the key for the
+ * account that started the flow. Always answers with a redirect to a same-origin path, carrying
+ * `openrouter=connected` or `openrouter=error&openrouter_error=<code>`.
+ */
+async function oauthCallback(request, env, url) {
+  const redirect = (returnTo, outcome) => {
+    const target = new URL(returnTo || DEFAULT_RETURN, url.origin);
+    if (outcome === "connected") target.searchParams.set("openrouter", "connected");
+    else {
+      target.searchParams.set("openrouter", "error");
+      target.searchParams.set("openrouter_error", outcome);
+    }
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: target.pathname + target.search,
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+        "set-cookie": oauthCookie(url, "", 0),
+      },
+    });
+  };
+  const state = url.searchParams.get("state");
+  const code = url.searchParams.get("code");
+  const claim = await claimOAuth(env, { state, browser: cookieValue(request, OAUTH_COOKIE) });
+  if (claim.error) return redirect(claim.returnTo, claim.error);
+  if (!code || code.length > 2048) return redirect(claim.returnTo, "denied");
+  let apiKey;
+  try {
+    apiKey = await exchangeOAuthCode(env, { code, verifier: claim.verifier });
+  } catch (error) {
+    console.error("openrouter oauth exchange failed", error?.message);
+    return redirect(claim.returnTo, "exchange_failed");
+  }
+  if (!apiKey || apiKey.length > MAX_KEY) return redirect(claim.returnTo, "exchange_failed");
+  let label = null;
+  try {
+    const check = await checkOpenRouterKey(env, apiKey, AbortSignal.timeout(5000));
+    if (check.ok) label = check.info?.label || null;
+  } catch {}
+  await saveCredential(env, claim.accountId, { apiKey, source: "oauth", label });
+  return redirect(claim.returnTo, "connected");
+}
 
 /**
  * /api/ai/*. `accountOf(env, request, url)` and `limited(binding, key)` come from the router
- * (cloud/worker.js); `ctx.waitUntil`, when the platform offers it, keeps a run going after its
- * client disconnects.
+ * (cloud/worker.js). Without AI_RUNS, `ctx.waitUntil` (when the platform offers it) keeps a
+ * request-scoped run going after its client disconnects.
  */
 export async function handleAi(request, env, url, { accountOf, limited, ctx }) {
   const path = url.pathname;
   const config = aiConfig(env);
+  // A top-level navigation back from openrouter.ai: no session header, its state authenticates it.
+  if (path === `${OAUTH_PATH}/callback`) {
+    if (request.method !== "GET") fail(405, "Use GET");
+    return oauthCallback(request, env, url);
+  }
   // Browsers send Origin: only the server's own pages may call it from a browser.
   const origin = request.headers.get("origin");
   if (origin && origin !== url.origin) fail(403, "Cross-origin requests are not allowed");
@@ -282,21 +651,22 @@ export async function handleAi(request, env, url, { accountOf, limited, ctx }) {
 
   if (path === "/api/ai/config") {
     if (request.method !== "GET") fail(405, "Use GET");
-    return json(config);
+    return json({ ...config, credentials: { openrouter: await credentialState(env, account) } });
   }
+
+  if (path === "/api/ai/credentials" || path.startsWith("/api/ai/credentials/"))
+    return handleCredentials(request, env, url, account, limited);
 
   if (path === "/api/ai/runs") {
     if (request.method !== "POST") fail(405, "Use POST");
     if (!config.enabled) fail(503, "The model API runtime is not configured on this server");
-    if (await limited(env.AI_LIMIT, `account:${account.id}`))
-      return new Response(JSON.stringify({ error: "Too many requests. Try again in a minute." }), {
-        status: 429,
-        headers: { ...corsHeaders, "content-type": "application/json", "retry-after": "60" },
-      });
+    if (await limited(env.AI_LIMIT, `account:${account.id}`)) return tooMany();
     const input = validRunRequest(await readJson(request, MAX_BODY), config);
     // A retried request: replay the existing run's events, then follow it.
     const existing = await runByKey(env, account.id, input.idempotencyKey);
-    if (existing) return sse(followStream(env, existing.id, 0));
+    if (existing) return sse(await runStream(env, existing, 0));
+    if ((await credentialState(env, account)) === "missing")
+      return json({ error: CREDENTIALS_MESSAGE, code: "credentials_required" }, 409);
 
     const backend = createRoomBackend(env, request, url, account, { roomId: input.roomId });
     const { role, title } = await backend.role(input.roomId);
@@ -314,33 +684,44 @@ export async function handleAi(request, env, url, { accountOf, limited, ctx }) {
       access: input.access,
       idempotencyKey: input.idempotencyKey,
     });
-    if (!created) return sse(followStream(env, run.id, 0));
+    if (!created) return sse(await runStream(env, run, 0));
 
-    const live = liveStream();
-    const execution = executeRun({
-      env,
-      run,
-      backend,
-      room: { id: input.roomId, title },
-      role,
+    const runInput = {
       prompt: input.prompt,
       history: input.history,
       designStyle: input.designStyle,
       plan: input.plan,
       helper: input.helper,
-      approvalTimeoutMs: approvalTimeout(env),
-      limits: config.limits,
-      provider: {
-        apiKey: env.OPENROUTER_API_KEY,
-        baseUrl: env.OPENROUTER_BASE_URL || undefined,
-        origin: url.origin,
-      },
-      log: createEventLog(env, run, { onEvent: live.send }),
-    })
-      .catch((error) => console.error("ai run failed", run.id, error?.message))
-      .finally(() => live.close());
+    };
+    if (env.AI_RUNS) {
+      // Durable: the run executes in its own AiRun object; this request only subscribes to it.
+      try {
+        await env.AI_RUNS.getByName(run.id).start({
+          runId: run.id,
+          accountId: account.id,
+          authUserId: account.authUser?.id || null,
+          origin: url.origin,
+          input: runInput,
+        });
+      } catch (error) {
+        console.error("ai run could not start", run.id, error?.message);
+        await closeRun(env, run, "The run could not be started.");
+      }
+      return sse(await runStream(env, await getRun(env, run.id), 0));
+    }
+
+    // Request-scoped (no AI_RUNS binding: Vercel): the run executes in this request.
+    const live = liveStream();
+    const execution = launchRun(env, {
+      run,
+      account,
+      request,
+      input: runInput,
+      room: { role, title },
+      onEvent: live.send,
+    }).finally(() => live.close());
     ctx?.waitUntil?.(execution);
-    return sse(live.stream);
+    return sse({ body: live.stream, source: "request" });
   }
 
   const match = path.match(RUN_ROUTE);
@@ -348,19 +729,23 @@ export async function handleAi(request, env, url, { accountOf, limited, ctx }) {
   const [, runId, action] = match;
   if (action === "events") {
     if (request.method !== "GET") fail(405, "Use GET");
-    await ownedRun(env, runId, account);
+    const run = await ownedRun(env, runId, account);
     const after = Number(url.searchParams.get("after") ?? 0);
     if (!Number.isInteger(after) || after < 0) fail(400, "after must be a sequence number");
-    return sse(followStream(env, runId, after));
+    return sse(await runStream(env, run, after));
   }
   if (request.method !== "POST") fail(405, "Use POST");
   const run = await ownedRun(env, runId, account);
   if (action === "cancel") {
-    if (run.status === "running") await requestCancel(env, runId);
+    if (run.status === "running") {
+      await requestCancel(env, runId);
+      await notifyRun(env, runId);
+    }
     return json({ ok: true });
   }
-  // Approvals: the decision is stored once, here; the executor (on whichever instance runs the
-  // run) polls it, re-checks the hash against the call it is about to run, and the room role.
+  // Approvals: the decision is stored once, here; the executor (in the run's AiRun object, or on
+  // whichever instance runs a request-scoped run) is notified or polls it, re-checks the hash
+  // against the call it is about to run, and the room role.
   const body = await readJson(request, 16 * 1024);
   if (typeof body?.requestId !== "string" || typeof body.allow !== "boolean")
     fail(400, "Body must be {requestId, allow, argsHash}");
@@ -377,5 +762,6 @@ export async function handleAi(request, env, url, { accountOf, limited, ctx }) {
     fail(409, "The arguments of this tool call do not match the approval request");
   if (!(await decideApproval(env, runId, body.requestId, body.allow, "user")))
     fail(409, "This request was already decided");
+  await notifyRun(env, runId);
   return json({ ok: true });
 }

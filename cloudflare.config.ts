@@ -22,13 +22,17 @@ export default defineConfig({
       AUTH_LIMIT: bindings.rateLimit({ namespace: "1002", simple: { limit: 10, period: 60 } }),
       // Hosted MCP (POST /api/mcp): per IP and per account.
       MCP_LIMIT: bindings.rateLimit({ namespace: "1003", simple: { limit: 240, period: 60 } }),
-      // Model API runtime (POST /api/ai/runs, cloud/ai.js): new runs per account. The runtime is
-      // off until the OPENROUTER_API_KEY secret is set (`cf secret put OPENROUTER_API_KEY`); it is
-      // not declared here so deployments without it stay valid (docs/ai-runtime.md).
+      // Model API runtime (cloud/ai.js): new runs, and key checks / OAuth starts, per account. Each
+      // account connects its own OpenRouter key (stored encrypted under a key derived from
+      // BETTER_AUTH_SECRET), so no OPENROUTER_API_KEY secret is needed; a server-wide key is used
+      // only as a fallback when VERYNIZE_AI_SERVER_KEY=1 and that secret is set (docs/ai-runtime.md).
       AI_LIMIT: bindings.rateLimit({ namespace: "1004", simple: { limit: 20, period: 60 } }),
       ROOMS: bindings.durableObject({ worker: "verynize", exportName: "DesignRoom" }),
       ACCOUNTS: bindings.durableObject({ worker: "verynize", exportName: "AccountDirectory" }),
       APPS: bindings.durableObject({ worker: "verynize", exportName: "PublishedApp" }),
+      // Model API runs (cloud/ai-run.js): one object per run id hosts the run's executor, so a run
+      // outlives the request that started it (docs/ai-runtime.md, "Hosting").
+      AI_RUNS: bindings.durableObject({ worker: "verynize", exportName: "AiRun" }),
       // Better Auth users, sessions and organizations (cloud/auth.js). Schema: cloud/migrations.
       DB: bindings.d1({ name: "verynize", id: "76210bc4-d4fe-4075-a321-776c2525a828" }),
       // Signs Better Auth cookies and tokens. Generate with `openssl rand -base64 32`.
@@ -47,6 +51,8 @@ export default defineConfig({
       DesignRoom: exports.durableObject({ storage: "sqlite" }),
       AccountDirectory: exports.durableObject({ storage: "sqlite" }),
       PublishedApp: exports.durableObject({ storage: "sqlite" }),
+      // New SQLite-backed class: cf deploy adds its migration (new_sqlite_classes) on first deploy.
+      AiRun: exports.durableObject({ storage: "sqlite" }),
     },
     observability: { enabled: true, traces: { enabled: true } },
   },

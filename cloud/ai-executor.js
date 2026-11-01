@@ -117,13 +117,51 @@ export async function argsHash(name, args) {
  * provider ended it. So requests are fetched with the run's own signal. `request(req)` is the only method the SDK
  * calls on its HTTP client (@openrouter/sdk lib/sdks.js). tests/cloud-ai-cancel.mjs covers it.
  */
-export function openRouterAdapter(model, provider, signal) {
+export function openRouterAdapter(model, provider, signal, onCredentialProblem = () => {}) {
   return createOpenRouterText(model, provider.apiKey, {
     ...(provider.baseUrl ? { serverURL: provider.baseUrl } : {}),
     ...(provider.origin ? { httpReferer: provider.origin } : {}),
     appTitle: "Verynize",
-    httpClient: { request: (request) => fetch(request, { signal }) },
+    httpClient: {
+      async request(request) {
+        let init = { signal };
+        // The credential is re-read before every model request (resolveProvider's `current`): a
+        // key deleted mid-run fails this call; a replaced key is used from now on.
+        if (provider.current) {
+          const key = await provider.current();
+          if (!key) {
+            const message = credentialMessage(provider, "disconnected");
+            onCredentialProblem(message);
+            throw new Error(message);
+          }
+          if (key !== provider.apiKey) {
+            const headers = new Headers(request.headers);
+            headers.set("authorization", `Bearer ${key}`);
+            init = { signal, headers };
+          }
+        }
+        const response = await fetch(request, init);
+        if ([401, 402, 403].includes(response.status))
+          onCredentialProblem(
+            credentialMessage(provider, response.status === 402 ? "credits" : "rejected"),
+          );
+        return response;
+      },
+    },
   });
+}
+
+/** What the user is told when the provider credential stops working during a run. */
+export function credentialMessage(provider, problem) {
+  if (provider?.source === "server")
+    return problem === "credits"
+      ? "The server's OpenRouter key is out of credits. Connect your own OpenRouter account in Settings."
+      : "The server's OpenRouter key was rejected. Connect your own OpenRouter account in Settings.";
+  if (problem === "disconnected")
+    return "Your OpenRouter account was disconnected during this run. Reconnect it in Settings to continue.";
+  if (problem === "credits")
+    return "Your OpenRouter account is out of credits. Add credits on openrouter.ai, or reconnect another account in Settings.";
+  return "Your OpenRouter key was rejected. Reconnect your OpenRouter account in Settings.";
 }
 
 /** A short label for an approval card. */
@@ -149,9 +187,9 @@ async function runTool(backend, name, args) {
  * The run's tool policy (docs/ai-runtime.md, "Policy"). Read tools run freely. Write tools come
  * from the same hosted table; each one needs editor in the room (checked before the call and again
  * immediately before it runs), an approval under `access: "ask"` (stored in ai_approval, decided
- * through POST /approvals from any instance, polled here) and runs at most once per
- * (runId, toolCallId) (claimed in ai_tool_result before it runs). `plan` runs refuse writes;
- * `helper` runs are read-only (no write tool offered).
+ * through POST /approvals from any instance and read back here after every `waitForChange`) and
+ * runs at most once per (runId, toolCallId) (claimed in ai_tool_result before it runs). `plan`
+ * runs refuse writes; `helper` runs are read-only (no write tool offered).
  * @param {object} options
  * @param {object} options.env bindings (DB)
  * @param {object} options.backend createRoomBackend(..., {roomId})
@@ -163,6 +201,9 @@ async function runTool(backend, name, args) {
  * @param {boolean} [options.helper]
  * @param {number} [options.approvalTimeoutMs]
  * @param {number} [options.pollMs]
+ * @param {(ms: number) => Promise<unknown>} [options.waitForChange] waits at most `ms` for a
+ *   change to the run (a decision or cancel); default: poll every `pollMs`. The AiRun Durable
+ *   Object passes its notifier, woken by the approval and cancel endpoints and by its alarm.
  */
 export function createRunPolicy({
   env,
@@ -175,6 +216,7 @@ export function createRunPolicy({
   helper = false,
   approvalTimeoutMs = APPROVAL_TIMEOUT_MS,
   pollMs = APPROVAL_POLL_MS,
+  waitForChange = (ms) => sleep(Math.min(ms, pollMs)),
 }) {
   const access = run?.access || "ask";
   const isWrite = (definition) => !!definition && !isReadOnlyTool(definition);
@@ -266,7 +308,7 @@ export function createRunPolicy({
           if (await isCancelled()) await decideApproval(env, run.id, requestId, false, "cancelled");
           else if (Date.now() >= deadline)
             await decideApproval(env, run.id, requestId, false, "timeout");
-          else await sleep(pollMs);
+          else await waitForChange(Math.max(1, deadline - Date.now()));
         }
       }
       const allow = decided.decision === "allow" && decided.argsHash === hash;
@@ -373,6 +415,12 @@ export function buildSystemPrompt({ room, role, designStyle, writes, access = "a
  * @param {boolean} [options.helper] read-only helper run (no write tools)
  * @param {number} [options.approvalTimeoutMs] how long an `ask` write waits for its decision
  * @param {ReturnType<typeof createRunPolicy>} [options.policy] replaces the default policy
+ * @param {AbortSignal} [options.signal] cancels the run when aborted (the AiRun Durable Object's
+ *   cancel notification)
+ * @param {boolean} [options.heartbeat] poll the cancel flag and renew the lease from the database
+ *   on a timer (default true). The AiRun Durable Object passes false: its alarm renews the lease
+ *   and the cancel endpoint notifies it.
+ * @param {(ms: number) => Promise<unknown>} [options.waitForChange] see createRunPolicy
  */
 export async function executeRun(options) {
   const {
@@ -390,6 +438,9 @@ export async function executeRun(options) {
     plan = false,
     helper = false,
     approvalTimeoutMs,
+    signal,
+    heartbeat = true,
+    waitForChange,
   } = options;
   const emit = log.emit;
   const abortController = new AbortController();
@@ -397,6 +448,7 @@ export async function executeRun(options) {
     cancelled: false,
     budget: false,
     error: null,
+    credentialProblem: null,
     toolCalls: 0,
     turnToolCalls: 0,
     lastTurnToolCalls: 0,
@@ -429,27 +481,33 @@ export async function executeRun(options) {
       plan,
       helper,
       approvalTimeoutMs,
+      ...(waitForChange ? { waitForChange } : {}),
     });
+  if (signal?.aborted) cancel();
+  signal?.addEventListener("abort", cancel, { once: true });
 
-  // Cancel flag and lease, polled from the database so a cancel from any instance is seen.
+  // Cancel flag and lease, polled from the database so a cancel from any instance is seen (unless
+  // the host renews the lease and delivers cancel itself: heartbeat false).
   let lastRenew = Date.now();
   let ticking = false;
-  const ticker = setInterval(async () => {
-    if (ticking) return;
-    ticking = true;
-    try {
-      const now = Date.now();
-      const wanted =
-        now - lastRenew >= RENEW_MS
-          ? ((lastRenew = now), await renewLease(env, run.id, now))
-          : await cancelRequested(env, run.id);
-      if (wanted) cancel();
-    } catch {
-      // A transient database error: the next tick retries; the lease has slack.
-    } finally {
-      ticking = false;
-    }
-  }, TICK_MS);
+  const ticker = heartbeat
+    ? setInterval(async () => {
+        if (ticking) return;
+        ticking = true;
+        try {
+          const now = Date.now();
+          const wanted =
+            now - lastRenew >= RENEW_MS
+              ? ((lastRenew = now), await renewLease(env, run.id, now))
+              : await cancelRequested(env, run.id);
+          if (wanted) cancel();
+        } catch {
+          // A transient database error: the next tick retries; the lease has slack.
+        } finally {
+          ticking = false;
+        }
+      }, TICK_MS)
+    : null;
 
   let code = "ok";
   try {
@@ -557,7 +615,9 @@ export async function executeRun(options) {
       { role: "user", content: prompt },
     ];
     const stream = chat({
-      adapter: openRouterAdapter(run.model, provider, abortController.signal),
+      adapter: openRouterAdapter(run.model, provider, abortController.signal, (message) => {
+        state.credentialProblem ||= message;
+      }),
       threadId: run.chatId,
       runId: run.id,
       systemPrompts: [
@@ -658,7 +718,14 @@ export async function executeRun(options) {
       state.error ||= error?.message || String(error);
     }
   } finally {
-    clearInterval(ticker);
+    if (ticker) clearInterval(ticker);
+    signal?.removeEventListener("abort", cancel);
+  }
+  // The provider refused the credential (or it was deleted): say so plainly instead of the SDK's
+  // error text.
+  if (state.credentialProblem && code !== "cancelled") {
+    code = "error";
+    state.error = state.credentialProblem;
   }
 
   // Approvals still waiting when the run ends are denied (and announced before done).

@@ -282,3 +282,37 @@ export const aiToolResult = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.runId, table.toolCallId] })],
 );
+
+// Model API credentials (cloud/ai-credentials.js, migration 0007): per-account provider keys,
+// encrypted at rest, and pending OpenRouter PKCE sign-ins. Times are epoch ms.
+export const aiCredential = sqliteTable(
+  "ai_credential",
+  {
+    accountId: text("accountId").notNull(),
+    provider: text("provider").notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    iv: text("iv").notNull(),
+    last4: text("last4").notNull(),
+    label: text("label"),
+    source: text("source").notNull(),
+    createdAt: integer("createdAt").notNull(),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.accountId, table.provider] })],
+);
+
+export const aiOauthState = sqliteTable(
+  "ai_oauth_state",
+  {
+    stateHash: text("stateHash").notNull().primaryKey(),
+    accountId: text("accountId").notNull(),
+    provider: text("provider").notNull(),
+    verifier: text("verifier").notNull(),
+    iv: text("iv").notNull(),
+    browserHash: text("browserHash").notNull(),
+    returnTo: text("returnTo").notNull(),
+    expiresAt: integer("expiresAt").notNull(),
+    createdAt: integer("createdAt").notNull(),
+  },
+  (table) => [index("ai_oauth_state_expires_idx").on(table.expiresAt)],
+);

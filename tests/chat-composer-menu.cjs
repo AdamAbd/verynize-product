@@ -278,7 +278,10 @@ async function write(file, text) {
       await page.waitForFunction(id => document.getElementById('chat-style-picker')?.dataset.styleId === id, choice.id);
       assert.ok((await picker.innerText()).includes(choice.name), 'the chip shows the chosen style');
       assert.equal(await page.evaluate(() => window.chatDesignStyle.get()), choice.id);
-      const done = await page.evaluate(() => window.agentWorkspace.getUsage().completed);
+      // Wait for the style menu's exit animation, as openMenu() does: the slash list opening above the composer moves
+      // the layout under the pointer, and a still-mounted (closing) menu item takes focus from the prompt on pointer leave.
+      await page.locator('#chat-style-menu').waitFor({ state: 'detached' });
+      const done =await page.evaluate(() => window.agentWorkspace.getUsage().completed);
       await page.locator('#project-prompt').fill('Restyle the hero');
       await page.locator('#project-prompt').press('Enter');
       await completed(done + 1);
