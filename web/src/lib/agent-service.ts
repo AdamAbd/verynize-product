@@ -46,7 +46,7 @@ export type AgentListener = (event: AgentEvent) => void;
 
 export interface AgentService {
   readonly kind: AgentRuntime;
-  /** True when a turn can start now (web: signed in on this server and the model API enabled). */
+  /** True when a turn can start now (web: signed in on this server, the model API enabled, OpenRouter connected). */
   ready(): boolean;
   /** Start one turn; resolves with the run id once the runtime accepted it. Events follow through `subscribe`. */
   run(options: AgentRunOptions): Promise<AgentRunResult>;
@@ -85,12 +85,22 @@ export type AiConfig = {
   models: { id: string; label: string }[];
   defaultModel: string | null;
   limits?: { maxTurns: number; maxToolCalls: number };
+  /**
+   * Whether the signed-in account can start a run: `connected` (its own OpenRouter key), `server` (the operator's
+   * opted-in shared key) or `missing`. Absent on servers from before per-account keys (then `enabled` decides).
+   */
+  credentials?: { openrouter: "connected" | "server" | "missing" };
 };
+
+/** True when the config lets the account start a run (runtime on and a credential to run with). */
+export const canRun = (config: AiConfig | null | undefined) =>
+  !!config?.enabled && config.credentials?.openrouter !== "missing";
 
 /** What the chat says when the model API cannot run a turn. Shown verbatim (tests match them). */
 export const WEB_AGENT_MESSAGES = {
   signedOut: "Sign in to use chat",
   notConfigured: "Model API not configured on this server",
+  needsCredentials: "Connect your OpenRouter account",
   noRoom: "Open or share a cloud room to chat with the model API",
 } as const;
 
@@ -106,6 +116,8 @@ export type WebAgentDeps = {
   ready(): boolean;
   /** Waits between reconnect attempts after a dropped stream (ms); the last one ends the run as failed. */
   retryDelays?: number[];
+  /** The server refused a start for want of a credential (`credentials_required`): refresh the config. */
+  credentialsRequired?(): void;
 };
 
 const STATUS_TEXT: Record<string, string> = {
@@ -192,8 +204,9 @@ export async function readSse(
   }
 }
 
-async function errorMessage(response: Response): Promise<string> {
+async function errorMessage(response: Response, onCode?: (code: string) => void): Promise<string> {
   const data = await response.json().catch(() => null);
+  if (onCode && data && typeof data === "object" && typeof data.code === "string") onCode(data.code);
   return (
     (data && typeof data === "object" && (data.error || data.message)) ||
     `Server returned ${response.status}`
@@ -259,6 +272,7 @@ export function createWebAgentService(deps: WebAgentDeps): AgentService {
     const config = await deps.config();
     if (!config) throw Error(WEB_AGENT_MESSAGES.signedOut);
     if (!config.enabled) throw Error(WEB_AGENT_MESSAGES.notConfigured);
+    if (!canRun(config)) throw Error(WEB_AGENT_MESSAGES.needsCredentials);
     const roomId = deps.room();
     if (!roomId) throw Error(WEB_AGENT_MESSAGES.noRoom);
     const model =
@@ -348,7 +362,9 @@ export function createWebAgentService(deps: WebAgentDeps): AgentService {
               return fail(error.message);
           }
           if (response && !response.ok) {
-            const message = await errorMessage(response);
+            const message = await errorMessage(response, (code) => {
+              if (code === "credentials_required") deps.credentialsRequired?.();
+            });
             // The start was refused (bad input, no room access, a running turn, limits, not configured), or the
             // run is gone / no longer ours: nothing to retry. Only an unreachable backend behind a proxy is.
             if (response.status !== 502 && response.status !== 504) return fail(message);
@@ -422,6 +438,8 @@ export function createWebAgentService(deps: WebAgentDeps): AgentService {
           ? WEB_AGENT_MESSAGES.signedOut
           : !config.enabled
             ? WEB_AGENT_MESSAGES.notConfigured
+            : !canRun(config)
+              ? WEB_AGENT_MESSAGES.needsCredentials
             : undefined);
       return [{ ...WEB_AGENT, available: !reason, ...(reason ? { reason } : {}) }];
     },
