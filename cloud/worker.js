@@ -11,9 +11,10 @@ import {
   errorResponse,
   rpc,
   roleRank,
+  atLeast,
   HttpError,
 } from "./http.js";
-import { REQUEST_BYTES } from "./limits.js";
+import { MESSAGE_BYTES, REQUEST_BYTES } from "./limits.js";
 import { SESSION } from "./accounts.js";
 import { AUTH_BASE_PATH, createAuth } from "./auth.js";
 import {
@@ -37,6 +38,7 @@ import { verifiedPage, resetPasswordPage, resetPasswordScript } from "./account-
 import * as profiles from "./profiles.js";
 import { handleRoomAssets } from "./assets.js";
 import { requireRoomAccount } from "./web-access.js";
+import { extractInline, migrateRoomInline } from "./inline-binaries.js";
 
 export { DesignRoom } from "./rooms.js";
 export { AccountDirectory } from "./accounts.js";
@@ -371,6 +373,27 @@ async function handleAuth(request, env, url) {
   return null;
 }
 
+/**
+ * The body of a snapshot write or HTTP batch with its large inline binaries stored as room
+ * assets, when the caller may edit the room. Other callers get their body forwarded unchanged
+ * (the room refuses the write by role, or rejects the inline data).
+ */
+async function inlineWrite(request, env, url, roomId, account, orgRole, stub, limit) {
+  const data = await readJson(request, limit);
+  const target = Array.isArray(data?.ops) ? "ops" : "document";
+  if (!data?.[target]) return data;
+  const asGet = new Request(request.url, { method: "GET", headers: request.headers });
+  const extract = async () => {
+    const checked = await stub.fetch(
+      roomRequest(new URL("https://room/access"), asGet, account, undefined, orgRole),
+    );
+    if (!checked.ok || !atLeast((await checked.json()).role, "editor")) return data;
+    const { value } = await extractInline(env, url.origin, roomId, data[target], account?.id);
+    return { ...data, [target]: value };
+  };
+  return globalThis.VerynizeStorageLimits.inlineBinaries(data[target]).length ? extract() : data;
+}
+
 async function handleRooms(request, env, url) {
   if (url.pathname === "/api/rooms" && request.method === "POST") {
     if (await limited(env.ROOM_CREATION, ip(request)))
@@ -397,8 +420,16 @@ async function handleRooms(request, env, url) {
     } else if (data.organizationId !== undefined)
       fail(401, "Sign in with your email and password to create rooms in an organization");
     const id = crypto.randomUUID();
+    // Large inline binaries become assets of the new room (cloud/inline-binaries.js).
+    const { value: document } = await extractInline(
+      env,
+      url.origin,
+      id,
+      data.document,
+      account?.id,
+    );
     const response = await env.ROOMS.getByName(id).fetch(
-      roomRequest("https://room/create", request, account, { document: data.document }),
+      roomRequest("https://room/create", request, account, { document }),
     );
     const result = await response.json();
     if (response.ok && account) await profiles.linkRoom(env, account.id, id, "owner", result.title);
@@ -493,7 +524,37 @@ async function handleRooms(request, env, url) {
     const org = await roomOrganization(env, roomId);
     return json({ organization: { id: org.id, name: org.name } });
   }
-  const response = await stub.fetch(roomRequest(forward, request, account, undefined, orgRole));
+  // Room assets (cloud/inline-binaries.js): rooms are migrated to asset URLs when opened, and
+  // inline binaries in snapshot writes and HTTP batches become assets before the room sees them.
+  // Lazy clients migrate the pages they load: `page` on GET /room?lazy=1, `id` on /pages.
+  if (action === "/socket" || (action === "/room" && request.method === "GET"))
+    await migrateRoomInline(
+      env,
+      url.origin,
+      roomId,
+      stub,
+      action === "/room" && url.searchParams.get("lazy") === "1"
+        ? forward.searchParams.getAll("page")
+        : null,
+    );
+  if (action === "/pages" && request.method === "GET")
+    await migrateRoomInline(env, url.origin, roomId, stub, forward.searchParams.getAll("id"));
+  let body;
+  if (
+    (action === "/room" && request.method === "PUT") ||
+    (action === "/ops" && request.method === "POST")
+  )
+    body = await inlineWrite(
+      request,
+      env,
+      url,
+      roomId,
+      account,
+      orgRole,
+      stub,
+      action === "/ops" ? MESSAGE_BYTES : REQUEST_BYTES,
+    );
+  const response = await stub.fetch(roomRequest(forward, request, account, body, orgRole));
   if (action === "/socket" || !response.ok) return response;
   const result = await response.json();
   if (result?.title) await syncTitle(env, roomId, result.title);

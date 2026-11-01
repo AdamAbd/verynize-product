@@ -18,6 +18,7 @@ import {
   ROLES,
   rpcFail,
 } from "./http.js";
+import { mayHoldInline, rejectInline, screenOps } from "./inline-binaries.js";
 
 const Ops = globalThis.VerynizeOps;
 const CLIENT = /^[A-Za-z0-9_-]{1,64}$/;
@@ -86,19 +87,23 @@ export class DesignRoom extends DurableObject {
    */
   lazySnapshot(ids = []) {
     const index = this.store.index();
-    const known = new Set(index.map((page) => page.id));
-    const wanted = new Set(ids.filter((id) => known.has(id)));
-    if (!wanted.size && index.length) {
-      const active = this.store.metadata()?.activePage;
-      wanted.add(known.has(active) ? active : index[0].id);
-    }
-    const state = this.store.load(wanted);
+    const state = this.store.load(this.lazyPages(ids, index));
     return {
       document: state.doc,
       revision: this.row().revision,
       unloaded: [...state.stubs],
       pages: index,
     };
+  }
+  /** The pages a lazy snapshot loads: the existing ones of `ids`, else the active or first page. */
+  lazyPages(ids = [], index = this.store.index()) {
+    const known = new Set(index.map((page) => page.id));
+    const wanted = new Set(ids.filter((id) => known.has(id)));
+    if (!wanted.size && index.length) {
+      const active = this.store.metadata()?.activePage;
+      wanted.add(known.has(active) ? active : index[0].id);
+    }
+    return wanted;
   }
   /** Whole pages by id, in the requested order, and the ids that do not exist. */
   readPages(ids) {
@@ -162,7 +167,8 @@ export class DesignRoom extends DurableObject {
 
   async create(data, account) {
     if (this.row()) fail(409, "Room exists");
-    this.store.replace(requireDocument(data.document));
+    rejectInline(this.env, requireDocument(data.document));
+    this.store.replace(data.document);
     this.sql.exec("INSERT INTO room (id,token_hash,document,revision) VALUES (1,'migrated','',0)");
     const issued = await this.issueToken("owner", "Original invite link");
     if (account?.id) this.addMember(account, "owner");
@@ -230,7 +236,7 @@ export class DesignRoom extends DurableObject {
   update(document, baseRevision) {
     if (!Number.isSafeInteger(baseRevision) || baseRevision < 0)
       fail(400, "baseRevision must be a nonnegative integer");
-    requireDocument(document);
+    rejectInline(this.env, requireDocument(document));
     const row = this.row();
     if (row.revision !== baseRevision)
       return json({ error: "Revision conflict", ...this.snapshot() }, 409);
@@ -282,7 +288,9 @@ export class DesignRoom extends DurableObject {
         error: "Your role in this room cannot edit",
       };
     const limit = Date.now() + FUTURE_SKEW;
-    const stamped = ops.map((op) => {
+    // Large inline binaries never reach room storage (cloud/inline-binaries.js).
+    const screened = screenOps(this.env, ops);
+    const stamped = screened.ops.map((op) => {
       const parsed = Ops.decode(op?.s);
       // Missing or far-future stamps would win forever; the server restamps them.
       const s = parsed && parsed.wall <= limit ? op.s : this.clock.next();
@@ -299,8 +307,17 @@ export class DesignRoom extends DurableObject {
       stamp: this.clock.next(),
       external: (id) => state.stubs.has(this.store.nodePage(id)),
     });
+    result.rejected.unshift(...screened.rejected);
     if (!result.applied.length)
-      return { type: "ops", client, batch, revision, ops: [], rejected: result.rejected.length };
+      return {
+        type: "ops",
+        client,
+        batch,
+        revision,
+        ops: [],
+        rejected: result.rejected.length,
+        reasons: result.rejected.slice(0, 20),
+      };
     try {
       this.store.commit(state, result.doc);
     } catch (error) {
@@ -380,6 +397,60 @@ export class DesignRoom extends DurableObject {
       reasons: message.reasons || [],
       ...this.snapshot(),
     };
+  }
+
+  /**
+   * Room migration (cloud/inline-binaries.js migrateRoomInline): the document with the pages that
+   * may still hold large inline binaries loaded (the others are stubs), or null. `ids` limits the
+   * scan to some pages (lazy loading; empty: the page a lazy snapshot opens on), null scans all.
+   * Pages found clean are not rescanned during this activation (writes reject inline binaries),
+   * and a page that cannot be migrated is offered once per revision, not on every open.
+   */
+  inlineSnapshot(ids = null) {
+    const row = this.row();
+    if (!row) return null;
+    this.inlineClean ??= new Set();
+    this.inlineOffered ??= new Map();
+    const fresh = (key) =>
+      !this.inlineClean.has(key) && this.inlineOffered.get(key) !== row.revision;
+    const check = (key, text) => {
+      if (mayHoldInline(text)) return true;
+      this.inlineClean.add(key);
+      return false;
+    };
+    const offer = (keys) => {
+      for (const key of keys) this.inlineOffered.set(key, row.revision);
+    };
+    if (this.store.layout !== "pages") {
+      if (!fresh("w") || !check("w", this.store.text("w"))) return null;
+      offer(["w"]);
+      return { document: this.store.read(), revision: row.revision };
+    }
+    const index = this.store.index().map((page) => page.id);
+    const scan = ids === null ? index : [...this.lazyPages(ids)];
+    const dirty = new Set(
+      scan.filter(
+        (id) =>
+          fresh(id) && check(id, this.store.text("h:" + id) + "\n" + this.store.text("n:" + id)),
+      ),
+    );
+    const meta = fresh("m") && check("m", this.store.text("m"));
+    if (!dirty.size && !meta) return null;
+    offer([...dirty, ...(meta ? ["m"] : [])]);
+    return { document: this.store.load(dirty).doc, revision: row.revision };
+  }
+  /** Apply the asset URL swap of a migration as a server batch; a newer revision is a conflict. */
+  migrateInline({ baseRevision, ops } = {}) {
+    const row = this.row();
+    if (!row) rpcFail(404, "Room not found");
+    if (row.revision !== baseRevision) return { conflict: true, revision: row.revision };
+    const client = "server-assets";
+    const last =
+      this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
+        ?.last_batch ?? 0;
+    const message = this.applyBatch({ client, batch: last + 1, ops }, "owner");
+    if (message.ops.length) this.broadcast(message);
+    return { applied: message.ops.length, rejected: message.rejected, revision: message.revision };
   }
 
   accessSummary(role) {

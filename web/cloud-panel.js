@@ -98,6 +98,8 @@
     app = null;
   const status = (text) => {
     $("cloud-status").textContent = text;
+    // Size limits (web/storage-limits.js): server refusals become the size island's blocking error.
+    if (window.storageLimits?.isSizeError(text)) window.storageLimits.reportError(String(text), "sync");
   };
   const action = (fn) => async () => {
     let epoch = generation;
@@ -538,7 +540,9 @@
     if (Number.isSafeInteger(message.revision)) revision = Math.max(revision, message.revision);
     if (message.client === clientId) {
       pending = pending.filter((batch) => batch.n > message.batch);
+      const sizeReason = message.reasons?.find((r) => window.storageLimits?.isSizeError(r?.reason));
       if (message.error) status(message.error);
+      else if (sizeReason) status(sizeReason.reason);
       else if (message.rejected)
         status(
           `${message.rejected} change${message.rejected === 1 ? " was" : "s were"} superseded by newer edits`,
@@ -1044,22 +1048,32 @@
     const server = base();
     disconnect("Creating room…");
     const epoch = generation,
-      result = await request(
-        "/api/rooms",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            document: window.design.getDocument(),
-            // Email accounts create rooms in the workspace chosen in the file browser.
-            ...(account?.server === server &&
-            !account.session.startsWith("vs_") &&
-            activeOrganization()
-              ? { organizationId: activeOrganization() }
-              : {}),
-          }),
-        },
-        { server },
-      );
+      create = (document) =>
+        request(
+          "/api/rooms",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              document,
+              // Email accounts create rooms in the workspace chosen in the file browser.
+              ...(account?.server === server &&
+              !account.session.startsWith("vs_") &&
+              activeOrganization()
+                ? { organizationId: activeOrganization() }
+                : {}),
+            }),
+          },
+          { server },
+        ),
+      // Embedded binaries are uploaded as room assets first (web/cloud-assets.js createRoom).
+      result = window.cloudAssets
+        ? await window.cloudAssets.createRoom(window.design.getDocument(), {
+            server,
+            create,
+            request: (path, options, room) => request(path, options, { server, ...room }),
+            progress: status,
+          })
+        : await create(window.design.getDocument());
     if (epoch !== generation) return;
     await connect({ server, id: result.id, token: result.token }, false, epoch);
   });
