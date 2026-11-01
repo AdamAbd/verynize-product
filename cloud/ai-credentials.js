@@ -179,7 +179,9 @@ export async function checkOpenRouterKey(env, apiKey, signal) {
 export function safeReturnPath(value, origin) {
   if (typeof value !== "string" || value.length > 512 || !/^\/(?![/\\])/.test(value))
     return DEFAULT_RETURN;
-  if (/[\u0000-\u001f\\]/.test(value)) return DEFAULT_RETURN;
+  // No backslashes or control characters (browsers treat some as path separators or drop them).
+  if (value.includes("\\") || [...value].some((c) => c.charCodeAt(0) < 0x20 || c === "\x7f"))
+    return DEFAULT_RETURN;
   try {
     const url = new URL(value, origin);
     if (url.origin !== origin) return DEFAULT_RETURN;
