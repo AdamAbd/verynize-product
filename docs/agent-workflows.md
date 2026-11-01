@@ -17,11 +17,14 @@ The chat panel (docked transcript, model picker, access levels, attachments and 
   The prompt is a streaming-input iterable that stays open until the turn's `result` arrives, so `Query.interrupt()` works for **Stop**. Pasted images go inline as base64 image blocks, and their saved paths are also listed in the context block. If the SDK cannot be loaded, the runtime falls back to `claude --print --output-format stream-json --include-partial-messages` with `--resume`, `--append-system-prompt` and `--mcp-config`.
 - **Codex** uses `codex app-server` JSON-RPC when `codex app-server --help` succeeds. Verified against codex-cli 0.165 using `codex app-server generate-ts`. The protocol flow:
   1. `initialize`, then `initialized`
-  2. `thread/start`, or `thread/resume` when the chat has a thread id (a failed resume starts a fresh thread)
-  3. `turn/start` with text plus `localImage` inputs and `model`/`effort`
-  4. `turn/interrupt` for **Stop**
+  2. `account/read {refreshToken:false}` (the sign-in gate, below)
+  3. `thread/start`, or `thread/resume` when the chat has a thread id (a failed resume starts a fresh thread)
+  4. `turn/start` with text plus `localImage` inputs and `model`/`effort`
+  5. `turn/interrupt` for **Stop**
   
-  One app-server process per window serves every chat thread. Approval server-requests (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, MCP elicitations) become approval cards. If app-server is unavailable, the one-shot `codex exec --json` runner in `desktop/agents.cjs` is used instead.
+  One app-server process per account serves every chat thread of that account.
+
+  **Sign-in gate.** Before each turn the runtime calls `account/read` on that account's app-server. `account: null` with `requiresOpenaiAuth: true` means signed out: no thread or turn starts, the run emits one `auth-required {agent, text, account:{id,name,system}}` and ends with `done {code:1}`. A provider that needs no OpenAI auth (`requiresOpenaiAuth: false`) and an API-key account pass; a CLI that cannot answer `account/read` (error or timeout) is let through. A signed-in answer is cached for 45 s per account (`CODEX_AUTH_TTL`); a sign-in or sign-out through `desktop/agent-auth.cjs` (Settings, onboarding, the chat card), an `account/updated` notification or an auth error mid-turn forget it, and an idle app-server of that account is replaced so it reads the new credentials. A 401 during a turn (`codexErrorInfo` `unauthorized` or an `httpStatusCode` 401, or the 401 text) gets one status line on the first retry; the second retry, or a final 401, becomes the same single `auth-required` event and the runtime interrupts the turn, so Codex's ~17 s of retries and the duplicated `error` + `turn/completed` message are not shown. The `codex exec` fallback checks `codex login status` instead (only a definite "Not logged in" blocks) and maps a 401 in its JSON stream the same way. `ask_agent`/second-opinion helpers refuse with the signed-out message. Shapes checked against codex-cli 0.166 (`codex app-server generate-json-schema`: `GetAccountParams`, `GetAccountResponse`, `ErrorNotification`) and live with an empty `CODEX_HOME` (`{"account":null,"requiresOpenaiAuth":true}`, about 200 ms). Approval server-requests (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, MCP elicitations) become approval cards. If app-server is unavailable, the one-shot `codex exec --json` runner in `desktop/agents.cjs` is used instead.
 - **Quick chats** are chats with no repository. They run in a per-chat scratch directory, `userData/agent-workdirs/<chatId>`. **Repository chats** (Code workspace) each run in their own git worktree, `<Verynize folder>/workspaces/<repo>/<name>` (default `~/Verynize`) on branch `<prefix>/<name>` (the Settings › Agents branch prefix, else the GitHub username, else `verynize`; see `desktop/repositories.cjs`); the renderer passes the chat's folder as `runAgent({root})` and main validates it against the repository registry. Folders without a commit, and chats saved before worktrees existed, run in the repository root. Project memory (`VERYNIZE.md`) and the user's personal instructions are appended to the persona: Claude's `append`, or Codex's `developerInstructions`. Claude chats also get `~/.codex/AGENTS.md` (Codex reads it itself; skipped when `~/.claude/CLAUDE.md` has the same text or imports it). Claude quick chats share one auto-memory folder, `userData/agent-memory/<id>`, passed as the `autoMemoryDirectory` flag setting (`desktop/agent-memory.cjs`); repository chats keep Claude Code's per-repository memory. The CLI fallback does not pass it.
 - At most three turns run per window, and only one per chat.
 
@@ -122,10 +125,12 @@ Main sends typed events on `desktop:agent-event`. Each one has `{id, chatId, seq
 - `tool-call`, `tool-input-delta`, `tool-result`
 - `permission-request`, `permission-resolved`
 - `usage`, `error`
+- `auth-required {agent, text, account}` (at most one per run; later errors of the run are dropped)
 - `done {code, stopped, sessionId, resumeAt?}`. `resumeAt` is the fork point of the finished turn: Claude's last main-chain transcript entry uuid, or the Codex turn id.
 
 Translators live in `desktop/agent-runtime-events.cjs`, one each for SDK messages, app-server notifications and `exec --json` lines. The renderer (`web/desktop-panel.js`) handles them as follows:
 - It streams text and re-renders only the active reply, at most once per frame.
+- `auth-required` becomes one **Sign in to Codex** card (`web/src/islands/chat/auth-card.tsx`, classes `.chat-auth`, `.chat-auth-signin`, `.chat-auth-retry`). Its button starts the installed CLI's browser sign-in for the run's account (`startAgentLogin`, the Settings › Accounts flow); when the sign-in completes (from the card or anywhere else) the card offers **Retry**, which resends the message in place of the signed-out reply.
 - Thinking shows in a collapsible block. Tool calls show as collapsible cards with input (partial JSON while streaming) and result. Permission requests show as Allow/Deny cards.
 - **Stop** interrupts the turn.
 - Each conversation stores the provider `sessionId`. A follow-up with the same agent in the same project passes `sessionId` to resume the native session, and the saved transcript is not re-sent. Switching agents, or **Continue from here** (a transcript branch), starts a new session seeded with the last eight messages. Files are never reverted.
@@ -151,6 +156,8 @@ Chat usage counters are local task counts. Settings › Usage reads the accounts
   - the exec fallback
   
   It also has a real Claude smoke test, which runs only with `VERYNIZE_REAL_AGENT_SMOKE=1`.
+- `node --test tests/codex-sign-in.cjs` checks the sign-in gate against the fake Codex (`$CODEX_HOME/fake-account.json` is its `account/read` answer): signed out → no thread/turn, one `auth-required`, no error; the signed-in cache and its invalidation; a 401 mid-turn → one event, turn interrupted, no retry lines; the exec fallback's `codex login status` gate; and `account/read` display accounts. Its last case runs the real installed `codex` with an empty temporary `CODEX_HOME` (signed out, no turn; skipped without Codex).
+- `node tests/codex-sign-in-ui.cjs` (Electron): a signed-out Codex chat (real `codex` with an empty temporary `CODEX_HOME` when installed) shows exactly one sign-in card with a Sign in button and no raw error; signing in through the card (fake Codex `login` on the isolated home) and Retry send the message once. It never touches `~/.codex`.
 - `node tests/agent-chat.cjs` drives Electron against the fake Codex app-server. It covers:
   - a quick chat in a scratch folder
   - streaming and tool cards
