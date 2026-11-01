@@ -104,7 +104,10 @@ export function bindingsFromEnvironment(vars, { webRoot }) {
     "EMAIL_FROM",
     "EMAIL_WEBHOOK_URL",
     "EMAIL_WEBHOOK_TOKEN",
-    // Model API runtime (cloud/ai.js): off without OPENROUTER_API_KEY.
+    // Model API runtime (cloud/ai.js): each account brings its own OpenRouter key; the server key
+    // is a fallback only with VERYNIZE_AI_SERVER_KEY=1. VERYNIZE_AI=off turns the runtime off.
+    "VERYNIZE_AI",
+    "VERYNIZE_AI_SERVER_KEY",
     "OPENROUTER_API_KEY",
     "OPENROUTER_BASE_URL",
     "VERYNIZE_AI_MODELS",

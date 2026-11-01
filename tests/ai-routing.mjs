@@ -27,6 +27,9 @@ const AI_PATHS = [
   "/api/ai/runs/0b7f2a4e-3c1d-4e5f-8a9b-0c1d2e3f4a5b/events",
   "/api/ai/runs/0b7f2a4e-3c1d-4e5f-8a9b-0c1d2e3f4a5b/cancel",
   "/api/ai/runs/0b7f2a4e-3c1d-4e5f-8a9b-0c1d2e3f4a5b/approvals",
+  "/api/ai/credentials",
+  "/api/ai/credentials/openrouter",
+  "/api/ai/credentials/openrouter/oauth/start",
 ];
 const temp = await fsp.mkdtemp(path.join(os.tmpdir(), "verynize-ai-routing-"));
 const fake = await startFakeOpenRouter({
@@ -34,6 +37,7 @@ const fake = await startFakeOpenRouter({
   default: [[{ text: "ok" }]],
 });
 const aiEnv = {
+  VERYNIZE_AI_SERVER_KEY: { type: "text", value: "1" },
   OPENROUTER_API_KEY: { type: "text", value: "routing-test-key" },
   OPENROUTER_BASE_URL: { type: "text", value: fake.baseUrl },
   VERYNIZE_AI_MODELS: { type: "text", value: "fake/model" },

@@ -117,13 +117,51 @@ export async function argsHash(name, args) {
  * provider ended it. So requests are fetched with the run's own signal. `request(req)` is the only method the SDK
  * calls on its HTTP client (@openrouter/sdk lib/sdks.js). tests/cloud-ai-cancel.mjs covers it.
  */
-export function openRouterAdapter(model, provider, signal) {
+export function openRouterAdapter(model, provider, signal, onCredentialProblem = () => {}) {
   return createOpenRouterText(model, provider.apiKey, {
     ...(provider.baseUrl ? { serverURL: provider.baseUrl } : {}),
     ...(provider.origin ? { httpReferer: provider.origin } : {}),
     appTitle: "Verynize",
-    httpClient: { request: (request) => fetch(request, { signal }) },
+    httpClient: {
+      async request(request) {
+        let init = { signal };
+        // The credential is re-read before every model request (resolveProvider's `current`): a
+        // key deleted mid-run fails this call; a replaced key is used from now on.
+        if (provider.current) {
+          const key = await provider.current();
+          if (!key) {
+            const message = credentialMessage(provider, "disconnected");
+            onCredentialProblem(message);
+            throw new Error(message);
+          }
+          if (key !== provider.apiKey) {
+            const headers = new Headers(request.headers);
+            headers.set("authorization", `Bearer ${key}`);
+            init = { signal, headers };
+          }
+        }
+        const response = await fetch(request, init);
+        if ([401, 402, 403].includes(response.status))
+          onCredentialProblem(
+            credentialMessage(provider, response.status === 402 ? "credits" : "rejected"),
+          );
+        return response;
+      },
+    },
   });
+}
+
+/** What the user is told when the provider credential stops working during a run. */
+export function credentialMessage(provider, problem) {
+  if (provider?.source === "server")
+    return problem === "credits"
+      ? "The server's OpenRouter key is out of credits. Connect your own OpenRouter account in Settings."
+      : "The server's OpenRouter key was rejected. Connect your own OpenRouter account in Settings.";
+  if (problem === "disconnected")
+    return "Your OpenRouter account was disconnected during this run. Reconnect it in Settings to continue.";
+  if (problem === "credits")
+    return "Your OpenRouter account is out of credits. Add credits on openrouter.ai, or reconnect another account in Settings.";
+  return "Your OpenRouter key was rejected. Reconnect your OpenRouter account in Settings.";
 }
 
 /** A short label for an approval card. */
@@ -410,6 +448,7 @@ export async function executeRun(options) {
     cancelled: false,
     budget: false,
     error: null,
+    credentialProblem: null,
     toolCalls: 0,
     turnToolCalls: 0,
     lastTurnToolCalls: 0,
@@ -576,7 +615,9 @@ export async function executeRun(options) {
       { role: "user", content: prompt },
     ];
     const stream = chat({
-      adapter: openRouterAdapter(run.model, provider, abortController.signal),
+      adapter: openRouterAdapter(run.model, provider, abortController.signal, (message) => {
+        state.credentialProblem ||= message;
+      }),
       threadId: run.chatId,
       runId: run.id,
       systemPrompts: [
@@ -679,6 +720,12 @@ export async function executeRun(options) {
   } finally {
     if (ticker) clearInterval(ticker);
     signal?.removeEventListener("abort", cancel);
+  }
+  // The provider refused the credential (or it was deleted): say so plainly instead of the SDK's
+  // error text.
+  if (state.credentialProblem && code !== "cancelled") {
+    code = "error";
+    state.error = state.credentialProblem;
   }
 
   // Approvals still waiting when the run ends are denied (and announced before done).
