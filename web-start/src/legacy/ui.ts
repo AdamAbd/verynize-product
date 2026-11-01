@@ -11,7 +11,10 @@ let ui: LegacyUi | null = null;
 let loading: Promise<LegacyUi> | undefined;
 const listeners = new Set<() => void>();
 
-/** Runs the UI bundle once (island mounts, the hosted shell router). Later calls return the same promise. */
+/**
+ * Runs the UI bundle once (island mounts, the hosted shell router) and resolves when it has run, like ui.js loading.
+ * Later calls return the same promise.
+ */
 export function loadLegacyUi(): Promise<LegacyUi> {
   loading ??= import("virtual:verynize/legacy-ui").then((module) => {
     // One React on the page: the islands are bundled with this app, not loaded as a second copy.
@@ -19,8 +22,12 @@ export function loadLegacyUi(): Promise<LegacyUi> {
     document.documentElement.dataset.sharedReact = String(
       module.React.useState === React.useState && module.React.version === React.version,
     );
-    ui = module;
-    for (const listener of listeners) listener();
+    // Route areas render after the islands' first commit, so takeover claims and the UI-ready signal see the same
+    // first frame as on desktop, where the router island applies the location after the other islands.
+    void module.islandsCommitted().then(() => {
+      ui = module;
+      for (const listener of listeners) listener();
+    });
     return module;
   });
   return loading;
