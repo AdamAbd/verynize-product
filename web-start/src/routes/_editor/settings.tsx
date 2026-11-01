@@ -7,9 +7,8 @@ import { useLegacyUi } from "../../legacy/ui";
 // the URL with the canonical /settings/<section> and records the view underneath in history state). One layout for
 // both child paths, so switching sections never remounts the screen.
 //
-// The view underneath comes from that history state (`settingsUnder`). Of the views, only the Files home is rendered
-// by a route, so this route renders it too while settings is open over it; the editor and the Code workspace are
-// still shown by the shell router's legacy appliers.
+// The view underneath comes from that history state (`settingsUnder`): this route renders the Files home or the Code
+// workspace under the overlay as their own routes would. The editor is what shows when neither is rendered.
 export const Route = createFileRoute("/_editor/settings")({ component: SettingsArea });
 
 function SettingsArea() {
@@ -22,6 +21,7 @@ function SettingsArea() {
   return (
     <>
       {ui && under === "/" && <ui.HomeArea />}
+      {ui && under === "/code" && <ui.CodeArea />}
       {ui && <ui.SettingsArea section={section} />}
       <Outlet />
     </>

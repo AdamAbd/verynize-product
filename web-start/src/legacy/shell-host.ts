@@ -34,6 +34,9 @@ export function useShellArea(area: ShellArea) {
   const location = useLocation();
   const key = location.state.__TSR_key;
   useLayoutEffect(() => {
-    (window.shellNavigation as Window["shellNavigation"] | undefined)?.applyLocation(area, location);
+    (window.shellNavigation as Window["shellNavigation"] | undefined)?.applyLocation(
+      area,
+      location,
+    );
   }, [key]); // oxlint-disable-line react-hooks/exhaustive-deps
 }
