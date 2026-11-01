@@ -160,7 +160,8 @@ try {
   const dialog = page.locator("#storage-limit-dialog");
   await dialog.waitFor({ timeout: 20000 });
   assert.match(await dialog.textContent(), /File is too large to sync/);
-  assert.match(await dialog.textContent(), /exceeds 2 MB|over the 2 MB page limit/);
+  // The room refuses per page (cloud/room-store.js) and names the page.
+  assert.match(await dialog.textContent(), /Page "Landing" exceeds the 2 MB page limit/);
   assert.match(await dialog.textContent(), /Your changes are kept on this device/);
   await page.waitForTimeout(400); // the dialog's fade-in
   await shot("size-sync-refused-dialog.png");
