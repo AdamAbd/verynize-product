@@ -91,6 +91,7 @@ export function bindingsFromEnvironment(vars, { webRoot }) {
     ROOMS: { type: "durable-object", exportName: "DesignRoom" },
     ACCOUNTS: { type: "durable-object", exportName: "AccountDirectory" },
     APPS: { type: "durable-object", exportName: "PublishedApp" },
+    AI_RUNS: { type: "durable-object", exportName: "AiRun" },
     DB: { type: "d1", name: "verynize" },
     ASSETS: { type: "assets", directory: vars.WEB_ROOT || webRoot },
   };
@@ -109,6 +110,7 @@ export function bindingsFromEnvironment(vars, { webRoot }) {
     "VERYNIZE_AI_MODELS",
     "VERYNIZE_AI_MAX_TURNS",
     "VERYNIZE_AI_MAX_TOOL_CALLS",
+    "VERYNIZE_AI_APPROVAL_TIMEOUT_MS",
   ])
     if (vars[name]) bindings[name] = text(vars[name]);
   const blobs = (vars.BLOB_STORE || "file").toLowerCase();

@@ -29,6 +29,9 @@ export default defineConfig({
       ROOMS: bindings.durableObject({ worker: "verynize", exportName: "DesignRoom" }),
       ACCOUNTS: bindings.durableObject({ worker: "verynize", exportName: "AccountDirectory" }),
       APPS: bindings.durableObject({ worker: "verynize", exportName: "PublishedApp" }),
+      // Model API runs (cloud/ai-run.js): one object per run id hosts the run's executor, so a run
+      // outlives the request that started it (docs/ai-runtime.md, "Hosting").
+      AI_RUNS: bindings.durableObject({ worker: "verynize", exportName: "AiRun" }),
       // Better Auth users, sessions and organizations (cloud/auth.js). Schema: cloud/migrations.
       DB: bindings.d1({ name: "verynize", id: "76210bc4-d4fe-4075-a321-776c2525a828" }),
       // Signs Better Auth cookies and tokens. Generate with `openssl rand -base64 32`.
@@ -47,6 +50,8 @@ export default defineConfig({
       DesignRoom: exports.durableObject({ storage: "sqlite" }),
       AccountDirectory: exports.durableObject({ storage: "sqlite" }),
       PublishedApp: exports.durableObject({ storage: "sqlite" }),
+      // New SQLite-backed class: cf deploy adds its migration (new_sqlite_classes) on first deploy.
+      AiRun: exports.durableObject({ storage: "sqlite" }),
     },
     observability: { enabled: true, traces: { enabled: true } },
   },

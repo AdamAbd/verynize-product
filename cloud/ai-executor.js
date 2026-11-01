@@ -149,9 +149,9 @@ async function runTool(backend, name, args) {
  * The run's tool policy (docs/ai-runtime.md, "Policy"). Read tools run freely. Write tools come
  * from the same hosted table; each one needs editor in the room (checked before the call and again
  * immediately before it runs), an approval under `access: "ask"` (stored in ai_approval, decided
- * through POST /approvals from any instance, polled here) and runs at most once per
- * (runId, toolCallId) (claimed in ai_tool_result before it runs). `plan` runs refuse writes;
- * `helper` runs are read-only (no write tool offered).
+ * through POST /approvals from any instance and read back here after every `waitForChange`) and
+ * runs at most once per (runId, toolCallId) (claimed in ai_tool_result before it runs). `plan`
+ * runs refuse writes; `helper` runs are read-only (no write tool offered).
  * @param {object} options
  * @param {object} options.env bindings (DB)
  * @param {object} options.backend createRoomBackend(..., {roomId})
@@ -163,6 +163,9 @@ async function runTool(backend, name, args) {
  * @param {boolean} [options.helper]
  * @param {number} [options.approvalTimeoutMs]
  * @param {number} [options.pollMs]
+ * @param {(ms: number) => Promise<unknown>} [options.waitForChange] waits at most `ms` for a
+ *   change to the run (a decision or cancel); default: poll every `pollMs`. The AiRun Durable
+ *   Object passes its notifier, woken by the approval and cancel endpoints and by its alarm.
  */
 export function createRunPolicy({
   env,
@@ -175,6 +178,7 @@ export function createRunPolicy({
   helper = false,
   approvalTimeoutMs = APPROVAL_TIMEOUT_MS,
   pollMs = APPROVAL_POLL_MS,
+  waitForChange = (ms) => sleep(Math.min(ms, pollMs)),
 }) {
   const access = run?.access || "ask";
   const isWrite = (definition) => !!definition && !isReadOnlyTool(definition);
@@ -266,7 +270,7 @@ export function createRunPolicy({
           if (await isCancelled()) await decideApproval(env, run.id, requestId, false, "cancelled");
           else if (Date.now() >= deadline)
             await decideApproval(env, run.id, requestId, false, "timeout");
-          else await sleep(pollMs);
+          else await waitForChange(Math.max(1, deadline - Date.now()));
         }
       }
       const allow = decided.decision === "allow" && decided.argsHash === hash;
@@ -373,6 +377,12 @@ export function buildSystemPrompt({ room, role, designStyle, writes, access = "a
  * @param {boolean} [options.helper] read-only helper run (no write tools)
  * @param {number} [options.approvalTimeoutMs] how long an `ask` write waits for its decision
  * @param {ReturnType<typeof createRunPolicy>} [options.policy] replaces the default policy
+ * @param {AbortSignal} [options.signal] cancels the run when aborted (the AiRun Durable Object's
+ *   cancel notification)
+ * @param {boolean} [options.heartbeat] poll the cancel flag and renew the lease from the database
+ *   on a timer (default true). The AiRun Durable Object passes false: its alarm renews the lease
+ *   and the cancel endpoint notifies it.
+ * @param {(ms: number) => Promise<unknown>} [options.waitForChange] see createRunPolicy
  */
 export async function executeRun(options) {
   const {
@@ -390,6 +400,9 @@ export async function executeRun(options) {
     plan = false,
     helper = false,
     approvalTimeoutMs,
+    signal,
+    heartbeat = true,
+    waitForChange,
   } = options;
   const emit = log.emit;
   const abortController = new AbortController();
@@ -429,27 +442,33 @@ export async function executeRun(options) {
       plan,
       helper,
       approvalTimeoutMs,
+      ...(waitForChange ? { waitForChange } : {}),
     });
+  if (signal?.aborted) cancel();
+  signal?.addEventListener("abort", cancel, { once: true });
 
-  // Cancel flag and lease, polled from the database so a cancel from any instance is seen.
+  // Cancel flag and lease, polled from the database so a cancel from any instance is seen (unless
+  // the host renews the lease and delivers cancel itself: heartbeat false).
   let lastRenew = Date.now();
   let ticking = false;
-  const ticker = setInterval(async () => {
-    if (ticking) return;
-    ticking = true;
-    try {
-      const now = Date.now();
-      const wanted =
-        now - lastRenew >= RENEW_MS
-          ? ((lastRenew = now), await renewLease(env, run.id, now))
-          : await cancelRequested(env, run.id);
-      if (wanted) cancel();
-    } catch {
-      // A transient database error: the next tick retries; the lease has slack.
-    } finally {
-      ticking = false;
-    }
-  }, TICK_MS);
+  const ticker = heartbeat
+    ? setInterval(async () => {
+        if (ticking) return;
+        ticking = true;
+        try {
+          const now = Date.now();
+          const wanted =
+            now - lastRenew >= RENEW_MS
+              ? ((lastRenew = now), await renewLease(env, run.id, now))
+              : await cancelRequested(env, run.id);
+          if (wanted) cancel();
+        } catch {
+          // A transient database error: the next tick retries; the lease has slack.
+        } finally {
+          ticking = false;
+        }
+      }, TICK_MS)
+    : null;
 
   let code = "ok";
   try {
@@ -658,7 +677,8 @@ export async function executeRun(options) {
       state.error ||= error?.message || String(error);
     }
   } finally {
-    clearInterval(ticker);
+    if (ticker) clearInterval(ticker);
+    signal?.removeEventListener("abort", cancel);
   }
 
   // Approvals still waiting when the run ends are denied (and announced before done).
