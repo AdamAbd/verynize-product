@@ -27,6 +27,10 @@
 
   const isUnloaded = (id) => unloaded.has(id);
   const nodeOpOn = (op, ids) => Ops.isNodeOp(op) && ids.has(op.page);
+  // Held operations: node edits of a page, and the removal of a page (kept until the page has
+  // loaded, so undoing it restores the page with its layers).
+  const held = (op) => Ops.isNodeOp(op) || op?.t === "removePage";
+  const pageOf = (op) => (op.t === "removePage" ? op.id : op.page);
 
   function settle() {
     waiters = waiters.filter((waiter) => {
@@ -40,7 +44,7 @@
   function forget(id) {
     unloaded.delete(id);
     wanted.delete(id);
-    deferred = deferred.filter((op) => op.page !== id);
+    deferred = deferred.filter((op) => pageOf(op) !== id);
   }
 
   /** Ask the room for pages (once each until they arrive; resent after a reconnect by `resume`). */
@@ -133,8 +137,8 @@
       unloaded = new Set(ids);
       wanted = new Set([...wanted].filter((id) => unloaded.has(id)));
       sizes = new Map((pages || []).map((page) => [page.id, page.bytes]));
-      const released = deferred.filter((op) => !unloaded.has(op.page));
-      deferred = deferred.filter((op) => unloaded.has(op.page));
+      const released = deferred.filter((op) => !unloaded.has(pageOf(op)));
+      deferred = deferred.filter((op) => unloaded.has(pageOf(op)));
       settle();
       schedulePrefetch();
       return released;
@@ -143,7 +147,7 @@
     stored: () => ({ unloaded: [...unloaded], deferred: deferred.slice() }),
     restore(state) {
       unloaded = new Set(Array.isArray(state?.unloaded) ? state.unloaded : []);
-      deferred = Array.isArray(state?.deferred) ? state.deferred.filter(Ops.isNodeOp) : [];
+      deferred = Array.isArray(state?.deferred) ? state.deferred.filter(held) : [];
       wanted.clear();
       settle();
     },
@@ -162,25 +166,30 @@
       return result;
     },
     /**
-     * Local operations: those on unloaded pages' nodes wait for the page (a reorder of such a
-     * page only lists local layers, so it is dropped); the rest are returned to send now.
+     * Local operations: those on unloaded pages' nodes, and removals of unloaded pages, wait for
+     * the page, which is requested (a reorder of such a page only lists local layers, so it is
+     * dropped); the rest are returned to send now.
      */
     splitLocal(ops) {
       if (!unloaded.size) return ops;
-      const now = [];
+      const now = [],
+        waiting = [];
       for (const op of ops) {
-        if (op?.t === "removePage") forget(op.id);
-        if (!nodeOpOn(op, unloaded)) now.push(op);
+        if (op?.t === "removePage" && unloaded.has(op.id)) {
+          deferred.push(op);
+          waiting.push(op.id);
+        } else if (!nodeOpOn(op, unloaded)) now.push(op);
         else if (op.t !== "nodeOrder") deferred.push(op);
       }
+      if (waiting.length) request(waiting);
       return now;
     },
     /** Local operations waiting for their pages (applied on top of the editor document). */
     deferredOps: () => deferred,
     /** A page arrived: it is loaded now. Returns its deferred local operations to send. */
     received(id) {
-      const mine = deferred.filter((op) => op.page === id);
-      deferred = deferred.filter((op) => op.page !== id);
+      const mine = deferred.filter((op) => pageOf(op) === id);
+      deferred = deferred.filter((op) => pageOf(op) !== id);
       unloaded.delete(id);
       wanted.delete(id);
       settle();

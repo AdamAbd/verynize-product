@@ -1081,7 +1081,8 @@
     const epoch = generation,
       info = connection;
     // Edits made on pages that were still loading are sent once those pages arrive.
-    if (Pages.deferredOps().length) await Pages.ensure(Pages.deferredOps().map((op) => op.page));
+    if (Pages.deferredOps().length)
+      await Pages.ensure(Pages.deferredOps().map((op) => op.page ?? op.id));
     if (epoch !== generation) return;
     await flush();
     if (epoch !== generation) return;
