@@ -14,6 +14,7 @@ import { Route as IndexDothtmlRouteImport } from './routes/index[.]html'
 import { Route as EditorIndexRouteImport } from './routes/_editor/index'
 import { Route as EditorCodeRouteImport } from './routes/_editor/code'
 import { Route as EditorEditorRouteImport } from './routes/_editor/editor'
+import { Route as EditorSettingsRouteImport } from './routes/_editor/settings'
 import { Route as EditorSettingsIndexRouteImport } from './routes/_editor/settings.index'
 import { Route as EditorSettingsSectionRouteImport } from './routes/_editor/settings.$section'
 
@@ -41,15 +42,20 @@ const EditorEditorRoute = EditorEditorRouteImport.update({
   path: '/editor',
   getParentRoute: () => EditorRoute,
 } as any)
-const EditorSettingsIndexRoute = EditorSettingsIndexRouteImport.update({
-  id: '/settings/',
-  path: '/settings/',
+const EditorSettingsRoute = EditorSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => EditorRoute,
 } as any)
+const EditorSettingsIndexRoute = EditorSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => EditorSettingsRoute,
+} as any)
 const EditorSettingsSectionRoute = EditorSettingsSectionRouteImport.update({
-  id: '/settings/$section',
-  path: '/settings/$section',
-  getParentRoute: () => EditorRoute,
+  id: '/$section',
+  path: '/$section',
+  getParentRoute: () => EditorSettingsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -57,6 +63,7 @@ export interface FileRoutesByFullPath {
   '/index.html': typeof IndexDothtmlRoute
   '/code': typeof EditorCodeRoute
   '/editor': typeof EditorEditorRoute
+  '/settings': typeof EditorSettingsRouteWithChildren
   '/settings/$section': typeof EditorSettingsSectionRoute
   '/settings/': typeof EditorSettingsIndexRoute
 }
@@ -74,6 +81,7 @@ export interface FileRoutesById {
   '/index.html': typeof IndexDothtmlRoute
   '/_editor/code': typeof EditorCodeRoute
   '/_editor/editor': typeof EditorEditorRoute
+  '/_editor/settings': typeof EditorSettingsRouteWithChildren
   '/_editor/': typeof EditorIndexRoute
   '/_editor/settings/$section': typeof EditorSettingsSectionRoute
   '/_editor/settings/': typeof EditorSettingsIndexRoute
@@ -85,6 +93,7 @@ export interface FileRouteTypes {
     | '/index.html'
     | '/code'
     | '/editor'
+    | '/settings'
     | '/settings/$section'
     | '/settings/'
   fileRoutesByTo: FileRoutesByTo
@@ -101,6 +110,7 @@ export interface FileRouteTypes {
     | '/index.html'
     | '/_editor/code'
     | '/_editor/editor'
+    | '/_editor/settings'
     | '/_editor/'
     | '/_editor/settings/$section'
     | '/_editor/settings/'
@@ -148,37 +158,56 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EditorEditorRouteImport
       parentRoute: typeof EditorRoute
     }
+    '/_editor/settings': {
+      id: '/_editor/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof EditorSettingsRouteImport
+      parentRoute: typeof EditorRoute
+    }
     '/_editor/settings/': {
       id: '/_editor/settings/'
-      path: '/settings'
+      path: '/'
       fullPath: '/settings/'
       preLoaderRoute: typeof EditorSettingsIndexRouteImport
-      parentRoute: typeof EditorRoute
+      parentRoute: typeof EditorSettingsRoute
     }
     '/_editor/settings/$section': {
       id: '/_editor/settings/$section'
-      path: '/settings/$section'
+      path: '/$section'
       fullPath: '/settings/$section'
       preLoaderRoute: typeof EditorSettingsSectionRouteImport
-      parentRoute: typeof EditorRoute
+      parentRoute: typeof EditorSettingsRoute
     }
   }
 }
 
+interface EditorSettingsRouteChildren {
+  EditorSettingsSectionRoute: typeof EditorSettingsSectionRoute
+  EditorSettingsIndexRoute: typeof EditorSettingsIndexRoute
+}
+
+const EditorSettingsRouteChildren: EditorSettingsRouteChildren = {
+  EditorSettingsSectionRoute: EditorSettingsSectionRoute,
+  EditorSettingsIndexRoute: EditorSettingsIndexRoute,
+}
+
+const EditorSettingsRouteWithChildren = EditorSettingsRoute._addFileChildren(
+  EditorSettingsRouteChildren,
+)
+
 interface EditorRouteChildren {
   EditorCodeRoute: typeof EditorCodeRoute
   EditorEditorRoute: typeof EditorEditorRoute
+  EditorSettingsRoute: typeof EditorSettingsRouteWithChildren
   EditorIndexRoute: typeof EditorIndexRoute
-  EditorSettingsSectionRoute: typeof EditorSettingsSectionRoute
-  EditorSettingsIndexRoute: typeof EditorSettingsIndexRoute
 }
 
 const EditorRouteChildren: EditorRouteChildren = {
   EditorCodeRoute: EditorCodeRoute,
   EditorEditorRoute: EditorEditorRoute,
+  EditorSettingsRoute: EditorSettingsRouteWithChildren,
   EditorIndexRoute: EditorIndexRoute,
-  EditorSettingsSectionRoute: EditorSettingsSectionRoute,
-  EditorSettingsIndexRoute: EditorSettingsIndexRoute,
 }
 
 const EditorRouteWithChildren =

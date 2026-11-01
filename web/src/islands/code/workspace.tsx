@@ -82,8 +82,10 @@ function useSplit() {
   return { panel, height, onPointerDown, onKeyDown };
 }
 
-export function CodeWorkspace({ state }: { state: ChatState }) {
-  const codeMode = useBodyClass("code-mode");
+/** `routed`: rendered by Start's Code route (web), which means Code mode is on; else it follows `body.code-mode`. */
+export function CodeWorkspace({ state, routed = false }: { state: ChatState; routed?: boolean }) {
+  const bodyCodeMode = useBodyClass("code-mode");
+  const codeMode = routed || bodyCodeMode;
   const sidebarCollapsed = useBodyClass("code-sidebar-collapsed");
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem(PANEL_KEY) !== "0");
   const slot = useTitlebarSlot(codeMode);
@@ -129,7 +131,7 @@ export function CodeWorkspace({ state }: { state: ChatState }) {
     });
 
   return (
-    <div id="code-workspace" aria-label="Code workspace" className={cn("fixed inset-0 z-30 flex bg-settings text-foreground-2", !codeMode && "hidden")}>
+    <div id="code-workspace" aria-label="Code workspace" data-route-owner={routed ? "start" : undefined} className={cn("fixed inset-0 z-30 flex bg-settings text-foreground-2", !codeMode && "hidden")}>
       {slot && createPortal(<Breadcrumb state={state} />, slot)}
       {codeMode && !sidebarCollapsed && <CodeSidebar state={state} />}
       <div className="flex min-w-0 flex-1 flex-col">
