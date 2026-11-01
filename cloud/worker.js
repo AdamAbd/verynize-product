@@ -8,12 +8,13 @@ import {
   fail,
   readJson,
   readBytes,
-  documentText,
   errorResponse,
   rpc,
   roleRank,
+  atLeast,
   HttpError,
 } from "./http.js";
+import { MESSAGE_BYTES, REQUEST_BYTES } from "./limits.js";
 import { SESSION } from "./accounts.js";
 import { AUTH_BASE_PATH, createAuth } from "./auth.js";
 import {
@@ -36,6 +37,8 @@ import { passkeyPage, passkeyScript } from "./passkey-page.js";
 import { verifiedPage, resetPasswordPage, resetPasswordScript } from "./account-pages.js";
 import * as profiles from "./profiles.js";
 import { handleRoomAssets } from "./assets.js";
+import { requireRoomAccount } from "./web-access.js";
+import { extractInline, migrateRoomInline } from "./inline-binaries.js";
 
 export { DesignRoom } from "./rooms.js";
 export { AccountDirectory } from "./accounts.js";
@@ -44,7 +47,7 @@ export { AiRun } from "./ai-run.js";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const ROOM_ROUTE = new RegExp(
-  `^/api/rooms/(${UUID})(/socket|/publish|/ops|/access|/members(?:/${UUID})?|/claim|/organization|/tokens(?:/rotate|/${UUID})?|/comments)?$`,
+  `^/api/rooms/(${UUID})(/socket|/publish|/ops|/pages|/access|/members(?:/${UUID})?|/claim|/organization|/tokens(?:/rotate|/${UUID})?|/comments)?$`,
 );
 const APP_ROUTE = new RegExp(
   `^/api/apps/(${UUID})(/versions(?:/(\\d+)(/finalize|/files/(.+))?)?|/activate|/publish)?$`,
@@ -260,6 +263,8 @@ async function handleAuth(request, env, url) {
       sessions: (await directory(env).sessionCount(account.id)) + authSessions,
       profilePath: `/u/${account.handle}`,
       personalOrganizationId,
+      // Web onboarding: when the AI setup steps were finished or skipped, null before.
+      aiSetupAt: await profiles.aiSetupAt(env, account.id),
     });
   }
   if (path === "/api/me" && request.method === "PATCH") {
@@ -273,7 +278,12 @@ async function handleAuth(request, env, url) {
       }),
     );
     await directory(env).mirrorAccount(updated);
-    return json({ account: updated, profilePath: `/u/${updated.handle}` });
+    // `aiSetup: true` records the web AI setup as finished (or skipped); false shows it again.
+    const aiSetupAt =
+      data.aiSetup === undefined
+        ? await profiles.aiSetupAt(env, account.id)
+        : await profiles.setAiSetup(env, account.id, data.aiSetup === true);
+    return json({ account: updated, profilePath: `/u/${updated.handle}`, aiSetupAt });
   }
   if (path === "/api/me/rooms" && request.method === "GET") {
     const account = await requireAccount(env, request, url);
@@ -363,13 +373,37 @@ async function handleAuth(request, env, url) {
   return null;
 }
 
+/**
+ * The body of a snapshot write or HTTP batch with its large inline binaries stored as room
+ * assets, when the caller may edit the room. Other callers get their body forwarded unchanged
+ * (the room refuses the write by role, or rejects the inline data).
+ */
+async function inlineWrite(request, env, url, roomId, account, orgRole, stub, limit) {
+  const data = await readJson(request, limit);
+  const target = Array.isArray(data?.ops) ? "ops" : "document";
+  if (!data?.[target]) return data;
+  const asGet = new Request(request.url, { method: "GET", headers: request.headers });
+  const extract = async () => {
+    const checked = await stub.fetch(
+      roomRequest(new URL("https://room/access"), asGet, account, undefined, orgRole),
+    );
+    if (!checked.ok || !atLeast((await checked.json()).role, "editor")) return data;
+    const { value } = await extractInline(env, url.origin, roomId, data[target], account?.id);
+    return { ...data, [target]: value };
+  };
+  return globalThis.VerynizeStorageLimits.inlineBinaries(data[target]).length ? extract() : data;
+}
+
 async function handleRooms(request, env, url) {
   if (url.pathname === "/api/rooms" && request.method === "POST") {
     if (await limited(env.ROOM_CREATION, ip(request)))
       return json({ error: "Too many new rooms. Try again in a minute." }, 429);
-    const data = await readJson(request);
-    documentText(data.document);
+    const data = await readJson(request, REQUEST_BYTES);
+    if (data.document === null || typeof data.document !== "object")
+      fail(400, "Document must be a JSON object or array");
     const account = await accountOf(env, request, url);
+    // The web app (and, with ROOM_ACCOUNT_REQUIRED=all, every client) creates rooms signed in.
+    requireRoomAccount(env, request, url, account, { creating: true });
     // Email accounts create rooms in an organization: the one named, or their personal one.
     let organizationId = null;
     if (account?.authUser) {
@@ -386,8 +420,16 @@ async function handleRooms(request, env, url) {
     } else if (data.organizationId !== undefined)
       fail(401, "Sign in with your email and password to create rooms in an organization");
     const id = crypto.randomUUID();
+    // Large inline binaries become assets of the new room (cloud/inline-binaries.js).
+    const { value: document } = await extractInline(
+      env,
+      url.origin,
+      id,
+      data.document,
+      account?.id,
+    );
     const response = await env.ROOMS.getByName(id).fetch(
-      roomRequest("https://room/create", request, account, { document: data.document }),
+      roomRequest("https://room/create", request, account, { document }),
     );
     const result = await response.json();
     if (response.ok && account) await profiles.linkRoom(env, account.id, id, "owner", result.title);
@@ -424,11 +466,17 @@ async function handleRooms(request, env, url) {
   const roomId = match[1],
     action = match[2] || "/room";
   const account = await accountOf(env, request, url);
+  requireRoomAccount(env, request, url, account);
   const orgRole = account?.authUser ? await orgRoomRole(env, roomId, account.authUser.id) : null;
   const forward = new URL("https://room" + action);
   if (action === "/socket")
-    for (const key of ["token", "client"])
+    for (const key of ["token", "client", "lazy"])
       if (url.searchParams.get(key)) forward.searchParams.set(key, url.searchParams.get(key));
+  // Lazy page loading (cloud/room-store.js): `lazy=1&page=<id>` on GET /room, `id=<page>` on /pages.
+  if (action === "/room" || action === "/pages")
+    for (const key of ["lazy", "page", "id"])
+      for (const value of url.searchParams.getAll(key).slice(0, 200))
+        forward.searchParams.append(key, value);
   const stub = env.ROOMS.getByName(roomId);
 
   if (action === "/members" && request.method === "POST") {
@@ -476,7 +524,37 @@ async function handleRooms(request, env, url) {
     const org = await roomOrganization(env, roomId);
     return json({ organization: { id: org.id, name: org.name } });
   }
-  const response = await stub.fetch(roomRequest(forward, request, account, undefined, orgRole));
+  // Room assets (cloud/inline-binaries.js): rooms are migrated to asset URLs when opened, and
+  // inline binaries in snapshot writes and HTTP batches become assets before the room sees them.
+  // Lazy clients migrate the pages they load: `page` on GET /room?lazy=1, `id` on /pages.
+  if (action === "/socket" || (action === "/room" && request.method === "GET"))
+    await migrateRoomInline(
+      env,
+      url.origin,
+      roomId,
+      stub,
+      action === "/room" && url.searchParams.get("lazy") === "1"
+        ? forward.searchParams.getAll("page")
+        : null,
+    );
+  if (action === "/pages" && request.method === "GET")
+    await migrateRoomInline(env, url.origin, roomId, stub, forward.searchParams.getAll("id"));
+  let body;
+  if (
+    (action === "/room" && request.method === "PUT") ||
+    (action === "/ops" && request.method === "POST")
+  )
+    body = await inlineWrite(
+      request,
+      env,
+      url,
+      roomId,
+      account,
+      orgRole,
+      stub,
+      action === "/ops" ? MESSAGE_BYTES : REQUEST_BYTES,
+    );
+  const response = await stub.fetch(roomRequest(forward, request, account, body, orgRole));
   if (action === "/socket" || !response.ok) return response;
   const result = await response.json();
   if (result?.title) await syncTitle(env, roomId, result.title);

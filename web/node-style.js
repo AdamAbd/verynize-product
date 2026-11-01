@@ -250,6 +250,9 @@
   const MASK_COMPOSITES = ['add', 'subtract', 'intersect', 'exclude'];
   const MASK_SIZE = /^(auto|cover|contain|\d{1,5}(\.\d{1,3})?(px|%)( \d{1,5}(\.\d{1,3})?(px|%))?)$/;
   const MASK_IMAGE = /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
+  // Room asset URLs (cloud/assets.js): the check lives in web/document-core.js, loaded after this file.
+  const assetUrl = v => !!root.VerynizeDocument?.isRoomAssetUrl?.(v);
+  const imageSource = v => typeof v === 'string' && (MASK_IMAGE.test(v) || assetUrl(v));
   const MASK_CSS = /^(repeating-)?(linear|radial|conic)-gradient\([^;{}<>\\]{1,2000}\)$/i;
   const MASK_SHAPE = /^inset\(-?\d{1,5}(\.\d{1,3})?%( -?\d{1,5}(\.\d{1,3})?%){0,3}\)$/;
   /** inset() percentages as [top, right, bottom, left] (CSS shorthand: 1–4 values), or null. */
@@ -320,7 +323,7 @@
     if (n.strokeToken && tokens && FX_HEX.test(tokens[n.strokeToken] || '')) return tokens[n.strokeToken];
     return '';
   }
-  const usableMask = m => MASK_TYPES.includes(m.type) && (m.type !== 'image' || MASK_IMAGE.test(m.src || '')) && (m.type !== 'custom' || MASK_CSS.test(m.css || '')) && (m.type !== 'shape' || !!maskInset(m.shape));
+  const usableMask = m => MASK_TYPES.includes(m.type) && (m.type !== 'image' || imageSource(m.src)) && (m.type !== 'custom' || MASK_CSS.test(m.css || '')) && (m.type !== 'shape' || !!maskInset(m.shape));
   const isBool = v => v === undefined || typeof v === 'boolean';
   const finite = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
   /** Validate the structured effect fields of a layer. Returns an error message, or '' when valid. */
@@ -350,7 +353,7 @@
     if (!list(n.masks, 8)) return 'Invalid masks';
     for (const m of n.masks || []) {
       if (!MASK_TYPES.includes(m.type) || !finite(m.rotation ?? 0, -3600, 3600) || !finite(m.alpha ?? 100, 0, 100) || !isBool(m.invert)) return 'Invalid mask';
-      if (m.type === 'image' && (typeof m.src !== 'string' || m.src.length > 15e6 || !MASK_IMAGE.test(m.src))) return 'Image mask needs an embedded base64 image';
+      if (m.type === 'image' && (typeof m.src !== 'string' || m.src.length > 15e6 || !imageSource(m.src))) return 'Image mask needs an embedded base64 image or a room asset';
       if (m.type === 'custom' && (typeof m.css !== 'string' || !MASK_CSS.test(m.css) || /url\s*\(/i.test(m.css))) return 'Custom mask needs a CSS gradient';
       if (m.type === 'shape' && !maskInset(m.shape)) return 'Shape mask needs an inset() of percentages';
       if (m.shape !== undefined && m.type !== 'shape') return 'Invalid mask';
@@ -409,8 +412,8 @@
       }
       return "";
     }
-    if (typeof p.src !== "string" || p.src.length > 15e6 || !PAINT_IMAGE.test(p.src))
-      return "Image paint needs an embedded base64 image";
+    if (typeof p.src !== "string" || p.src.length > 15e6 || !(PAINT_IMAGE.test(p.src) || assetUrl(p.src)))
+      return "Image paint needs an embedded base64 image or a room asset";
     if (p.fit !== undefined && !IMAGE_FITS.includes(p.fit))
       return "Image fit must be fill, cover, contain or none";
     for (const k of ["imageWidth", "imageHeight"])
@@ -536,6 +539,11 @@
     const fit = pick(p.fit, IMAGE_FITS, "fill");
     let url = p.src,
       size = IMAGE_SIZE[fit];
+    if (o < 100 && !/^data:/.test(p.src)) {
+      // Room asset URL: an SVG image cannot load it, so fade it against a transparent layer.
+      const image = `-webkit-cross-fade(linear-gradient(transparent, transparent), url("${p.src}"), ${Math.round(o)}%)`;
+      return { image, size, position: "center", repeat: "no-repeat" };
+    }
     if (o < 100) {
       // CSS has no per-layer opacity: wrap the bitmap in an SVG image that applies it.
       const w = num(p.imageWidth),

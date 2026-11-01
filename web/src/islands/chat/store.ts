@@ -25,6 +25,9 @@ export type ChatPart = {
   questions?: ChatQuestion[];
   /** Answers once submitted; absent while pending. */
   answers?: Record<string, string>;
+  // auth (kind "auth"): the provider account is signed out; one sign-in card per reply (chat/auth-card.tsx)
+  agent?: string;
+  account?: { id: string; name: string; system: boolean };
 };
 export type ChatQuestion = { id: string; question: string; header?: string; options?: { label: string; description?: string }[]; multiSelect?: boolean };
 /** A canvas element referenced from the composer (@mention or selection chip). */

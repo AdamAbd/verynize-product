@@ -152,6 +152,21 @@ export async function updateProfile(env, accountId, patch) {
   return getProfile(env, accountId);
 }
 
+/** When the account finished or skipped the web AI setup steps (epoch ms), or null. */
+export async function aiSetupAt(env, accountId) {
+  return (await byId(env, accountId))?.aiSetupAt ?? null;
+}
+/** Records (`done` true) or clears the web AI setup completion; returns the stored value. */
+export async function setAiSetup(env, accountId, done) {
+  const value = done ? Date.now() : null;
+  await database(env)
+    .update(profile)
+    .set({ aiSetupAt: value })
+    .where(eq(profile.id, accountId))
+    .run();
+  return value;
+}
+
 /** Public creator profile (verified accounts only); app paths follow handle changes. */
 export async function publicCreator(env, handle) {
   const row = typeof handle === "string" ? await byHandle(env, handle.toLowerCase()) : null;

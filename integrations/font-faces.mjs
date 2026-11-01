@@ -6,6 +6,9 @@ const FAMILY = /^[^;{}<>\\"]{1,100}$/;
 const WEIGHT = /^(normal|bold|[1-9]00( [1-9]00)?)$/;
 const SOURCE = /^data:font\/(woff2|woff|ttf|otf);base64,[A-Za-z0-9+/=]+$/;
 const RANGE = /^[\w+?, -]{1,2000}$/;
+// Shared rooms store fonts as room assets (cloud/assets.js): the same URL check as the schema.
+const ASSET_URL =
+  /^https?:\/\/[A-Za-z0-9.:[\]-]+\/api\/rooms\/[0-9a-f-]{36}\/assets\/[0-9a-f-]{36}(\?sig=[0-9a-f]{64})?$/;
 
 const valid = (f) =>
   f &&
@@ -14,7 +17,7 @@ const valid = (f) =>
   WEIGHT.test(String(f.weight)) &&
   ["normal", "italic", "oblique"].includes(f.style) &&
   typeof f.src === "string" &&
-  SOURCE.test(f.src) &&
+  (SOURCE.test(f.src) || ASSET_URL.test(f.src)) &&
   (f.unicodeRange === undefined ||
     (typeof f.unicodeRange === "string" && RANGE.test(f.unicodeRange)));
 

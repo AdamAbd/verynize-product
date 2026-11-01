@@ -1,5 +1,5 @@
 // Published running apps: a real project build (its own npm script) is collected, uploaded to
-// local workerd through the HTTP API and served with versioning, rollback and unpublish.
+// local workerd through the HTTP API and served with versioning, rollback and unpublish. File bytes are stored in the asset bucket (R2).
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -12,6 +12,25 @@ const publisher = require("../desktop/app-publish.cjs");
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-apps-"));
 const options = await cloudOptions(path.join(dir, "state"));
 let mf = new Miniflare(options);
+/** Keys of the published app files in the asset bucket (R2 on workerd, the blob directory on Node). */
+async function appObjects() {
+  if (typeof mf.getR2Bucket === "function") {
+    const bucket = await mf.getR2Bucket("ASSETS_BUCKET");
+    return (await bucket.list({ prefix: "apps/" })).objects.map((object) => object.key).sort();
+  }
+  const root = path.join(dir, "state", "blobs", "verynize-assets");
+  const found = [];
+  const walk = async (folder) => {
+    for (const entry of await fs.readdir(folder, { withFileTypes: true }).catch(() => [])) {
+      const file = path.join(folder, entry.name);
+      if (entry.isDirectory()) await walk(file);
+      else if (!/\.(meta\.json|tmp)$/.test(entry.name))
+        found.push(path.relative(root, file).split(path.sep).join("/"));
+    }
+  };
+  await walk(path.join(root, "apps"));
+  return found.sort();
+}
 const png = Buffer.from(
   "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360f8cfc0f01f0005000201a5f1b6f40000000049454e44ae426082",
   "hex",
@@ -166,11 +185,23 @@ try {
   );
   assert.equal(listing.app.activeVersion, 2);
 
+  // File bytes live in the asset bucket, one object per distinct file shared by both versions.
+  const stored = await appObjects();
+  assert.ok(stored.length >= 6 && stored.length < 12, stored.join(", "));
+  assert.ok(
+    stored.every((key) => /^apps\/[^/]+\/[0-9a-f]{64}$/.test(key)),
+    stored.join(", "),
+  );
+
   // Rollback, then deleting the live version is refused while the old one can go.
   assert.equal((await api(`/api/apps/${appId}/activate`, "POST", { version: 1 })).status, 200);
   assert.match(await (await get(`/apps/${handle}/demo-site/`)).text(), /Version one/);
   assert.equal((await api(`/api/apps/${appId}/versions/1`, "DELETE")).status, 409);
   assert.equal((await api(`/api/apps/${appId}/versions/2`, "DELETE")).status, 200);
+  // Objects only version 2 used are deleted; version 1's stay.
+  const remaining = await appObjects();
+  assert.ok(remaining.length < stored.length && remaining.length >= 6, remaining.join(", "));
+  assert.ok(remaining.every((key) => stored.includes(key)));
   assert.equal((await get(`/apps/${handle}/demo-site@2/`)).status, 404);
   assert.equal((await api(`/api/apps/${appId}/activate`, "POST", { version: 2 })).status, 404);
 

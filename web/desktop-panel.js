@@ -168,6 +168,7 @@
     }
     if(part.kind==='question'){const card=el('div','chat-question '+(part.state||''));for(const q of part.questions||[])card.append(el('p',null,q.question+(part.answers?' → '+(part.answers[q.id]||'No answer'):'')));return card;}
     if(part.kind==='error')return el('div','chat-error',part.text);
+    if(part.kind==='auth')return el('div','chat-auth',part.text);
     return el('div');
   };
   const renderMessage=(message,index)=>{
@@ -266,7 +267,7 @@
   }
   // Former project-dialog actions, now in the Code workspace menus (repository row, Start preview menu) and the app menu.
   const openDesign=action(async()=>{const result=await api.designOpen().catch(error=>{window.documentSafety.reportOpenFailure({error,source:'native',name:'Design file',kept:'The file was not changed.'});throw error});if(result){if(window.fileLibrary?.openNative)await window.fileLibrary.openNative(result);else {await window.documentLifecycle?.prepareSwitch({preserveNative:true});window.design.setDocument(result.document);}status('Opened '+result.path);}});
-  const saveDesign=async saveAs=>{const fileId=window.fileLibrary?.currentId;const result=await api.designSave({document:window.design.getDocument(),saveAs});if(result&&!result.detached&&fileId===window.fileLibrary?.currentId){window.fileLibrary?.setNativePath?.(result.path);status('Saved '+result.path+' · MCP can edit this file');}};
+  const saveDesign=async saveAs=>{await window.pageLoader?.ensureAll();const fileId=window.fileLibrary?.currentId;const result=await api.designSave({document:window.design.getDocument(),saveAs}).catch(error=>{/* size limits: web/storage-limits.js */if(window.storageLimits?.isSizeError(error))window.storageLimits.reportError(error.message,'save');throw error});if(result&&!result.detached&&fileId===window.fileLibrary?.currentId){window.fileLibrary?.setNativePath?.(result.path);status('Saved '+result.path+' · MCP can edit this file');}};
   if(api){document.getElementById('save-project').onclick=action(()=>saveDesign(false));
   document.getElementById('open-project').onclick=openDesign;}
   if(api)api.onDesignFileChanged(event=>{const active=window.fileLibrary?.list().find(file=>file.id===window.fileLibrary.currentId);if(active&&!active.nativePath)return;if(active?.nativePath&&active.nativePath!==event.path)return;if(event.error){status(event.error);return;}status('Design changed on disk: '+event.path);if(window.confirm('The design file changed outside the editor. Load its latest version?'))api.designReload().then(result=>{window.design.setDocument(result.document);status('Loaded external design changes');}).catch(e=>status(e.message));});
@@ -349,7 +350,7 @@
     if(event.sessionId&&event.resumeAt&&entry.replies.length)entry.replies.at(-1).resumePoint={sessionId:event.sessionId,at:event.resumeAt,agent:entry.task.agent,key:entry.key,toolsVersion:entry.version};
     if(event.code===0||event.stopped)stats.completed++;else stats.failed++;
     output(`\n[${event.stopped?'stopped':'exit '+event.code}]\n`);persistChat(entry);renderHistory();window.dispatchEvent(new CustomEvent('code-files-changed',{detail:{root:rootOf(chat,entry.key)}}));
-    status(chat!==conversation?`“${chat.title}” ${event.stopped?'stopped':event.code===0?'finished':'failed'}`:event.stopped?'Stopped':event.code===0?'Done':'The agent reported an error');
+    status(chat!==conversation?`“${chat.title}” ${event.stopped?'stopped':event.code===0?'finished':entry.authRequired?'needs sign-in':'failed'}`:event.stopped?'Stopped':event.code===0?'Done':entry.authRequired?'Sign in to continue':'The agent reported an error');
     if(event.code===0)autoTitle(entry,chat);
     // Stop keeps the queue (paused); "send now" stops the run and starts the chosen task.
     const q=queueOf(chat);let next=null;
@@ -378,7 +379,9 @@
       case 'question-request':reply.parts.push({kind:'question',requestId:event.requestId,runId:event.id,questions:normalizeQuestions(event.questions),state:'pending',at:Date.now()});status((here?'':`“${chat.title}”: `)+'The agent has a question');persistChat(entry);break;
       case 'question-resolved':{const part=entry.replies.flatMap(r=>r.parts||[]).find(p=>p.kind==='question'&&p.requestId===event.requestId);if(part&&part.state==='pending'){part.state=event.answers?'answered':'expired';if(event.answers)part.answers=event.answers;}break;}
       case 'usage':reply.usage=normalizeUsage(event,reply.usage);chat.usage=reply.usage;break;
-      case 'error':reply.parts.push({kind:'error',text:event.text});output('\n[error] '+event.text+'\n');break;
+      case 'error':if(entry.authRequired)break;reply.parts.push({kind:'error',text:event.text});output('\n[error] '+event.text+'\n');break;
+      // Signed-out provider account (desktop/agent-runtime.cjs requireAuth): one sign-in card per run (chat/auth-card.tsx); later errors are dropped.
+      case 'auth-required':{if(entry.authRequired)break;entry.authRequired=true;const a=event.account&&typeof event.account==='object'?event.account:{};reply.parts.push({kind:'auth',agent:String(event.agent||entry.task.agent),text:String(event.text||'').slice(0,600),account:{id:String(a.id||'system'),name:String(a.name||''),system:a.system!==false}});output('\n['+(event.text||'Sign-in needed')+']\n');if(here)status(event.text||'Sign-in needed');persistChat(entry);break;}
       // Chat autonomy (desktop/agent-autonomy.cjs): the run's effective settings and automatic allow/deny/limit decisions.
       case 'autonomy':if(event.text)reply.parts.push({kind:'autonomy',text:String(event.text).slice(0,600)});break;
       case 'policy':reply.parts.push({kind:'policy',decision:String(event.decision||''),toolName:String(event.toolName||''),text:String(event.text||'').slice(0,600)});output('\n['+(event.text||event.decision)+']\n');if(event.decision==='limit'&&here)status(event.text);break;
