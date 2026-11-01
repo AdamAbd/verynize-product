@@ -168,6 +168,7 @@
     }
     if(part.kind==='question'){const card=el('div','chat-question '+(part.state||''));for(const q of part.questions||[])card.append(el('p',null,q.question+(part.answers?' → '+(part.answers[q.id]||'No answer'):'')));return card;}
     if(part.kind==='error')return el('div','chat-error',part.text);
+    if(part.kind==='auth')return el('div','chat-auth',part.text);
     return el('div');
   };
   const renderMessage=(message,index)=>{
@@ -349,7 +350,7 @@
     if(event.sessionId&&event.resumeAt&&entry.replies.length)entry.replies.at(-1).resumePoint={sessionId:event.sessionId,at:event.resumeAt,agent:entry.task.agent,key:entry.key,toolsVersion:entry.version};
     if(event.code===0||event.stopped)stats.completed++;else stats.failed++;
     output(`\n[${event.stopped?'stopped':'exit '+event.code}]\n`);persistChat(entry);renderHistory();window.dispatchEvent(new CustomEvent('code-files-changed',{detail:{root:rootOf(chat,entry.key)}}));
-    status(chat!==conversation?`“${chat.title}” ${event.stopped?'stopped':event.code===0?'finished':'failed'}`:event.stopped?'Stopped':event.code===0?'Done':'The agent reported an error');
+    status(chat!==conversation?`“${chat.title}” ${event.stopped?'stopped':event.code===0?'finished':entry.authRequired?'needs sign-in':'failed'}`:event.stopped?'Stopped':event.code===0?'Done':entry.authRequired?'Sign in to continue':'The agent reported an error');
     if(event.code===0)autoTitle(entry,chat);
     // Stop keeps the queue (paused); "send now" stops the run and starts the chosen task.
     const q=queueOf(chat);let next=null;
@@ -378,7 +379,9 @@
       case 'question-request':reply.parts.push({kind:'question',requestId:event.requestId,runId:event.id,questions:normalizeQuestions(event.questions),state:'pending',at:Date.now()});status((here?'':`“${chat.title}”: `)+'The agent has a question');persistChat(entry);break;
       case 'question-resolved':{const part=entry.replies.flatMap(r=>r.parts||[]).find(p=>p.kind==='question'&&p.requestId===event.requestId);if(part&&part.state==='pending'){part.state=event.answers?'answered':'expired';if(event.answers)part.answers=event.answers;}break;}
       case 'usage':reply.usage=normalizeUsage(event,reply.usage);chat.usage=reply.usage;break;
-      case 'error':reply.parts.push({kind:'error',text:event.text});output('\n[error] '+event.text+'\n');break;
+      case 'error':if(entry.authRequired)break;reply.parts.push({kind:'error',text:event.text});output('\n[error] '+event.text+'\n');break;
+      // Signed-out provider account (desktop/agent-runtime.cjs requireAuth): one sign-in card per run (chat/auth-card.tsx); later errors are dropped.
+      case 'auth-required':{if(entry.authRequired)break;entry.authRequired=true;const a=event.account&&typeof event.account==='object'?event.account:{};reply.parts.push({kind:'auth',agent:String(event.agent||entry.task.agent),text:String(event.text||'').slice(0,600),account:{id:String(a.id||'system'),name:String(a.name||''),system:a.system!==false}});output('\n['+(event.text||'Sign-in needed')+']\n');if(here)status(event.text||'Sign-in needed');persistChat(entry);break;}
       // Chat autonomy (desktop/agent-autonomy.cjs): the run's effective settings and automatic allow/deny/limit decisions.
       case 'autonomy':if(event.text)reply.parts.push({kind:'autonomy',text:String(event.text).slice(0,600)});break;
       case 'policy':reply.parts.push({kind:'policy',decision:String(event.decision||''),toolName:String(event.toolName||''),text:String(event.text||'').slice(0,600)});output('\n['+(event.text||event.decision)+']\n');if(event.decision==='limit'&&here)status(event.text);break;
