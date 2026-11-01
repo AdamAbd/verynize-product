@@ -50,13 +50,13 @@
   display: none;
 }
 body.bd-chrome.agent-chat-open #preview-tab-view {
-  left: var(--spacing-chat);
+  left: var(--chat-dock-width);
 }
 body.bd-chrome.chat-sidebar-open:not(.code-mode) #preview-tab-view {
   left: var(--spacing-code-sidebar);
 }
 body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) #preview-tab-view {
-  left: calc(var(--spacing-code-sidebar) + var(--spacing-chat));
+  left: calc(var(--spacing-code-sidebar) + var(--chat-dock-width));
 }
 body[data-pt="view"]:not(.code-mode):not(.files-view) #preview-toolbar,
 body[data-pt="view"]:not(.code-mode):not(.files-view) #canvas-toolbar {

@@ -4,6 +4,7 @@
 // worktree, switching chats switches the tree root, the list survives a reload and Design returns to the canvas.
 // CODE_WORKSPACE_SHOT=/path.png saves a screenshot of the populated workspace.
 const { _electron } = require('@playwright/test');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -31,7 +32,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
   const rpc = async method => (await fs.readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(c => c.rpc === method && !/agent-workdirs[\/\\]titles|word title for a design chat/.test(JSON.stringify(c.params || {})));
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
-    const page = await app.firstWindow({ timeout: 20000 });
+    const page = await app.firstWindow({ timeout: 20000 }); await moveOffCursor(app);
     await waitForUiReady(page);
     await page.setViewportSize({ width: 1440, height: 870 });
     await page.waitForSelector('#project-toggle', { state: 'attached' });

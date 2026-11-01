@@ -507,3 +507,17 @@ html[data-ui-theme="light"] {
   --color-context-menu-destructive-disabled: var(--context-menu-destructive-disabled);
 }
 /* </context-menu-tokens> */
+
+/* <panel-resize-tokens> (drag-to-resize panel edges, chrome/panel-resize.tsx; Wonder sidebar-resize recording)
+ * Live widths of the resizable columns, track width including the 1px edge. Defaults are the measured Wonder widths
+ * (280 + 1px edge panels, 499px chat dock); chrome/panel-resize.tsx overrides them inline on <html> while dragging and
+ * from the saved widths. */
+:root {
+  --panel-left-width: 281px;
+  --panel-right-width: 281px;
+  --chat-dock-width: 499px;
+}
+@theme inline {
+  --spacing-chat-dock: var(--chat-dock-width);
+}
+/* </panel-resize-tokens> */

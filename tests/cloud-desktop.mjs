@@ -1,12 +1,14 @@
 import { Miniflare as Workerd } from 'miniflare';
 import { Miniflare, cloudOptions } from './cloud-harness.mjs';
 import {_electron as electron} from '@playwright/test';
+import {createRequire} from 'node:module';
+const {moveOffCursor}=createRequire(import.meta.url)('./helpers/off-cursor.cjs');
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'better-cloud-ui-'));
 const options=await cloudOptions(path.join(dir,'state'));
 const mf=new Miniflare(options);
-const apps=[];let legacyMf;try{const server=(await mf.ready).origin;const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1';for(const label of ['a','b'])apps.push(await electron.launch({env,args:['.',`--user-data-dir=${path.join(dir,label)}`]}));const [a,b]=await Promise.all(apps.map(app=>app.firstWindow()));await Promise.all([a,b].map(page=>page.waitForFunction(()=>!!window.design)));
+const apps=[];let legacyMf;try{const server=(await mf.ready).origin;const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1';for(const label of ['a','b'])apps.push(await electron.launch({env,args:['.',`--user-data-dir=${path.join(dir,label)}`]}));const [a,b]=await Promise.all(apps.map(app=>app.firstWindow()));await Promise.all(apps.map(moveOffCursor));await Promise.all([a,b].map(page=>page.waitForFunction(()=>!!window.design)));
  await a.locator('#cloud-toggle').click();await a.locator('#cloud-server').fill(server);await a.locator('#cloud-create').click();await a.waitForFunction(()=>document.getElementById('cloud-invite').value.includes('token='));const invite=await a.locator('#cloud-invite').inputValue();
  b.on('dialog',async dialog=>dialog.accept(dialog.type()==='prompt'?invite:undefined));await b.locator('#cloud-toggle').click();await b.locator('#cloud-invite').fill(invite);await b.locator('#cloud-connect').click();await b.waitForFunction(()=>document.getElementById('cloud-status').textContent.includes('Connected'));await a.waitForFunction(()=>document.getElementById('cloud-presence').textContent==='2 connected');
  await a.locator('#cloud-name').fill('Alice');await a.locator('#cloud-name').press('Tab');await b.locator('#cloud-name').fill('Bob');await b.locator('#cloud-name').press('Tab');await a.locator('#cloud-close').click();await b.locator('#cloud-close').click();const canvasBox=await a.locator('#canvas').boundingBox();await a.mouse.move(canvasBox.x+100,canvasBox.y+100);await b.waitForFunction(()=>document.querySelector('.collaborator-cursor')?.textContent.includes('Alice'));assert.equal(await b.locator('.collaborator-cursor').evaluate(e=>parseFloat(e.style.left)>0),true);await a.locator('.app-menu-trigger:visible').first().click();await a.locator('#rectangle').click();await b.waitForFunction(()=>window.design.getDocument().pages[0].nodes.length===4);assert.equal((await b.evaluate(()=>window.design.getDocument())).pages[0].nodes.length,4);

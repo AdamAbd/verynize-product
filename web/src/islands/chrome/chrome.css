@@ -1,6 +1,7 @@
 /*
  * Chrome island: plain CSS for legacy DOM the island cannot render itself (main grid, panel columns, chat dock
- * placement) plus window-drag regions. Values: 281px panels (280 + 1px edge), 499px chat dock (22, 29).
+ * placement) plus window-drag regions. Panel and chat dock widths are the live `--panel-left-width`,
+ * `--panel-right-width` and `--chat-dock-width` (panel-resize.tsx; defaults 281px = 280 + 1px edge, 499px (22, 29)).
  * `!important` because legacy/parity stylesheets still style these elements with higher specificity.
  */
 
@@ -26,16 +27,16 @@ body.bd-chrome > main {
   height: calc(100vh - 40px) !important;
   margin: 0 !important;
   width: 100% !important;
-  grid-template-columns: 281px minmax(0, 1fr) 281px !important;
+  grid-template-columns: var(--panel-left-width) minmax(0, 1fr) var(--panel-right-width) !important;
   grid-template-rows: minmax(0, 1fr) !important;
   overflow: hidden;
   transition: none;
 }
 body.bd-chrome.left-collapsed > main {
-  grid-template-columns: 0 minmax(0, 1fr) 281px !important;
+  grid-template-columns: 0 minmax(0, 1fr) var(--panel-right-width) !important;
 }
 body.bd-chrome.right-collapsed > main {
-  grid-template-columns: 281px minmax(0, 1fr) 0 !important;
+  grid-template-columns: var(--panel-left-width) minmax(0, 1fr) 0 !important;
 }
 body.bd-chrome.left-collapsed.right-collapsed > main {
   grid-template-columns: 0 minmax(0, 1fr) 0 !important;
@@ -75,12 +76,12 @@ body.bd-chrome > main > #workspace {
   background: var(--canvas);
 }
 
-/* ---------- Chat open (29): dock 499px on the left, full height; the editor grid shifts right ----------
+/* ---------- Chat open (29): dock (--chat-dock-width) on the left, full height; the editor grid shifts right ----------
  * The layers panel follows `left-collapsed` only, so it can sit beside the dock (chrome.tsx collapses it when the
  * chat opens and restores it when the chat closes). Legacy `body.agent-chat-open #layer-panel{display:none}` is undone. */
 body.bd-chrome.agent-chat-open > main {
-  margin-left: 499px !important;
-  width: calc(100% - 499px) !important;
+  margin-left: var(--chat-dock-width) !important;
+  width: calc(100% - var(--chat-dock-width)) !important;
 }
 body.bd-chrome.agent-chat-open > main > #layer-panel {
   display: block !important;
@@ -89,7 +90,7 @@ body.bd-chrome.agent-chat-open #agent-chat-dock {
   top: 0 !important;
   bottom: 0 !important;
   left: 0 !important;
-  width: 499px !important;
+  width: var(--chat-dock-width) !important;
   height: 100vh !important;
   z-index: 45;
   box-sizing: border-box;
@@ -99,7 +100,7 @@ body.bd-chrome.agent-chat-open #agent-chat-dock {
 
 /* The Files home (legacy #file-home, fixed, z-index 45) starts right of the open chat dock instead of covering it. */
 body.bd-chrome.agent-chat-open #file-home {
-  left: var(--spacing-chat) !important;
+  left: var(--chat-dock-width) !important;
 }
 
 /* ---------- Chat sidebar (Design mode, code/design-sidebar.tsx): the repositories / chats list takes the left
@@ -112,8 +113,8 @@ body.bd-chrome.chat-sidebar-open:not(.code-mode) > main {
   width: calc(100% - var(--spacing-code-sidebar)) !important;
 }
 body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) > main {
-  margin-left: calc(var(--spacing-code-sidebar) + var(--spacing-chat)) !important;
-  width: calc(100% - var(--spacing-code-sidebar) - var(--spacing-chat)) !important;
+  margin-left: calc(var(--spacing-code-sidebar) + var(--chat-dock-width)) !important;
+  width: calc(100% - var(--spacing-code-sidebar) - var(--chat-dock-width)) !important;
 }
 body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) #agent-chat-dock {
   left: var(--spacing-code-sidebar) !important;
@@ -122,7 +123,7 @@ body.bd-chrome.chat-sidebar-open:not(.code-mode) #file-home {
   left: var(--spacing-code-sidebar) !important;
 }
 body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) #file-home {
-  left: calc(var(--spacing-code-sidebar) + var(--spacing-chat)) !important;
+  left: calc(var(--spacing-code-sidebar) + var(--chat-dock-width)) !important;
 }
 
 /* ---------- Zoom menu: `#zoom-reset` text is the live percentage (contract); show a label instead ---------- */

@@ -2,6 +2,7 @@
 // opacity, typed variables (dimension/number/font family/font weight) with bindings, the font catalog picker with
 // family-specific weights, and artwork export at 0.5×/4× and as PDF through the native save dialog.
 const {_electron}=require('@playwright/test');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const {waitForUiReady}=require('./helpers/ui-ready.cjs');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
@@ -20,7 +21,7 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
  const env={...process.env,VERYNIZE_FONT_CACHE:fontCache};delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1';
  const app=await _electron.launch({env,args:['.',`--user-data-dir=${path.join(dir,'profile')}`],timeout:20000});
  try{
-  const page=await app.firstWindow({timeout:20000});await waitForUiReady(page);
+  const page=await app.firstWindow({timeout:20000}); await moveOffCursor(app);await waitForUiReady(page);
   await page.waitForSelector('#canvas .layer');
   const doc=()=>page.evaluate(()=>window.design.getDocument());
   // Menus/popovers animate out; wait until the previous one is gone before opening the next.

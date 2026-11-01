@@ -75,6 +75,11 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
 
 - **Layout state** lives in `body` classes: `left-collapsed`, `right-collapsed` (any island may toggle them; the chrome
   island owns the grid CSS that reacts to them), plus legacy `agent-chat-open`, `files-view`, `settings-open`.
+- **Panel widths** are drag-resizable (chrome `chrome/panel-resize.tsx`): read the live `--panel-left-width`,
+  `--panel-right-width` (track width incl. the 1px edge) and `--chat-dock-width` (utility `pl-chat-dock` / spacing
+  `chat-dock`) instead of hard-coding 280/281/499px. Edge strips are `[data-panel-resize=left|right|chat]`
+  (`role=separator`); saved widths are in `localStorage` `verynize.panelWidths`; `html[data-panel-reflow]` is set while
+  a width changes so the canvas pans with its moving left edge.
 - **Main menu**: the chrome island owns the app menu. Anyone opens it with
   `window.dispatchEvent(new CustomEvent("bd:open-app-menu", { detail: { anchor: buttonElement } }))`. Every visible
   trigger button must have class `app-menu-trigger` (tests click `.app-menu-trigger:visible` then a command id such as
@@ -135,6 +140,10 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
   deferred pending ids). It also works for an island built alone (`node scripts/build-ui.cjs <area>`): then only that
   island is counted. Electron tests call `waitForUiReady(page)` from `tests/helpers/ui-ready.cjs` after launch and after
   every reload, before clicking shell controls (`tests/ui-ready.cjs` is the regression test).
+- **Chat composer toolbar** matches Wonder exactly: `+` (attach menu), model picker, access level, then the right-side
+  indicators (works with, autonomy, tools, usage ring) and Send. Don't add chips to it. The design style picker
+  (`chat/style-picker.tsx`, menu `#chat-style-menu`, `window.chatDesignStyle`) has no chip; only the `/style` slash
+  command opens it (event `bd:open-style-picker`), anchored above the composer.
 - **Zoom menu**: tests click `#zoom-menu-button` then `#zoom-in`, `#zoom-out`, `#zoom-fit`, `#zoom-reset`, `#snap`,
   `#saved-views-open` (chrome island). `#zoom-reset` text must keep the zoom percentage (tests parse it).
 - **Inspector**: tests use `[name=w]`, `[name=rotation]`, `[name=opacity]`, `[name=mask-0-css]`, `[name=layout]`,

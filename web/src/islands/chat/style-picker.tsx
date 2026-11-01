@@ -1,13 +1,11 @@
-// Design style picker in the composer: a chip beside the model and access controls that pins one entry of the
-// runtime's design style catalog (platform.desktop.designStylesList) for the next runs. "Auto" (no style) lets the agent
-// choose. The pick is remembered for the session (localStorage) and read by web/desktop-panel.js when it composes a
-// task, through window.chatDesignStyle.get(); the run request then carries it as `designStyle`.
-// Hidden when the desktop build has no style catalog. "/style" (slash command) opens it.
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { PaletteIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
+// Design style picker: a menu opened by the "/style" slash command (Wonder's composer toolbar has no style control, so
+// there is no chip) that pins one entry of the runtime's design style catalog (platform.desktop.designStylesList) for
+// the next runs. "Auto" (no style) lets the agent choose. The pick is remembered for the session (localStorage) and read
+// by web/desktop-panel.js when it composes a task, through window.chatDesignStyle.get(); the run request then carries it
+// as `designStyle`. The menu anchors to the top edge of the composer, like the slash command list; the trigger is a
+// hidden zero-height anchor. Nothing renders when the desktop build has no style catalog.
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { platform } from "@/lib/platform";
-import { ChatChipButton } from "./controls";
 import { ChatMenu, ChatMenuContent, ChatMenuLabel, ChatMenuOptionItem, ChatMenuRadioGroup, ChatMenuSeparator, ChatMenuTrigger } from "./menu";
 
 export type DesignStyle = { id: string; name: string; summary?: string };
@@ -96,6 +94,7 @@ export function StylePicker() {
   const selected = useSyncExternalStore(subscribe, () => current);
   const styles = useStyles();
   const [open, setOpen] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const show = () => setOpen(true);
@@ -103,27 +102,34 @@ export function StylePicker() {
     return () => window.removeEventListener(OPEN_STYLE_PICKER_EVENT, show);
   }, []);
 
+  // Radix focuses the menu itself on open; move on to the current choice so ↑↓ / Enter work straight from the keyboard.
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() =>
+      contentRef.current?.querySelector<HTMLElement>("[role=menuitemradio][aria-checked=true]")?.focus(),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+
   if (!hasStyleCatalog() || styles.length === 0) return null;
   const active = styles.find((s) => s.id === selected);
-  const label = active ? active.name : "Auto";
   return (
     <ChatMenu open={open} onOpenChange={setOpen} modal={false}>
       <ChatMenuTrigger asChild>
-        <ChatChipButton
-          id="chat-style-picker"
-          data-style-id={active?.id ?? AUTO}
-          aria-label={`Design style: ${label}`}
-          title={active?.summary ?? "Design style: the agent picks one that fits the brief"}
-        >
-          <PaletteIcon className={cn("size-3.5", active ? "text-foreground-2" : "text-muted-foreground")} />
-          <span className="max-w-28 truncate">{active ? active.name : "Style"}</span>
-        </ChatChipButton>
+        <span aria-hidden="true" tabIndex={-1} className="pointer-events-none absolute inset-x-0 top-0 h-0" />
       </ChatMenuTrigger>
       <ChatMenuContent
+        ref={contentRef}
         id="chat-style-menu"
+        aria-label="Design style"
         align="start"
         side="top"
         className="max-h-(--radix-dropdown-menu-content-available-height) w-72 overflow-y-auto"
+        onCloseAutoFocus={(event) => {
+          // The hidden anchor can't take focus back; return it to the prompt the command was typed in.
+          event.preventDefault();
+          document.getElementById("project-prompt")?.focus();
+        }}
       >
         <ChatMenuLabel>Design style</ChatMenuLabel>
         <ChatMenuRadioGroup value={active?.id ?? AUTO} onValueChange={setDesignStyle}>

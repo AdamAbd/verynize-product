@@ -4,6 +4,7 @@
 // the previous run), stop confirmation, the embedded terminal, Fix with agent, and the Publish popover.
 // PREVIEW_FRAME_SHOTS=<dir> also writes 1440×870 @2x screenshots of each state (visual parity proof).
 const {_electron} = require('@playwright/test');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -33,7 +34,7 @@ const freePort = () => new Promise(resolve => { const s = net.createServer(); s.
   const app = await _electron.launch({env, args});
   const busy = http.createServer((_q, r) => r.end('Existing app'));
   try {
-    const page = await app.firstWindow();
+    const page = await app.firstWindow(); await moveOffCursor(app);
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.waitForFunction(() => !!window.livePreview?.frameInternals && !!window.livePreview.openPublish);
     if (SHOTS) {
