@@ -11,7 +11,8 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "noUnusedLocals": true,
+    "paths": { "@/*": ["../web/src/*"] },
     "types": []
   },
-  "include": ["src"]
+  "include": ["src", "../web/src/vite-env.d.ts"]
 }

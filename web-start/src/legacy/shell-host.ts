@@ -4,16 +4,14 @@
 // router, and Start's route components tell it which area to show (useShellArea).
 import { useLayoutEffect } from "react";
 import { useLocation, type AnyRouter } from "@tanstack/react-router";
+// Types only: the shell router itself runs when the UI module does (legacy/ui.ts), which also declares
+// window.shellNavigation. Until then it is undefined.
+import type { ShellArea } from "@/lib/router/shell-router";
 
-/** An area of the editor page: a view, or the settings overlay (any /settings path). */
-export type ShellArea = "/" | "/editor" | "/code" | "/settings";
-
-type ShellLocation = { pathname: string; state: unknown };
+export type { ShellArea };
 declare global {
   interface Window {
     verynizeShellHost?: { router: AnyRouter; initialState: unknown };
-    /** Set by the shell router once ui.js has run. */
-    shellNavigation?: { applyLocation(area: ShellArea, location: ShellLocation): boolean };
   }
 }
 
@@ -36,6 +34,6 @@ export function useShellArea(area: ShellArea) {
   const location = useLocation();
   const key = location.state.__TSR_key;
   useLayoutEffect(() => {
-    window.shellNavigation?.applyLocation(area, location);
+    (window.shellNavigation as Window["shellNavigation"] | undefined)?.applyLocation(area, location);
   }, [key]); // oxlint-disable-line react-hooks/exhaustive-deps
 }
