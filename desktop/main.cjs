@@ -24,6 +24,7 @@ require('./app-preferences.cjs').attachDeepLinks(app); // verynize:// design lin
 app.whenReady().then(async () => {
   appProtocol.registerHandler(protocol, net);
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  require('./cloud-defaults.cjs').guardProduction(session.defaultSession); // automated runs never reach the production cloud
   const storageMigration=require('./storage-migration.cjs');const migration=await storageMigration.migrateStorage({app,BrowserWindow}); // one-time file:// → app://verynize localStorage/IndexedDB copy; applies staged old-build edits
   // Design preferences: one file shared by the agent persona (agent-runtime.cjs) and the MCP tools.
   if(!process.env.VERYNIZE_PREFERENCES)process.env.VERYNIZE_PREFERENCES=path.join(app.getPath('userData'),'design-preferences.json');
@@ -68,6 +69,7 @@ app.whenReady().then(async () => {
     require('./agent-memory.cjs').registerAgentMemory(handle,{userData:app.getPath('userData'),shell});
     // First-run onboarding (web/src/islands/onboarding): automated runs skip it with VERYNIZE_SKIP_ONBOARDING=1.
     handle('onboardingState',()=>({skip:process.env.VERYNIZE_SKIP_ONBOARDING==='1'}));
+    require('./cloud-defaults.cjs').registerCloudDefaults(handle); // Share panel server default: production or VERYNIZE_CLOUD_SERVER
     handle('openExternal',value=>{const url=new URL(value);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('Only HTTP and HTTPS links are supported');return shell.openExternal(url.href);});
     let lastNotification=0;
     handle('notifyTask',options=>{if(!options||typeof options.title!=='string'||typeof options.body!=='string')throw Error('Invalid notification');if(Date.now()-lastNotification<3000||!Notification.isSupported())return false;lastNotification=Date.now();new Notification({title:options.title.slice(0,120),body:options.body.slice(0,300)}).show();return true;});

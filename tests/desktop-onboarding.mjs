@@ -39,6 +39,9 @@ exit 0`,
     const env = { ...process.env, HOME: home, PATH: `${bin}:/usr/bin:/bin` };
     delete env.ELECTRON_RUN_AS_NODE;
     delete env.VERYNIZE_SKIP_ONBOARDING;
+    // Onboarding shows the production default but this run must never reach it (desktop/cloud-defaults.cjs).
+    env.VERYNIZE_BLOCK_PRODUCTION_CLOUD = "1";
+    delete env.VERYNIZE_CLOUD_SERVER;
     Object.assign(env, extra);
     const app = await electron.launch({
       executablePath: (await import("electron")).default,

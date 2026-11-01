@@ -56,7 +56,7 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
 - `can(capability)` / `platform.capabilities` (`projects`, `git`, `designFiles`, `agents`, `agentAccounts`, `terminal`,
   `devServer`, `livePreview`, `rasterExport`, `codeExport`, `imageGeneration`, `figma`, `htmlImport`, `templatePacks`,
   `webCapture`, `publishApps`, `passkeyWindow`, `localFonts`, `notifications`, `externalLinks`, `agentBridge`,
-  `onboarding`): true when every preload method the feature needs is present. Gate desktop-only UI on a capability,
+  `onboarding`, `cloudDefaults`): true when every preload method the feature needs is present. Gate desktop-only UI on a capability,
   then call `platform.desktop.x()`.
 - Legacy scripts use the same object: `window.verynizePlatform.can('figma')`; they may keep calling
   `window.desktop.x()` behind that check.
