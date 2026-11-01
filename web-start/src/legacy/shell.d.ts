@@ -9,3 +9,8 @@ declare module "virtual:verynize/legacy-shell" {
   };
   export default shell;
 }
+
+// The renderer UI from source (web/src/web-app.tsx) on the client; an empty module on the server.
+declare module "virtual:verynize/legacy-ui" {
+  export * from "@/web-app";
+}

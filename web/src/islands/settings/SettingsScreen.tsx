@@ -63,8 +63,13 @@ const AVAILABLE: Partial<Record<SectionId, () => boolean>> = {};
 const navRow =
   "flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-left text-sm text-foreground-3 outline-none hover:bg-muted hover:text-foreground-2 focus-visible:ring-1 focus-visible:ring-ring [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg]:text-subtle-foreground";
 
-function Screen() {
-  const { api, state, preferences, setPreference } = useSettings();
+/**
+ * The screen itself. `section` is given by Start's settings route on the web (the route's URL is the section and the
+ * route being rendered means open); without it the legacy module's state decides (desktop).
+ */
+export function SettingsScreenContent({ section }: { section?: SectionId } = {}) {
+  const { api, state: legacyState, preferences, setPreference } = useSettings();
+  const state = section ? { ...legacyState, open: true, section } : legacyState;
   const [query, setQuery] = useState("");
   const mainRef = useRef<HTMLDivElement>(null);
 
@@ -232,5 +237,5 @@ export function SettingsScreen() {
     el?.setAttribute("data-bd", "");
     return el;
   });
-  return host ? createPortal(<Screen />, host) : null;
+  return host ? createPortal(<SettingsScreenContent />, host) : null;
 }

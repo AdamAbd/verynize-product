@@ -24,6 +24,18 @@ function Committed({ name }: { name: string }) {
 }
 
 /**
+ * The context every island tree gets: the one QueryClient and the tooltip provider. Island roots (mountIsland) and
+ * the areas Start's routes render on the web (inside Start's own React tree) both use it.
+ */
+export function IslandProviders({ children }: { children: ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider delayDuration={400}>{children}</TooltipProvider>
+    </QueryClientProvider>
+  );
+}
+
+/**
  * Mount an island once the legacy scripts have run.
  * `target` is the element the island renders into (created if it is a string id that does not exist yet).
  * Every island shares one QueryClient (`@/lib/query/client`).
@@ -43,9 +55,7 @@ export function mountIsland(
     createRoot(container).render(
       <StrictMode>
         {/* One QueryClient for every island root: server state is shared across islands. */}
-        <QueryClientProvider client={queryClient}>
-          <TooltipProvider delayDuration={400}>{node()}</TooltipProvider>
-        </QueryClientProvider>
+        <IslandProviders>{node()}</IslandProviders>
         <Committed name={name} />
       </StrictMode>,
     );
