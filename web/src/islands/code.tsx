@@ -3,6 +3,7 @@
 // title bar); the canvas stays mounted underneath. Chat state stays in web/desktop-panel.js (window.agentWorkspace).
 import { useEffect } from "react";
 import { mountIsland } from "@/lib/mount";
+import { hosted } from "@/lib/router/host";
 import { useChatState } from "./chat/store";
 import { workspace } from "./code/api";
 import { addRepository, newChat, newQuickChat, openChat, openRepository, refresh, repositoryByKey, start } from "./code/controller";
@@ -42,7 +43,8 @@ function Island() {
   if (!state) return null;
   return (
     <>
-      <CodeWorkspace state={state} />
+      {/* On the web, Start's Code route renders the workspace (code/route-area.tsx). */}
+      {!hosted && <CodeWorkspace state={state} />}
       <DesignChatSidebar state={state} />
     </>
   );

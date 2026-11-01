@@ -32,8 +32,11 @@ import "@/lib/bridge";
 //   the route components below.
 // - Hosted (the web app, web-start/): TanStack Start registers window.verynizeShellHost before booting the legacy
 //   editor. This module then creates no history and no router: it uses Start's router and history, navigate() goes
-//   through Start's router, and Start's route components (web-start/src/routes/_editor/*) apply their location with
-//   window.shellNavigation.applyLocation. Requests, settings history and the cloud fragment rules are the same.
+//   through Start's router, and Start's route components (web-start/src/routes/_editor/*) hand their location to
+//   window.shellNavigation.applyLocation. Those routes render the Files home, Code workspace and settings overlay
+//   themselves, so applyShell() calls no legacy applier there; this module keeps the history rules only. Requests,
+//   settings history (the view underneath, closing via history.back()), canonical settings URLs and the cloud
+//   fragment rules are the same.
 
 export type ViewPath = "/" | "/editor" | "/code";
 type Shell = { view: ViewPath; settings: SectionId | null };
@@ -79,11 +82,12 @@ function shown(): Shell {
 const same = (a: Shell, b: Shell) => a.view === b.view && a.settings === b.settings;
 
 function applyShell(next: Shell) {
+  // Hosted, Start's routes render the Files home, the Code workspace and the settings overlay and own their shown
+  // state (each area's route; the settings route also renders the view underneath, from history state:
+  // web-start/src/routes/_editor/). The editor is what shows when none of them is rendered.
+  if (hosted) return;
   const { fileLibrary, appSettings, agentWorkspace } = legacy();
   agentWorkspace?.applyCodeMode?.(next.view === "/code");
-  // Hosted, Start's routes render the Files home and the settings overlay and own their shown state (the Files
-  // route, and the settings route with the view underneath from history state: web-start/src/routes/_editor/).
-  if (hosted) return;
   if (next.view === "/") fileLibrary?.applyHome?.();
   else fileLibrary?.applyEditor?.();
   if (next.settings) appSettings?.applyOpen?.(next.settings);

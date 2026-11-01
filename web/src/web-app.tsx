@@ -6,6 +6,7 @@ import * as React from "react";
 import "./ui";
 
 export { islandsCommitted } from "./lib/bridge";
+export { CodeArea } from "./islands/code/route-area";
 export { HomeArea } from "./islands/home/route-area";
 export { SettingsArea } from "./islands/settings/route-area";
 /** Lets the web app check that its React and the islands' React are one copy. */

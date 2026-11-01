@@ -3,8 +3,10 @@
 // (web-start/src/legacy/shell-host.ts). Checks UI clicks, app navigation and Back/Forward between
 // /, /editor, /code and /settings/<section>; that the editor never remounts; that Start's router
 // location always matches the address bar and Back/Forward move exactly one entry; deep links; and
-// that the #room= fragment survives navigation. Areas moved out of web/dist/ui.js are rendered by
-// Start's routes from the same React copy as the islands: the settings overlay (settings.tsx).
+// that the #room= fragment survives navigation. The non-canvas areas are rendered by Start's routes
+// (data-route-owner="start"), not by island mounts, from the same React copy as the islands: the
+// settings overlay (settings.tsx), the Files home (index.tsx) and the Code workspace (code.tsx),
+// plus the view under settings.
 import assert from "node:assert/strict";
 
 const ROOM = "11111111-1111-4111-8111-111111111111";
@@ -63,6 +65,12 @@ export async function checkWebRouter(browser, origin) {
           fileHome.hidden === !home &&
           (fileHome.dataset.routeOwner === "start") === home &&
           !!document.querySelector("#bd-home-root #library-files") === home &&
+          // Start's Code route (or the settings route over Code) renders the workspace; no
+          // island-rendered copy exists on the web.
+          document.querySelectorAll("#code-workspace").length === (code ? 1 : 0) &&
+          (!code ||
+            (document.getElementById("code-workspace").dataset.routeOwner === "start" &&
+              !!document.querySelector("#code-workspace #code-chat-host .project-agent"))) &&
           // Start's settings route renders the overlay (route-area.tsx), not the settings island.
           !!screen &&
           screen.hidden === !settings &&
