@@ -8,12 +8,12 @@ import {
   fail,
   readJson,
   readBytes,
-  documentText,
   errorResponse,
   rpc,
   roleRank,
   HttpError,
 } from "./http.js";
+import { REQUEST_BYTES } from "./limits.js";
 import { SESSION } from "./accounts.js";
 import { AUTH_BASE_PATH, createAuth } from "./auth.js";
 import {
@@ -45,7 +45,7 @@ export { AiRun } from "./ai-run.js";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const ROOM_ROUTE = new RegExp(
-  `^/api/rooms/(${UUID})(/socket|/publish|/ops|/access|/members(?:/${UUID})?|/claim|/organization|/tokens(?:/rotate|/${UUID})?|/comments)?$`,
+  `^/api/rooms/(${UUID})(/socket|/publish|/ops|/pages|/access|/members(?:/${UUID})?|/claim|/organization|/tokens(?:/rotate|/${UUID})?|/comments)?$`,
 );
 const APP_ROUTE = new RegExp(
   `^/api/apps/(${UUID})(/versions(?:/(\\d+)(/finalize|/files/(.+))?)?|/activate|/publish)?$`,
@@ -375,11 +375,12 @@ async function handleRooms(request, env, url) {
   if (url.pathname === "/api/rooms" && request.method === "POST") {
     if (await limited(env.ROOM_CREATION, ip(request)))
       return json({ error: "Too many new rooms. Try again in a minute." }, 429);
+    const data = await readJson(request, REQUEST_BYTES);
+    if (data.document === null || typeof data.document !== "object")
+      fail(400, "Document must be a JSON object or array");
     const account = await accountOf(env, request, url);
     // The web app (and, with ROOM_ACCOUNT_REQUIRED=all, every client) creates rooms signed in.
     requireRoomAccount(env, request, url, account, { creating: true });
-    const data = await readJson(request);
-    documentText(data.document);
     // Email accounts create rooms in an organization: the one named, or their personal one.
     let organizationId = null;
     if (account?.authUser) {
@@ -438,8 +439,13 @@ async function handleRooms(request, env, url) {
   const orgRole = account?.authUser ? await orgRoomRole(env, roomId, account.authUser.id) : null;
   const forward = new URL("https://room" + action);
   if (action === "/socket")
-    for (const key of ["token", "client"])
+    for (const key of ["token", "client", "lazy"])
       if (url.searchParams.get(key)) forward.searchParams.set(key, url.searchParams.get(key));
+  // Lazy page loading (cloud/room-store.js): `lazy=1&page=<id>` on GET /room, `id=<page>` on /pages.
+  if (action === "/room" || action === "/pages")
+    for (const key of ["lazy", "page", "id"])
+      for (const value of url.searchParams.getAll(key).slice(0, 200))
+        forward.searchParams.append(key, value);
   const stub = env.ROOMS.getByName(roomId);
 
   if (action === "/members" && request.method === "POST") {
