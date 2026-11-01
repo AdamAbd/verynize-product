@@ -10,6 +10,8 @@ export interface StorageProblem {
   bytes?: number;
   limit?: number;
   message: string;
+  /** What the limit stopped (storage-limit-error events). */
+  action?: "sync" | "save" | "share";
 }
 export interface StorageReport {
   total: number;
@@ -27,6 +29,7 @@ interface StorageLimitsApi {
   current(): StorageReport | null;
   refresh(): StorageReport | null;
   subscribe(fn: (report: StorageReport) => void): () => void;
+  noteChange(doc: unknown): void;
 }
 export interface AssetStatus {
   uploading: number;
@@ -38,7 +41,7 @@ export interface AssetStatus {
 declare global {
   interface Window {
     storageLimits?: StorageLimitsApi;
-    cloudAssets?: { status(): AssetStatus };
+    cloudAssets?: { status(): AssetStatus; inlineHtml?(html: string): Promise<string> };
   }
 }
 

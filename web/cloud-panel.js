@@ -95,7 +95,7 @@
   const status = (text) => {
     $("cloud-status").textContent = text;
     // Size limits (web/storage-limits.js): server refusals become the size island's blocking error.
-    if (window.storageLimits?.isSizeError(text)) window.storageLimits.reportError(String(text));
+    if (window.storageLimits?.isSizeError(text)) window.storageLimits.reportError(String(text), "sync");
   };
   const action = (fn) => async () => {
     let epoch = generation;

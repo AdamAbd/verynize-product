@@ -315,22 +315,21 @@
       else run();
     }, DEBOUNCE);
   }
-  let subscribed = false;
-  function attach() {
-    if (subscribed || !window.design?.subscribe) return;
-    subscribed = true;
-    window.design.subscribe(schedule);
-    schedule(null);
-  }
-  if (document.readyState === "loading") window.addEventListener("DOMContentLoaded", attach);
-  else setTimeout(attach, 0);
 
-  /** A sync, save or share stopped by a size limit: the size island shows it (event `storage-limit-error`). */
-  function reportError(problem) {
-    const detail =
-      typeof problem === "string"
-        ? { level: "over", scope: "document", message: problem }
-        : problem;
+  /**
+   * A sync, save or share stopped by a size limit: the size island shows it (event
+   * `storage-limit-error`). `action` is 'sync' (default), 'save' or 'share'.
+   */
+  function reportError(problem, action) {
+    // Errors from the desktop bridge arrive as "Error invoking remote method 'x': Error: …".
+    const clean = (text) =>
+      String(text).replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, "");
+    const detail = {
+      ...(typeof problem === "string"
+        ? { level: "over", scope: "document", message: clean(problem) }
+        : { ...problem, message: clean(problem.message) }),
+      action: action || problem?.action || "sync",
+    };
     window.dispatchEvent(new CustomEvent("storage-limit-error", { detail }));
     return detail;
   }
@@ -349,7 +348,7 @@
     const result = measure(doc);
     const blocking = problems(result).find((problem) => problem.level === "over");
     if (blocking) {
-      reportError(blocking);
+      reportError(blocking, "share");
       throw Object.assign(new Error(blocking.message), {
         code: "storage_limit",
         problem: blocking,
@@ -369,9 +368,14 @@
       latestDoc = null;
       return run();
     },
+    /**
+     * The open document changed (the storage island forwards the islands' one design
+     * subscription, web/src/lib/bridge.ts, so measuring adds no document copy per render).
+     */
+    noteChange: schedule,
     subscribe(fn) {
       listeners.add(fn);
-      attach();
+      if (!report) schedule(null);
       return () => listeners.delete(fn);
     },
     reportError,

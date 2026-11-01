@@ -172,7 +172,8 @@
         entry.error = error.message;
         lastError = error.message;
         console.warn("Room asset upload failed; the data stays embedded:", error.message);
-        if (error.code === "storage_limit") window.storageLimits?.reportError(error.message);
+        if (error.code === "storage_limit")
+          window.storageLimits?.reportError(error.message, "sync");
         changed();
         settleSoon();
       },
@@ -344,7 +345,7 @@
       creating.error = `Uploading files to the new room failed: ${error.message}. Create room again to retry.`;
       report();
       if (error.code === "storage_limit" || window.storageLimits.isSizeError(error))
-        window.storageLimits.reportError(error.message);
+        window.storageLimits.reportError(error.message, "share");
       throw Object.assign(Error(creating.error), { code: error.code, status: error.status });
     }
   }
