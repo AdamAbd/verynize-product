@@ -1,7 +1,8 @@
 // Smoke test of the Node build of the web app (vite.node.config.ts + web-start/node/server.mjs):
-// it serves /editor and the legacy editor boots in Chromium; web/ files are served and web/src is
-// not; backend paths and room WebSocket upgrades are forwarded to VERYNIZE_BACKEND_URL (a stub
-// backend here); without a backend they answer 502.
+// it serves /editor and the legacy editor boots in Chromium once signed in (signed out, the sign-in
+// screen shows and the editor does not boot); web/ files are served and web/src is not; backend
+// paths and room WebSocket upgrades are forwarded to VERYNIZE_BACKEND_URL (a stub backend here);
+// without a backend they answer 502. The real backend's sign-in is covered by tests/web-ai-chat.mjs.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -9,7 +10,7 @@ import fs from "node:fs";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { createWebServer } from "../web-start/node/server.mjs";
-import { launchBrowser } from "./helpers/web-app.mjs";
+import { launchBrowser, signedInContext } from "./helpers/web-app.mjs";
 import { checkWebRouter } from "./helpers/web-router.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -25,11 +26,35 @@ execFileSync(
   },
 );
 
-// Stub backend: echoes HTTP requests and speaks just enough WebSocket to send one text frame.
+// The signed-in account (the web app needs one) and the account reads the editor makes, answered
+// like the real backend with an empty workspace.
+const ACCOUNT = {
+  id: "a1",
+  email: "node@example.test",
+  handle: "node",
+  displayName: "Node",
+  avatarUrl: "",
+};
+const ACCOUNT_API = {
+  "/api/me": { account: ACCOUNT, personalOrganizationId: "org-1", aiSetupAt: 1 },
+  "/api/me/rooms": { rooms: [] },
+  "/api/auth/organization/list": [
+    { id: "org-1", name: "Personal", slug: "personal-a1", metadata: { personal: true } },
+  ],
+  "/api/orgs/org-1/rooms": { role: "owner", rooms: [] },
+  "/api/ai/config": { enabled: false, provider: "openrouter", models: [], defaultModel: null },
+};
+// Stub backend: answers the account reads above, otherwise echoes HTTP requests, and speaks just
+// enough WebSocket to send one text frame.
 const backend = http.createServer((req, res) => {
   let body = "";
   req.on("data", (chunk) => (body += chunk));
   req.on("end", () => {
+    const account = req.method === "GET" && ACCOUNT_API[req.url];
+    if (account) {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(account));
+    }
     res.writeHead(200, { "content-type": "application/json", "set-cookie": ["a=1", "b=2"] });
     res.end(JSON.stringify({ method: req.method, url: req.url, host: req.headers.host, body }));
   });
@@ -105,8 +130,25 @@ try {
   assert.equal((await fetch(bareOrigin + "/editor")).status, 200);
 
   browser = await launchBrowser();
-  const page = await browser.newPage();
   const errors = [];
+  // Signed out: the sign-in screen, at the requested path, and no editor.
+  const anonymous = await browser.newPage();
+  anonymous.on("pageerror", (error) => errors.push(error.message));
+  await anonymous.goto(origin + "/code");
+  await anonymous.waitForFunction(() => document.documentElement.dataset.webAuth === "signed-out");
+  await anonymous.locator("#web-sign-in #onboarding-email").waitFor();
+  assert.equal(
+    await anonymous.evaluate(() => document.documentElement.dataset.legacyEditor ?? null),
+    null,
+  );
+  assert.equal(new URL(anonymous.url()).pathname, "/code");
+  await anonymous.close();
+  // Signed in.
+  const context = await signedInContext(browser, origin, {
+    session: `${"a".repeat(32)}.${"b".repeat(32)}`,
+    account: ACCOUNT,
+  });
+  const page = await context.newPage();
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(origin + "/editor");
   await page.waitForFunction(() => document.documentElement.dataset.legacyEditor === "ready");
@@ -121,9 +163,9 @@ try {
   assert.equal(await page.locator("#canvas .layer").count(), before + 1);
   assert.deepEqual(errors, []);
   await page.close();
-  await checkWebRouter(browser, origin);
+  await checkWebRouter(browser, origin, context);
   console.log(
-    "PASS web (Node build): /editor boots client-only, one router (clicks, Back/Forward, deep links, room fragment), static web/ files without web/src, /api and room WebSocket forwarded to the backend",
+    "PASS web (Node build): sign-in screen while signed out, /editor boots client-only once signed in, one router (clicks, Back/Forward, deep links, room fragment), static web/ files without web/src, /api and room WebSocket forwarded to the backend",
   );
 } finally {
   await browser?.close();
