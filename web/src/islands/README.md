@@ -3,6 +3,9 @@
 The renderer is migrating from vanilla DOM (`web/*.js`, `web/*.css`) to React 19 + Tailwind CSS v4 + shadcn/ui (Radix) + `cn()`.
 Each UI area is an **island**: `web/src/islands/<area>.tsx` (entry) + `web/src/islands/<area>/**` (code), bundled together by `web/src/ui.tsx`
 into `web/dist/ui.{js,css}` (classic IIFE, one React copy) and loaded by `web/index.html` after all legacy scripts.
+The web app (`web-start/`) does not load `ui.js`: `web/src/web-app.tsx` imports the same islands and is bundled into
+Start's client build, so Start's routes and the islands share one React and one QueryClient; styles still come from
+`web/dist/ui.css` (see "Web vs desktop ownership" below).
 
 Visual target: the Wonder app, captured in `design/wonder/*.png` (2880×1740 = 1440×870 CSS px at 2×; crop and
 measure with Python/PIL — divide pixel coordinates by 2). `design-qa.md` lists measured values from an earlier pass.
@@ -79,13 +82,26 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
   Commands must stay reachable by those ids inside the opened menu.
 - **Shell routes** (`web/src/lib/router/shell-router.ts`, docs/spikes/tanstack-router.md): the URL owns the top-level
   view — `/` (`files-view`), `/editor`, `/code` (`code-mode`), `/settings/<section>` (`settings-open`). Never toggle
-  those three body classes yourself: navigate with `navigate()` or call the legacy request APIs
+  those three body classes yourself (on the web only the route areas above set them): navigate with `navigate()` or call the legacy request APIs
   (`fileLibrary.showHome/showEditor`, `appSettings.open/close/select`, `agentWorkspace.setCodeMode`), which update the
   URL and apply the view synchronously. The `apply*` functions on those objects are for the router only. One router
   owns navigation per page: standalone (desktop, `file://`) the shell router creates its own history and routes; in
   the web app it runs hosted on TanStack Start's router (`window.verynizeShellHost`, `web-start/README.md` "One
   router"), `window.shellRouter` is Start's router and Start's routes apply the area via
   `window.shellNavigation.applyLocation(area, location)`. Never create another router or browser history in an island.
+- **Web vs desktop ownership** (`web-start/README.md` "Areas"): on desktop every area is rendered by its island. On the
+  web, Start's routes render three areas from their island folders, each through a `route-area.tsx` that portals into
+  the same host with the same ids, marks it `data-route-owner="start"`, and owns the shown state while mounted:
+  settings (`settings/route-area.tsx`, `/settings/$section`; the section is the route param), Files home
+  (`home/route-area.tsx`, `/`) and the Code workspace (`code/route-area.tsx`, `/code`). The settings route also renders
+  the home or code area when settings is open over it. On the web the matching island parts are not rendered
+  (`hosted` from `@/lib/router/host`): the settings island skips `SettingsScreen`, the code island skips
+  `CodeWorkspace`, the home island only prepares `#bd-home-root` (its takeovers are all deferred there). Anything that
+  must outlive a route (dialogs, toasts, controllers, `window.*` APIs, the design chat sidebar) stays in the island.
+  Area components take a prop that says they are route-rendered (`section`, `routed`) instead of reading the body
+  class, and must survive remounts (keep view state in a module store or localStorage, not only `useState`).
+  Legacy modules learn the route's state through `appSettings.syncSection`, `fileLibrary.syncHome` and
+  `agentWorkspace.syncCodeMode`; their `apply*` functions are desktop-only.
 - **Code mode**: `body.code-mode` (toggle with `window.agentWorkspace.setCodeMode(on)`, which navigates to `/code` or `/editor`; `openProject()` enters it, `#project-toggle`
   toggles it). Tests use `#code-add-repository` then `#project-open` / `#project-new` / `#project-clone`, `#code-new-chat`,
   `#code-new-quick-chat`, `[data-repository=<name>]`, `[data-chat-id=<id>]`, `#code-file-tree[data-root=<path>]
@@ -103,7 +119,10 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
   `window.cloudAccount.fetch(path, init)` is the authenticated raw-Response variant of `request` (streamed bodies).
   `cloud-room-changed` fires when the editor joins or leaves a cloud room (`window.cloudWorkspace.room()`).
 - **Web chat gate**: on the web the chat island replaces the composer with `#chat-web-gate[data-state=signed-out|
-  not-configured|no-room|loading|error]` (`#chat-web-sign-in`, `#chat-web-share`) until the model API can run a turn.
+  not-configured|needs-credentials|no-room|loading|error]` (`#chat-web-sign-in`, `#chat-web-share`,
+  `#chat-web-connect-openrouter`, `#chat-web-paste-key` → `#chat-web-openrouter-key` + `#chat-web-save-key`) until the
+  model API can run a turn. The user's own OpenRouter credential is `web/src/lib/ai-credentials.ts` (connect, paste,
+  disconnect; the key never comes back to the browser); Settings › Agents shows it on the web (`#settings-openrouter-card[data-status]`).
 - **UI ready** (`web/src/lib/bridge.ts` + `mount.tsx`): `<html data-ui-ready="true">` is set and `bd:ui-ready` fires on
   `window`, once per page load, when every island started with `mountIsland()` has committed its first render AND no
   `takeOver()` id is still pending (until claimed, an id such as `#files-home` or `#add-page` resolves to the hidden

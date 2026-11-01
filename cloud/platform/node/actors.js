@@ -107,8 +107,24 @@ class Actor {
         throw new Error("Create sockets with acceptWebSocket(ctx) from #cloud-runtime");
       },
       acceptUpgrade: () => actor.acceptUpgrade(),
-      waitUntil: () => {},
+      // Work that outlives the call (a model API run in AiRun) keeps the instance from the sweep.
+      waitUntil: (promise) => {
+        actor.busy++;
+        Promise.resolve(promise)
+          .catch(() => {})
+          .finally(() => {
+            actor.busy--;
+            actor.lastUsed = Date.now();
+          });
+      },
     };
+    // Alarms: one per actor, a process timer (not durable: a restart drops it, and the work it
+    // watched is gone with the process too). Kept by the namespace, so eviction does not drop it.
+    Object.assign(this.ctx.storage, {
+      setAlarm: async (time) => namespace.setAlarm(name, Number(time)),
+      getAlarm: async () => namespace.alarms.get(name)?.time ?? null,
+      deleteAlarm: async () => namespace.clearAlarm(name),
+    });
     this.instance = new namespace.Class(this.ctx, namespace.env);
     this.storage.commit();
   }
@@ -180,6 +196,7 @@ export class ActorNamespace {
     this.directory = directory;
     this.env = null;
     this.actors = new Map();
+    this.alarms = new Map();
     this.sweeper = setInterval(() => this.sweep(), 15_000);
     this.sweeper.unref();
   }
@@ -225,6 +242,25 @@ export class ActorNamespace {
     );
   }
 
+  setAlarm(name, time) {
+    this.clearAlarm(name);
+    const timer = setTimeout(
+      () => {
+        this.alarms.delete(name);
+        this.actor(name).event("alarm");
+      },
+      Math.max(0, time - Date.now()),
+    );
+    timer.unref?.();
+    this.alarms.set(name, { time, timer });
+  }
+
+  clearAlarm(name) {
+    const alarm = this.alarms.get(name);
+    if (alarm) clearTimeout(alarm.timer);
+    this.alarms.delete(name);
+  }
+
   evict(name) {
     const actor = this.actors.get(name);
     if (!actor) return;
@@ -241,6 +277,7 @@ export class ActorNamespace {
 
   close() {
     clearInterval(this.sweeper);
+    for (const name of this.alarms.keys()) this.clearAlarm(name);
     for (const name of this.actors.keys()) this.evict(name);
   }
 }

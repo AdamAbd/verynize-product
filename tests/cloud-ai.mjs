@@ -5,14 +5,19 @@
 // checks (owner, argsHash, replay, ended run), cancel and timeout while waiting, at most once per
 // tool call (re-POST, reconnect, repeated id), plan and helper runs, revocation mid-run, edit
 // access with a live room socket, and the same write through hosted MCP and the runtime giving
-// the same document. The LLM provider is the only fake: a local OpenAI-compatible server
+// the same document. Per-account credentials: no key → credentials_required, pasted keys, the
+// OAuth PKCE round-trip and its refusals (replay, forged, expired, another browser), encryption at
+// rest, each account's runs on its own key, a key deleted mid-run, 401/402 from the provider.
+// The LLM provider and OpenRouter's key endpoints are the only fake: a local server
 // (tests/helpers/fake-openrouter.mjs) set as OPENROUTER_BASE_URL.
 // Runs on workerd (default), Node and Vercel (CLOUD_RUNTIME, tests/cloud-harness.mjs).
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Miniflare, cloudOptions, passwordUser, RUNTIME } from "./cloud-harness.mjs";
+import { createHash } from "node:crypto";
+import { AUTH_SECRET, Miniflare, cloudOptions, passwordUser, RUNTIME } from "./cloud-harness.mjs";
+import { openSecret } from "../cloud/ai-credentials.js";
 import { startFakeOpenRouter, toolMessages, userText } from "./helpers/fake-openrouter.mjs";
 import { validateDocument } from "../integrations/document-core.mjs";
 
@@ -46,6 +51,11 @@ const fake = await startFakeOpenRouter({
       ? [{ text: "No." }]
       : [{ tool: "get_element_tree", args: { document: otherRoomId } }],
   slow: [[{ text: "Working on it" }, { hang: true }]],
+  // A tool round with a pause, so the key can be deleted before the second model call.
+  gone: [
+    [{ text: "Checking." }, { delay: 1500 }, { tool: "get_artboards", args: {} }],
+    [{ text: "unreachable" }],
+  ],
   steps: [[{ text: "one " }, { delay: 700 }, { text: "two three" }]],
   loop: [[{ tool: "get_artboards", args: {} }]],
   burst: [
@@ -204,7 +214,9 @@ async function connectRoom(roomId, session) {
 }
 
 try {
-  // Disabled: no OPENROUTER_API_KEY.
+  // Turned off by the operator (VERYNIZE_AI=off).
+  config.env = { ...baseEnv, VERYNIZE_AI: { type: "text", value: "off" } };
+  await mf.setOptions(options);
   const ana = await passwordUser(ORIGIN, "ana@example.test", "Ana", local, "192.0.2.1");
   const dodi = await passwordUser(ORIGIN, "dodi@example.test", "Dodi", local, "192.0.2.2");
   assert.equal((await request("/api/ai/config")).status, 401, "config needs an account");
@@ -230,17 +242,18 @@ try {
   const off = await startRun(ana, { chatId: "chat-off", roomId: room.id, prompt: "hi" });
   assert.equal(off.status, 503, await off.text());
 
-  // Enabled.
+  // Enabled: the runtime is available, but every account brings its own OpenRouter key. A server
+  // key without the operator's opt-in (VERYNIZE_AI_SERVER_KEY=1) is never used.
   config.env = {
     ...baseEnv,
-    OPENROUTER_API_KEY: { type: "text", value: "test-openrouter-key" },
+    OPENROUTER_API_KEY: { type: "text", value: "server-key-not-opted-in" },
     OPENROUTER_BASE_URL: { type: "text", value: fake.baseUrl },
     VERYNIZE_AI_MODELS: { type: "text", value: "fake/model-a=Model A,fake/model-b" },
     VERYNIZE_AI_MAX_TURNS: { type: "text", value: "3" },
     VERYNIZE_AI_MAX_TOOL_CALLS: { type: "text", value: "4" },
   };
   await mf.setOptions(options);
-  assert.deepEqual(await data(await request("/api/ai/config", { token: ana }), 200), {
+  const expectedConfig = (openrouter) => ({
     enabled: true,
     provider: "openrouter",
     models: [
@@ -249,7 +262,220 @@ try {
     ],
     defaultModel: "fake/model-a",
     limits: { maxTurns: 3, maxToolCalls: 4 },
+    credentials: { openrouter },
   });
+  assert.deepEqual(
+    await data(await request("/api/ai/config", { token: ana }), 200),
+    expectedConfig("missing"),
+  );
+  const noKey = await startRun(ana, { chatId: "chat-nokey", roomId: room.id, prompt: "hi" });
+  assert.deepEqual(await data(noKey, 409), {
+    error: "Connect your OpenRouter account in Settings to use the model API.",
+    code: "credentials_required",
+  });
+  assert.equal(fake.requests.length, 0, "no provider request without a credential");
+
+  // ---------------------------------------------------------------------------------------------
+  // Credentials (docs/ai-runtime.md "Credentials"): manual key, OAuth PKCE, storage.
+  const anaId = (await data(await request("/api/me", { token: ana }), 200)).account.id;
+  const dodiId = (await data(await request("/api/me", { token: dodi }), 200)).account.id;
+  let db = await mf.getD1Database("DB");
+  const credentialOf = (accountId) =>
+    db.prepare(`select * from ai_credential where "accountId" = ?`).bind(accountId).first();
+  for (const route of ["/api/ai/credentials", "/api/ai/credentials/openrouter"])
+    assert.equal((await request(route)).status, 401, `${route} needs an account`);
+  assert.equal(
+    (await request("/api/ai/credentials/openrouter/oauth/start", { method: "POST" })).status,
+    401,
+  );
+  assert.deepEqual(await data(await request("/api/ai/credentials", { token: ana }), 200), {
+    openrouter: { connected: false },
+  });
+  const putKey = (token, apiKey, headers) =>
+    request("/api/ai/credentials/openrouter", {
+      method: "PUT",
+      token,
+      body: { apiKey },
+      headers,
+    });
+  // Manual: the key is checked with OpenRouter (GET /key) before it is stored.
+  assert.equal((await putKey(ana, "")).status, 400);
+  assert.equal((await putKey(ana, "has spaces in it")).status, 400);
+  const unknownKey = await data(await putKey(ana, "sk-or-v1-not-a-real-key-0000"), 400);
+  assert.equal(unknownKey.code, "invalid_key");
+  assert.equal(await credentialOf(anaId), null, "a rejected key is not stored");
+  assert.equal(
+    (await putKey(ana, "sk-or-v1-x", { origin: "https://evil.example" })).status,
+    403,
+    "cross-origin",
+  );
+  const ANA_KEY = "sk-or-v1-ana-manual-key-1234";
+  fake.keys.add(ANA_KEY);
+  const anaPut = await data(await putKey(ana, ANA_KEY), 200);
+  assert.deepEqual(
+    (({ connected, source, last4, label, state, limit, usage, limitRemaining }) => ({
+      connected,
+      source,
+      last4,
+      label,
+      state,
+      limit,
+      usage,
+      limitRemaining,
+    }))(anaPut.openrouter),
+    {
+      connected: true,
+      source: "manual",
+      last4: "1234",
+      label: "fake key 1234",
+      state: "ok",
+      limit: 10,
+      usage: 1.25,
+      limitRemaining: 8.75,
+    },
+  );
+  assert.ok(!JSON.stringify(anaPut).includes(ANA_KEY), "the key is never sent back");
+  const anaStatus = await data(await request("/api/ai/credentials", { token: ana }), 200);
+  assert.ok(!JSON.stringify(anaStatus).includes(ANA_KEY));
+  assert.equal(anaStatus.openrouter.connected, true);
+  // Stored encrypted: the ciphertext is not the key, decrypts with the deployment's secret and
+  // the account's context only.
+  const anaRow = await credentialOf(anaId);
+  assert.equal(anaRow.source, "manual");
+  assert.ok(!anaRow.ciphertext.includes(ANA_KEY) && !atob(anaRow.ciphertext).includes(ANA_KEY));
+  assert.notEqual(anaRow.ciphertext, ANA_KEY);
+  assert.equal(await openSecret(AUTH_SECRET, anaRow, `${anaId}:openrouter`), ANA_KEY);
+  await assert.rejects(
+    openSecret("another-secret-of-the-same-length-00000", anaRow, `${anaId}:openrouter`),
+  );
+  await assert.rejects(
+    openSecret(AUTH_SECRET, anaRow, `${dodiId}:openrouter`),
+    "a row copied to another account does not decrypt",
+  );
+  assert.deepEqual(
+    await data(await request("/api/ai/config", { token: ana }), 200),
+    expectedConfig("connected"),
+  );
+
+  // OAuth PKCE: start → OpenRouter's sign-in page → callback with a code → connected.
+  const OAUTH = "/api/ai/credentials/openrouter/oauth";
+  const startOAuth = async (token, returnTo) => {
+    const response = await request(`${OAUTH}/start`, {
+      method: "POST",
+      token,
+      body: returnTo === undefined ? {} : { returnTo },
+    });
+    const cookie = (response.headers.get("set-cookie") || "").split(";")[0];
+    const body = await data(response, 200);
+    return { ...body, cookie, url: new URL(body.authorizeUrl) };
+  };
+  /** OpenRouter's /auth page (the fake approves at once): the callback URL it redirects to. */
+  const authorize = async (authorizeUrl) => {
+    const response = await fetch(authorizeUrl, { redirect: "manual" });
+    assert.equal(response.status, 302);
+    return new URL(response.headers.get("location"));
+  };
+  const callback = async (callbackUrl, cookie) => {
+    const response = await mf.dispatchFetch(callbackUrl.toString(), {
+      redirect: "manual",
+      headers: cookie ? { cookie } : {},
+    });
+    assert.equal(response.status, 303, await response.clone().text());
+    assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+    return response.headers.get("location");
+  };
+  const dodiStart = await startOAuth(dodi, "/editor?file=1");
+  assert.equal(dodiStart.url.origin + dodiStart.url.pathname, new URL("/auth", fake.baseUrl).href);
+  assert.equal(dodiStart.url.searchParams.get("callback_url"), `${ORIGIN}${OAUTH}/callback`);
+  assert.equal(dodiStart.url.searchParams.get("code_challenge_method"), "S256");
+  assert.match(dodiStart.url.searchParams.get("code_challenge"), /^[\w-]{43}$/);
+  assert.match(dodiStart.url.searchParams.get("state"), /^[\w-]{40,}$/);
+  assert.match(dodiStart.cookie, /^vz_openrouter_oauth=[\w-]+$/);
+  const dodiCallback = await authorize(dodiStart.authorizeUrl);
+  assert.equal(dodiCallback.origin + dodiCallback.pathname, `${ORIGIN}${OAUTH}/callback`);
+  assert.equal(
+    await callback(dodiCallback, dodiStart.cookie),
+    "/editor?file=1&openrouter=connected",
+  );
+  const exchange = fake.exchanges.at(-1);
+  assert.equal(exchange.code, dodiCallback.searchParams.get("code"));
+  assert.equal(exchange.code_challenge_method, "S256");
+  assert.equal(
+    createHash("sha256").update(exchange.code_verifier).digest("base64url"),
+    dodiStart.url.searchParams.get("code_challenge"),
+    "the stored verifier matches the challenge",
+  );
+  const dodiStatus = (await data(await request("/api/ai/credentials", { token: dodi }), 200))
+    .openrouter;
+  assert.deepEqual([dodiStatus.connected, dodiStatus.source], [true, "oauth"]);
+  const dodiRow = await credentialOf(dodiId);
+  const DODI_KEY = await openSecret(AUTH_SECRET, dodiRow, `${dodiId}:openrouter`);
+  assert.match(DODI_KEY, /^sk-or-v1-oauth-/);
+  assert.equal(dodiStatus.last4, DODI_KEY.slice(-4));
+  // Replay of the same callback (state already used): refused, nothing changes.
+  assert.equal(
+    await callback(dodiCallback, dodiStart.cookie),
+    "/settings/agents?openrouter=error&openrouter_error=invalid_state",
+  );
+  // A forged state.
+  const forged = new URL(dodiCallback);
+  forged.searchParams.set("state", "forged-state-value-0123456789abcdef");
+  assert.equal(
+    await callback(forged, dodiStart.cookie),
+    "/settings/agents?openrouter=error&openrouter_error=invalid_state",
+  );
+  // An expired pending sign-in (ten minutes); its return path was not same-origin, so the
+  // redirect falls back to Settings (no open redirect).
+  const lateStart = await startOAuth(dodi, "//evil.example/steal");
+  await db
+    .prepare(`update ai_oauth_state set "expiresAt" = ?`)
+    .bind(Date.now() - 1000)
+    .run();
+  assert.equal(
+    await callback(await authorize(lateStart.authorizeUrl), lateStart.cookie),
+    "/settings/agents?openrouter=error&openrouter_error=expired",
+  );
+  const absolute = await startOAuth(dodi, "https://evil.example/x");
+  const absoluteBack = await authorize(absolute.authorizeUrl);
+  // The callback of Dodi's flow opened in Ana's browser (her own flow's cookie, or none): the
+  // state is bound to the browser that started it, so Dodi's code cannot land anywhere else and
+  // Ana's cookie cannot make the key hers.
+  const anaStart = await startOAuth(ana, "/editor");
+  assert.equal(
+    await callback(absoluteBack, anaStart.cookie),
+    "/settings/agents?openrouter=error&openrouter_error=wrong_browser",
+  );
+  assert.equal(
+    await callback(absoluteBack, absolute.cookie),
+    "/settings/agents?openrouter=error&openrouter_error=invalid_state",
+    "a refused callback burns the state",
+  );
+  assert.equal((await credentialOf(dodiId)).ciphertext, dodiRow.ciphertext, "Dodi unchanged");
+  assert.equal((await credentialOf(anaId)).ciphertext, anaRow.ciphertext, "Ana unchanged");
+  // Ana's own flow without its cookie is refused too.
+  const anaBack = await authorize(anaStart.authorizeUrl);
+  assert.equal(await callback(anaBack), "/editor?openrouter=error&openrouter_error=wrong_browser");
+  assert.equal((await credentialOf(anaId)).source, "manual");
+  // Disconnect and reconnect: delete removes the row; the next run start needs a key again.
+  assert.deepEqual(
+    await data(
+      await request("/api/ai/credentials/openrouter", { method: "DELETE", token: dodi }),
+      200,
+    ),
+    { ok: true, removed: true },
+  );
+  assert.equal(await credentialOf(dodiId), null);
+  assert.equal(
+    (await startRun(dodi, { chatId: "chat-gone", roomId: room.id, prompt: "x" })).status,
+    409,
+  );
+  const reconnect = await startOAuth(dodi);
+  assert.equal(
+    await callback(await authorize(reconnect.authorizeUrl), reconnect.cookie),
+    "/settings/agents?openrouter=connected",
+  );
+  const dodiKey = await openSecret(AUTH_SECRET, await credentialOf(dodiId), `${dodiId}:openrouter`);
+  assert.notEqual(dodiKey, DODI_KEY, "a reconnect stores the new key");
 
   // Content for the read tools, through the hosted MCP endpoint (cloud/design-backend.js).
   const created = await data(
@@ -392,7 +618,7 @@ try {
   // What the backend sent OpenRouter: key, model, persona + room context, history, read tools only.
   const sent = fake.requests.at(-1);
   assert.equal(fake.requests.length, requestsBefore + 1);
-  assert.equal(sent.headers.authorization, "Bearer test-openrouter-key");
+  assert.equal(sent.headers.authorization, `Bearer ${ANA_KEY}`, "the account's own key");
   assert.equal(sent.body.model, "fake/model-a");
   assert.equal(sent.body.stream, true);
   assert.match(systemOf(sent.body), /You are the designer inside Verynize/);
@@ -521,6 +747,14 @@ try {
   assert.equal(refused.isError, true);
   assert.match(refused.output, new RegExp(`works on room ${dodiRoom.id} only`));
   assert.doesNotMatch(refused.output, /Hero/);
+  // Each account's run uses its own key.
+  assert.equal(fake.requests.at(-1).headers.authorization, `Bearer ${dodiKey}`, "Dodi's own key");
+  assert.equal(
+    fake.requests.filter((r) => r.headers.authorization === "Bearer server-key-not-opted-in")
+      .length,
+    0,
+    "the server key is never used without the opt-in",
+  );
 
   // Cancel: the executor stops the model stream and ends with done {cancelled, stopped}.
   const slow = sseReader(
@@ -587,12 +821,58 @@ try {
   assert.equal(burst.at(-1).code, "budget");
   assert.ok(!burst.some((e) => e.type === "assistant-text" && /unreachable/.test(e.text)));
 
+  // Key deleted mid-run: the next model call fails cleanly with a clear error.
+  const gone = sseReader(
+    await startRun(dodi, { chatId: "chat-gone", roomId: dodiRoom.id, prompt: "[scenario:gone]" }),
+  );
+  await gone.next((e) => e.type === "assistant-text-delta");
+  await data(
+    await request("/api/ai/credentials/openrouter", { method: "DELETE", token: dodi }),
+    200,
+  );
+  const goneEvents = await gone.all();
+  assert.ok(
+    goneEvents.some((e) => e.type === "tool-result"),
+    "the first turn finished",
+  );
+  assert.match(
+    goneEvents.find((e) => e.type === "error").message,
+    /Your OpenRouter account was disconnected during this run/,
+  );
+  assert.deepEqual([goneEvents.at(-1).type, goneEvents.at(-1).code], ["done", "error"]);
+  assert.ok(!goneEvents.some((e) => e.type === "assistant-text" && /unreachable/.test(e.text)));
+  // OpenRouter refuses the key (401) or has no credits (402): the run says so and ends.
+  for (const [status, key, message] of [
+    [401, "sk-or-v1-dodi-revoked-key-9999", /Your OpenRouter key was rejected/],
+    [402, "sk-or-v1-dodi-broke-key-8888", /out of credits/],
+  ]) {
+    fake.keys.add(key);
+    await data(await putKey(dodi, key), 200);
+    (status === 401 ? fake.rejected : fake.noCredits).add(key);
+    const refusedRun = await sseReader(
+      await startRun(dodi, {
+        chatId: `chat-refused-${status}`,
+        roomId: dodiRoom.id,
+        prompt: "[scenario:hello]",
+      }),
+    ).all();
+    assert.equal(fake.requests.at(-1).refused, status);
+    assert.match(refusedRun.find((e) => e.type === "error").message, message);
+    assert.deepEqual([refusedRun.at(-1).type, refusedRun.at(-1).code], ["done", "error"]);
+    assert.ok(!JSON.stringify(refusedRun).includes(key), "the key never appears in events");
+  }
+  const DODI_GOOD = "sk-or-v1-dodi-good-key-5678";
+  fake.keys.add(DODI_GOOD);
+  await data(await putKey(dodi, DODI_GOOD), 200);
+
   // ---------------------------------------------------------------------------------------------
   // Write tools and approvals (Policy in docs/ai-runtime.md). Eva has her own room so these runs
   // stay clear of Ana's per-account rate limit.
-  let db = await mf.getD1Database("DB");
+  db = await mf.getD1Database("DB");
   const eva = await passwordUser(ORIGIN, "eva@example.test", "Eva", local, "192.0.2.3");
   const evaMe = await data(await request("/api/me", { token: eva }), 200);
+  fake.keys.add("sk-or-v1-eva-key-0001");
+  await data(await putKey(eva, "sk-or-v1-eva-key-0001"), 200);
   const evaRoom = await data(
     await request("/api/rooms", { method: "POST", token: eva, body: { document: blank("Board") } }),
     201,

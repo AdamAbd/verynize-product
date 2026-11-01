@@ -13,7 +13,7 @@ import worker from "../../cloud/worker.js";
 import { isWorkerPath } from "../worker-paths.mjs";
 
 // @ts-expect-error cloud/worker.js is untyped JavaScript.
-export { DesignRoom, AccountDirectory, PublishedApp } from "../../cloud/worker.js";
+export { DesignRoom, AccountDirectory, PublishedApp, AiRun } from "../../cloud/worker.js";
 
 type CloudWorker = { fetch(request: Request, env: unknown, ctx: unknown): Promise<Response> };
 

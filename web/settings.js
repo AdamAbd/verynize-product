@@ -50,7 +50,9 @@
  function applyOpen(section){const id=section||'preferences';if(!screen.hidden&&selected===id)return;screen.hidden=false;document.body.classList.add('settings-open');render(id);}
  function applyClose(){if(screen.hidden)return;screen.hidden=true;document.body.classList.remove('settings-open');renderer?.update?.();}
  function close(){window.shellRequest({settings:null},applyClose);}
- window.appSettings={open:section=>{window.shellRequest({settings:section||'preferences'},()=>applyOpen(section));},close,select:id=>{if(screen.hidden)render(id);else window.shellRequest({settings:id},()=>render(id));},applyOpen,applyClose,actions,sections:sections.map(([id,title])=>({id,title})),getState:()=>({open:!screen.hidden,section:selected,status:lastStatus,accounts:{...accounts}}),
+ window.appSettings={open:section=>{window.shellRequest({settings:section||'preferences'},()=>applyOpen(section));},close,select:id=>{if(screen.hidden)render(id);else window.shellRequest({settings:id},()=>render(id));},applyOpen,applyClose,
+  // Web app: Start's settings route owns the open state (#settings-screen[hidden], body.settings-open) and the section (its URL); it reports the section here so getState() stays true.
+  syncSection:id=>{selected=id;lastStatus='';renderer?.update?.()},actions,sections:sections.map(([id,title])=>({id,title})),getState:()=>({open:!screen.hidden,section:selected,status:lastStatus,accounts:{...accounts}}),
   // A UI layer (the React settings island) renders the screen itself and is notified on every state change.
   attach:next=>{renderer=next;screen.replaceChildren();if(!screen.hidden)renderer.update?.();}};
  $('settings-back').onclick=close;$('settings-search').oninput=nav;$('settings-sharing').onclick=actions.share;

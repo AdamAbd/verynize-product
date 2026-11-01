@@ -6,11 +6,20 @@
 // - Static files come from web/ through an allowlist: everything except web/src (sources),
 //   web/index.html (Start renders the document) and desktop-only pages. Served by a dev middleware
 //   and emitted into the client build, replacing the old `publicDir: "web"`.
+// - `virtual:verynize/legacy-ui` is the renderer UI (web/src/web-app.tsx: every island of
+//   web/dist/ui.js plus the area components Start's routes render), bundled into Start's client
+//   build from source so the page has one React, one QueryClient and one TanStack Router copy.
+//   The server build gets an empty module: the editor is client-only. Styles still come from
+//   web/dist/ui.css (built by scripts/build-ui.cjs with Tailwind), so CSS imported under web/src is
+//   an empty module here and the web and desktop pages load the same stylesheet.
 import fs from "node:fs";
 import path from "node:path";
 
 const VIRTUAL_ID = "virtual:verynize/legacy-shell";
 const RESOLVED_ID = "\0" + VIRTUAL_ID;
+const UI_ID = "virtual:verynize/legacy-ui";
+const RESOLVED_UI_ID = "\0" + UI_ID;
+const EMPTY_CSS_ID = "\0verynize:ui-css";
 
 /**
  * Paths under web/ that are never published to the browser deployment. web/dist only ships the
@@ -97,8 +106,45 @@ export function contentType(file) {
   return CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
 }
 
+/**
+ * The renderer UI from source (`virtual:verynize/legacy-ui`): the `@` alias of web/src, the entry
+ * on the client and an empty module on the server, and CSS imports under web/src emptied (the page
+ * loads web/dist/ui.css, see above).
+ * @param {{ webDir: string }} options
+ */
+function legacyUi({ webDir }) {
+  const srcDir = path.join(webDir, "src");
+  const entry = path.join(srcDir, "web-app.tsx").split(path.sep).join("/");
+  return {
+    name: "verynize:legacy-ui",
+    enforce: "pre",
+    config: () => ({ resolve: { alias: { "@": srcDir } } }),
+    resolveId(id, importer) {
+      if (id === UI_ID) return RESOLVED_UI_ID;
+      if (
+        importer &&
+        path.resolve(importer.split("?")[0]).startsWith(srcDir + path.sep) &&
+        /\.css(\?|$)/.test(id)
+      )
+        return EMPTY_CSS_ID;
+    },
+    load(id) {
+      if (id === EMPTY_CSS_ID) return "";
+      if (id !== RESOLVED_UI_ID) return;
+      return this.environment?.name === "client"
+        ? `export * from ${JSON.stringify(entry)};`
+        : "export {};";
+    },
+  };
+}
+
 /** @param {{ webDir: string }} options */
 export function legacyWeb({ webDir }) {
+  return [legacyUi({ webDir }), legacyWebFiles({ webDir })];
+}
+
+/** @param {{ webDir: string }} options */
+function legacyWebFiles({ webDir }) {
   const indexHtml = path.join(webDir, "index.html");
   return {
     name: "verynize:legacy-web",

@@ -31,7 +31,7 @@ npm run deploy:check
 npm run deploy
 ```
 
-`deploy:check` builds and validates without uploading. `deploy` requires a configured Cloudflare account and creates the declared bindings. The dry run validates the asset bundle and every declared binding: the `ROOMS`, `ACCOUNTS` and `APPS` SQLite Durable Objects, the `DB` D1 database, the `ASSETS_BUCKET` R2 bucket, the `EMAIL` send-email binding, and the `ROOM_CREATION`, `AUTH_LIMIT` and `MCP_LIMIT` rate limiters.
+`deploy:check` builds and validates without uploading. `deploy` requires a configured Cloudflare account and creates the declared bindings. The dry run validates the asset bundle and every declared binding: the `ROOMS`, `ACCOUNTS`, `APPS` and `AI_RUNS` SQLite Durable Objects, the `DB` D1 database, the `ASSETS_BUCKET` R2 bucket, the `EMAIL` send-email binding, and the `ROOM_CREATION`, `AUTH_LIMIT` and `MCP_LIMIT` rate limiters.
 
 ## Accounts database (D1) and auth secret
 

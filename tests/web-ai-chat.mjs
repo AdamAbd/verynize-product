@@ -11,7 +11,11 @@
 // models and never Claude/Codex; with access "Ask" picked in the composer a write tool call raises the approval card:
 // Allow → POST /approvals with the request's argsHash, the edit lands in the room (backend read and the open canvas)
 // and the run reports permission-resolved; Deny → the room is unchanged and the model gets the denial;
-// a server without OPENROUTER_API_KEY → "Model API not configured on this server".
+// a server whose operator set VERYNIZE_AI=off → "Model API not configured on this server".
+// Credentials (docs/ai-runtime.md "Credentials"): no server key; signed in without an OpenRouter key → "Connect your
+// OpenRouter account"; a pasted key is checked (rejected, then accepted); OAuth PKCE through the fake OpenRouter
+// sign-in page and the backend callback returns to the editor with its #room= fragment restored; turns carry the
+// account's own key; Settings › Agents shows the connection (last4, source, usage), Disconnect and Paste API key.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -71,8 +75,8 @@ const fake = await startFakeOpenRouter({
 const temp = await fsp.mkdtemp(path.join(os.tmpdir(), "verynize-web-ai-chat-"));
 const options = await cloudOptions(path.join(temp, "state"));
 const baseEnv = { ...options.workers[0].config.env };
+// No server key: the account connects its own OpenRouter key (pasted, then through OAuth PKCE).
 const aiEnv = {
-  OPENROUTER_API_KEY: { type: "text", value: "web-chat-test-key" },
   OPENROUTER_BASE_URL: { type: "text", value: fake.baseUrl },
   VERYNIZE_AI_MODELS: { type: "text", value: "fake/alpha=Fake Alpha,fake/beta=Fake Beta" },
 };
@@ -191,13 +195,15 @@ try {
   page.on("dialog", (dialog) => dialog.accept());
   await page.goto(origin + "/editor");
   await ready(page);
-  await page.waitForFunction(
-    () => document.getElementById("chat-web-gate")?.dataset.state === "no-room",
-  );
-  assert.match(
-    await gate(page).innerText(),
-    /^Open or share a cloud room to chat with the model API/,
-  );
+  const gateState = (state) =>
+    page.waitForFunction(
+      (wanted) => document.getElementById("chat-web-gate")?.dataset.state === wanted,
+      state,
+    );
+  // No OpenRouter credential yet: Connect, or paste a key.
+  await gateState("needs-credentials");
+  assert.match(await gate(page).innerText(), /^Connect your OpenRouter account/);
+  assert.match(await gate(page).innerText(), /separate from Claude Code and Codex/);
   assert.ok(
     requests.includes("GET /api/ai/config"),
     "the config is fetched through the query layer: " + requests.join(", "),
@@ -208,16 +214,77 @@ try {
     ),
     "the ai-config query is cached under the account scope",
   );
+  await page.locator("#chat-web-connect-openrouter").waitFor();
+  await page.locator("#chat-web-paste-key").click();
+  await page.locator("#chat-web-openrouter-key").fill("sk-or-v1-not-known-to-openrouter");
+  await page.locator("#chat-web-save-key").click();
+  await page
+    .locator("#chat-web-key-error")
+    .getByText(/OpenRouter rejected this key/)
+    .waitFor();
+  const PASTED = "sk-or-v1-web-pasted-key-4321";
+  fake.keys.add(PASTED);
+  await page.locator("#chat-web-openrouter-key").fill(PASTED);
+  await page.locator("#chat-web-save-key").click();
+  await gateState("no-room");
+  assert.match(
+    await gate(page).innerText(),
+    /^Open or share a cloud room to chat with the model API/,
+  );
+  const credentials = async () => (await (await api("/api/ai/credentials")).json()).openrouter;
+  assert.deepEqual(
+    (({ connected, source, last4 }) => ({ connected, source, last4 }))(await credentials()),
+    { connected: true, source: "manual", last4: "4321" },
+  );
+  // Disconnect (from another tab, say): the next config check brings the gate back.
+  assert.ok((await api("/api/ai/credentials/openrouter", { method: "DELETE" })).ok);
 
   // Join the room the way an invite link does (#room=, Share dialog › Join invite).
+  const joinRoom = async () => {
+    await ready(page);
+    await page.locator("#cloud-connect").click();
+    await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, room.id);
+    await page.evaluate(() => document.getElementById("cloud-dialog").close());
+  };
   await page.goto(origin + `/editor#room=${room.id}`);
   await page.reload(); // a fragment-only navigation does not load the page again
-  await ready(page);
-  await page.locator("#cloud-connect").click();
-  await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, room.id);
-  await page.evaluate(() => document.getElementById("cloud-dialog").close());
+  await joinRoom();
+  await gateState("needs-credentials");
+
+  // Connect OpenRouter: OAuth PKCE in this tab, through OpenRouter's sign-in page (faked) and the backend's
+  // callback, back to the editor with its #room= fragment restored (kept client-side, never sent to the server).
+  const authBefore = fake.authRequests.length;
+  const cameBack = page.waitForURL((url) => url.searchParams.get("openrouter") === "connected", {
+    timeout: 20000,
+  });
+  await page.locator("#chat-web-connect-openrouter").click();
+  await cameBack;
+  await page.waitForURL(
+    (url) =>
+      url.pathname === "/editor" &&
+      !url.searchParams.has("openrouter") &&
+      url.hash === `#room=${room.id}`,
+    { timeout: 20000 },
+  );
+  assert.equal(fake.authRequests.length, authBefore + 1, "the browser went to OpenRouter's /auth");
+  const auth = fake.authRequests.at(-1);
+  assert.equal(auth.callback_url, `${origin}/api/ai/credentials/openrouter/oauth/callback`);
+  assert.equal(auth.code_challenge_method, "S256");
+  assert.ok(!JSON.stringify(auth).includes(room.id), "the room fragment never left the browser");
+  assert.ok(
+    requests.some((r) => r.startsWith("GET /api/ai/credentials/openrouter/oauth/callback?code=")),
+  );
+  assert.ok(
+    !new URL(page.url()).searchParams.has("openrouter"),
+    "the outcome parameter is dropped",
+  );
+  await joinRoom();
   await page.locator("#project-prompt").waitFor({ state: "visible" });
   assert.equal(await gate(page).count(), 0, "no gate once signed in with a room");
+  const connected = await credentials();
+  assert.deepEqual([connected.connected, connected.source], [true, "oauth"]);
+  const oauthKey = fake.exchanges.at(-1) && [...fake.keys].find((k) => k.endsWith(connected.last4));
+  assert.ok(oauthKey?.startsWith("sk-or-v1-oauth-"), "the key issued through OAuth is stored");
 
   const send = async (text) => {
     await page.locator("#project-prompt").fill(text);
@@ -258,6 +325,11 @@ try {
   assert.equal(reply.state, "complete");
   assert.equal(reply.agent, "openrouter");
   assert.equal(fake.requests.at(-1).body.model, "fake/beta", "the picked model is sent");
+  assert.equal(
+    fake.requests.at(-1).headers.authorization,
+    `Bearer ${oauthKey}`,
+    "the turn runs on the account's own OpenRouter key",
+  );
 
   // A read tool call against the room renders as a tool card with the room's content in its result.
   await send("[scenario:tree] What is in this room?");
@@ -510,13 +582,73 @@ try {
     "the answered approval is rendered as denied",
   );
   await page.close();
+
+  // ---- Settings › Agents › Model API (OpenRouter): status, disconnect, paste a key ----
+  {
+    const settings = await context.newPage();
+    watch(settings);
+    await settings.goto(origin + "/settings/agents");
+    await settings.waitForFunction(() => document.documentElement.dataset.uiReady === "true");
+    const card = settings.locator("#settings-openrouter-card");
+    await settings.locator('#settings-openrouter-card[data-status="connected"]').waitFor();
+    const status = await settings.locator("#settings-openrouter-status").innerText();
+    assert.match(status, new RegExp(`Key ending ${connected.last4} · connected with OpenRouter`));
+    assert.match(status, /\$1\.25 of \$10\.00 used/);
+    assert.ok(!status.includes(oauthKey), "the key is never shown");
+    await settings.locator("#settings-openrouter-reconnect").waitFor();
+    await settings.locator("#settings-openrouter-disconnect").click();
+    await settings.locator('#settings-openrouter-card[data-status="missing"]').waitFor();
+    assert.equal((await credentials()).connected, false);
+    // Connect from Settings: the OAuth round-trip comes back to the Start-rendered /settings/agents screen with the
+    // outcome parameter dropped and the section still open.
+    const settingsBack = settings.waitForURL(
+      (url) => url.searchParams.get("openrouter") === "connected",
+      { timeout: 20000 },
+    );
+    await settings.locator("#settings-openrouter-connect").click();
+    await settingsBack;
+    await settings.waitForURL(
+      (url) => url.pathname === "/settings/agents" && !url.searchParams.has("openrouter"),
+      { timeout: 20000 },
+    );
+    await settings.locator('#settings-openrouter-card[data-status="connected"]').waitFor();
+    assert.equal(
+      await settings.evaluate(() => window.shellRouter?.state.location.pathname),
+      "/settings/agents",
+      "Start's router is on the settings section after the return",
+    );
+    assert.equal(
+      await settings.evaluate(() => window.shellRouter?.state.location.searchStr || ""),
+      "",
+      "Start's location dropped the outcome parameter too",
+    );
+    assert.equal((await credentials()).source, "oauth");
+    await settings.locator("#settings-openrouter-disconnect").click();
+    await settings.locator('#settings-openrouter-card[data-status="missing"]').waitFor();
+    await settings.locator("#settings-openrouter-paste").click();
+    const SETTINGS_KEY = "sk-or-v1-web-settings-key-7777";
+    fake.keys.add(SETTINGS_KEY);
+    await settings.locator("#settings-openrouter-key").fill(SETTINGS_KEY);
+    await settings.locator("#settings-openrouter-save").click();
+    await settings.locator('#settings-openrouter-card[data-status="connected"]').waitFor();
+    assert.match(await card.innerText(), /Key ending 7777 · pasted API key/);
+    await settings.close();
+  }
   await context.close();
 
-  // ---- a server without an OpenRouter key ----
+  // ---- a server whose operator turned the model API off ----
   const worker = options.workers[0];
   await backend.setOptions({
     ...options,
-    workers: [{ ...worker, config: { ...worker.config, env: baseEnv } }],
+    workers: [
+      {
+        ...worker,
+        config: {
+          ...worker.config,
+          env: { ...baseEnv, VERYNIZE_AI: { type: "text", value: "off" } },
+        },
+      },
+    ],
   });
   {
     const context2 = await signedInContext();
@@ -534,7 +666,7 @@ try {
 
   assert.deepEqual(errors, [], "no page errors");
   console.log(
-    "PASS web chat (model API): signed-out and not-configured states, room gate, streamed text, read tool call, history, reconnect with events?after=, cancel, model picker, access Ask with write approvals (allow and deny)",
+    "PASS web chat (model API): signed-out, needs-credentials and not-configured states, pasted key (rejected, accepted), OAuth PKCE round-trip keeping #room=, Settings OpenRouter status/disconnect/paste, room gate, streamed text, read tool call, history, reconnect with events?after=, cancel, model picker, access Ask with write approvals (allow and deny)",
   );
 } finally {
   await browser?.close();

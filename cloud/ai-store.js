@@ -130,6 +130,16 @@ export async function claimExpired(env, runId, now = Date.now()) {
   return !!result.meta?.changes;
 }
 
+/** Claim a running run that never got an executor, to finish it as an error; true if this call won. */
+export async function claimUnstarted(env, runId, now = Date.now()) {
+  const result = await database(env)
+    .update(aiRun)
+    .set({ status: "done", code: "error", updatedAt: now })
+    .where(and(eq(aiRun.id, runId), eq(aiRun.status, "running")))
+    .run();
+  return !!result.meta?.changes;
+}
+
 // Approvals (permission requests of write tool calls).
 
 export async function createApproval(env, fields, now = Date.now()) {
