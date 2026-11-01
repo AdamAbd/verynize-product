@@ -2,8 +2,10 @@
 // around cloud/worker.js's fetch, with room WebSockets accepted through
 // `upgradeWebSocket` from @vercel/functions once the room's turn has committed.
 import { pendingUpgrade, UPGRADED } from "./actors.js";
+import { MESSAGE_BYTES } from "../../limits.js";
 
-const MAX_SOCKET_MESSAGE = 8 * 1024 * 1024;
+// Room socket messages carry up to a whole document (cloud/limits.js).
+const MAX_SOCKET_MESSAGE = MESSAGE_BYTES;
 export const REWRITTEN_PATH = "__vz_path";
 
 /**

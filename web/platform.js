@@ -50,6 +50,8 @@
     // Agent MCP bridge into the editor (desktop/mcp-bridge.cjs, web/agent-bridge.js).
     agentBridge: ["agentBridge.onCall", "agentBridge.reply"],
     onboarding: ["onboardingState"],
+    // Share panel server default (desktop/cloud-defaults.cjs).
+    cloudDefaults: ["cloudDefaults"],
   };
   const exposed = root.desktop;
   const desktop = exposed && typeof exposed === "object" ? exposed : null;

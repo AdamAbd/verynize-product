@@ -1,22 +1,24 @@
 // One SQLite Durable Object per shared design room: capability links with roles, account
 // members, operation-based merging, revision-checked snapshots (legacy clients), WebSocket
-// presence, comments and frozen public snapshots.
+// presence, comments and frozen public snapshots. The document is stored per page
+// (cloud/room-store.js) and clients that ask for it load pages lazily (`lazy=1`, `sync`, `pages`).
 import { DurableObject, acceptWebSocket } from "#cloud-runtime";
 import "../web/cloud-ops.js";
+import { RoomStore } from "./room-store.js";
+import { MESSAGE_BYTES, REQUEST_BYTES } from "./limits.js";
 import {
   json,
   fail,
   readJson,
-  documentText,
   randomHex,
   digestHex,
   errorResponse,
   atLeast,
   roleRank,
   ROLES,
-  MAX_JSON,
   rpcFail,
 } from "./http.js";
+import { mayHoldInline, rejectInline, screenOps } from "./inline-binaries.js";
 
 const Ops = globalThis.VerynizeOps;
 const CLIENT = /^[A-Za-z0-9_-]{1,64}$/;
@@ -24,6 +26,13 @@ const MAX_SOCKETS = 32;
 const FUTURE_SKEW = 5 * 60 * 1000;
 const TOKEN_ROLES = ["viewer", "commenter", "editor", "owner"];
 const ORG_ROLES = ["viewer", "commenter", "editor", "owner"];
+const PAGE_ID = (id) => typeof id === "string" && id.length > 0 && id.length <= 200;
+const MAX_PAGE_REQUEST = 200;
+const requireDocument = (document) => {
+  if (document === null || typeof document !== "object")
+    fail(400, "Document must be a JSON object or array");
+  return document;
+};
 const bestRole = (...roles) =>
   roles.filter(Boolean).sort((a, b) => roleRank(b) - roleRank(a))[0] || null;
 
@@ -41,7 +50,10 @@ export class DesignRoom extends DurableObject {
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     this.clock = Ops.createClock("server");
+    this.store = new RoomStore(this.sql);
     this.migrateLegacyToken();
+    // Rooms that kept the whole document in room.document move to per-page records once.
+    this.store.migrate(this.row());
   }
 
   // Rooms created before roles stored one capability hash as a JSON byte array on the room row.
@@ -66,16 +78,46 @@ export class DesignRoom extends DurableObject {
     return this.sql.exec("SELECT * FROM room WHERE id=1").toArray()[0];
   }
   snapshot() {
-    const row = this.row();
-    return { document: JSON.parse(row.document), revision: row.revision };
+    return { document: this.store.read(), revision: this.row().revision };
+  }
+  /**
+   * The document with only the pages in `ids` loaded (the document's active page, or its first,
+   * when none of them exists) and the others as stubs ({...properties, nodes: []}), listed in
+   * `unloaded`; `pages` indexes every page ({id, bytes, nodes}).
+   */
+  lazySnapshot(ids = []) {
+    const index = this.store.index();
+    const state = this.store.load(this.lazyPages(ids, index));
+    return {
+      document: state.doc,
+      revision: this.row().revision,
+      unloaded: [...state.stubs],
+      pages: index,
+    };
+  }
+  /** The pages a lazy snapshot loads: the existing ones of `ids`, else the active or first page. */
+  lazyPages(ids = [], index = this.store.index()) {
+    const known = new Set(index.map((page) => page.id));
+    const wanted = new Set(ids.filter((id) => known.has(id)));
+    if (!wanted.size && index.length) {
+      const active = this.store.metadata()?.activePage;
+      wanted.add(known.has(active) ? active : index[0].id);
+    }
+    return wanted;
+  }
+  /** Whole pages by id, in the requested order, and the ids that do not exist. */
+  readPages(ids) {
+    const pages = [],
+      missing = [];
+    for (const id of ids.slice(0, MAX_PAGE_REQUEST)) {
+      const page = PAGE_ID(id) ? this.store.page(id) : null;
+      if (page) pages.push(page);
+      else missing.push(id);
+    }
+    return { revision: this.row().revision, pages, missing };
   }
   title() {
-    try {
-      const doc = JSON.parse(this.row().document);
-      return typeof doc?.name === "string" ? doc.name.slice(0, 120) : "Shared design";
-    } catch {
-      return "Shared design";
-    }
+    return this.store.title();
   }
 
   async issueToken(role, label) {
@@ -125,11 +167,9 @@ export class DesignRoom extends DurableObject {
 
   async create(data, account) {
     if (this.row()) fail(409, "Room exists");
-    const text = documentText(data.document);
-    this.sql.exec(
-      "INSERT INTO room (id,token_hash,document,revision) VALUES (1,'migrated',?,0)",
-      text,
-    );
+    rejectInline(this.env, requireDocument(data.document));
+    this.store.replace(data.document);
+    this.sql.exec("INSERT INTO room (id,token_hash,document,revision) VALUES (1,'migrated','',0)");
     const issued = await this.issueToken("owner", "Original invite link");
     if (account?.id) this.addMember(account, "owner");
     return json({ token: issued.token, revision: 0, role: "owner", title: this.title() }, 201);
@@ -196,23 +236,22 @@ export class DesignRoom extends DurableObject {
   update(document, baseRevision) {
     if (!Number.isSafeInteger(baseRevision) || baseRevision < 0)
       fail(400, "baseRevision must be a nonnegative integer");
-    const text = documentText(document);
+    rejectInline(this.env, requireDocument(document));
     const row = this.row();
     if (row.revision !== baseRevision)
       return json({ error: "Revision conflict", ...this.snapshot() }, 409);
     const stamp = this.clock.next();
     const store = this.stampStore();
+    const state = this.store.load(null);
     Ops.apply(
-      JSON.parse(row.document),
-      Ops.diff(JSON.parse(row.document), document).map((op) => ({ ...op, s: stamp })),
+      state.doc,
+      Ops.diff(state.doc, document).map((op) => ({ ...op, s: stamp })),
       { stamps: store },
     );
+    // Only the pages that differ are rewritten; limits are checked before anything is stored.
+    this.store.commit(state, document);
     store.flush();
-    this.sql.exec(
-      "UPDATE room SET document=?,revision=revision+1 WHERE id=1 AND revision=?",
-      text,
-      baseRevision,
-    );
+    this.sql.exec("UPDATE room SET revision=revision+1 WHERE id=1 AND revision=?", baseRevision);
     const result = this.snapshot();
     this.broadcast({ type: "snapshot", ...result });
     return json(result);
@@ -249,7 +288,9 @@ export class DesignRoom extends DurableObject {
         error: "Your role in this room cannot edit",
       };
     const limit = Date.now() + FUTURE_SKEW;
-    const stamped = ops.map((op) => {
+    // Large inline binaries never reach room storage (cloud/inline-binaries.js).
+    const screened = screenOps(this.env, ops);
+    const stamped = screened.ops.map((op) => {
       const parsed = Ops.decode(op?.s);
       // Missing or far-future stamps would win forever; the server restamps them.
       const s = parsed && parsed.wall <= limit ? op.s : this.clock.next();
@@ -257,17 +298,43 @@ export class DesignRoom extends DurableObject {
       return { ...op, s };
     });
     const store = this.stampStore();
-    const current = this.snapshot();
-    const result = Ops.apply(current.document, stamped, {
+    // Only the pages the batch touches are read and written; the others stay stubs.
+    const touched = Ops.touchedPages(stamped);
+    const state = this.store.load(touched.all ? null : touched.pages);
+    const result = Ops.apply(state.doc, stamped, {
       stamps: store,
       normalize: true,
       stamp: this.clock.next(),
+      external: (id) => state.stubs.has(this.store.nodePage(id)),
     });
+    result.rejected.unshift(...screened.rejected);
     if (!result.applied.length)
-      return { type: "ops", client, batch, revision, ops: [], rejected: result.rejected.length };
-    const text = documentText(result.doc);
+      return {
+        type: "ops",
+        client,
+        batch,
+        revision,
+        ops: [],
+        rejected: result.rejected.length,
+        reasons: result.rejected.slice(0, 20),
+      };
+    try {
+      this.store.commit(state, result.doc);
+    } catch (error) {
+      if (error?.status !== 413) throw error;
+      return {
+        type: "ops",
+        client,
+        batch,
+        revision,
+        ops: [],
+        rejected: ops.length,
+        error: error.message,
+        tooLarge: true,
+      };
+    }
     store.flush();
-    this.sql.exec("UPDATE room SET document=?,revision=revision+1 WHERE id=1", text);
+    this.sql.exec("UPDATE room SET revision=revision+1 WHERE id=1");
     return {
       type: "ops",
       client,
@@ -330,6 +397,60 @@ export class DesignRoom extends DurableObject {
       reasons: message.reasons || [],
       ...this.snapshot(),
     };
+  }
+
+  /**
+   * Room migration (cloud/inline-binaries.js migrateRoomInline): the document with the pages that
+   * may still hold large inline binaries loaded (the others are stubs), or null. `ids` limits the
+   * scan to some pages (lazy loading; empty: the page a lazy snapshot opens on), null scans all.
+   * Pages found clean are not rescanned during this activation (writes reject inline binaries),
+   * and a page that cannot be migrated is offered once per revision, not on every open.
+   */
+  inlineSnapshot(ids = null) {
+    const row = this.row();
+    if (!row) return null;
+    this.inlineClean ??= new Set();
+    this.inlineOffered ??= new Map();
+    const fresh = (key) =>
+      !this.inlineClean.has(key) && this.inlineOffered.get(key) !== row.revision;
+    const check = (key, text) => {
+      if (mayHoldInline(text)) return true;
+      this.inlineClean.add(key);
+      return false;
+    };
+    const offer = (keys) => {
+      for (const key of keys) this.inlineOffered.set(key, row.revision);
+    };
+    if (this.store.layout !== "pages") {
+      if (!fresh("w") || !check("w", this.store.text("w"))) return null;
+      offer(["w"]);
+      return { document: this.store.read(), revision: row.revision };
+    }
+    const index = this.store.index().map((page) => page.id);
+    const scan = ids === null ? index : [...this.lazyPages(ids)];
+    const dirty = new Set(
+      scan.filter(
+        (id) =>
+          fresh(id) && check(id, this.store.text("h:" + id) + "\n" + this.store.text("n:" + id)),
+      ),
+    );
+    const meta = fresh("m") && check("m", this.store.text("m"));
+    if (!dirty.size && !meta) return null;
+    offer([...dirty, ...(meta ? ["m"] : [])]);
+    return { document: this.store.load(dirty).doc, revision: row.revision };
+  }
+  /** Apply the asset URL swap of a migration as a server batch; a newer revision is a conflict. */
+  migrateInline({ baseRevision, ops } = {}) {
+    const row = this.row();
+    if (!row) rpcFail(404, "Room not found");
+    if (row.revision !== baseRevision) return { conflict: true, revision: row.revision };
+    const client = "server-assets";
+    const last =
+      this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
+        ?.last_batch ?? 0;
+    const message = this.applyBatch({ client, batch: last + 1, ops }, "owner");
+    if (message.ops.length) this.broadcast(message);
+    return { applied: message.ops.length, rejected: message.rejected, revision: message.revision };
   }
 
   accessSummary(role) {
@@ -401,12 +522,12 @@ export class DesignRoom extends DurableObject {
         try {
           account = JSON.parse(request.headers.get("x-verynize-account") || "null");
         } catch {}
-        return await this.create(await readJson(request), account);
+        return await this.create(await readJson(request, REQUEST_BYTES), account);
       }
       if (action === "/public" && method === "GET") {
         if (!row || !row.public_nonce || url.searchParams.get("nonce") !== row.public_nonce)
           return json({ error: "Not found" }, 404);
-        return json({ document: JSON.parse(row.public_document), revision: row.public_revision });
+        return json({ document: this.store.published(row), revision: row.public_revision });
       }
       if (!row) return json({ error: "Unauthorized" }, 401);
       const { role, capability, account, orgRole } = await this.access(request, url);
@@ -429,6 +550,7 @@ export class DesignRoom extends DurableObject {
           : 0;
         const { socket: server, response } = acceptWebSocket(this.ctx);
         const id = crypto.randomUUID();
+        const lazy = url.searchParams.get("lazy") === "1";
         server.serializeAttachment({
           id,
           name: account?.displayName || "Guest",
@@ -438,29 +560,51 @@ export class DesignRoom extends DurableObject {
           accountId: account?.id || null,
           handle: account?.handle || null,
           client,
+          lazy,
         });
-        server.send(JSON.stringify({ type: "welcome", id, protocol: Ops.PROTOCOL, role, acked }));
-        server.send(JSON.stringify({ type: "snapshot", ...this.snapshot(), acked }));
+        // Lazy clients answer the welcome with `sync` (the pages they hold) and get a snapshot
+        // of those pages only; other clients get the whole document at once.
+        server.send(
+          JSON.stringify({
+            type: "welcome",
+            id,
+            protocol: Ops.PROTOCOL,
+            role,
+            acked,
+            ...(lazy ? { lazyPages: true } : {}),
+          }),
+        );
+        if (!lazy) server.send(JSON.stringify({ type: "snapshot", ...this.snapshot(), acked }));
         this.broadcast({ type: "presence", peers: this.peers() });
         return response;
       }
       if (action === "/room" && method === "GET")
-        return json({ ...this.snapshot(), role, protocol: Ops.PROTOCOL, title: this.title() });
+        return json({
+          ...(url.searchParams.get("lazy") === "1"
+            ? this.lazySnapshot(url.searchParams.getAll("page"))
+            : this.snapshot()),
+          role,
+          protocol: Ops.PROTOCOL,
+          title: this.title(),
+        });
+      if (action === "/pages" && method === "GET")
+        return json(this.readPages(url.searchParams.getAll("id")));
       if (action === "/room" && method === "PUT") {
         need("editor");
-        const data = await readJson(request);
+        const data = await readJson(request, REQUEST_BYTES);
         return this.update(data.document, data.baseRevision);
       }
       if (action === "/ops" && method === "POST") {
-        const message = this.applyBatch(await readJson(request), role);
+        const message = this.applyBatch(await readJson(request, MESSAGE_BYTES), role);
         if (message.ops.length) this.broadcast(message);
-        return json(message, message.error ? 403 : 200);
+        return json(message, message.tooLarge ? 413 : message.error ? 403 : 200);
       }
       if (action === "/publish" && method === "POST") {
         need("editor");
         const nonce = randomHex(32);
+        this.store.publish();
         this.sql.exec(
-          "UPDATE room SET public_nonce=?,public_document=document,public_revision=revision WHERE id=1",
+          "UPDATE room SET public_nonce=?,public_document=NULL,public_revision=revision WHERE id=1",
           nonce,
         );
         return json({ nonce, revision: this.row().revision, title: this.title() });
@@ -470,6 +614,7 @@ export class DesignRoom extends DurableObject {
         this.sql.exec(
           "UPDATE room SET public_nonce=NULL,public_document=NULL,public_revision=NULL WHERE id=1",
         );
+        this.store.unpublish();
         return json({ unpublished: true });
       }
       if (action === "/access" && method === "GET") return json(this.accessSummary(role));
@@ -625,7 +770,7 @@ export class DesignRoom extends DurableObject {
 
   async webSocketMessage(ws, message) {
     try {
-      if (typeof message !== "string" || message.length > MAX_JSON)
+      if (typeof message !== "string" || message.length > MESSAGE_BYTES)
         throw Error("Invalid message size");
       const data = JSON.parse(message);
       const state = ws.deserializeAttachment() || {};
@@ -641,6 +786,35 @@ export class DesignRoom extends DurableObject {
         );
         if (result.ops.length) this.broadcast(result);
         else ws.send(JSON.stringify(result));
+      } else if (data.type === "sync") {
+        // A lazy client's snapshot: the pages it holds (or the active page), unless its revision
+        // is current. `acked` drops the batches the room already applied.
+        const acked = state.client
+          ? (this.sql
+              .exec("SELECT last_batch FROM clients WHERE client_id=?", state.client)
+              .toArray()[0]?.last_batch ?? 0)
+          : 0;
+        const revision = this.row().revision;
+        const pages = Array.isArray(data.pages)
+          ? data.pages.filter(PAGE_ID).slice(0, MAX_PAGE_REQUEST)
+          : [];
+        ws.send(
+          JSON.stringify(
+            Number.isSafeInteger(data.revision) && data.revision === revision
+              ? { type: "snapshot", same: true, revision, acked, pages: this.store.index() }
+              : { type: "snapshot", ...this.lazySnapshot(pages), acked },
+          ),
+        );
+      } else if (data.type === "pages") {
+        // Pages arrive on the socket that carries the operations, so a page reflects every
+        // operation sent before it and the operations after it apply on top. One message per
+        // page keeps each under the page limit.
+        const ids = Array.isArray(data.ids) ? data.ids : [];
+        const { revision, pages, missing } = this.readPages(ids);
+        for (const page of pages)
+          ws.send(JSON.stringify({ type: "pages", revision, pages: [page] }));
+        if (missing.length || !pages.length)
+          ws.send(JSON.stringify({ type: "pages", revision, pages: [], missing }));
       } else if (data.type === "presence") {
         const presence = {
           name: typeof data.name === "string" ? data.name.slice(0, 80) : "Guest",

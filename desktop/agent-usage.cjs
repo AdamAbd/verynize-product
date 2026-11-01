@@ -165,6 +165,22 @@ async function fetchCodexUsage({ executable, spawnProcess = spawn, timeout = FET
   } finally { rpc.close(); }
 }
 
+/**
+ * `account/read` on a short-lived `codex app-server` for an account (`env`: a named account's CODEX_HOME). Resolves the
+ * raw result ({account: {type, email?, planType?, workspaceName?} | null, requiresOpenaiAuth}); rejects when the CLI has
+ * no app-server or does not answer. The supported source of the email/plan (desktop/agent-tools.cjs codexAccountFromRead).
+ */
+async function readCodexAccount({ executable, spawnProcess = spawn, timeout = 8000, env = {} } = {}) {
+  const { JsonRpcChild } = require('./agent-runtime.cjs');
+  const child = spawnProcess(executable, ['app-server'], { env: agents.childEnv(env), stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+  const rpc = new JsonRpcChild(child);
+  try {
+    await rpc.request('initialize', { clientInfo: { name: 'verynize', title: 'Verynize', version: '0' } }, timeout);
+    rpc.notify('initialized');
+    return await rpc.request('account/read', { refreshToken: false }, timeout);
+  } finally { rpc.close(); }
+}
+
 function friendlyError(error) {
   const text = String(error?.message || error || '');
   if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network|offline|fetch failed|timed out/i.test(text)) return 'Couldn\'t reach the service. Check your connection and refresh.';
@@ -272,4 +288,4 @@ function registerAgentUsage(handle, { userData, profiles = null }) {
   return usage;
 }
 
-module.exports = { registerAgentUsage, AgentUsage, parseClaudeUsage, parseCodexUsage, fetchClaudeUsage, fetchCodexUsage, LayerLog, countNewNodes, recordGeneratedLayers, weekStart, claudePlan, codexPlan, friendlyError };
+module.exports = { registerAgentUsage, AgentUsage, parseClaudeUsage, parseCodexUsage, fetchClaudeUsage, fetchCodexUsage, readCodexAccount, LayerLog, countNewNodes, recordGeneratedLayers, weekStart, claudePlan, codexPlan, friendlyError };

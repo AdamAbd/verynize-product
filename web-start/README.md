@@ -82,6 +82,18 @@ Alternatives considered:
 
 Navigating between `/`, `/editor`, `/code` and `/settings/*` never remounts the layout.
 
+### Sign-in first
+
+The web app needs an account (cloud/README.md "Web sign-in"). Before step 1 above, `EditorHost` asks
+`webAccess()` (`legacy/web-auth.ts`, imported dynamically so the server never loads it): it loads the
+stylesheets alone (`loadLegacyStyles()`, step 1) and checks the stored session for this origin with
+`GET /api/me`. Signed out, the layout renders the sign-in screen
+(`web/src/islands/onboarding/web-sign-in.tsx`) instead of its children and boots nothing; once signed
+in it registers the shell host and boots the editor at the same address, fragment included. A
+`#public=…` snapshot link boots without an account. After boot, losing the session (sign out) reloads
+the page into the sign-in screen. `<html data-web-auth>` reports `checking`, `signed-out`, `signed-in`
+or `public`.
+
 ### One router
 
 Start's router is the only router and the only history on the page. The legacy shell router

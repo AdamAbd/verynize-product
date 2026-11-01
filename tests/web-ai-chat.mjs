@@ -4,7 +4,11 @@
 // (tests/helpers/fake-openrouter.mjs); the account, room, database, tools and the web transport
 // (web/src/lib/agent-service.ts) are real.
 //
-// Checks: signed out → "Sign in to use chat"; signed in without a room → "Open or share a cloud room…"; joined through
+// Web sign-in (cloud/README.md "Web sign-in"): signed out → the sign-in screen and no editor; a password sign-in boots
+// the editor and the AI setup steps open (OpenRouter not connected, Claude Code / Codex desktop-only); Skip for now is
+// remembered on the server (another browser does not see the steps again); Settings › Agents › AI setup reopens them;
+// after OpenRouter is connected they show the connection and the summary; signing out shows the sign-in screen again.
+// Checks: signed in without a room → "Open or share a cloud room…"; joined through
 // the editor's #room= invite → a sent message streams assistant text into the transcript, a read tool call renders
 // with its result from the room, the next turn carries the earlier ones as history, a dropped connection resumes
 // through GET /api/ai/runs/:id/events?after=, Stop cancels a running turn, the model picker lists the server's
@@ -23,7 +27,11 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { launchBrowser } from "./helpers/web-app.mjs";
+import {
+  launchBrowser,
+  screenshot,
+  signedInContext as signedInBrowserContext,
+} from "./helpers/web-app.mjs";
 import { startFakeOpenRouter, toolMessages, userText } from "./helpers/fake-openrouter.mjs";
 
 // cloudOptions on the Node runtime: no workerd bundle build; the Node server runs cloud/worker.js itself.
@@ -132,24 +140,51 @@ try {
   };
   const gate = (page) => page.locator("#chat-web-gate");
 
-  // ---- signed out ----
+  // ---- signed out: the sign-in screen, then the web AI setup steps ----
+  // (The chat gate's own "Sign in to use chat" state is unreachable in the web app: nothing boots signed out.)
   {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 870 } });
+    const viewport = { width: 1440, height: 870 };
+    const signInContext = await browser.newContext({ viewport });
+    const page = await signInContext.newPage();
     watch(page);
+    const meResponses = [];
+    page.on("response", (response) => {
+      if (new URL(response.url()).pathname === "/api/me") meResponses.push(response.status());
+    });
     await page.goto(origin + "/editor");
-    await ready(page);
-    await gate(page).waitFor();
-    assert.equal(await gate(page).getAttribute("data-state"), "signed-out");
-    assert.match(await gate(page).innerText(), /^Sign in to use chat/);
-    assert.match(
-      await gate(page).innerText(),
-      /Claude Code and Codex sign-ins work in the desktop app only/,
-    );
+    await page.waitForFunction(() => document.documentElement.dataset.webAuth === "signed-out");
+    await page.locator("#web-sign-in #onboarding-email").waitFor();
     assert.equal(
-      await page.locator("#project-prompt").isVisible(),
-      false,
-      "no composer while signed out",
+      await page.evaluate(() => document.documentElement.dataset.legacyEditor ?? null),
+      null,
+      "the editor does not boot while signed out",
     );
+    assert.equal(await gate(page).count(), 0);
+    await screenshot(page, "01-web-sign-in.png");
+    const signInWithPassword = async (target) => {
+      await target.locator("#onboarding-email").fill("chat@example.test");
+      await target.locator("#onboarding-password").fill("a long enough password");
+      await target.locator("#onboarding-submit").click();
+      await target.waitForFunction(() => document.documentElement.dataset.webAuth === "signed-in");
+      await target.waitForFunction(
+        () => document.documentElement.dataset.uiReady === "true",
+        null,
+        { timeout: 30000 },
+      );
+    };
+    await signInWithPassword(page);
+    assert.equal(new URL(page.url()).pathname, "/editor");
+
+    // First sign-in of the account: the AI setup steps, OpenRouter not connected yet, Claude Code / Codex desktop-only.
+    const setup = page.locator("#onboarding[data-step='ai']");
+    const provider = (id) => page.locator(`#onboarding-ai-providers li[data-provider='${id}']`);
+    await provider("openrouter").and(page.locator("[data-status='missing']")).waitFor();
+    assert.equal(await provider("claude").getAttribute("data-status"), "desktop-only");
+    assert.equal(await provider("codex").getAttribute("data-status"), "desktop-only");
+    assert.match(await provider("codex").innerText(), /Desktop app only/);
+    await page.locator("#onboarding-openrouter-connect-openrouter").waitFor();
+    await page.locator("#onboarding-openrouter-paste-key").waitFor();
+    await screenshot(page, "02-ai-setup-not-connected.png");
     assert.deepEqual(
       await page.evaluate(() => ({
         kind: window.verynizePlatform.kind,
@@ -160,27 +195,70 @@ try {
       })),
       { kind: "web", capabilities: false, service: "web", ready: false, agents: ["openrouter"] },
     );
-    await page.close();
+    // Skip for now: closed and remembered for the account on the server.
+    await page.locator("#onboarding-ai-skip").click();
+    await setup.waitFor({ state: "detached" });
+    await page.waitForFunction(async () => {
+      const me = await window.cloudAccount.request("/api/me");
+      return typeof me.aiSetupAt === "number";
+    });
+
+    // Another browser (no local copy): the server remembers, so the steps do not open again.
+    const other = await browser.newContext({ viewport });
+    const second = await other.newPage();
+    watch(second);
+    const secondMe = [];
+    second.on("response", (response) => {
+      if (new URL(response.url()).pathname === "/api/me") secondMe.push(response.status());
+    });
+    await second.goto(origin + "/editor");
+    await second.locator("#web-sign-in #onboarding-email").waitFor();
+    await signInWithPassword(second);
+    // The sign-in itself, then the onboarding island's check.
+    await second.waitForFunction(() => document.documentElement.dataset.uiReady === "true");
+    const until = Date.now() + 10000;
+    while (secondMe.length < 2 && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(secondMe.length >= 2, `GET /api/me after sign-in: ${secondMe}`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(await second.locator("#onboarding").count(), 0, "AI setup shown once per account");
+
+    // Settings › Agents › AI setup reopens it.
+    await second.goto(origin + "/settings/agents");
+    await second.waitForFunction(() => document.documentElement.dataset.uiReady === "true", null, {
+      timeout: 30000,
+    });
+    await second.locator("#settings-ai-setup").click();
+    await second.locator("#onboarding[data-step='ai'] #onboarding-ai-providers").waitFor();
+    await second.locator("#onboarding-ai-skip").click();
+    await second.locator("#onboarding").waitFor({ state: "detached" });
+
+    // Signing out shows the sign-in screen again.
+    await second.evaluate(() => window.cloudAccount.signOut());
+    await second.waitForFunction(
+      () => document.documentElement.dataset.webAuth === "signed-out",
+      null,
+      {
+        timeout: 15000,
+      },
+    );
+    await second.locator("#web-sign-in").waitFor();
+    assert.equal(new URL(second.url()).pathname, "/settings/agents");
+    await other.close();
+    assert.ok(
+      meResponses.every((status) => status === 200),
+      `GET /api/me: ${meResponses}`,
+    );
+    await signInContext.close();
   }
 
   // ---- signed in (same session store as cloud-panel.js) ----
-  const signedInContext = async () => {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 870 } });
-    const session = JSON.stringify({
-      server: origin,
-      session: token,
-      account: me.account,
-      personalOrganizationId: me.personalOrganizationId || null,
-    });
-    // Top document only: sandboxed preview frames have no storage.
-    await context.addInitScript(
-      ([value]) => {
-        if (window === window.top) localStorage.setItem("verynize.cloud.account", value);
-      },
-      [session],
+  const signedInContext = () =>
+    signedInBrowserContext(
+      browser,
+      origin,
+      { session: token, ...me },
+      { viewport: { width: 1440, height: 870 } },
     );
-    return context;
-  };
   const context = await signedInContext();
   const page = await context.newPage();
   watch(page);
@@ -285,6 +363,24 @@ try {
   assert.deepEqual([connected.connected, connected.source], [true, "oauth"]);
   const oauthKey = fake.exchanges.at(-1) && [...fake.keys].find((k) => k.endsWith(connected.last4));
   assert.ok(oauthKey?.startsWith("sk-or-v1-oauth-"), "the key issued through OAuth is stored");
+
+  // The AI setup steps (reopened as from Settings › Agents) show the connection, then the summary.
+  await page.evaluate(() => window.dispatchEvent(new Event("bd:open-onboarding")));
+  await page
+    .locator("#onboarding-ai-providers li[data-provider='openrouter'][data-status='connected']")
+    .waitFor();
+  assert.match(await page.locator("#onboarding-ai-status").innerText(), /Key ending \w{4}/);
+  assert.equal(await page.locator("#onboarding-openrouter-connect-openrouter").count(), 0);
+  await screenshot(page, "03-ai-setup-connected.png");
+  await page.locator("#onboarding-ai-continue").click();
+  await page.locator("#onboarding[data-step='ready'] #onboarding-ready-summary").waitFor();
+  assert.match(
+    await page.locator("#onboarding-ready-summary").innerText(),
+    new RegExp(`key ending ${connected.last4}`),
+  );
+  await screenshot(page, "04-ai-setup-ready.png");
+  await page.locator("#onboarding-ready-done").click();
+  await page.locator("#onboarding").waitFor({ state: "detached" });
 
   const send = async (text) => {
     await page.locator("#project-prompt").fill(text);
@@ -666,7 +762,7 @@ try {
 
   assert.deepEqual(errors, [], "no page errors");
   console.log(
-    "PASS web chat (model API): signed-out, needs-credentials and not-configured states, pasted key (rejected, accepted), OAuth PKCE round-trip keeping #room=, Settings OpenRouter status/disconnect/paste, room gate, streamed text, read tool call, history, reconnect with events?after=, cancel, model picker, access Ask with write approvals (allow and deny)",
+    "PASS web chat (model API): sign-in screen, AI setup steps (once per account, skip, reopen, connected), sign out, needs-credentials and not-configured states, pasted key (rejected, accepted), OAuth PKCE round-trip keeping #room=, Settings OpenRouter status/disconnect/paste, room gate, streamed text, read tool call, history, reconnect with events?after=, cancel, model picker, access Ask with write approvals (allow and deny)",
   );
 } finally {
   await browser?.close();

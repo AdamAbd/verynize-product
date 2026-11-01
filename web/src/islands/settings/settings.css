@@ -261,6 +261,15 @@ html #cloud-dialog .cloud-actions {
 html #cloud-dialog .cloud-actions button {
   flex: 1 1 auto;
 }
+html #cloud-dialog .cloud-actions select#cloud-invite-role {
+  flex: 0 0 auto;
+  width: auto;
+}
+/* Actions the current role cannot use (cloud-panel.js setRole) are hidden, not just disabled. */
+html #cloud-dialog [hidden],
+html #cloud-dialog .cloud-actions:not(:has(> :not([hidden]))) {
+  display: none !important;
+}
 html #cloud-public {
   display: block;
   margin: 0 0 8px;

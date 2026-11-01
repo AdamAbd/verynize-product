@@ -2,7 +2,8 @@
 // stay separate: the Verynize account (sign in), the user's own OpenRouter account (Connect OpenRouter, or a pasted
 // key; lib/ai-credentials.ts), and Claude Code / Codex sign-ins, which only the desktop app uses.
 // Test contract: `#chat-web-gate[data-state]`, `#chat-web-connect-openrouter`, `#chat-web-paste-key`,
-// `#chat-web-openrouter-key`, `#chat-web-save-key`, `#chat-web-key-error`.
+// `#chat-web-openrouter-key`, `#chat-web-save-key`, `#chat-web-key-error`. The web AI setup step
+// (onboarding/ai-step.tsx) renders the same connect controls under its own id prefix.
 import { useState, type FormEvent } from "react";
 import { Input } from "@/components/ui/input";
 import type { AgentTransport } from "@/lib/agent-transport";
@@ -26,7 +27,8 @@ const DETAIL: Partial<Record<AgentTransport["state"], string>> = {
     "The model API works on shared cloud rooms. Share this design or open one of your rooms, then chat here.",
 };
 
-function OpenRouterConnect() {
+/** Connect OpenRouter (OAuth in this tab) or paste a key. Element ids are `<idPrefix>-connect-openrouter`, … */
+export function OpenRouterConnect({ idPrefix = "chat-web" }: { idPrefix?: string }) {
   const [pasting, setPasting] = useState(false);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -62,14 +64,14 @@ function OpenRouterConnect() {
     <div className="mt-1.5 flex w-full flex-col items-start gap-2">
       <div className="flex items-center gap-2">
         <ChatActionButton
-          id="chat-web-connect-openrouter"
+          id={`${idPrefix}-connect-openrouter`}
           disabled={busy}
           onClick={() => void connect()}
         >
           Connect OpenRouter
         </ChatActionButton>
         <ChatActionButton
-          id="chat-web-paste-key"
+          id={`${idPrefix}-paste-key`}
           variant="ghost"
           aria-expanded={pasting}
           onClick={() => setPasting(!pasting)}
@@ -80,7 +82,7 @@ function OpenRouterConnect() {
       {pasting && (
         <form className="flex w-full items-center gap-2" onSubmit={(event) => void save(event)}>
           <Input
-            id="chat-web-openrouter-key"
+            id={`${idPrefix}-openrouter-key`}
             type="password"
             autoComplete="off"
             spellCheck={false}
@@ -90,13 +92,17 @@ function OpenRouterConnect() {
             disabled={busy}
             onChange={(event) => setKey(event.target.value)}
           />
-          <ChatActionButton id="chat-web-save-key" type="submit" disabled={busy || !key.trim()}>
+          <ChatActionButton
+            id={`${idPrefix}-save-key`}
+            type="submit"
+            disabled={busy || !key.trim()}
+          >
             Save key
           </ChatActionButton>
         </form>
       )}
       {error && (
-        <p id="chat-web-key-error" role="alert" className="m-0 text-sm text-destructive">
+        <p id={`${idPrefix}-key-error`} role="alert" className="m-0 text-sm text-destructive">
           {error}
         </p>
       )}

@@ -62,11 +62,11 @@ $('template-preview-use').onclick=()=>{if(previewing)useDocument(reidDocument(pr
 $('template-search').oninput=renderGallery;
 for(const tab of host.querySelectorAll('[data-template-category]'))tab.onclick=()=>{category=tab.dataset.templateCategory;renderGallery();};
 const guarded=fn=>async()=>{try{const message=await fn();if(message)say(message);renderGallery();}catch(error){say(error.message);}};
-$('template-save-document').onclick=guarded(async()=>{const doc=window.design.getDocument();const name=await window.askText('Template name',doc.name||'My template');if(!name?.trim())return '';saveTemplate({name,document:doc});return `Saved “${name.trim()}” to My templates`;});
+$('template-save-document').onclick=guarded(async()=>{await window.pageLoader?.ensureAll();const doc=window.design.getDocument();const name=await window.askText('Template name',doc.name||'My template');if(!name?.trim())return '';saveTemplate({name,document:doc});return `Saved “${name.trim()}” to My templates`;});
 $('template-save-selection').onclick=guarded(async()=>{if(!window.design.getSelection().length)throw Error('Select layers to save as a template.');const name=await window.askText('Template name','Selection');if(!name?.trim())return '';saveTemplate({name,document:templateFromSelection(name)});return `Saved “${name.trim()}” to My templates`;});
 $('component-add').onclick=guarded(async()=>{if(!window.design.getSelection().length)throw Error('Select a layer to add to the library.');const name=await window.askText('Component name','Component');if(!name?.trim())return '';const c=addComponent(name);return `Added “${c.name}” to the library`;});
 $('component-publish').onclick=guarded(()=>{const c=publishComponent();return `Published “${c.name}” version ${c.version}`;});
-$('component-update-instances').onclick=guarded(()=>{const n=updateInstances();return n?`Updated ${n} instance${n===1?'':'s'}`:'Every instance is up to date';});
+$('component-update-instances').onclick=guarded(async()=>{await window.pageLoader?.ensureAll();const n=updateInstances();return n?`Updated ${n} instance${n===1?'':'s'}`:'Every instance is up to date';});
 // Packs: .zip in the desktop app (manifest + documents + embedded image assets, desktop/template-packs.cjs), JSON otherwise.
 const zipApi=()=>window.verynizePlatform.can('templatePacks')?window.desktop.templatePacks:null;
 async function exportZip(pack=exportPack()){const api=zipApi();if(!api)throw Error('Zip packs need the desktop app.');return new Uint8Array(await api.encode(pack));}

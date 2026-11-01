@@ -3,10 +3,11 @@
 // from GET /api/ai/credentials (never the key); Connect / Reconnect run OpenRouter's OAuth PKCE sign-in in this tab and
 // come back here; "Paste API key" is the fallback. Test contract: `#settings-openrouter-card[data-status]`,
 // `#settings-openrouter-connect`, `#settings-openrouter-reconnect`, `#settings-openrouter-disconnect`,
-// `#settings-openrouter-paste`, `#settings-openrouter-key`, `#settings-openrouter-save`, `#settings-openrouter-error`.
+// `#settings-openrouter-paste`, `#settings-openrouter-key`, `#settings-openrouter-save`, `#settings-openrouter-error`,
+// `#settings-ai-setup` (opens the AI setup steps shown after the first web sign-in, onboarding.tsx).
 import { useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { KeyRoundIcon } from "lucide-react";
+import { KeyRoundIcon, SparklesIcon } from "lucide-react";
 import { webAgentScope } from "@/lib/agent-transport";
 import {
   aiCredentialsQuery,
@@ -25,7 +26,8 @@ import { Card, IconTile, Row, Section, SettingsButton, TextField } from "./contr
 const RETURN_TO = "/settings/agents";
 const money = (value: number) => `$${value.toFixed(2)}`;
 
-function describe(credential: OpenRouterCredential) {
+/** One line about the connection: key, source, label, OpenRouter's verdict and usage. */
+export function describe(credential: OpenRouterCredential) {
   if (!credential.connected)
     return credential.serverFallback
       ? "Not connected. This server's shared key covers runs for now; connect your own account to use your credits."
@@ -179,6 +181,24 @@ export function OpenRouterSection() {
               Save key
             </SettingsButton>
           </form>
+        )}
+        {status !== "signed-out" && (
+          <Row
+            icon={
+              <IconTile>
+                <SparklesIcon className="size-4" />
+              </IconTile>
+            }
+            title="AI setup"
+            description="The steps shown after your first sign-in: connect your AI provider and see what runs where."
+          >
+            <SettingsButton
+              id="settings-ai-setup"
+              onClick={() => window.dispatchEvent(new Event("bd:open-onboarding"))}
+            >
+              Open setup
+            </SettingsButton>
+          </Row>
         )}
         {error && (
           <p

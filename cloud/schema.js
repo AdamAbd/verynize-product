@@ -142,6 +142,8 @@ export const profile = sqliteTable("profile", {
     .unique()
     .references(() => user.id, { onDelete: "set null" }),
   createdAt: integer("createdAt").notNull(),
+  // Web onboarding: when the AI setup steps were finished or skipped (migration 0008).
+  aiSetupAt: integer("aiSetupAt"),
 });
 
 export const roomMembership = sqliteTable(

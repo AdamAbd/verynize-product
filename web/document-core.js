@@ -264,9 +264,9 @@
       if (
         typeof f.src !== "string" ||
         f.src.length > 3e6 ||
-        !/^data:font\/(woff2|woff|ttf|otf);base64,[A-Za-z0-9+/=]+$/.test(f.src)
+        !(/^data:font\/(woff2|woff|ttf|otf);base64,[A-Za-z0-9+/=]+$/.test(f.src) || isRoomAssetUrl(f.src))
       )
-        throw new Error("Embedded font source must be a base64 font data URL");
+        throw new Error("Embedded font source must be a base64 font data URL or a room asset URL");
       if (
         f.unicodeRange !== undefined &&
         (typeof f.unicodeRange !== "string" || !/^[\w+?, -]{1,2000}$/.test(f.unicodeRange))

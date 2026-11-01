@@ -7,10 +7,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Miniflare, cloudOptions, passwordUser, signIn } from "./cloud-harness.mjs";
+import { noisePng } from "./helpers/png.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-mcp-"));
 const mf = new Miniflare(await cloudOptions(path.join(dir, "state")));
-const ORIGIN = "http://local";
+const ORIGIN = "http://localhost";
 const local = (url, init) => mf.dispatchFetch(url, init);
 const send = (route, { method = "GET", body, session, headers = {} } = {}) =>
   mf.dispatchFetch(ORIGIN + route, {
@@ -243,6 +244,28 @@ try {
     nodes.some((n) => n.type === "image" && (n.src || "").startsWith("data:image/svg+xml")),
   );
 
+  // An embedded photo in the JSX becomes a room asset (cloud/inline-binaries.js): the room and the
+  // live editor receive its URL, never the data URI.
+  const photo = noisePng(64, 64);
+  const photoArt = await call(ana, "create_artboard", {
+    document: room.id,
+    code: `<div data-node-label="Photo" className="w-[200px] h-[200px]"><img src="data:image/png;base64,${photo.toString("base64")}" alt="Noise" className="w-[64px] h-[64px]" /></div>`,
+  });
+  assert.equal(photoArt.isError, false, photoArt.text);
+  const photoOps = await editor.next((m) => m.type === "ops");
+  assert.ok(!JSON.stringify(photoOps).includes("data:image/png"), "no data URI over the socket");
+  const withPhoto = await data(await send(`/api/rooms/${room.id}`, { session: ana }), 200);
+  const photoNode = withPhoto.document.pages[0].nodes.find(
+    (n) => n.type === "image" && n.name !== "Icon" && !String(n.src).startsWith("data:image/svg"),
+  );
+  assert.match(
+    photoNode?.src || "",
+    new RegExp(`/api/rooms/${room.id}/assets/[0-9a-f-]{36}\\?sig=[0-9a-f]{64}$`),
+    JSON.stringify(photoNode),
+  );
+  const photoBytes = Buffer.from(await (await mf.dispatchFetch(photoNode.src)).arrayBuffer());
+  assert.ok(photoBytes.equals(photo), "the asset holds the photo's bytes");
+
   // A directive edit; the editor sees a text change and the code reads back.
   const headline = nodes.find((n) => n.type === "text").shortId;
   const edit = await call(ana, "update_elements", {
@@ -396,7 +419,7 @@ try {
 
   editor.socket.close();
   console.log(
-    "PASS hosted MCP: auth (401 + WWW-Authenticate, capability tokens refused), handshake, tools/list subset, list/read rooms, edits broadcast as ops and persisted, icons, viewer/other-account refused, create_document in personal organization, apply_operations revisions, legacy sessions, batches",
+    "PASS hosted MCP: auth (401 + WWW-Authenticate, capability tokens refused), handshake, tools/list subset, list/read rooms, edits broadcast as ops and persisted, embedded photos stored as room assets, icons, viewer/other-account refused, create_document in personal organization, apply_operations revisions, legacy sessions, batches",
   );
 } finally {
   await mf.dispose();

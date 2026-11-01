@@ -22,7 +22,8 @@ const agents = require('./agents.cjs');
 const settings = require('./agent-settings.cjs');
 const agentAccess = require('./agent-access.cjs'); // Settings › Agents › Access switches
 const agentBehavior = require('./agent-behavior.cjs');
-const { createClaudeMapper, createCodexMapper, toolTitle } = require('./agent-runtime-events.cjs');
+const { createClaudeMapper, createCodexMapper, toolTitle, CODEX_SIGNED_OUT } = require('./agent-runtime-events.cjs');
+const agentAuth = require('./agent-auth.cjs'); // sign-in state changes (login/logout) invalidate the Codex sign-in cache
 const agentCommands = require('./agent-commands.cjs'); // composer slash commands: Codex prompt/skill expansion
 const agentMemory = require('./agent-memory.cjs'); // Settings › Memory: repo-less memory folder, ~/.codex/AGENTS.md for Claude
 // Named accounts, Verynize-managed MCP servers + tool permission defaults, and per-chat autonomy (Settings › Accounts / Tools, chat Autonomy panel).
@@ -41,6 +42,8 @@ const MAX_HELPERS = 2;
 // After a steered Claude turn reports `result`, wait this long for the folded-in follow-up to start
 // a new turn before closing the input stream (session_state_changed:idle usually ends it sooner).
 const STEER_SETTLE_MS = 6000;
+// A signed-in `account/read` (or `codex login status`) answer is reused this long per account before the next turn checks again.
+const CODEX_AUTH_TTL = 45 * 1000;
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{5,79}$/;
 const NODE_ID = /^[a-zA-Z0-9_.:#/-]{1,160}$/;
 const IMAGE_TYPES = [
@@ -633,6 +636,17 @@ class JsonRpcChild {
   close() { try { this.child.stdin.end(); } catch {} agents.killTree(this.child); }
 }
 
+/**
+ * Codex app-server `account/read` result -> {ok, method?, email?, plan?, workspace?}. Signed out = no account while the
+ * configured provider needs OpenAI auth (`requiresOpenaiAuth`); a provider that needs none (local models) counts as ok.
+ */
+function codexAuthFromAccount(result) {
+  const account = result?.account && typeof result.account === 'object' ? result.account : null;
+  if (account) return { ok: true, method: typeof account.type === 'string' ? account.type : 'unknown', ...(typeof account.email === 'string' && account.email ? { email: account.email } : {}), ...(typeof account.planType === 'string' ? { plan: account.planType } : {}), ...(typeof account.workspaceName === 'string' && account.workspaceName ? { workspace: account.workspaceName } : {}) };
+  if (result && typeof result === 'object' && result.requiresOpenaiAuth === false) return { ok: true, method: 'none' };
+  return { ok: false };
+}
+
 // ---------------------------------------------------------------------------------------------
 class AgentRuntime {
   constructor({
@@ -663,6 +677,10 @@ class AgentRuntime {
     this.codexPool = new Map();
     this.runs = new Map(); this.pendingStarts = 0; this.permissions = new Map(); this.questions = new Map(); this.codex = null; this.codexSupport = new Map(); this.modelCache = new Map(); this.seq = 0;
     this.helpers = new Set(); this.allowRules = new AllowRules(path.join(userData, 'agent-allow-rules.json'));
+    // `codex exec` fallback sign-in cache: slot -> {at} (the app-server path caches on its server object instead).
+    this.codexExecAuth = new Map();
+    // Sign-in or sign-out (Settings, onboarding, the chat's sign-in card): check that Codex account again next turn.
+    this.offAccountChange = agentAuth.onAccountChange(({ agent, profile }) => { if (agent === 'codex') this.invalidateCodexAuth(profile || 'system'); });
   }
   get codex() { return this.codexPool.get('system') || null; }
   set codex(server) { if (server) this.codexPool.set('system', server); else this.codexPool?.delete('system'); }
@@ -757,7 +775,7 @@ class AgentRuntime {
         if (options.agent === 'claude') runtime = await this.startClaude(params);
         else {
           if (!found) throw Error('Codex CLI is not installed');
-          runtime = (await this.supportsAppServer(found.path)) ? await this.startCodex(params) : this.startCodexExec(params);
+          runtime = (await this.supportsAppServer(found.path)) ? await this.startCodex(params) : await this.startCodexExec(params);
         }
       } catch (error) { this.runs.delete(run.id); throw error; }
       run.runtime = runtime;
@@ -771,16 +789,62 @@ class AgentRuntime {
     for (const [requestId, pending] of this.permissions) if (pending.runId === run.id) pending.resolve(false, requestId);
     for (const pending of [...this.questions.values()]) if (pending.runId === run.id) pending.resolve(null);
     for (const server of this.codexPool.values()) for (const [threadId, child] of server.children) if (child.run === run) server.children.delete(threadId);
-    if (error && !run.stopped) this.emit(run, { type: 'error', text: String(error).slice(0, 4000) });
+    if (error && !run.stopped && !run.authRequired) this.emit(run, { type: 'error', text: String(error).slice(0, 4000) });
     this.runs.delete(run.id);
     this.emit(run, { type: 'done', code: run.stopped ? 130 : code, stopped: run.stopped, ...(run.sessionId ? { sessionId: run.sessionId } : {}), ...(run.sessionId && run.resumeAt ? { resumeAt: run.resumeAt } : {}) });
   }
 
   forward(run, event) {
     if (event.type === 'session') run.sessionId = event.sessionId;
+    if (event.type === 'auth-required') { this.requireAuth(run); return; }
     this.enforceLimits(run, event);
-    if (event.type === 'error') { if (run.stopped) return; run.failed = true; }
+    if (event.type === 'error') { if (run.stopped || run.authRequired) return; run.failed = true; }
     this.emit(run, event);
+  }
+
+  // --- Codex sign-in gate --------------------------------------------------------------------------
+  /**
+   * The run's account is signed out (pre-turn check) or its sign-in was rejected mid-turn: one `auth-required` event
+   * with the account, the cached sign-in forgotten, and a running turn interrupted so Codex stops retrying. Later errors
+   * of the run are dropped (forward/finish), so the chat shows a single "Sign in to Codex" card.
+   */
+  requireAuth(run) {
+    if (run.authRequired || run.done) return;
+    run.authRequired = true; run.failed = true;
+    const account = run.account || { id: 'system', name: 'This Mac' };
+    this.emit(run, { type: 'auth-required', agent: run.agent, text: CODEX_SIGNED_OUT, account: { id: account.id, name: account.name, system: (run.codexSlot || 'system') === 'system' } });
+    this.invalidateCodexAuth(run.codexSlot || 'system');
+    Promise.resolve().then(() => run.interruptTurn?.()).catch(() => {});
+  }
+
+  /** Forget cached Codex sign-in answers (one slot, or all) and retire idle app-servers so the next turn reads fresh credentials. */
+  invalidateCodexAuth(slot) {
+    for (const [key, server] of this.codexPool) if (slot === undefined || key === slot) { server.auth = null; server.stale = true; }
+    if (slot === undefined) this.codexExecAuth.clear(); else this.codexExecAuth.delete(slot);
+  }
+
+  /** `account/read` on the account's app-server, a positive answer cached for CODEX_AUTH_TTL. Unknown (old CLI, timeout) = ok. */
+  async codexAuth(server) {
+    if (server.auth && Date.now() - server.auth.at < CODEX_AUTH_TTL) return server.auth.state;
+    let result;
+    try { result = await server.rpc.request('account/read', { refreshToken: false }, 10000); }
+    catch { return { ok: true, unknown: true }; }
+    const state = codexAuthFromAccount(result);
+    server.auth = state.ok ? { at: Date.now(), state } : null;
+    return state;
+  }
+
+  /** `codex login status` for the exec fallback (CLIs without app-server): exit 0 = signed in, cached like codexAuth. */
+  async codexExecSignedIn(executable, slot, env) {
+    const cached = this.codexExecAuth.get(slot);
+    if (cached && Date.now() - cached.at < CODEX_AUTH_TTL) return true;
+    let result;
+    try { result = await agentAuth.bounded(executable, agentAuth.COMMANDS.codex.status, this.spawnProcess, env); }
+    catch { return true; }
+    // Only a definite "Not logged in" blocks; other failures (an old CLI without `login status`) let the turn run.
+    const signedOut = result.code !== 0 && /not logged in/i.test(result.output);
+    if (signedOut) this.codexExecAuth.delete(slot); else this.codexExecAuth.set(slot, { at: Date.now() });
+    return !signedOut;
   }
 
   /** Chat autonomy limits the provider cannot enforce itself: Codex tool steps and a reported cost over budget. */
@@ -1054,7 +1118,7 @@ class AgentRuntime {
   async codexServer(executable, bridge, extraArgs = [], { slot = 'system', extraEnv = {} } = {}) {
     const key = executable + '|' + (bridge?.url || '') + '|' + extraArgs.join(' ') + '|' + createHash('sha256').update(JSON.stringify(extraEnv)).digest('hex').slice(0, 16);
     const current = this.codexPool.get(slot);
-    if (current && !current.rpc.closed && current.key === key) return current;
+    if (current && !current.rpc.closed && current.key === key && !current.stale) return current;
     if (current && !current.rpc.closed && ([...this.runs.values()].some(r => r.runtime === 'codex-app-server' && !r.done && (r.codexSlot || 'system') === slot) || (slot === 'system' && [...this.helpers].some(h => h.agent === 'codex')))) return current;
     current?.rpc.close();
     const env = agents.childEnv({ ...extraEnv, ...(bridge?.token ? { [settings.MCP_TOKEN_ENV]: bridge.token } : {}) });
@@ -1068,6 +1132,7 @@ class AgentRuntime {
     };
     rpc.on(message => {
       if (message.method === '$exit') { for (const run of server.threads.values()) this.finish(run, { code: 1, error: 'Codex app-server stopped unexpectedly' }); server.threads.clear(); server.children.clear(); return; }
+      if (message.method === 'account/updated') { server.auth = null; return; } // signed in/out or plan changed: read again next turn
       if (message.method === 'account/rateLimits/updated' || (message.method === 'mcpServer/startupStatus/updated' && !message.params?.threadId)) { // account-wide: every running chat gets it
         for (const run of new Set(server.threads.values())) if (!run.done && !run.helper) for (const event of run.map(message)) this.forward(run, event);
         return;
@@ -1085,7 +1150,7 @@ class AgentRuntime {
         if (event.type === 'turn-complete') {
           const turnId = message.params?.turn?.id || run.turnId;
           if (typeof turnId === 'string' && FORK_ID.test(turnId)) run.resumeAt = turnId;
-          server.threads.delete(threadId); this.finish(run, { code: event.ok || event.interrupted ? 0 : 1 }); continue;
+          server.threads.delete(threadId); this.finish(run, { code: !run.authRequired && (event.ok || event.interrupted) ? 0 : 1 }); continue;
         }
         if (event.type === 'subagent-threads') { link(run, event); continue; }
         if (event.type === 'session') continue; // emitted when the thread is opened
@@ -1128,6 +1193,8 @@ class AgentRuntime {
     // Server-wide args stay the same for every chat on this account (one app-server serves them all); the per-chat
     // preference write block goes into the thread's config instead (codexPreferenceConfig).
     const server = await this.codexServer(params.executable, params.bridge, [...(params.agentSettings ? agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) : []), ...extra.args], { slot: run.codexSlot || 'system', extraEnv: { ...(params.account?.env || {}), ...extra.env } });
+    // Sign-in gate: a signed-out account gets the sign-in card instead of a turn that retries for ~17 s and fails with 401.
+    if (!(await this.codexAuth(server)).ok) { this.requireAuth(run); this.finish(run, { code: 1 }); return 'codex-app-server'; }
     const threadParams = codexPreferenceConfig(applyCodexPlanFirst(codexThreadParams(params), params.autonomy), params);
     let thread;
     if (params.fork) {
@@ -1159,6 +1226,12 @@ class AgentRuntime {
       this.emit(run, { type: 'steer', text: display ?? text });
       return { steered: true };
     };
+    // Sign-in rejected mid-turn (requireAuth): stop Codex's retries without marking the run as stopped by the user.
+    run.interruptTurn = async () => {
+      if (run.done) return;
+      try { if (run.turnId) await server.rpc.request('turn/interrupt', { threadId: thread.id, turnId: run.turnId }, 5000); } catch {}
+      setTimeout(() => { if (!run.done) { server.threads.delete(thread.id); this.finish(run, { code: 1 }); } }, 5000).unref?.();
+    };
     run.cancel = async () => {
       if (run.done) return; run.stopped = true;
       try { if (run.turnId) await server.rpc.request('turn/interrupt', { threadId: thread.id, turnId: run.turnId }, 5000); } catch {}
@@ -1167,14 +1240,16 @@ class AgentRuntime {
     return 'codex-app-server';
   }
 
-  startCodexExec(params) {
+  async startCodexExec(params) {
     const { run } = params;
+    if (!(await this.codexExecSignedIn(params.executable, run.codexSlot || 'system', params.account?.env || {}))) { this.requireAuth(run); this.finish(run, { code: 1 }); return 'codex-exec'; }
     const prompt = [params.persona, composePrompt(params.prompt, params.context, params.seed)].join('\n\n');
     const handle = this.startFallback(params.executable, 'codex', prompt, params.cwd, event => {
-      if (event.type === 'done') { run.stopped = run.stopped || event.stopped; this.finish(run, { code: event.code }); return; }
+      if (event.type === 'done') { run.stopped = run.stopped || (event.stopped && !run.authRequired); this.finish(run, { code: run.authRequired ? 1 : event.code }); return; }
       const { id: _id, ...rest } = event; this.forward(run, rest);
     }, { model: params.model, access: params.access, effort: params.effort, structured: true, bridge: params.bridge, id: run.id, codexPersonality: params.codexPersonality, env: { ...(params.account?.env || {}), ...toolConfig.codexServerArgs(params.tools?.servers || []).env }, extraArgs: [...(params.agentSettings ? agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url, blockPreferenceWrites: params.preferenceWrites !== 'approve' }) : []), ...toolConfig.codexServerArgs(params.tools?.servers || []).args] });
     run.cancel = () => { run.stopped = true; handle.cancel(); };
+    run.interruptTurn = () => handle.cancel();
     return 'codex-exec';
   }
 
@@ -1329,6 +1404,7 @@ class AgentRuntime {
     if (!(await this.supportsAppServer(found.path))) throw Error('This Codex CLI does not support app-server');
     // One app-server serves every Codex thread; keep it configured with the canvas bridge.
     const server = await this.codexServer(found.path, bridge || await this.getBridge().catch(() => null));
+    if (!(await this.codexAuth(server)).ok) throw Error(CODEX_SIGNED_OUT);
     const base = { cwd, approvalPolicy: 'never', sandbox: 'read-only', ephemeral: true, developerInstructions: system, ...(model ? { model } : {}) };
     let thread, resolvedModel = model || '';
     const config = purpose === 'review' ? { [`mcp_servers.${settings.MCP_SERVER_NAME}.disabled_tools`]: HELPER_BLOCKED_DESIGN_TOOLS } : null;
@@ -1339,7 +1415,7 @@ class AgentRuntime {
     const run = { id: randomUUID(), chatId: 'helper', agent: 'codex', helper: true, projectKey: 'helper', done: false, stopped: false, map: createCodexMapper(), sink: event => {
       if (event.type === 'assistant-text-delta') text += event.text;
       else if (event.type === 'assistant-text') finalText = event.text;
-      else if (event.type === 'error') run.error = event.text;
+      else if (event.type === 'error' || event.type === 'auth-required') run.error = run.error || event.text;
       else if (event.type === 'done') finished(event);
     } };
     server.threads.set(thread.id, run);
@@ -1427,6 +1503,7 @@ class AgentRuntime {
   }
 
   close() {
+    this.offAccountChange?.();
     for (const run of this.runs.values()) { try { run.cancel(); } catch {} }
     for (const server of this.codexPool.values()) server.rpc.close();
     this.codexPool.clear();
@@ -1494,6 +1571,6 @@ async function claudeContent(text, images = []) {
 module.exports = {
   AgentRuntime, registerAgentRuntime, buildPersona, createDesignTurnGuard, designHooks, toolOutcome, STOP_REASON, buildTurnContext, normalizeContext, composePrompt, buildSeedBlock, claudeQueryOptions, codexThreadParams, JsonRpcChild, defaultBridge,
   claudeQuestions, claudeAnswerInput, codexQuestions, codexAnswers, normalizeAnswers, allowRuleFor, ruleMatches, AllowRules, heuristicTitle, cleanTitle, agentToolsVersion, preferenceStore, MAX_RUNS,
-  normalizeFork, buildReviewTask, applyClaudePolicy, applyCodexPlanFirst, codexPreferenceConfig,
+  normalizeFork, buildReviewTask, codexAuthFromAccount, CODEX_AUTH_TTL, applyClaudePolicy, applyCodexPlanFirst, codexPreferenceConfig,
   preferenceBlock, PREFERENCE_LIMITS, validPreference, normalizeDesignStyle, listDesignStyles, PREFERENCE_BLOCKED_REASON, PREFERENCE_DECLINED_REASON,
 };

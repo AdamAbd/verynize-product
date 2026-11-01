@@ -35,6 +35,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { legacySet } from "@/lib/bridge";
 import { platform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { AuthCard } from "./auth-card";
 import { ChatActionButton, ChatIconButton, ChatPillButton, ChatSuggestionButton } from "./controls";
 import { Markdown, openAppLink } from "./markdown";
 import { ChatMenu, ChatMenuContent, ChatMenuItem, ChatMenuNote, ChatMenuSeparator, ChatMenuTrigger } from "./menu";
@@ -650,6 +651,7 @@ type Block =
   | { type: "permission"; key: string; item: Indexed }
   | { type: "question"; key: string; item: Indexed }
   | { type: "error"; key: string; text?: string }
+  | { type: "auth"; key: string; item: Indexed }
   | { type: "notice"; key: string; part: ChatPart }
   | { type: "preview"; key: string; part: ChatPart };
 
@@ -672,6 +674,7 @@ function runningBlocks(parts: ChatPart[], nesting: Nesting): Block[] {
     } else if (part.kind === "permission") blocks.push({ type: "permission", key, item: { part, index } });
     else if (part.kind === "question") blocks.push({ type: "question", key, item: { part, index } });
     else if (part.kind === "error") blocks.push({ type: "error", key, text: part.text });
+    else if (part.kind === "auth") blocks.push({ type: "auth", key, item: { part, index } });
     else if ((part.kind === "autonomy" && part.text) || part.kind === "policy") blocks.push({ type: "notice", key, part });
   });
   return blocks;
@@ -742,6 +745,7 @@ function AssistantMessage({
         {blocks.map((block) => {
           if (block.type === "text") return <Markdown key={block.key} text={block.text} />;
           if (block.type === "error") return <ErrorRow key={block.key} text={block.text} />;
+          if (block.type === "auth") return <AuthCard key={block.key} part={block.item.part} index={index} busy={busy} />;
           if (block.type === "notice") return <NoticeRow key={block.key} part={block.part} />;
           if (block.type === "preview") return <PreviewSavedCard key={block.key} part={block.part} />;
           if (block.type === "question") return question(block.item.part, block.item.index, block.key);
@@ -787,6 +791,7 @@ function AssistantMessage({
         ({ part: p }) =>
           (p.kind === "text" && p.text?.trim()) ||
           p.kind === "error" ||
+          p.kind === "auth" ||
           p.kind === "question" ||
           !!savedPreview(p) ||
           (p.kind === "autonomy" && !!p.text) ||
@@ -794,13 +799,15 @@ function AssistantMessage({
       );
     content = (
       <>
-        {(work.length > 0 || (timed && parts.length > 0)) && <TurnHeader label={label}>{work.length ? work : undefined}</TurnHeader>}
+        {(work.length > 0 || (timed && parts.some((p) => p.kind !== "auth"))) && <TurnHeader label={label}>{work.length ? work : undefined}</TurnHeader>}
         {parts.length === 0 &&
           message.text &&
           (message.state === "error" ? <ErrorRow text={message.text} /> : <Markdown text={message.text} />)}
         {answerParts.map(({ part, index: partIndex }) =>
           part.kind === "error" ? (
             <ErrorRow key={partIndex} text={part.text} />
+          ) : part.kind === "auth" ? (
+            <AuthCard key={partIndex} part={part} index={index} busy={busy} />
           ) : part.kind === "autonomy" || part.kind === "policy" ? (
             <NoticeRow key={partIndex} part={part} />
           ) : part.kind === "question" ? (
@@ -838,7 +845,7 @@ function AssistantMessage({
           ))}
         </div>
       )}
-      {message.state && STATE_NOTE[message.state] && <p className="text-sm text-subtle-foreground">{STATE_NOTE[message.state]}</p>}
+      {message.state && STATE_NOTE[message.state] && !parts.some((p) => p.kind === "auth") && <p className="text-sm text-subtle-foreground">{STATE_NOTE[message.state]}</p>}
       {usage && <p className={cn(hook.usage, "self-end text-xs text-subtle-foreground tabular-nums")}>{usage}</p>}
       {!busy && (
         <ActionBar className="left-0">
