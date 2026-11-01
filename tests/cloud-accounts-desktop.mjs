@@ -148,9 +148,16 @@ try {
   const viewerToken = new URLSearchParams(
     new URL(await a.locator("#cloud-link-output").inputValue()).hash.slice(1),
   ).get("token");
-  const oldToken = new URLSearchParams(
-    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
-  ).get("token");
+  // The file keeps the owner link privately; the invite field shows an editor link instead.
+  const ownerToken = () =>
+    a.evaluate(() => window.fileLibrary.cloudOf(window.fileLibrary.currentId).token);
+  const inviteToken = async () =>
+    new URLSearchParams(new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1)).get(
+      "token",
+    );
+  const oldToken = await ownerToken();
+  const oldInvite = await inviteToken();
+  assert.ok(oldInvite && oldInvite !== oldToken, "the invite never carries the owner token");
   assert.equal(
     (
       await fetch(`${server}/api/rooms/${roomId}`, {
@@ -160,12 +167,18 @@ try {
     200,
   );
   await a.locator("#cloud-rotate").click();
-  await statusIncludes(a, "Rotated links: 2 old links revoked");
-  const newToken = new URLSearchParams(
-    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
-  ).get("token");
+  // Owner link, editor invite and viewer link.
+  await statusIncludes(a, "Rotated links: 3 old links revoked");
+  const newToken = await ownerToken();
   assert.notEqual(newToken, oldToken);
-  for (const token of [oldToken, viewerToken])
+  await a.waitForFunction(
+    (old) =>
+      /token=/.test(document.getElementById("cloud-invite").value) &&
+      !document.getElementById("cloud-invite").value.includes(old),
+    oldInvite,
+  );
+  assert.notEqual(await inviteToken(), newToken);
+  for (const token of [oldToken, oldInvite, viewerToken])
     assert.equal(
       (
         await fetch(`${server}/api/rooms/${roomId}`, {
@@ -201,9 +214,7 @@ try {
   await a.locator("#cloud-rooms-refresh").click();
   await a.locator(`[data-recover-room="${roomId}"]`).click();
   await statusIncludes(a, "Recovered owner access");
-  const recovered = new URLSearchParams(
-    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
-  ).get("token");
+  const recovered = await ownerToken();
   assert.notEqual(recovered, newToken);
   assert.equal(
     (

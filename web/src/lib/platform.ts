@@ -32,6 +32,7 @@ export const CAPABILITIES = [
   "externalLinks",
   "agentBridge",
   "onboarding",
+  "cloudDefaults",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
