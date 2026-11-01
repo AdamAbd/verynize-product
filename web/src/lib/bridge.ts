@@ -254,9 +254,20 @@ export function registerIsland(name: string) {
   }, UI_READY_WARN_MS);
 }
 
+const committedWaiters: (() => void)[] = [];
+/**
+ * Resolves once every island mounted so far has committed its first render. The web app renders the areas its
+ * routes own after this, as the router island applies the first location after the other islands on desktop.
+ */
+export function islandsCommitted(): Promise<void> {
+  if (!mounting.size) return Promise.resolve();
+  return new Promise((resolve) => committedWaiters.push(resolve));
+}
+
 /** mountIsland() calls this once the island's first render has committed. */
 export function markIslandCommitted(name: string) {
   if (!mounting.delete(name)) return;
+  if (!mounting.size) for (const resolve of committedWaiters.splice(0)) resolve();
   // Island elements usually claim their ids through the MutationObserver; this pass covers the case where none is pending.
   claimPending();
 }

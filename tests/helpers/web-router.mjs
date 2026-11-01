@@ -50,6 +50,7 @@ export async function checkWebRouter(browser, origin) {
         const settings = path.startsWith("/settings/");
         const body = document.body.classList;
         const screen = document.getElementById("settings-screen");
+        const fileHome = document.getElementById("file-home");
         return (
           window.shellRouter.state.status === "idle" &&
           location.pathname === path &&
@@ -57,6 +58,11 @@ export async function checkWebRouter(browser, origin) {
             location.pathname + location.search + location.hash &&
           body.contains("settings-open") === settings &&
           (!settings || window.appSettings.getState().section === path.slice(10)) &&
+          // Start's Files route (or the settings route over Files) renders the home screen.
+          !!fileHome &&
+          fileHome.hidden === !home &&
+          (fileHome.dataset.routeOwner === "start") === home &&
+          !!document.querySelector("#bd-home-root #library-files") === home &&
           // Start's settings route renders the overlay (route-area.tsx), not the settings island.
           !!screen &&
           screen.hidden === !settings &&
@@ -119,6 +125,9 @@ export async function checkWebRouter(browser, origin) {
   let at = await expectShell("/");
   assert.equal(at.index, start.index + 1, "Files pushes one entry");
   assert.equal(at.length, start.length + 1, "one history entry per navigation");
+  // The route-rendered screen is interactive and keeps its view choice when the route unmounts it.
+  await page.locator("#library-list").click();
+  await page.waitForFunction(() => document.getElementById("library-files")?.className === "list");
   // Back goes exactly one step, Forward returns.
   await back();
   at = await expectShell("/editor");
@@ -126,6 +135,12 @@ export async function checkWebRouter(browser, origin) {
   await page.goForward({ waitUntil: "commit" });
   at = await expectShell("/");
   assert.equal(at.index, start.index + 1, "Forward moves one entry");
+  assert.equal(
+    await page.evaluate(() => document.getElementById("library-list").getAttribute("aria-pressed")),
+    "true",
+    "the Files route keeps the list view across remounts",
+  );
+  await page.locator("#library-grid").click();
   await back();
   await expectShell("/editor");
 

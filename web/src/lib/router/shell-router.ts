@@ -81,11 +81,11 @@ const same = (a: Shell, b: Shell) => a.view === b.view && a.settings === b.setti
 function applyShell(next: Shell) {
   const { fileLibrary, appSettings, agentWorkspace } = legacy();
   agentWorkspace?.applyCodeMode?.(next.view === "/code");
+  // Hosted, Start's routes render the Files home and the settings overlay and own their shown state (the Files
+  // route, and the settings route with the view underneath from history state: web-start/src/routes/_editor/).
+  if (hosted) return;
   if (next.view === "/") fileLibrary?.applyHome?.();
   else fileLibrary?.applyEditor?.();
-  // Hosted, Start's settings route renders the overlay and owns its open state and section
-  // (web-start/src/routes/_editor/settings.tsx); here only the view underneath is applied.
-  if (hosted) return;
   if (next.settings) appSettings?.applyOpen?.(next.settings);
   else appSettings?.applyClose?.();
 }
