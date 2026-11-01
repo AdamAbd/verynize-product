@@ -22,6 +22,7 @@ import { createRoomBackend, ROOM_ID } from "./design-backend.js";
 import {
   activeRuns,
   claimExpired,
+  claimUnstarted,
   createRun,
   decideApproval,
   denyPending,
@@ -156,7 +157,7 @@ export async function closeExpired(
 
 /** End a running run that never got an executor (its host could not start it). */
 async function closeRun(env, run, message) {
-  if (!(await claimExpired(env, run.id, Number.MAX_SAFE_INTEGER))) return;
+  if (!(await claimUnstarted(env, run.id))) return;
   await closeClaimed(env, run, message);
 }
 
