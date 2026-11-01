@@ -2,6 +2,7 @@
 // keyboard shortcuts drawer (K1), ⌘K command palette and the Text tool defaults (TX1).
 const {_electron} = require(process.cwd() + '/node_modules/@playwright/test');
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -16,7 +17,7 @@ const nodes = [
   delete env.ELECTRON_RUN_AS_NODE; env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({timeout: 20000, env, args: ['.', `--user-data-dir=${profile}`]});
   try {
-    const p = await app.firstWindow({timeout: 15000});
+    const p = await app.firstWindow({timeout: 15000}); await moveOffCursor(app);
     await waitForUiReady(p);
     await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 870));
     await p.waitForSelector('#canvas .layer');

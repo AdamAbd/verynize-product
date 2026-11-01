@@ -256,27 +256,55 @@ async function write(file, text) {
     await page.locator('#project-prompt').press('Escape');
     await page.evaluate(() => window.agentWorkspace.setDefaults({ agent: 'codex' }));
 
-    // 9. Design style picker (style-picker.tsx): "Auto" by default, lists window.desktop.designStylesList(), the pick is
-    // sent as the run's designStyle (the runtime adds it to the turn context), and /style opens the picker.
+    // 9. Design style picker (style-picker.tsx): Wonder's composer toolbar has no style chip, so the picker opens only
+    // from /style. "Auto" by default, lists window.desktop.designStylesList(), the pick is sent as the run's designStyle
+    // (the runtime adds it to the turn context).
+    assert.equal(await page.locator('#chat-style-picker').count(), 0, 'the composer has no Style chip');
+    const toolbarLabels = await page.locator('#project-prompt').evaluate(prompt => {
+      const composer = prompt.closest('.rounded-2xl');
+      return [...composer.querySelectorAll('button')].map(b => `${b.getAttribute('aria-label') || ''} ${b.textContent}`.trim());
+    });
+    assert.ok(!toolbarLabels.some(label => /\bstyle\b/i.test(label)), `no composer button mentions a style: ${toolbarLabels.join(' | ')}`);
     const catalog = await page.evaluate(async () => (typeof window.desktop?.designStylesList === 'function' ? await window.desktop.designStylesList() : null));
     if (!catalog?.length) {
-      assert.equal(await page.locator('#chat-style-picker').count(), 0, 'without a style catalog the picker stays hidden');
-      assert.equal(await page.evaluate(() => window.chatDesignStyle?.get()), '', 'and no style is sent');
+      assert.equal(await page.evaluate(() => window.chatDesignStyle?.get()), '', 'without a style catalog no style is sent');
       console.log('design style picker: skipped (this desktop build has no designStylesList)');
     } else {
-      const picker = page.locator('#chat-style-picker');
-      await picker.waitFor();
-      assert.equal(await picker.getAttribute('data-style-id'), '', 'Auto by default');
-      assert.match(await picker.getAttribute('aria-label'), /Design style: Auto/);
-      await picker.click();
+      assert.equal(await page.evaluate(() => window.chatDesignStyle.get()), '', 'Auto by default');
+      const openStyles = async () => {
+        await page.locator('#project-prompt').fill('');
+        await page.locator('#project-prompt').pressSequentially('/sty');
+        await page.locator('[data-command="style"][data-selected=true]').waitFor();
+        await page.locator('#project-prompt').press('Enter');
+        await page.locator('#chat-style-menu').waitFor();
+        assert.equal(await page.locator('#project-prompt').inputValue(), '', 'the /style command leaves no text behind');
+      };
+      await openStyles();
       const rows = page.locator('#chat-style-menu [data-style-id]');
       await rows.nth(1).waitFor();
       assert.equal(await rows.count(), catalog.length + 1, 'Auto plus every catalog style');
+      assert.equal(await page.locator('#chat-style-menu [data-style-id=""]').getAttribute('aria-checked'), 'true', 'Auto is checked');
+      // Focus starts on the current choice (Auto).
+      await page.waitForFunction(() => document.activeElement?.closest('#chat-style-menu') && document.activeElement.dataset.styleId === '');
+      // Anchored above the composer, like the slash command list.
+      const menuBox = await page.locator('#chat-style-menu').boundingBox();
+      const promptBox = await page.locator('#project-prompt').boundingBox();
+      assert.ok(menuBox.y + menuBox.height <= promptBox.y + 1, 'the style menu opens above the composer');
       await shot('chat-style-menu');
+      // Keyboard: ↓ moves to the first style, Enter picks it and closes the menu; focus returns to the prompt.
+      await page.keyboard.press('ArrowDown');
+      await page.waitForFunction(id => document.activeElement?.dataset.styleId === id, catalog[0].id); // ArrowDown reaches the first style
+      await page.keyboard.press('Enter');
+      await page.locator('#chat-style-menu').waitFor({ state: 'detached' });
+      assert.equal(await page.evaluate(() => window.chatDesignStyle.get()), catalog[0].id, 'Enter picks the style');
+      assert.equal(await page.evaluate(() => document.activeElement?.id), 'project-prompt', 'focus returns to the prompt');
+      // Clicking a row picks too; the next run carries the choice.
       const choice = catalog.find(style => style.id === 'neo-brutalism') ?? catalog[0];
+      await openStyles();
+      assert.equal(await page.locator(`#chat-style-menu [data-style-id="${catalog[0].id}"]`).getAttribute('aria-checked'), 'true', 'the menu shows the current choice');
+      await page.waitForFunction(id => document.activeElement?.dataset.styleId === id, catalog[0].id); // and focuses it
       await page.locator(`#chat-style-menu [data-style-id="${choice.id}"]`).click();
-      await page.waitForFunction(id => document.getElementById('chat-style-picker')?.dataset.styleId === id, choice.id);
-      assert.ok((await picker.innerText()).includes(choice.name), 'the chip shows the chosen style');
+      await page.locator('#chat-style-menu').waitFor({ state: 'detached' });
       assert.equal(await page.evaluate(() => window.chatDesignStyle.get()), choice.id);
       // Wait for the style menu's exit animation, as openMenu() does: the slash list opening above the composer moves
       // the layout under the pointer, and a still-mounted (closing) menu item takes focus from the prompt on pointer leave.
@@ -286,16 +314,12 @@ async function write(file, text) {
       await page.locator('#project-prompt').press('Enter');
       await completed(done + 1);
       assert.ok(JSON.stringify((await turns()).at(-1).params).includes(choice.id), 'the turn carries the chosen design style');
-      // /style opens the picker from the keyboard; Enter on Auto clears the choice.
-      await page.locator('#project-prompt').pressSequentially('/sty');
-      await page.locator('[data-command="style"][data-selected=true]').waitFor();
-      await page.locator('#project-prompt').press('Enter');
-      await page.locator('#chat-style-menu').waitFor();
+      // Enter on Auto clears the choice.
+      await openStyles();
       await page.locator('#chat-style-menu [data-style-id=""]').focus();
       await page.keyboard.press('Enter');
-      await page.waitForFunction(() => document.getElementById('chat-style-picker')?.dataset.styleId === '');
+      await page.locator('#chat-style-menu').waitFor({ state: 'detached' });
       assert.equal(await page.evaluate(() => window.chatDesignStyle.get()), '');
-      assert.equal(await page.locator('#project-prompt').inputValue(), '', 'the /style command leaves no text behind');
     }
 
     console.log('Chat composer + menu and slash commands passed');

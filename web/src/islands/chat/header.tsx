@@ -171,7 +171,7 @@ export function DockHeader({ state }: { state: ChatState }) {
   const sidebarOpen = useBodyClass("chat-sidebar-open") && !state.codeMode;
   return (
     <>
-      {/* Top row shares the window title bar (chrome island leaves the left 499px to the dock): traffic-light inset. */}
+      {/* Top row shares the window title bar (chrome island leaves the left --chat-dock-width to the dock): traffic-light inset. */}
       <div
         className={cn(
           hook.drag,

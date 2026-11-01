@@ -344,11 +344,13 @@
     }, {passive: false});
     // Opening or closing a panel on the left (layers, chat dock, chats sidebar) moves the viewport's left edge: shift the
     // camera by the same amount so the artwork stays put on screen instead of sliding with the panel (panels are ≥200px
-    // wide; smaller moves are start-up layout settling).
+    // wide; smaller moves are start-up layout settling). While a panel edge is dragged (`html[data-panel-reflow]`, set by
+    // the chrome island's panel-resize.tsx) every move of the left edge is compensated.
     let viewportLeft = null, panelToggledAt = -Infinity;
     new MutationObserver(() => { panelToggledAt = performance.now(); }).observe(document.body, {attributes: true, attributeFilter: ['class']});
     new ResizeObserver(() => {
-      const left = viewport().left, moved = viewportLeft !== null && Math.abs(left - viewportLeft) >= 100 && performance.now() - panelToggledAt < 1000;
+      const left = viewport().left, reflow = document.documentElement.hasAttribute('data-panel-reflow');
+      const moved = viewportLeft !== null && (reflow ? left !== viewportLeft : Math.abs(left - viewportLeft) >= 100 && performance.now() - panelToggledAt < 1000);
       if (moved) { cam.x -= left - viewportLeft; autoFit = false; }
       viewportLeft = left;
       if (autoFit) fit(true); else applyCamera();
@@ -1688,7 +1690,7 @@
       if (existing) Object.assign(existing, command); else commands.push({keys: [], ...command});
       keyIndex.clear(); for (const c of commands) for (const k of c.keys) keyIndex.set(k, c);
     }
-    const context = {ed, find, sel, selectedNodes, topSelected, worldRect, union, placeInView, isFlow, inStack, footer, writeSystemClipboard, register, hooks, getClipboard: () => clipboard, paste: (data, options) => paste(data, options)};
+    const context = {ed, find, sel, selectedNodes, topSelected, worldRect, union, placeInView, screenToWorld, frameAt, isFlow, inStack, footer, writeSystemClipboard, register, hooks, getClipboard: () => clipboard, paste: (data, options) => paste(data, options)};
     for (const extend of extensions) extend(context);
 
     return {
