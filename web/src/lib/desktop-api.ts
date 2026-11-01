@@ -73,6 +73,8 @@ export interface DesktopApi {
   agentLogout(options: { agent: Agent; profile?: string }): Promise<unknown>;
   openExternal(url: string): Promise<unknown>;
   onboardingState(): Promise<{ skip: boolean }>;
+  /** Share panel server default (desktop/cloud-defaults.cjs): production, or VERYNIZE_CLOUD_SERVER. */
+  cloudDefaults(): Promise<{ server: string }>;
   onAuthEvent(callback: (event: AuthEvent) => void): Unsubscribe;
   notifyTask(options: { title: string; body: string }): Promise<boolean>;
   // Share › Publish app and passkeys (desktop/app-publish.cjs, desktop/cloud-passkey.cjs).
@@ -302,6 +304,7 @@ export const DESKTOP_API_SHAPE = {
   agentLogout: true,
   openExternal: true,
   onboardingState: true,
+  cloudDefaults: true,
   onAuthEvent: true,
   notifyTask: true,
   cloudAppDetect: true,

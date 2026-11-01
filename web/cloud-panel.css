@@ -14,3 +14,6 @@
 #cloud-dialog textarea{display:block;width:100%;box-sizing:border-box;margin-top:6px;resize:vertical}
 #cloud-app-url{display:block;font-size:12px;overflow-wrap:anywhere;color:var(--primary-text,#bba4fa)}
 #cloud-app-status:empty{display:none}
+/* Live presence count: just left of the zoom readout at the bottom right of the canvas (chrome island). */
+body #cloud-presence{right:calc(var(--panel-right-width,281px) + 64px);bottom:14px;line-height:16px}
+body.right-collapsed #cloud-presence{right:64px}

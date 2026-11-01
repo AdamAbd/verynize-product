@@ -10,10 +10,11 @@
   root.id = "cloud-panel";
   root.innerHTML = `<button id="cloud-toggle">Share & collaborate</button><dialog id="cloud-dialog"><header><strong>Shared design</strong><button id="cloud-close">Close</button></header>
 <label>Server URL<input id="cloud-server" placeholder="https://your-app.workers.dev"></label><label>Your name<input id="cloud-name" maxlength="80" placeholder="Designer"></label>
-<p>Create a private room, then share its invite link with collaborators. Anyone with an owner or editor link can edit.</p>
+<p>Create a private room, then share its invite link with collaborators. Invite links let people edit (or only view); owner access stays with you.</p>
 <div class="cloud-actions"><button id="cloud-create">Create room</button><button id="cloud-connect">Join invite</button><button id="cloud-leave">Disconnect</button></div>
 <label>Invite link<input id="cloud-invite" placeholder="Paste a private invite URL to join"></label>
-<div class="cloud-actions"><button id="cloud-copy">Copy invite</button><button id="cloud-publish">Publish snapshot</button><button id="cloud-unpublish">Unpublish</button></div>
+<div class="cloud-actions"><select id="cloud-invite-role" aria-label="Role for people who join with the invite" hidden><option value="editor">Can edit</option><option value="viewer">Can view</option></select><button id="cloud-copy">Copy invite</button></div>
+<div class="cloud-actions"><button id="cloud-publish" hidden>Publish snapshot</button><button id="cloud-unpublish" hidden>Unpublish</button></div>
 <a id="cloud-public" target="_blank" rel="noopener noreferrer"></a><p id="cloud-status" role="status">Not connected</p>
 <div id="cloud-conflict" hidden><p>A collaborator changed the design while you were editing. Your work has not been overwritten.</p><button id="cloud-reload">Load shared version</button><button id="cloud-overwrite">Replace shared version with mine</button></div>
 <details class="cloud-section" id="cloud-account-section"><summary>Account</summary>
@@ -190,6 +191,15 @@
     return u.origin;
   }
   $("cloud-server").value = location.protocol.startsWith("http") ? location.origin : "";
+  // Desktop (app://, no HTTP origin): the production service, or VERYNIZE_CLOUD_SERVER in tests
+  // (desktop/cloud-defaults.cjs), unless a saved account, preference or room already set it.
+  if (!$("cloud-server").value && window.verynizePlatform.can("cloudDefaults"))
+    window.desktop
+      .cloudDefaults()
+      .then(({ server }) => {
+        if (!$("cloud-server").value && server) $("cloud-server").value = server;
+      })
+      .catch(() => {});
   const loadAccount = () => {
     try {
       const value = JSON.parse(localStorage.getItem(ACCOUNT_KEY) || "null");
@@ -227,13 +237,32 @@
     }
     return data;
   }
+  // Owners share a role-limited link (web/cloud-invite.js), never their own owner token. Others
+  // share the link they joined with, or a token-free link that opens for account members. Servers
+  // without roles (protocol 1) have a single room token, which stays the invite.
+  const sharesLinks = () => role === "owner" && protocol >= 2;
   function updateInvite() {
-    const url = new URL(connection.server);
-    url.hash = new URLSearchParams(
-      connection.token ? { room: connection.id, token: connection.token } : { room: connection.id },
-    ).toString();
-    $("cloud-invite").value = url.href;
+    const owner = sharesLinks();
+    $("cloud-invite-role").hidden = !owner;
+    $("cloud-invite").value = window.cloudInvites.url(connection, owner ? null : connection.token);
+    // Errors surface on Copy invite, which asks again.
+    if (owner && $("cloud-dialog").open) shareInvite().catch(() => {});
   }
+  async function shareInvite() {
+    const info = connection;
+    if (!info || !sharesLinks()) return $("cloud-invite").value;
+    const href = await window.cloudInvites.create(
+      info,
+      $("cloud-invite-role").value,
+      (path, options) => request(path, options, info),
+    );
+    if (connection?.id === info.id && connection.server === info.server && sharesLinks())
+      $("cloud-invite").value = href;
+    return href;
+  }
+  $("cloud-invite-role").onchange = () => {
+    if (connection) updateInvite();
+  };
 
   // ---- legacy snapshot protocol (servers without operation support) ---------------------------
   function markConflict() {
@@ -775,7 +804,7 @@
       );
     info = { id: info.id, token, server: u.origin };
     if (expected !== undefined && expected !== generation) return;
-    if (expected === undefined) disconnect();
+    if (expected === undefined) disconnect("Connecting…");
     const epoch = generation;
     const [stored, fetched] = await Promise.all([
       readOutbox(roomKey(info)),
@@ -924,12 +953,13 @@
   $("cloud-toggle").onclick = () => {
     $("cloud-dialog").showModal();
     renderAccount();
+    if (connection) updateInvite();
   };
   $("cloud-close").onclick = () => $("cloud-dialog").close();
   $("cloud-create").onclick = action(async () => {
     if (connection) throw Error("Disconnect before creating another room");
     const server = base();
-    disconnect();
+    disconnect("Creating room…");
     const epoch = generation,
       result = await request(
         "/api/rooms",
@@ -983,8 +1013,24 @@
   $("cloud-app-url").onclick = openLink;
   $("cloud-copy").onclick = action(async () => {
     const epoch = generation;
-    await navigator.clipboard.writeText($("cloud-invite").value);
-    if (epoch === generation) status("Invite copied");
+    const href = await shareInvite();
+    if (epoch !== generation) return;
+    try {
+      await navigator.clipboard.writeText(href);
+    } catch {
+      // The desktop denies the clipboard permission (desktop/main.cjs): copy the selected field.
+      const input = $("cloud-invite");
+      input.value = href;
+      input.select();
+      if (!document.execCommand("copy")) throw Error("Select the invite link and copy it");
+    }
+    if (epoch !== generation) return;
+    const shared = connection && sharesLinks() ? $("cloud-invite-role").value : null;
+    status(
+      shared
+        ? `Invite copied: people who join can ${shared === "viewer" ? "view" : "edit"}`
+        : "Invite copied",
+    );
   });
   $("cloud-publish").onclick = action(async () => {
     if (!connection) throw Error("Create or join a room first");
@@ -1074,6 +1120,7 @@
 
   // ---- roles & access -------------------------------------------------------------------------
   function setRole(next) {
+    const previous = role;
     role = next;
     $("cloud-role").textContent = ROLE_LABEL[next] || "Not connected";
     $("cloud-owner-tools").hidden = next !== "owner";
@@ -1083,6 +1130,10 @@
       sessionFor(connection.server)
     );
     document.body.classList.toggle("cloud-read-only", !!connection && !!next && !canEdit());
+    // Only what this role can do: no Create room while in a room, no publishing below editor.
+    $("cloud-create").hidden = !!connection;
+    $("cloud-publish").hidden = $("cloud-unpublish").hidden = !connection || !canEdit();
+    if (connection && next !== previous) updateInvite();
   }
   function listItem(text, buttons = []) {
     const li = document.createElement("li");
@@ -1255,6 +1306,7 @@
       const result = await request(`/api/rooms/${info.id}/tokens/rotate`, { method: "POST" }, info);
       if (epoch !== generation) return;
       connection = { ...info, token: result.token };
+      window.cloudInvites.forget(info);
       const lib = library(),
         cloud = info.fileId && lib?.cloudOf?.(info.fileId);
       if (cloud) lib.setCloud(info.fileId, { ...cloud, token: result.token });
