@@ -206,7 +206,13 @@
    */
   function problems(report) {
     const out = [];
-    const mb = (bytes) => `${(bytes / MiB).toFixed(bytes >= 10 * MiB ? 0 : 1)} MB`;
+    const mb = (bytes, limit) => {
+      const value = bytes / MiB;
+      let text = Number.isInteger(value) ? String(value) : value.toFixed(value >= 10 ? 0 : 1);
+      // Just over a limit must not read as the limit itself ("2.0 MB, over the 2 MB limit").
+      if (limit && bytes > limit && Number(text) <= limit / MiB) text = value.toFixed(2);
+      return `${text} MB`;
+    };
     const total = level(report.total, limits.DOCUMENT_LIMIT_BYTES);
     if (total !== "ok")
       out.push({
@@ -216,7 +222,7 @@
         limit: limits.DOCUMENT_LIMIT_BYTES,
         message:
           total === "over"
-            ? `This file is ${mb(report.total)}, over the ${mb(limits.DOCUMENT_LIMIT_BYTES)} limit for shared files. Split it into several files or remove unused pages.`
+            ? `This file is ${mb(report.total, limits.DOCUMENT_LIMIT_BYTES)}, over the ${mb(limits.DOCUMENT_LIMIT_BYTES)} limit for shared files. Split it into several files or remove unused pages.`
             : `This file is ${mb(report.total)} of the ${mb(limits.DOCUMENT_LIMIT_BYTES)} limit for shared files.`,
       });
     for (const page of report.pages) {
@@ -230,7 +236,7 @@
         limit: limits.PAGE_LIMIT_BYTES,
         message:
           state === "over"
-            ? `Page “${page.name}” is ${mb(page.bytes)}, over the ${mb(limits.PAGE_LIMIT_BYTES)} page limit. Split it into several pages.`
+            ? `Page “${page.name}” is ${mb(page.bytes, limits.PAGE_LIMIT_BYTES)}, over the ${mb(limits.PAGE_LIMIT_BYTES)} page limit. Split it into several pages.`
             : `Page “${page.name}” is ${mb(page.bytes)} of the ${mb(limits.PAGE_LIMIT_BYTES)} page limit. Consider splitting it into several pages.`,
       });
     }
@@ -241,7 +247,7 @@
         pageId: item.pageId,
         bytes: item.bytes,
         limit: limits.ASSET_LIMIT_BYTES,
-        message: `An embedded ${item.mime.split("/")[0]} is ${mb(item.bytes)}, over the ${mb(limits.ASSET_LIMIT_BYTES)} upload limit. Replace it with a smaller file.`,
+        message: `An embedded ${item.mime.split("/")[0]} is ${mb(item.bytes, limits.ASSET_LIMIT_BYTES)}, over the ${mb(limits.ASSET_LIMIT_BYTES)} upload limit. Replace it with a smaller file.`,
       });
     for (const item of report.inline.rejected)
       out.push({

@@ -49,7 +49,7 @@
     "lint": "vp lint",
     "format": "vp fmt",
     "format:check": "vp fmt --check",
-    "test:ux": "node tests/wonder-shell.cjs && node tests/settings.cjs && node tests/views-templates.cjs && node --test tests/views-store.cjs && node tests/document-lifecycle.cjs && node tests/document-validation-safety.cjs && node tests/cloud-async.cjs && node tests/shell-router.cjs && node tests/settings-route.cjs && node tests/shell-routes.cjs && node tests/ui-ready.cjs && node tests/panel-resize.cjs && node tests/web-platform.cjs",
+    "test:ux": "node tests/wonder-shell.cjs && node tests/settings.cjs && node tests/views-templates.cjs && node --test tests/views-store.cjs && node tests/document-lifecycle.cjs && node tests/document-validation-safety.cjs && node tests/cloud-async.cjs && node tests/shell-router.cjs && node tests/settings-route.cjs && node tests/shell-routes.cjs && node tests/ui-ready.cjs && node tests/panel-resize.cjs && node tests/web-platform.cjs && node tests/storage-limits-ux.mjs",
     "build:ui": "node scripts/build-ui.cjs",
     "lint:ui": "vp lint web/src",
     "typecheck:ui": "tsc -p tsconfig.json && tsc -p web-start/tsconfig.json",

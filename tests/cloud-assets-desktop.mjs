@@ -1,6 +1,8 @@
 // Two Electron clients in one room: an image inserted by one client is uploaded to the room's R2
 // asset store and the other client receives only its URL (never the data URI). The image renders
-// in both editors and a raster export inlines it for the offline renderer.
+// in both editors and a raster export inlines it for the offline renderer. Creating a room from a
+// file with embedded binaries (image layer, image fill, font) uploads them first, with progress:
+// no request carries the bytes inside the document.
 import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 import { _electron as electron } from "@playwright/test";
 import assert from "node:assert/strict";
@@ -155,8 +157,128 @@ try {
   assert.ok(pixel[0] > 200 && pixel[1] < 50 && pixel[2] < 50 && pixel[3] > 200, `pixel ${pixel}`);
   assert.equal((await a.evaluate(() => window.cloudAssets.status())).failed, 0);
 
+  // ---- Creating a room from a local file with embedded binaries uploads them first. ----
+  await a.locator("#cloud-toggle").click();
+  await a.locator("#cloud-leave").click();
+  await a.locator("#cloud-close").click();
+  const local = await a.evaluate(() => {
+    // Random pixels do not compress: about 100 KB of PNG, well above the 8 KB inline limit.
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 160;
+    const ctx = canvas.getContext("2d");
+    const pixels = ctx.createImageData(160, 160);
+    for (let i = 0; i < pixels.data.length; i++)
+      pixels.data[i] = i % 4 === 3 ? 255 : Math.floor(Math.random() * 256);
+    ctx.putImageData(pixels, 0, 0);
+    const photo = canvas.toDataURL("image/png");
+    const green = canvas.toDataURL("image/jpeg", 1);
+    const font = `data:font/woff2;base64,${btoa("wOF2" + "x".repeat(12000))}`;
+    const doc = window.design.getDocument();
+    const page = doc.pages.find((p) => p.id === doc.activePage);
+    page.nodes = [
+      { id: "photo", type: "image", name: "Photo", x: 0, y: 0, w: 160, h: 160, src: photo },
+      {
+        id: "card",
+        type: "rectangle",
+        name: "Card",
+        x: 200,
+        y: 0,
+        w: 160,
+        h: 160,
+        fills: [{ type: "image", src: green, fit: "cover", opacity: 50 }],
+      },
+    ];
+    doc.fontFaces = [{ family: "Brand Sans", weight: "400", style: "normal", src: font }];
+    window.design.loadDocument(doc);
+    return { photo, green, font, bytes: photo.length + green.length + font.length };
+  });
+  assert.ok(local.photo.length > 50000 && local.green.length > 8192, JSON.stringify(local.bytes));
+  const posted = [];
+  a.on("request", (request) => {
+    if (request.method() !== "GET" && request.url().startsWith(server))
+      posted.push({ url: request.url(), body: request.postData() || "" });
+  });
+  const progress = [];
+  await a.exposeFunction("recordProgress", (text) => progress.push(text));
+  await a.evaluate(() => {
+    const status = document.getElementById("cloud-status");
+    new MutationObserver(() => window.recordProgress(status.textContent)).observe(status, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  });
+  await a.locator("#cloud-toggle").click();
+  await a.locator("#cloud-create").click();
+  await a.waitForFunction(
+    () => document.getElementById("cloud-status").textContent.includes("Connected"),
+    null,
+    { timeout: 30000 },
+  );
+  const created = new URLSearchParams(
+    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
+  );
+  assert.notEqual(created.get("room"), room.get("room"));
+  assert.ok(
+    progress.some((text) => /Uploading 3 files to the new room/.test(text)),
+    progress.join(" | "),
+  );
+  // No request put the bytes into a room document: they went to the asset upload URLs only.
+  const documentWrites = posted.filter(
+    (request) => !/\/assets(\/|$)/.test(new URL(request.url).pathname),
+  );
+  assert.ok(documentWrites.length >= 2, JSON.stringify(documentWrites.map((r) => r.url)));
+  // (a stand-in 1×1 image may travel while the room is created; the real bytes never do).
+  for (const request of documentWrites)
+    for (const value of [local.photo, local.green, local.font])
+      assert.equal(request.body.includes(value.slice(-200)), false, request.url);
+  const uploads = posted.filter(
+    (request) => request.url.includes("/assets/") && request.url.includes("signature="),
+  );
+  assert.equal(uploads.length, 3);
+  const roomDoc = (
+    await (
+      await fetch(`${server}/api/rooms/${created.get("room")}`, {
+        headers: { authorization: `Bearer ${created.get("token")}` },
+      })
+    ).json()
+  ).document;
+  const assetPattern = new RegExp(
+    `/api/rooms/${created.get("room")}/assets/[0-9a-f-]{36}\\?sig=[0-9a-f]{64}$`,
+  );
+  const [photoNode, cardNode] = roomDoc.pages.find((p) =>
+    p.nodes.some((n) => n.id === "photo"),
+  ).nodes;
+  assert.match(photoNode.src, assetPattern);
+  assert.match(cardNode.fills[0].src, assetPattern);
+  assert.equal(cardNode.fills[0].opacity, 50);
+  assert.match(roomDoc.fontFaces[0].src, assetPattern);
+  // The asset holds the original bytes.
+  const served = Buffer.from(await (await fetch(photoNode.src)).arrayBuffer());
+  assert.ok(served.equals(Buffer.from(local.photo.split(",")[1], "base64")));
+  // The editor ends on asset URLs too (embedded copies are swapped after connecting), and the
+  // half-transparent image fill renders from its asset URL: green at 50 % over the canvas.
+  await a.waitForFunction(
+    () => {
+      const nodes = window.design.getDocument().pages.flatMap((p) => p.nodes);
+      return ["photo", "card"].every((id) => {
+        const node = nodes.find((n) => n.id === id);
+        return /\/assets\//.test(node?.src || node?.fills?.[0]?.src || "");
+      });
+    },
+    null,
+    { timeout: 20000 },
+  );
+  const fill = await a.evaluate(() =>
+    [...document.querySelectorAll('[data-id="card"]')]
+      .map((el) => getComputedStyle(el).backgroundImage)
+      .join(" "),
+  );
+  assert.match(fill, /cross-fade/);
+  assert.equal((await a.evaluate(() => window.cloudAssets.status())).failed, 0);
+
   console.log(
-    "PASS desktop room assets: inserted image uploaded to R2, collaborator receives only the URL, both editors render it, dedupe on reinsert, raster export inlines it",
+    "PASS desktop room assets: inserted image uploaded to R2, collaborator receives only the URL, both editors render it, dedupe on reinsert, raster export inlines it, room creation uploads image, fill and font first with progress",
   );
 } finally {
   await Promise.all(apps.map((app) => app.close().catch(() => {})));
