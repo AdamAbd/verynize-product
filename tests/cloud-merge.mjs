@@ -58,6 +58,30 @@ const stampAt = (wall, replica) => Ops.createClock(replica, () => wall).next();
     "generic JSON documents fall back to top-level keys",
   );
   assert.deepEqual(Ops.diff([1], [2]), [{ t: "root", value: [2] }]);
+  // Per-page rooms load only the pages a batch names (touchedPages) and check node ids on the
+  // other pages through `external`.
+  const touched = Ops.touchedPages(ops);
+  assert.equal(touched.all, false);
+  assert.deepEqual([...touched.pages].sort(), ["p1", "p2"]);
+  assert.equal(Ops.touchedPages([{ t: "doc", key: "name", value: "x" }, { t: "pageOrder", value: [] }]).pages.size, 0);
+  assert.equal(Ops.touchedPages([{ t: "root", value: {} }, null]).all, true);
+  assert.equal(Ops.isNodeOp({ t: "text" }), true);
+  assert.equal(Ops.isNodeOp({ t: "page" }), false);
+  const stub = { ...base, pages: [base.pages[0], { id: "p9", name: "Unloaded", nodes: [] }] };
+  const elsewhere = Ops.apply(
+    stub,
+    [
+      { t: "add", page: "p1", id: "far", value: node("far") },
+      { t: "addPage", id: "p8", value: { id: "p8", nodes: [node("far2")] } },
+      { t: "add", page: "p1", id: "near", value: node("near") },
+    ],
+    { external: (id) => id === "far" || id === "far2" },
+  );
+  assert.deepEqual(
+    elsewhere.rejected.map((r) => r.reason),
+    ["Node exists", "Node id already used"],
+  );
+  assert.equal(elsewhere.applied.length, 1);
 
   // Concurrent edits of different properties of the same node both survive.
   const stamps = Ops.memoryStamps();
