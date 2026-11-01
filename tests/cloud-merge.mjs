@@ -63,7 +63,13 @@ const stampAt = (wall, replica) => Ops.createClock(replica, () => wall).next();
   const touched = Ops.touchedPages(ops);
   assert.equal(touched.all, false);
   assert.deepEqual([...touched.pages].sort(), ["p1", "p2"]);
-  assert.equal(Ops.touchedPages([{ t: "doc", key: "name", value: "x" }, { t: "pageOrder", value: [] }]).pages.size, 0);
+  assert.equal(
+    Ops.touchedPages([
+      { t: "doc", key: "name", value: "x" },
+      { t: "pageOrder", value: [] },
+    ]).pages.size,
+    0,
+  );
   assert.equal(Ops.touchedPages([{ t: "root", value: {} }, null]).all, true);
   assert.equal(Ops.isNodeOp({ t: "text" }), true);
   assert.equal(Ops.isNodeOp({ t: "page" }), false);

@@ -245,10 +245,7 @@ export class DesignRoom extends DurableObject {
     // Only the pages that differ are rewritten; limits are checked before anything is stored.
     this.store.commit(state, document);
     store.flush();
-    this.sql.exec(
-      "UPDATE room SET revision=revision+1 WHERE id=1 AND revision=?",
-      baseRevision,
-    );
+    this.sql.exec("UPDATE room SET revision=revision+1 WHERE id=1 AND revision=?", baseRevision);
     const result = this.snapshot();
     this.broadcast({ type: "snapshot", ...result });
     return json(result);
@@ -743,7 +740,8 @@ export class DesignRoom extends DurableObject {
         // page keeps each under the page limit.
         const ids = Array.isArray(data.ids) ? data.ids : [];
         const { revision, pages, missing } = this.readPages(ids);
-        for (const page of pages) ws.send(JSON.stringify({ type: "pages", revision, pages: [page] }));
+        for (const page of pages)
+          ws.send(JSON.stringify({ type: "pages", revision, pages: [page] }));
         if (missing.length || !pages.length)
           ws.send(JSON.stringify({ type: "pages", revision, pages: [], missing }));
       } else if (data.type === "presence") {

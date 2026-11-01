@@ -2,6 +2,8 @@
 // link rotation, comments, design snapshots and published apps. API: cloud/README.md.
 (() => {
   const Ops = window.VerynizeOps;
+  // Lazy pages (web/page-loader.js): stubs until fetched, edits on them held until they load.
+  const Pages = window.pageLoader;
   const LOCAL_KEYS = ["activePage"];
   const ACCOUNT_KEY = "verynize.cloud.account";
   const SESSION_TOKEN = /^(vs_[0-9a-f]{64}|[A-Za-z0-9]{16,64}\.[A-Za-z0-9+/=_%-]{16,128})$/;
@@ -82,6 +84,7 @@
     timer,
     retryTimer,
     unsub,
+    lazySocket = false,
     generation = 0,
     retries = 0,
     lastLocal = "",
@@ -313,6 +316,7 @@
     if (window.cloudAssets?.holding?.()) return;
     let doc = confirmed;
     for (const batch of pending) doc = Ops.apply(doc, batch.ops).doc;
+    if (Pages.deferredOps().length) doc = Ops.apply(doc, Pages.deferredOps()).doc;
     const current = window.design.getDocument();
     const next = { ...doc };
     if (Ops.isStructured(doc) && doc.pages.some((page) => page.id === current.activePage))
@@ -368,14 +372,14 @@
     }
     // cloud-assets: embedded images upload first; their URL is sent instead of the data URI.
     if (window.cloudAssets?.hold?.(now, () => (localChange(), rebuild()))) return;
-    const ops = Ops.diff(lastLocalDoc, now, { ignore: LOCAL_KEYS });
+    const changes = Ops.diff(lastLocalDoc, now, { ignore: LOCAL_KEYS });
+    const ops = Pages.splitLocal(changes);
     const before = lastLocalDoc;
     lastLocalDoc = now;
     lastLocal = text;
-    if (ops.length) {
-      recordLocal(before, now);
-      queueOps(ops);
-    }
+    if (changes.length) recordLocal(before, now);
+    if (ops.length) queueOps(ops);
+    else if (changes.length) saveOutbox();
   }
 
   // ---- collaborative undo ---------------------------------------------------------------------
@@ -460,7 +464,9 @@
     }
     apply(next);
     to.push({ from: current, to: lastLocalDoc, seq: remoteSeq, at: 0, history: true });
-    queueOps(changes);
+    const send = Pages.splitLocal(changes);
+    if (send.length) queueOps(send);
+    else saveOutbox();
     status(label === "undo" ? "Undid your last change" : "Redid your change");
     refreshHistoryButtons();
   }
@@ -497,7 +503,7 @@
   function receiveOps(message) {
     if (message.client !== clientId && message.ops?.length) markRemote(message.ops);
     if (message.ops?.length) {
-      confirmed = Ops.apply(confirmed, message.ops).doc;
+      confirmed = Ops.apply(confirmed, Pages.filterRemote(message.ops)).doc;
       for (const op of message.ops) if (op.s) clock.observe(op.s);
     }
     if (Number.isSafeInteger(message.revision)) revision = Math.max(revision, message.revision);
@@ -513,6 +519,41 @@
     rebuild();
     saveOutbox();
   }
+  /**
+   * Pages fetched on the socket (lazy rooms): each replaces its stub in the confirmed document and
+   * in the undo steps, and the edits made on it while it loaded are sent.
+   */
+  function receivePages(message) {
+    for (const id of message.missing || []) Pages.missing(id);
+    if (!confirmed || !Ops.isStructured(confirmed)) return;
+    const released = [];
+    let loaded = false;
+    for (const page of message.pages || []) {
+      // A page that is loaded already (a repeated request) is newer here than in the message.
+      if (!Pages.isUnloaded(page?.id)) continue;
+      if (!confirmed.pages.some((item) => item.id === page.id)) {
+        Pages.missing(page.id);
+        continue;
+      }
+      confirmed = Pages.fill(confirmed, { ...page, nodes: page.nodes || [] });
+      for (const step of undoStack.concat(redoStack)) {
+        step.from = Pages.fill(step.from, page);
+        step.to = Pages.fill(step.to, page);
+      }
+      released.push(...Pages.received(page.id));
+      loaded = true;
+    }
+    if (!loaded) return;
+    remoteSeq++; // a loaded page ends the current undo step
+    if (released.length && canEdit()) queueOps(released);
+    rebuild();
+    saveOutbox();
+  }
+  /** Ids of the pages this client holds (lazy rooms request these again after a reconnect). */
+  const loadedPages = () =>
+    Ops.isStructured(confirmed)
+      ? confirmed.pages.map((page) => page.id).filter((id) => !Pages.isUnloaded(id))
+      : [];
   /** Make sure local operations reached the server (used before publishing). */
   async function flushOps() {
     if (!pending.length || !connection) return;
@@ -593,6 +634,7 @@
       confirmed,
       revision,
       role,
+      pages: Pages.stored(),
       savedAt: Date.now(),
     };
   }
@@ -644,6 +686,8 @@
       old.close();
     }
     connection = null;
+    lazySocket = false;
+    Pages.attach(null);
     peerList = [];
     selfId = null;
     role = null;
@@ -683,10 +727,12 @@
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     if (info.token) url.searchParams.set("token", info.token);
     if (clientId) url.searchParams.set("client", clientId);
+    url.searchParams.set("lazy", "1");
     const session = sessionFor(info.server);
     if (session) url.searchParams.set("session", session);
     const ws = new WebSocket(url);
     socket = ws;
+    lazySocket = false;
     ws.onopen = () => {
       if (epoch !== generation || ws !== socket) {
         ws.close();
@@ -704,6 +750,19 @@
         if (message.type === "welcome") {
           selfId = message.id;
           if (message.role) setRole(message.role);
+          // Lazy rooms send their snapshot after `sync`: the pages held here, or the active one.
+          if (message.lazyPages) {
+            lazySocket = true;
+            const active = window.design.getView?.().page;
+            const pages = loadedPages();
+            ws.send(
+              JSON.stringify({
+                type: "sync",
+                pages: pages.length ? pages : active ? [active] : [],
+                ...(confirmed ? { revision } : {}),
+              }),
+            );
+          }
           return;
         }
         if (message.type === "presence") {
@@ -714,16 +773,25 @@
         }
         if (message.type === "snapshot") {
           if (protocol < 2) return receiveSnapshot(message);
-          if (confirmed) markRemote(Ops.diff(confirmed, message.document, { ignore: LOCAL_KEYS }));
-          confirmed = message.document;
+          let released = [];
+          // `same`: the room is still at this client's revision, so its document stands.
+          if (!message.same) {
+            if (confirmed)
+              markRemote(Ops.diff(confirmed, message.document, { ignore: LOCAL_KEYS }));
+            confirmed = message.document;
+            released = Pages.reset(message.unloaded || [], message.pages);
+          }
           revision = message.revision;
           pending = pending.filter((batch) => batch.n > (message.acked || 0));
           for (const batch of pending) batch.sent = false;
+          if (released.length && canEdit()) queueOps(released);
           rebuild();
           sendPending();
+          Pages.resume();
           saveOutbox();
           return;
         }
+        if (message.type === "pages") return receivePages(message);
         if (message.type === "ops") return receiveOps(message);
         if (message.type === "role") {
           setRole(message.role);
@@ -777,9 +845,12 @@
     if (expected !== undefined && expected !== generation) return;
     if (expected === undefined) disconnect();
     const epoch = generation;
+    // Joining loads the active page first (the rest arrives on the socket). Create room keeps the
+    // open document, and a detached copy is compared with the whole room, so both read it all.
+    const lazy = load && !record?.detached;
     const [stored, fetched] = await Promise.all([
       readOutbox(roomKey(info)),
-      request(`/api/rooms/${info.id}`, {}, info).then(
+      request(`/api/rooms/${info.id}${lazy ? "?lazy=1" : ""}`, {}, info).then(
         (value) => ({ value }),
         (error) => ({ error }),
       ),
@@ -854,6 +925,15 @@
     // Restored batches were made on the stored confirmed document. The socket snapshot replaces it
     // and drops the batches the server acknowledged for this client id.
     confirmed = restore ? restore.confirmed : current.document;
+    if (restore) Pages.restore(restore.pages);
+    else Pages.reset(current.unloaded || [], current.pages);
+    Pages.attach({
+      online: () => socket?.readyState === WebSocket.OPEN && lazySocket,
+      request: (ids) => {
+        if (epoch !== generation || socket?.readyState !== WebSocket.OPEN || !lazySocket) return;
+        socket.send(JSON.stringify({ type: "pages", ids }));
+      },
+    });
     setRole(current.role || "owner");
     $("cloud-server").value = info.server;
     updateInvite();
@@ -867,7 +947,8 @@
       // stored when the app quit) become one more batch.
       let base = confirmed;
       for (const batch of pending) base = Ops.apply(base, batch.ops).doc;
-      const ops = Ops.diff(base, lastLocalDoc, { ignore: LOCAL_KEYS });
+      base = Ops.apply(base, Pages.deferredOps()).doc;
+      const ops = Pages.splitLocal(Ops.diff(base, lastLocalDoc, { ignore: LOCAL_KEYS }));
       if (ops.length && canEdit()) queueOps(ops);
     }
     if (protocol >= 2) saveOutbox(true);
@@ -909,6 +990,8 @@
     openRoom: (info) => connect({ server: info.server, id: info.id, token: info.token }),
     /** Unacknowledged local batches of the open room. */
     pendingCount: () => pending.length,
+    /** Lazy pages of the open room: {unloaded, requested, deferred} (web/page-loader.js). */
+    pages: () => Pages.state(),
     /** The stored outbox of a room (client id, batches, confirmed document), for diagnostics. */
     storedOutbox: (server, id) => readOutbox(roomKey({ server, id })),
     role: () => role,
@@ -972,7 +1055,14 @@
       return;
     await connect(info);
   });
-  $("cloud-leave").onclick = () => disconnect(undefined, true);
+  $("cloud-leave").onclick = action(async () => {
+    // The local copy stays as a detached file: load the pages it does not hold yet.
+    if (connection && Pages.unloadedIds().length) {
+      status("Loading every page before disconnecting…");
+      await Pages.ensureAll().catch(() => {});
+    }
+    disconnect(undefined, true);
+  });
   const openLink = (event) => {
     if (window.verynizePlatform.can("externalLinks")) {
       event.preventDefault();
@@ -990,6 +1080,9 @@
     if (!connection) throw Error("Create or join a room first");
     const epoch = generation,
       info = connection;
+    // Edits made on pages that were still loading are sent once those pages arrive.
+    if (Pages.deferredOps().length) await Pages.ensure(Pages.deferredOps().map((op) => op.page));
+    if (epoch !== generation) return;
     await flush();
     if (epoch !== generation) return;
     if (inflight) await inflight;

@@ -29,7 +29,7 @@ const metaText = (doc) => JSON.stringify({ ...doc, pages: null });
 /** Split a text into parts without separating a UTF-16 surrogate pair. */
 function chunks(text) {
   const out = [];
-  for (let start = 0; start < text.length; ) {
+  for (let start = 0; start < text.length;) {
     let end = Math.min(text.length, start + PART_CHARS);
     const code = text.charCodeAt(end - 1);
     if (end < text.length && code >= 0xd800 && code <= 0xdbff) end--;
@@ -176,11 +176,10 @@ export class RoomStore {
   /** Store `document` in place of everything (create, migration, conversion of the layout). */
   replace(document, { enforce = true } = {}) {
     if (!paged(document)) return this.writeJson(document, enforce);
-    this.commit(
-      { doc: { pages: [] }, stubs: new Set(), texts: new Map(), meta: null },
-      document,
-      { replace: true, enforce },
-    );
+    this.commit({ doc: { pages: [] }, stubs: new Set(), texts: new Map(), meta: null }, document, {
+      replace: true,
+      enforce,
+    });
   }
 
   writeJson(document, enforce = true) {

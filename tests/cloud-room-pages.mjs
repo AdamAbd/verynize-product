@@ -85,7 +85,10 @@ try {
 
   // ---- create: stored per page, the whole document assembles unchanged ----------------------
   const doc = board();
-  const room = await data(await call("/api/rooms", { method: "POST", body: { document: doc } }), 201);
+  const room = await data(
+    await call("/api/rooms", { method: "POST", body: { document: doc } }),
+    201,
+  );
   const url = "/api/rooms/" + room.id;
   const full = await data(await call(url, { token: room.token }));
   assert.equal(JSON.stringify(full.document), JSON.stringify(doc), "key order survives the split");
@@ -191,7 +194,12 @@ try {
     type: "ops",
     batch: 5,
     ops: [
-      { t: "addPage", id: "p4", value: { id: "p4", name: "New", nodes: [node("g")] }, s: clock.next() },
+      {
+        t: "addPage",
+        id: "p4",
+        value: { id: "p4", name: "New", nodes: [node("g")] },
+        s: clock.next(),
+      },
       { t: "pageOrder", value: ["p4", "p3", "p2", "p1"], s: clock.next() },
       { t: "removePage", id: "p2", s: clock.next() },
     ],
@@ -226,7 +234,10 @@ try {
   const big = board();
   big.pages[0].nodes[1].text = filler(1_500_000);
   big.pages[1].nodes[0].name = filler(1_500_000);
-  const bigRoom = await data(await call("/api/rooms", { method: "POST", body: { document: big } }), 201);
+  const bigRoom = await data(
+    await call("/api/rooms", { method: "POST", body: { document: big } }),
+    201,
+  );
   assert.equal(
     (await data(await call(`/api/rooms/${bigRoom.id}?lazy=1&page=p3`, { token: bigRoom.token })))
       .document.pages[0].nodes.length,
@@ -263,7 +274,11 @@ try {
       {
         t: "addPage",
         id: "fill" + i,
-        value: { id: "fill" + i, name: "Fill", nodes: [node("fill-node" + i, { text: filler(pageBody) })] },
+        value: {
+          id: "fill" + i,
+          name: "Fill",
+          nodes: [node("fill-node" + i, { text: filler(pageBody) })],
+        },
       },
     ]);
     if (response.status === 413) {
@@ -286,14 +301,20 @@ try {
   );
 
   // ---- public snapshot: a frozen copy assembled from the pages --------------------------------
-  const publication = await data(await call(url + "/publish", { method: "POST", token: room.token }));
+  const publication = await data(
+    await call(url + "/publish", { method: "POST", token: room.token }),
+  );
   const publicDoc = (await data(await call(`/api/public/${publication.publicId}`))).document;
   assert.deepEqual(publicDoc, expected);
   await data(
     await call(url + "/ops", {
       method: "POST",
       token: room.token,
-      body: { client: "later", batch: 1, ops: [{ t: "page", page: "p1", key: "name", value: "Changed" }] },
+      body: {
+        client: "later",
+        batch: 1,
+        ops: [{ t: "page", page: "p1", key: "name", value: "Changed" }],
+      },
     }),
   );
   assert.deepEqual(
@@ -370,10 +391,7 @@ try {
     }),
   );
   assert.equal(older.rejected, 2);
-  assert.equal(
-    (await data(await call(`/api/rooms/${legacyRoom}`, { token: secret }))).revision,
-    7,
-  );
+  assert.equal((await data(await call(`/api/rooms/${legacyRoom}`, { token: secret }))).revision, 7);
   assert.deepEqual(
     (await data(await call(`/api/rooms/${jsonRoom}`, { token: secret }))).document,
     { nodes: [1, 2] },
@@ -384,7 +402,11 @@ try {
     await call(`/api/rooms/${legacyRoom}/ops`, {
       method: "POST",
       token: secret,
-      body: { client: "after", batch: 2, ops: [{ t: "page", page: "p3", key: "name", value: "Old" }] },
+      body: {
+        client: "after",
+        batch: 2,
+        ops: [{ t: "page", page: "p3", key: "name", value: "Old" }],
+      },
     }),
   );
   await mf.dispose();
