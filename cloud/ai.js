@@ -395,9 +395,7 @@ export async function launchRun(env, options) {
     const provider = role ? await resolveProvider(env, account, url.origin) : null;
     if (!role || !provider) {
       await log.emit("error", {
-        message: role
-          ? CREDENTIALS_MESSAGE
-          : "You have no access to this room",
+        message: role ? CREDENTIALS_MESSAGE : "You have no access to this room",
       });
       await log.emit("done", { code: "error", stopped: false, sessionId: run.id });
       await finishRun(env, run.id, "error");

@@ -206,7 +206,8 @@ export async function readSse(
 
 async function errorMessage(response: Response, onCode?: (code: string) => void): Promise<string> {
   const data = await response.json().catch(() => null);
-  if (onCode && data && typeof data === "object" && typeof data.code === "string") onCode(data.code);
+  if (onCode && data && typeof data === "object" && typeof data.code === "string")
+    onCode(data.code);
   return (
     (data && typeof data === "object" && (data.error || data.message)) ||
     `Server returned ${response.status}`
@@ -440,7 +441,7 @@ export function createWebAgentService(deps: WebAgentDeps): AgentService {
             ? WEB_AGENT_MESSAGES.notConfigured
             : !canRun(config)
               ? WEB_AGENT_MESSAGES.needsCredentials
-            : undefined);
+              : undefined);
       return [{ ...WEB_AGENT, available: !reason, ...(reason ? { reason } : {}) }];
     },
   };
