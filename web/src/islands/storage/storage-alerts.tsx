@@ -20,15 +20,21 @@ const RANK: Record<Level, number> = { ok: 0, warn: 1, over: 2 };
 
 export function StorageAlerts() {
   const report = useStorageReport();
-  const previous = useRef<Level>("ok");
+  // The problem the toast is about ("level:scope:page"): a new one is announced once, a cleared
+  // one dismisses it, and growing or shrinking sizes of the same problem stay quiet.
+  const previous = useRef("ok");
   useEffect(() => {
     if (!report) return;
     const level = worstLevel(report.problems);
-    const before = previous.current;
-    previous.current = level;
-    if (RANK[level] <= RANK[before]) return;
     const problem = report.problems[0];
-    if (level === "over") toast.error(problem.message, { id: "storage-limit" });
+    const key = problem ? `${level}:${problem.scope}:${problem.pageId ?? ""}` : "ok";
+    const before = previous.current;
+    previous.current = key;
+    if (key === before) return;
+    if (!problem) toast.dismiss("storage-limit");
+    else if (RANK[level] < RANK[(before.split(":")[0] as Level) || "ok"])
+      toast.dismiss("storage-limit");
+    else if (level === "over") toast.error(problem.message, { id: "storage-limit" });
     else toast.warning(problem.message, { id: "storage-limit" });
   }, [report]);
 
@@ -44,7 +50,7 @@ export function StorageAlerts() {
     <Dialog open={!!blocked} onOpenChange={(open) => !open && setBlocked(null)}>
       <DialogContent id="storage-limit-dialog" className="max-w-sm" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>File is too large to sync</DialogTitle>
+          <DialogTitle>File is too large to {blocked?.action ?? "sync"}</DialogTitle>
           <DialogDescription>{blocked?.message}</DialogDescription>
         </DialogHeader>
         <p className="text-xs text-muted-foreground">

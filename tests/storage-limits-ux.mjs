@@ -1,7 +1,8 @@
 // Document size warnings in a real Electron editor (web/storage-limits.js + the storage island):
 // a page at 80 % of its limit warns in the Share panel and with a toast, a page over its limit
 // blocks creating a room before anything is sent, and a server that refuses a synced edit for its
-// size shows the blocking size dialog instead of a generic failure. Screenshots go to
+// size shows the blocking size dialog instead of a generic failure, and a native save over the
+// 20 MiB file limit shows the same dialog titled for saving. Screenshots go to
 // $VERYNIZE_SCREENSHOTS when set.
 import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 import { _electron as electron } from "@playwright/test";
@@ -161,12 +162,60 @@ try {
   assert.match(await dialog.textContent(), /File is too large to sync/);
   assert.match(await dialog.textContent(), /exceeds 2 MB|over the 2 MB page limit/);
   assert.match(await dialog.textContent(), /Your changes are kept on this device/);
+  await page.waitForTimeout(400); // the dialog's fade-in
   await shot("size-sync-refused-dialog.png");
   await page.getByRole("button", { name: "Close size error" }).click();
   await dialog.waitFor({ state: "detached" });
 
+  // 5. Native save: a file over the 20 MiB limit of the design store is refused by the main
+  // process; the refusal is the blocking size dialog for saving. The large page is not the open one.
+  await page.locator("#cloud-toggle").click();
+  await page.locator("#cloud-leave").click();
+  await page.locator("#cloud-close").click();
+  const target = path.join(dir, "too-large.verynize.json");
+  await app.evaluate(({ dialog }, target) => {
+    dialog.showSaveDialog = async () => ({ canceled: false, filePath: target });
+  }, target);
+  await page.evaluate(() => {
+    const doc = window.design.getDocument();
+    doc.pages = [
+      { id: "small", name: "Cover", background: "#f5f3ee", nodes: [] },
+      {
+        id: "archive",
+        name: "Archive",
+        background: "#f5f3ee",
+        nodes: Array.from({ length: 22 }, (_, i) => ({
+          id: `a-${i}`,
+          type: "text",
+          name: `Archive ${i + 1}`,
+          x: 0,
+          y: i * 60,
+          w: 400,
+          h: 40,
+          text: "Archived ".repeat(110000),
+        })),
+      },
+    ];
+    doc.activePage = "small";
+    window.design.loadDocument(doc);
+  });
+  await page.evaluate(() =>
+    (
+      document.getElementById("legacy-save-project") || document.getElementById("save-project")
+    ).click(),
+  );
+  await dialog.waitFor({ timeout: 30000 });
+  assert.match(await dialog.textContent(), /File is too large to save/);
+  assert.match(await dialog.textContent(), /Document exceeds 20 MiB/);
+  assert.doesNotMatch(await dialog.textContent(), /invoking remote method/);
+  await assert.rejects(fs.access(target), "nothing was written");
+  await page.waitForTimeout(400); // the dialog's fade-in
+  await shot("size-save-refused-dialog.png");
+  await page.getByRole("button", { name: "Close size error" }).click();
+  await dialog.waitFor({ state: "detached" });
+
   console.log(
-    "PASS size warnings: size in the Share panel, 80 % page warning with toast, blocking error before sharing an over-limit page (nothing sent), server size refusal while syncing shown as the blocking size dialog",
+    "PASS size warnings: size in the Share panel, 80 % page warning with toast, blocking error before sharing an over-limit page (nothing sent), server size refusal while syncing shown as the blocking size dialog, native save over 20 MiB refused with the save dialog",
   );
 } finally {
   await app?.close().catch(() => {});
