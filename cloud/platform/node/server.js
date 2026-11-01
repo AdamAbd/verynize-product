@@ -4,6 +4,7 @@ import http from "node:http";
 import { Readable } from "node:stream";
 import { WebSocketServer } from "ws";
 import { pendingUpgrade, UPGRADED } from "./actors.js";
+import { MESSAGE_BYTES } from "../../limits.js";
 
 // Paths Cloudflare runs the Worker for before looking at static assets (cloudflare.config.ts).
 const WORKER_FIRST = [
@@ -14,7 +15,8 @@ const WORKER_FIRST = [
   /^\/passkey\.js$/,
   /^\/account\//,
 ];
-const MAX_SOCKET_MESSAGE = 8 * 1024 * 1024;
+// Room socket messages carry up to a whole document (cloud/limits.js).
+const MAX_SOCKET_MESSAGE = MESSAGE_BYTES;
 
 /**
  * @param {object} options

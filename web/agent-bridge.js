@@ -96,7 +96,9 @@
       window.dispatchEvent(new CustomEvent('verynize-tools', { detail: window.verynizeTools }));
       return { ok: true };
     },
-    state() {
+    async state() {
+      // Shared rooms load pages lazily (web/page-loader.js); agents read and write whole documents.
+      await window.pageLoader?.ensureAll();
       const document = editor().getDocument();
       return { document, stamp, selection: editor().getSelection(), activePage: document.activePage, ...library() };
     },

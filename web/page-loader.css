@@ -1,0 +1,4 @@
+/* Lazy pages (web/page-loader.js): the shown page of a shared room has not loaded yet. The
+   overlay covers the canvas so nothing is drawn onto the empty stub while it loads. */
+#page-loading{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:var(--shell-canvas);color:var(--shell-muted);font-size:12px;cursor:progress}
+#page-loading[hidden]{display:none}
