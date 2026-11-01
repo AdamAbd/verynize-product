@@ -1,5 +1,6 @@
 // Canvas parity: camera, tools, selection, smart guides, clipboard, structure commands, sizing modes.
 const {_electron} = require('@playwright/test');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
@@ -10,7 +11,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
   env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({env, args: ['.', `--user-data-dir=${dir}`], timeout: 20000});
   try {
-    const page = await app.firstWindow({timeout: 20000});
+    const page = await app.firstWindow({timeout: 20000}); await moveOffCursor(app);
     await waitForUiReady(page);
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));

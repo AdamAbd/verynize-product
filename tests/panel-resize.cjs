@@ -3,6 +3,7 @@
 // resizes them within their limits, the canvas reflows without moving the artwork and still hit-tests, a double-click
 // restores the default width, collapsing still works and the widths survive a reload.
 const { _electron: electron } = require("@playwright/test");
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const { waitForUiReady } = require("./helpers/ui-ready.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
@@ -19,7 +20,7 @@ const path = require("node:path");
     timeout: 20000,
   });
   try {
-    const page = await app.firstWindow({ timeout: 20000 });
+    const page = await app.firstWindow({ timeout: 20000 }); await moveOffCursor(app);
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.setViewportSize({ width: 1440, height: 870 });

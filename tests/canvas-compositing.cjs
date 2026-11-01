@@ -2,6 +2,7 @@
 // Chromium out of tile memory ("tile memory limits exceeded, some content may not draw"). The GPU budget is lowered so
 // the failure shows up on any machine, as it does on a laptop under memory pressure.
 const {_electron} = require('@playwright/test');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
@@ -14,7 +15,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
   app.process().stderr.on('data', d => { warnings += (String(d).match(/tile memory limits exceeded/g) || []).length; });
   const settle = (ms = 700) => new Promise(r => setTimeout(r, ms));
   try {
-    const page = await app.firstWindow({timeout: 20000});
+    const page = await app.firstWindow({timeout: 20000}); await moveOffCursor(app);
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.waitForSelector('#canvas .layer');

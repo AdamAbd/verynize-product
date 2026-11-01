@@ -2,6 +2,7 @@
 // 21–26, 41; docs/wonder-design-workflow-2026-10-30.md P20, P22, P23, P30, P32). Real Electron: UI edits through
 // the inspector, native raster/vector/code export through the save dialog, decoded output pixels and dimensions.
 const { _electron } = require("@playwright/test");
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises"),
   os = require("node:os"),
@@ -26,7 +27,7 @@ const LOGO = svg(
     timeout: 20000,
   });
   try {
-    const page = await app.firstWindow({ timeout: 20000 });
+    const page = await app.firstWindow({ timeout: 20000 }); await moveOffCursor(app);
     await page.waitForSelector("#canvas .layer");
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));

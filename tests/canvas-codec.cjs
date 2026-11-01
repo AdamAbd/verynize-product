@@ -1,6 +1,7 @@
 // Renderer parity for codec output: JSX built by integrations/design-edit.mjs is rendered by the
 // real canvas (web/app.js) and the DOM boxes are compared with the headless layout estimate.
 const {_electron} = require('@playwright/test');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 const {pathToFileURL} = require('node:url');
@@ -12,7 +13,7 @@ const {pathToFileURL} = require('node:url');
   env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({env, args: ['.', `--user-data-dir=${dir}`], timeout: 20000});
   try {
-    const page = await app.firstWindow({timeout: 20000});
+    const page = await app.firstWindow({timeout: 20000}); await moveOffCursor(app);
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.waitForSelector('#canvas .layer');
     const blank = {version: 2, name: 'Codec', activePage: 'p1', pages: [{id: 'p1', name: 'Page', nodes: []}], tokens: {}};
