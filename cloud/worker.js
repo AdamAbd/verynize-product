@@ -20,14 +20,18 @@ import { AUTH_BASE_PATH, createAuth } from "./auth.js";
 import {
   addRoom,
   ensurePersonalOrganization,
+  managesOrganization,
+  memberByEmail,
   membership,
   moveRoom,
   orgRoomRole,
   organizationRooms,
+  pendingInvitation,
   refreshMember,
   refreshRoom,
   roomOrganization,
   roomRoleFor,
+  setInvitationRole,
   syncTitle,
   userOrganizationRooms,
 } from "./orgs.js";
@@ -47,7 +51,7 @@ export { AiRun } from "./ai-run.js";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const ROOM_ROUTE = new RegExp(
-  `^/api/rooms/(${UUID})(/socket|/publish|/ops|/pages|/access|/members(?:/${UUID})?|/claim|/organization|/tokens(?:/rotate|/${UUID})?|/comments)?$`,
+  `^/api/rooms/(${UUID})(/socket|/publish|/ops|/pages|/access|/members(?:/${UUID})?|/claim|/organization|/visibility|/share-invitations|/invitation|/tokens(?:/rotate|/${UUID})?|/comments)?$`,
 );
 const APP_ROUTE = new RegExp(
   `^/api/apps/(${UUID})(/versions(?:/(\\d+)(/finalize|/files/(.+))?)?|/activate|/publish)?$`,
@@ -394,6 +398,83 @@ async function inlineWrite(request, env, url, roomId, account, orgRole, stub, li
   return globalThis.VerynizeStorageLimits.inlineBinaries(data[target]).length ? extract() : data;
 }
 
+/** The message of an error thrown by a Better Auth server call (APIError) or anything else. */
+const authError = (error) =>
+  error?.body?.message || error?.message || "The workspace server refused the request";
+
+// Share invitations (POST /api/rooms/:id/share-invitations): Wonder-style roles.
+const SHARE_ROLES = ["viewer", "editor", "admin"];
+const MAX_SHARE_INVITES = 20;
+
+/**
+ * What the caller may do in the Share panel, from the room's role answer: `you` of /access.
+ * Owners change visibility. Inviting needs a signed-in owner; in a workspace room it invites to the
+ * workspace when the caller manages the workspace (owner/admin), else adds direct room members.
+ */
+async function shareAbilities(env, roomId, account, role) {
+  const org = await roomOrganization(env, roomId);
+  const orgMember =
+    org && account?.authUser ? await membership(env, org.id, account.authUser.id) : null;
+  const workspace = !!org && managesOrganization(orgMember);
+  return {
+    org,
+    workspace,
+    you: {
+      role: role || null,
+      canInvite: !!account && role === "owner",
+      canChangeVisibility: role === "owner",
+    },
+  };
+}
+
+/** The invitation shown to an invited non-member: {id, organizationId, organizationName, inviterName, role, roomRole}. */
+const invitationView = (invitation, org) => ({
+  id: invitation.id,
+  organizationId: invitation.organizationId,
+  organizationName: invitation.organizationName,
+  inviterName: invitation.inviterName,
+  role: invitation.role,
+  roomRole: roomRoleFor(invitation.role, org?.metadata),
+});
+
+/** A signed-in account's pending invitation into the workspace of a room, or null. */
+async function roomInvitation(env, roomId, account) {
+  if (!account?.authUser) return null;
+  const org = await roomOrganization(env, roomId);
+  if (!org) return null;
+  const invitation = await pendingInvitation(env, org.id, account.authUser.email);
+  return invitation ? invitationView(invitation, org) : null;
+}
+
+/** Split, normalize and dedupe the addresses of a share invitation. */
+function shareAddresses(list) {
+  if (!Array.isArray(list)) fail(400, "Enter an email address to invite.");
+  const seen = new Set(),
+    valid = [],
+    errors = [];
+  for (const entry of list.slice(0, 200)) {
+    for (const part of String(typeof entry === "string" ? entry : "").split(/[,;\s]+/)) {
+      if (!part) continue;
+      let email;
+      try {
+        email = profiles.normalizeEmail(part);
+      } catch (error) {
+        if (!errors.some((e) => e.email === part))
+          errors.push({ email: part, message: error.message });
+        continue;
+      }
+      if (!seen.has(email)) {
+        seen.add(email);
+        valid.push(email);
+      }
+    }
+  }
+  if (!valid.length && !errors.length) fail(400, "Enter an email address to invite.");
+  if (valid.length + errors.length > MAX_SHARE_INVITES)
+    fail(400, `Invite up to ${MAX_SHARE_INVITES} people at a time.`);
+  return { valid, errors };
+}
+
 async function handleRooms(request, env, url) {
   if (url.pathname === "/api/rooms" && request.method === "POST") {
     if (await limited(env.ROOM_CREATION, ip(request)))
@@ -466,7 +547,11 @@ async function handleRooms(request, env, url) {
   const roomId = match[1],
     action = match[2] || "/room";
   const account = await accountOf(env, request, url);
-  requireRoomAccount(env, request, url, account);
+  // Public rooms are readable without an account on every origin (cloud/README.md "File
+  // visibility"); writes still need a role the room grants, which public visitors never have.
+  const reading = request.method === "GET" && action !== "/invitation";
+  if (!(account === null && reading && (await env.ROOMS.getByName(roomId).publicRoom())))
+    requireRoomAccount(env, request, url, account);
   const orgRole = account?.authUser ? await orgRoomRole(env, roomId, account.authUser.id) : null;
   const forward = new URL("https://room" + action);
   if (action === "/socket")
@@ -478,25 +563,128 @@ async function handleRooms(request, env, url) {
       for (const value of url.searchParams.getAll(key).slice(0, 200))
         forward.searchParams.append(key, value);
   const stub = env.ROOMS.getByName(roomId);
+  /** The caller's /access answer from the room (role, members, visibility, ...). */
+  const roomAccess = async () => {
+    const asGet = new Request(request.url, { method: "GET", headers: request.headers });
+    const checked = await stub.fetch(
+      roomRequest(new URL("https://room/access"), asGet, account, undefined, orgRole),
+    );
+    return { ok: checked.ok, status: checked.status, access: await checked.json() };
+  };
+  /** Add or change a direct room member; only a new member is emailed (B2). */
+  const addDirectMember = async (email, role) => {
+    const invitee = await profiles.ensureProfile(env, email);
+    const response = await stub.fetch(
+      roomRequest(
+        new URL("https://room/members"),
+        new Request(request.url, { method: "POST", headers: request.headers }),
+        account,
+        { account: invitee, role },
+        orgRole,
+      ),
+    );
+    const result = await response.json();
+    if (response.ok) {
+      await profiles.linkRoom(env, invitee.id, roomId, role, result.title);
+      result.emailed = result.previousRole
+        ? false
+        : await directory(env).notifyInvite(
+            invitee.email,
+            result.title,
+            role,
+            `${url.origin}/#room=${roomId}`,
+          );
+    }
+    return { response, result };
+  };
 
   if (action === "/members" && request.method === "POST") {
     if (!account) fail(401, "Sign in to invite people by email");
     const data = await readJson(request, 16 * 1024);
-    const invitee = await profiles.ensureProfile(env, data.email);
-    const response = await stub.fetch(
-      roomRequest(forward, request, account, { account: invitee, role: data.role }, orgRole),
-    );
-    const result = await response.json();
-    if (response.ok) {
-      await profiles.linkRoom(env, invitee.id, roomId, data.role, result.title);
-      result.emailed = await directory(env).notifyInvite(
-        invitee.email,
-        result.title,
-        data.role,
-        `${url.origin}/#room=${roomId}`,
-      );
-    }
+    const { response, result } = await addDirectMember(data.email, data.role);
     return json(result, response.status);
+  }
+  if (action === "/share-invitations" && request.method === "POST") {
+    if (!account) fail(401, "Sign in to invite people");
+    const data = await readJson(request, 64 * 1024);
+    if (!SHARE_ROLES.includes(data.role)) fail(400, "Choose Viewer, Editor or Admin");
+    const { valid, errors } = shareAddresses(data.emails);
+    const checked = await roomAccess();
+    if (!checked.ok) return json(checked.access, checked.status);
+    const { org, workspace, you } = await shareAbilities(env, roomId, account, checked.access.role);
+    if (!you.canInvite) fail(403, "Only owners can invite people to this file");
+    const invited = [];
+    const auth = workspace ? createAuth(env, request) : null;
+    for (const email of valid) {
+      try {
+        if (workspace) {
+          // A workspace invitation: accepting it reaches every file in the workspace.
+          if (await memberByEmail(env, org.id, email)) {
+            invited.push({ email, status: "already-member" });
+            continue;
+          }
+          const pending = await pendingInvitation(env, org.id, email);
+          if (pending) {
+            // Already invited: keep the one email that was sent, update the role only.
+            if (pending.role !== data.role) await setInvitationRole(env, pending.id, data.role);
+          } else
+            await auth.api.createInvitation({
+              headers: authHeaders(sessionOf(request, url)),
+              body: { email, role: data.role, organizationId: org.id },
+            });
+          invited.push({ email, status: "invited" });
+        } else {
+          // No workspace to invite to (or not its admin): direct room members, admin = owner.
+          if (checked.access.members.some((member) => member.email === email)) {
+            invited.push({ email, status: "already-member" });
+            continue;
+          }
+          const { response, result } = await addDirectMember(
+            email,
+            data.role === "admin" ? "owner" : data.role,
+          );
+          if (!response.ok) errors.push({ email, message: result.error || "Could not invite" });
+          else invited.push({ email, status: "invited" });
+        }
+      } catch (error) {
+        errors.push({ email, message: authError(error) });
+      }
+    }
+    return json({ invited, errors });
+  }
+  if (action === "/invitation") {
+    // In-app acceptance: an invited, signed-in non-member sees and answers their invitation.
+    if (!account) fail(401, "Sign in to Verynize first");
+    if (request.method === "GET")
+      return json({ invitation: await roomInvitation(env, roomId, account) });
+    if (request.method === "POST") {
+      const data = await readJson(request, 16 * 1024);
+      if (!["accept", "decline"].includes(data.action)) fail(400, "Choose accept or decline");
+      const invitation = await roomInvitation(env, roomId, account);
+      if (!invitation || (data.invitationId && data.invitationId !== invitation.id))
+        fail(404, "This invitation is no longer available");
+      const auth = createAuth(env, request);
+      const call = {
+        headers: authHeaders(sessionOf(request, url)),
+        body: { invitationId: invitation.id },
+      };
+      try {
+        if (data.action === "decline") {
+          await auth.api.rejectInvitation(call);
+          return json({ declined: true, invitation });
+        }
+        await auth.api.acceptInvitation(call);
+      } catch (error) {
+        fail(error?.statusCode || 400, authError(error));
+      }
+      const role = await orgRoomRole(env, roomId, account.authUser.id);
+      return json({
+        accepted: true,
+        role,
+        organization: { id: invitation.organizationId, name: invitation.organizationName },
+      });
+    }
+    return null;
   }
   if (action === "/organization" && request.method === "PUT") {
     // Move a room into an organization (room owners who are members of the target).
@@ -555,12 +743,35 @@ async function handleRooms(request, env, url) {
       action === "/ops" ? MESSAGE_BYTES : REQUEST_BYTES,
     );
   const response = await stub.fetch(roomRequest(forward, request, account, body, orgRole));
+  // An invited account that has not accepted yet: a distinguishable 403 with the invitation,
+  // so the client can offer Join / Decline in the app (no email needed).
+  if (response.status === 401 && account?.authUser) {
+    const invitation = await roomInvitation(env, roomId, account);
+    if (invitation)
+      return json(
+        {
+          error: "You have an invitation to this file's workspace",
+          code: "invitation-pending",
+          invitation,
+        },
+        403,
+      );
+  }
   if (action === "/socket" || !response.ok) return response;
   const result = await response.json();
   if (result?.title) await syncTitle(env, roomId, result.title);
   if (action === "/access") {
-    const org = await roomOrganization(env, roomId);
+    const { org, you } = await shareAbilities(env, roomId, account, result.role);
     result.organization = org ? { id: org.id, name: org.name } : null;
+    // The Share panel's abilities; `canClaim`: an owner link held by a signed-in account that is
+    // not yet an owner member (B6: never offer "add to my account" to an existing owner).
+    result.you = {
+      ...you,
+      canClaim:
+        !!account && result.role === "owner" && result.member !== "owner" && orgRole !== "owner",
+    };
+    delete result.member;
+    delete result.publicOnly;
   }
   if (action === "/publish" && request.method === "POST") {
     const publicId = `${roomId}.${result.nonce}`;

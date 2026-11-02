@@ -6,6 +6,7 @@
 // $VERYNIZE_SCREENSHOTS when set.
 import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 import { _electron as electron } from "@playwright/test";
+import { openSharedDesign } from "./helpers/shared-design.cjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -74,7 +75,7 @@ try {
   await load([200000, 50000]);
   let measured = await report();
   assert.equal(measured.problems.length, 0);
-  await page.locator("#cloud-toggle").click();
+  await openSharedDesign(page);
   await page.locator("#cloud-server").fill(server);
   const meter = page.locator("#storage-meter");
   await meter.waitFor();
@@ -95,7 +96,7 @@ try {
   const toast = page.locator("[data-sonner-toast]", { hasText: "Page “Landing” is" });
   await toast.waitFor({ timeout: 10000 });
   assert.match(await toast.textContent(), /of the 2 MB page limit/);
-  await page.locator("#cloud-toggle").click();
+  await openSharedDesign(page);
   await page.waitForFunction(
     () => document.getElementById("storage-meter")?.dataset.level === "warn",
   );
@@ -116,7 +117,7 @@ try {
   page.on("request", (request) => {
     if (request.url().startsWith(server)) requests.push(request.url());
   });
-  await page.locator("#cloud-toggle").click();
+  await openSharedDesign(page);
   await page.waitForFunction(
     () => document.getElementById("storage-meter")?.dataset.level === "over",
   );
@@ -139,7 +140,7 @@ try {
   await mark();
   await load([1.1 * MiB]);
   await report();
-  await page.locator("#cloud-toggle").click();
+  await openSharedDesign(page);
   await page.locator("#cloud-create").click();
   await page.waitForFunction(
     () => document.getElementById("cloud-status").textContent.includes("Connected"),
@@ -170,7 +171,7 @@ try {
 
   // 5. Native save: a file over the 20 MiB limit of the design store is refused by the main
   // process; the refusal is the blocking size dialog for saving. The large page is not the open one.
-  await page.locator("#cloud-toggle").click();
+  await openSharedDesign(page);
   await page.locator("#cloud-leave").click();
   await page.locator("#cloud-close").click();
   const target = path.join(dir, "too-large.verynize.json");

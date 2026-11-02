@@ -5,6 +5,7 @@
 // no request carries the bytes inside the document.
 import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 import { _electron as electron } from "@playwright/test";
+import { openSharedDesign } from "./helpers/shared-design.cjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -33,14 +34,14 @@ try {
     socket.on("framesent", (frame) => sent.push(String(frame.payload))),
   );
 
-  await a.locator("#cloud-toggle").click();
+  await openSharedDesign(a);
   await a.locator("#cloud-server").fill(server);
   await a.locator("#cloud-create").click();
   await a.waitForFunction(() => document.getElementById("cloud-invite").value.includes("token="));
   const invite = await a.locator("#cloud-invite").inputValue();
   const room = new URLSearchParams(new URL(invite).hash.slice(1));
   b.on("dialog", async (dialog) => dialog.accept(dialog.type() === "prompt" ? invite : undefined));
-  await b.locator("#cloud-toggle").click();
+  await openSharedDesign(b);
   await b.locator("#cloud-invite").fill(invite);
   await b.locator("#cloud-connect").click();
   await b.waitForFunction(() =>
@@ -158,7 +159,7 @@ try {
   assert.equal((await a.evaluate(() => window.cloudAssets.status())).failed, 0);
 
   // ---- Creating a room from a local file with embedded binaries uploads them first. ----
-  await a.locator("#cloud-toggle").click();
+  await openSharedDesign(a);
   await a.locator("#cloud-leave").click();
   await a.locator("#cloud-close").click();
   const local = await a.evaluate(() => {
@@ -208,7 +209,7 @@ try {
       subtree: true,
     });
   });
-  await a.locator("#cloud-toggle").click();
+  await openSharedDesign(a);
   await a.locator("#cloud-create").click();
   await a.waitForFunction(
     () => document.getElementById("cloud-status").textContent.includes("Connected"),

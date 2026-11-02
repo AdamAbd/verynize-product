@@ -3,7 +3,7 @@
 // into it), so its same-named fields never collide with the island's visible fields. Legacy handlers that still
 // matter (precision align, scale, duplicate, delete, colour picker, shader gallery, artwork export) are driven by
 // clicking the detached elements.
-import { hideLegacy, legacy, legacyClick, takeOver } from "@/lib/bridge";
+import { hideLegacy, legacy, takeOver } from "@/lib/bridge";
 
 let form: HTMLFormElement | null = null;
 const ROOT_ID = "bd-inspector-root";
@@ -78,6 +78,3 @@ export async function createColorToken(): Promise<string | null> {
   return button?.onclick ? await button.onclick.call(button, new PointerEvent("click")) : null;
 }
 
-export function openShare() {
-  legacyClick("cloud-toggle");
-}

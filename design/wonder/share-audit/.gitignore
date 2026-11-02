@@ -1,0 +1,7 @@
+# Screenshots, pairs and raw sidecars hold personal account data; they stay local.
+*
+!*/
+!*.md
+!*.cjs
+!*.py
+!.gitignore

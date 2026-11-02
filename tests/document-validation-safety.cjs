@@ -68,6 +68,13 @@ async function seed(page, { current, library }) {
     ({ current, library }) => {
       localStorage.setItem("verynize-v2", current);
       localStorage.setItem("verynize-library-v1", JSON.stringify(library));
+      // The outgoing page still holds its own document and may save it (a media-query re-render) before the reload
+      // commits; only the seeded state may reach the next page.
+      const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key === "verynize-v2" || key === "verynize-library-v1") return;
+        return set.call(this, key, value);
+      };
       location.reload();
     },
     { current, library },

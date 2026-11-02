@@ -233,28 +233,30 @@ export async function checkWebRouter(browser, origin, context = browser) {
   }
 
   // The room fragment stays client-side and survives every kind of navigation.
+  // The link handler (web/src/islands/collab/links.ts) takes the link at once: its token leaves the address before
+  // the room loads, the room id stays (what follows depends on the backend: no access here, a stub elsewhere).
+  const KEPT = `#room=${ROOM}`;
   await page.goto(origin + "/editor" + INVITE);
   await ready();
+  await page.waitForFunction((kept) => location.hash === kept, KEPT);
   await expectShell("/editor");
-  await page.waitForFunction(() => document.getElementById("cloud-dialog")?.open);
-  await page.evaluate(() => document.getElementById("cloud-dialog").close());
   const withInvite = await state();
-  assert.equal(withInvite.hash, INVITE);
+  assert.equal(withInvite.hash, KEPT);
   await page.locator("#files-home").click();
   at = await expectShell("/");
-  assert.equal(at.hash, INVITE, "UI navigation keeps the fragment");
+  assert.equal(at.hash, KEPT, "UI navigation keeps the fragment");
   await page.evaluate(() => window.shellNavigation.navigate({ to: "/code" }));
   at = await expectShell("/code");
-  assert.equal(at.hash, INVITE, "router navigation keeps the fragment");
+  assert.equal(at.hash, KEPT, "router navigation keeps the fragment");
   await page.evaluate(() => window.appSettings.open("account"));
   at = await expectShell("/settings/account", { code: true });
-  assert.equal(at.hash, INVITE, "settings keeps the fragment");
+  assert.equal(at.hash, KEPT, "settings keeps the fragment");
   await back();
   at = await expectShell("/code");
-  assert.equal(at.hash, INVITE);
+  assert.equal(at.hash, KEPT);
   await back();
   at = await expectShell("/");
-  assert.equal(at.hash, INVITE, "Back keeps the fragment");
+  assert.equal(at.hash, KEPT, "Back keeps the fragment");
   // Navigating to the current path adds no entry even though the fragment is kept.
   await page.evaluate(() => window.shellRouter.navigate({ to: "/" }));
   assert.deepEqual(await state(), at);

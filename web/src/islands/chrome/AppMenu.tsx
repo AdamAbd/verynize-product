@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Globe,
   ImageIcon,
+  Lock,
   LayoutGrid,
   MonitorPlay,
   Pencil,
@@ -30,6 +31,7 @@ import { legacySet, useDesign } from "@/lib/bridge";
 import { legacySelect, MENU_IDS, run } from "./legacy";
 import { MenuContent, MenuGroup, MenuItem, MenuLabel, MenuRoot, MenuSeparator, MenuTrigger, Shortcut } from "./menu";
 import { useIconKinds } from "./useIconKinds";
+import { requestVisibility, useCloudState } from "../share/api";
 
 type Command = { id: (typeof MENU_IDS)[number]; label: string; icon: ComponentType<{ className?: string }>; shortcut?: string };
 const GROUPS: { label?: string; items: Command[] }[] = [
@@ -95,6 +97,10 @@ export function AppMenu() {
   const openRef = useRef(false);
   const skipClick = useRef<EventTarget | null>(null);
   const iconKinds = useIconKinds();
+  const cloud = useCloudState();
+  // Wonder SL4 File menu: one entry toggling the file's visibility, confirmed by the share island's dialog.
+  const makePublic = cloud.visibility !== "public";
+  const canChangeVisibility = !cloud.connected || cloud.role === "owner";
 
   const show = useCallback((anchor: HTMLElement | null) => {
     anchorRef.current = anchor;
@@ -221,6 +227,17 @@ export function AppMenu() {
                     </div>
                   );
                 })}
+                {group.label === "File" && (
+                  <MenuItem
+                    id={makePublic ? "file-make-public" : "file-make-private"}
+                    disabled={!canChangeVisibility}
+                    // After the menu has closed, so its focus return does not fight the dialog.
+                    onSelect={() => requestAnimationFrame(() => requestVisibility(makePublic ? "public" : "private"))}
+                  >
+                    {makePublic ? <Globe /> : <Lock />}
+                    <span className="truncate">{makePublic ? "Make file public" : "Make file private"}</span>
+                  </MenuItem>
+                )}
                 {group.label === "File" &&
                   workspaceActions() &&
                   FILE_ACTIONS.map(({ id, action, label, icon: Icon }) => (

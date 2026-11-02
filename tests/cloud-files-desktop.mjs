@@ -2,6 +2,7 @@
 // the Files home lists workspace rooms and rooms shared with you, and edits made while the server
 // is down survive an app restart and reach the room exactly once (persistent outbox).
 import { _electron as electron } from "@playwright/test";
+import { openSharedDesign } from "./helpers/shared-design.cjs";
 import { waitForUiReady } from "./helpers/ui-ready.cjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -82,7 +83,7 @@ try {
   const textId = await page.evaluate(() =>
     window.design.addNode("text", { name: "Headline", text: "Hello" }),
   );
-  await page.locator("#cloud-toggle").click();
+  await openSharedDesign(page);
   await page.locator("#cloud-server").fill(server);
   await page.locator("#cloud-create").click();
   await page.waitForFunction(() =>
@@ -252,7 +253,7 @@ try {
   );
 
   // 6. Disconnect keeps the local copy, marks it detached and forgets the stored outbox.
-  await page.locator("#cloud-toggle").click();
+  await openSharedDesign(page);
   await page.locator("#cloud-leave").click();
   assert.equal(await page.evaluate(() => window.cloudWorkspace.isConnected()), false);
   await page.waitForFunction(

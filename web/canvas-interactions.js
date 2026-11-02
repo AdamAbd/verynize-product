@@ -256,6 +256,13 @@
       }, () => { canvas.classList.remove('spacing-measure'); delete workspace.dataset.spacingLimit; spacingDrag = null; delete workspace.dataset.spacingDrag; spacingKey = ''; refreshHover(true); });
     }
 
+    // ---------- Viewers ----------
+    // A viewer or commenter in a shared room (body.cloud-read-only) looks around and selects; commands that change the
+    // document are inert (web/cloud-panel.js rolls back anything else).
+    function readOnly() { return document.body.classList.contains('cloud-read-only'); }
+    const VIEWER_COMMANDS = /^(select\.|view\.|tool\.(move|hand)$|edit\.copy(Code|Png)?$)/;
+    function allowed(id) { return !readOnly() || VIEWER_COMMANDS.test(id); }
+
     // ---------- Camera ----------
     const viewport = () => wrap.getBoundingClientRect();
     // Compositing: a permanently promoted #canvas (will-change: transform) freezes its raster scale, so after a zoom out
@@ -378,6 +385,7 @@
 
     // ---------- Tools ----------
     function setTool(next) {
+      if (readOnly() && next !== 'hand') next = 'move'; // viewers: Move and Hand only
       if (next === 'image') { setTool('move'); $('#image')?.click(); return; }
       const previous = tool;
       tool = TOOL_BUTTONS[next] ? next : 'move';
@@ -523,6 +531,7 @@
       if (e.target.closest('.frame-label')) return;
       if (space || tool === 'hand' || e.button === 1) { startPan(e); return; }
       if (e.button !== 0) return;
+      if (readOnly()) { viewerPointerDown(e); return; }
       if (chrome.pointerDown(e)) return;
       const spacing = e.target.closest('#canvas-overlay .spacing-band');
       if (spacing) { startSpacing(e, spacingBands[Number(spacing.dataset.index)], Number(spacing.dataset.index)); return; }
@@ -549,11 +558,20 @@
         }
       });
     });
+    // Viewers (body.cloud-read-only, web/cloud-panel.js setRole) select and marquee-select; nothing moves or resizes.
+    function viewerPointerDown(e) {
+      const el = e.target.closest('#canvas .layer');
+      if (!el) { startMarquee(e); return; }
+      const id = resolveHit(el.dataset.id, deepSelect(e));
+      if (e.shiftKey) { const next = new Set(sel()); if (next.has(id)) next.delete(id); else next.add(id); select(next); }
+      else select([id]);
+      e.preventDefault();
+    }
     // Double-click edits a text layer that the first click of the pair had already selected; drilling in happens per click.
     let firstClickSelection = new Set();
     wrap.addEventListener('click', e => { if (e.detail <= 1) firstClickSelection = new Set(sel()); });
     wrap.addEventListener('dblclick', e => {
-      const el = e.target.closest('#canvas .layer'); if (!el) return;
+      const el = e.target.closest('#canvas .layer'); if (!el || readOnly()) return;
       const n = find(el.dataset.id);
       if (textEdit?.el.contains(e.target)) return; // native word selection inside the editor
       if (n?.type === 'text' && !n.locked && sel().size === 1 && sel().has(n.id) && firstClickSelection.has(n.id)) editText({x: e.clientX, y: e.clientY});
@@ -1114,7 +1132,7 @@
         const r = worldRect(n.id); if (!r || (sel().has(n.id) && sel().size === 1)) continue;
         const label = document.createElement('span'); label.className = 'frame-label' + (sel().has(n.id) ? ' selected' : '') + (n.id === hoverId ? ' hovered' : ''); label.textContent = n.name; label.dataset.id = n.id;
         label.style.left = toScreenX(r.x) + 'px'; label.style.top = toScreenY(r.y) - 18 + 'px';
-        label.onpointerdown = e => { if (e.button !== 0 || space || tool === 'hand') return; e.stopPropagation(); select(e.shiftKey ? [...sel(), n.id] : [n.id]); if (!e.shiftKey) startMove(e); };
+        label.onpointerdown = e => { if (e.button !== 0 || space || tool === 'hand') return; e.stopPropagation(); select(e.shiftKey ? [...sel(), n.id] : [n.id]); if (!e.shiftKey && !readOnly()) startMove(e); };
         frameLabels.append(label);
       }
     }
@@ -1542,7 +1560,7 @@
     }
     const keyIndex = new Map();
     for (const c of commands) for (const k of c.keys) keyIndex.set(k, c);
-    function runCommand(id, arg) { const c = commands.find(x => x.id === id); if (!c || (c.when && !c.when())) return false; c.run(arg); return true; }
+    function runCommand(id, arg) { const c = commands.find(x => x.id === id); if (!c || !allowed(id) || (c.when && !c.when())) return false; c.run(arg); return true; }
     const shortcutText = k => k.replace('mod+', /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+').replace('alt+', '⌥').replace('shift+', '⇧').replace('ctrl+', '⌃').toUpperCase();
 
     document.addEventListener('keydown', e => {
@@ -1552,6 +1570,7 @@
       if (e.code === 'Space') { space = true; workspace.classList.add('space-pan'); refreshHover(); e.preventDefault(); return; }
       if (e.altKey && lastHover && !e.repeat) measureTo(lastHover);
       if (e.key.startsWith('Arrow')) {
+        if (readOnly()) return;
         const list = selectedNodes().filter(n => !n.locked); if (!list.length) return;
         // Auto-layout children have no x/y: arrows step them through their stack instead.
         if (list.every(inStack)) { e.preventDefault(); arrange(e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? 'backward' : 'forward'); return; }
@@ -1561,6 +1580,7 @@
         ed.render(); return;
       }
       const command = keyIndex.get(comboOf(e)); if (!command) return;
+      if (!allowed(command.id)) { e.preventDefault(); return; }
       if (command.when && !command.when()) return;
       if (command.native) { requestPaste(command.id === 'edit.pasteInPlace'); return; } // keep default so the native paste event fires
       e.preventDefault(); command.run();
@@ -1579,6 +1599,7 @@
     wrap.addEventListener('contextmenu', e => {
       if (textEdit?.el.contains(e.target)) return;
       e.preventDefault(); closeMenu();
+      if (readOnly()) return; // its commands edit
       const label = e.target.closest('.frame-label'), el = e.target.closest('#canvas .layer'), chrome = sel().size === 1 && e.target.closest('#canvas-overlay .rotate-zone, #canvas-overlay .resize-edge, #selection-chat-chip') ? [...sel()][0] : null;
       const under = [...canvas.querySelectorAll('.layer[data-id]')].filter(l => { const r = l.getBoundingClientRect(); return r.width && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; }).map(l => l.dataset.id).reverse();
       const locked = under.find(id => find(id)?.locked), above = locked && (!el || under.indexOf(locked) < under.indexOf(el.dataset.id));

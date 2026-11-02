@@ -6,6 +6,7 @@
 // cannot load while the room is unreachable says so.
 import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
 import { _electron as electron } from "@playwright/test";
+import { openSharedDesign } from "./helpers/shared-design.cjs";
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -74,7 +75,7 @@ try {
   await b.evaluate(() => localStorage.setItem("verynize.pages.prefetch", "off"));
   const join = async (p) => {
     p.on("dialog", (dialog) => dialog.accept(dialog.type() === "prompt" ? invite : undefined));
-    await p.locator("#cloud-toggle").click();
+    await openSharedDesign(p);
     await p.locator("#cloud-invite").fill(invite);
     await p.locator("#cloud-connect").click();
     await p.waitForFunction(() =>

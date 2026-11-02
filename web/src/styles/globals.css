@@ -521,3 +521,92 @@ html[data-ui-theme="light"] {
   --spacing-chat-dock: var(--chat-dock-width);
 }
 /* </panel-resize-tokens> */
+
+/* <collab-tokens> (presence avatars, Multiplayer tools popover, remote cursors; Wonder share-audit SC1-tools.png:
+ * popover 240 × 122 at radius 16, surface rgb(28,28,28), edge rgb(47,47,47), search row 31px over a rgb(40,40,40) rule).
+ * Peer colours are per person (collab/presence-engine.ts picks one from the account handle) and carry white labels. */
+:root {
+  --presence-popover: #1c1c1c;
+  --presence-edge: #2f2f2f;
+  --presence-rule: #282828;
+  --peer-1: #e5484d;
+  --peer-2: #ef5f00;
+  --peer-3: #d6409f;
+  --peer-4: #2b9a66;
+  --peer-5: #0d9b8a;
+  --peer-6: #0588f0;
+  --peer-7: #3e63dd;
+  --peer-8: #8e4ec6;
+}
+html[data-ui-theme="light"] {
+  --presence-popover: #ffffff;
+  --presence-edge: #e2e2e2;
+  --presence-rule: #ececec;
+}
+@theme inline {
+  --color-presence-popover: var(--presence-popover);
+  --color-presence-edge: var(--presence-edge);
+  --color-presence-rule: var(--presence-rule);
+  --color-peer-1: var(--peer-1);
+  --color-peer-2: var(--peer-2);
+  --color-peer-3: var(--peer-3);
+  --color-peer-4: var(--peer-4);
+  --color-peer-5: var(--peer-5);
+  --color-peer-6: var(--peer-6);
+  --color-peer-7: var(--peer-7);
+  --color-peer-8: var(--peer-8);
+  --spacing-presence-popover: 240px;
+  --spacing-access-screen: 400px;
+}
+/* </collab-tokens> */
+
+/* <share-tokens> (Share popover, web/src/islands/share; Wonder share-audit SH2–SV2, SL1, measurements.json)
+ * Popover 384 wide, radius 16, padding 12, surface rgb(28,28,28) with a 0.5px rgb(48,48,48) edge; email field 28
+ * tall with a 1px rgb(43,43,43) edge and a 2px rgb(109,53,138) focus ring; chips 20 tall rgb(54,54,54), invalid
+ * chips rgb(54,22,21) with rgb(237,110,108) text, ring and error line; muted copy rgb(130,130,130). Role menu
+ * 176 wide (radius 12, padding 6, 29px rows); visibility menu 256 wide (radius 10, padding 4, 43px rows). Confirm
+ * dialog 400 wide on rgb(24,24,24) with a 52px rgb(34,34,34) footer, destructive button rgb(231,68,65), warning
+ * rgb(76,57,35) / rgb(249,231,150); the page behind dims to ~68 %. Toasts 360 × 40 with a green rgb(102,220,126)
+ * check. File-header "Public" badge 20 tall, green on a dark green tint. */
+:root {
+  --share-error: #ed6e6c;
+  --share-error-chip: #361615;
+  --share-success: #66dc7e;
+  --share-danger: #e74441;
+  --share-warning: #4c3923;
+  --share-warning-foreground: #f9e796;
+  --share-public: #52a964;
+}
+html[data-ui-theme="light"] {
+  --share-error: #d93a37;
+  --share-error-chip: #fbe3e2;
+  --share-success: #22a33f;
+  --share-warning: #fdf3d7;
+  --share-warning-foreground: #6b4a00;
+  --share-public: #2f8a43;
+}
+@theme inline {
+  --spacing-share: 384px;
+  --spacing-share-role-menu: 176px;
+  --spacing-share-visibility: 256px;
+  --spacing-share-dialog: 400px;
+  --spacing-share-toast: 360px;
+  --radius-share: 16px;
+  --color-share-muted: color-mix(in srgb, var(--foreground) 50%, var(--background)); /* #828282 */
+  --color-share-focus: color-mix(in srgb, var(--primary) 60%, var(--background)); /* #6d358a */
+  --color-share-error: var(--share-error);
+  --color-share-error-chip: var(--share-error-chip);
+  --color-share-success: var(--share-success);
+  --color-share-danger: var(--share-danger);
+  --color-share-danger-hover: color-mix(in srgb, var(--share-danger) 88%, white);
+  --color-share-warning: var(--share-warning);
+  --color-share-warning-foreground: var(--share-warning-foreground);
+  --color-share-dialog: color-mix(in srgb, var(--background) 86%, black); /* #181818 */
+  --color-share-scrim: rgb(0 0 0 / 0.32);
+  --color-share-public: var(--share-public);
+  --color-share-public-tint: color-mix(in srgb, var(--share-public) 14%, var(--background));
+  --color-share-public-edge: color-mix(in srgb, var(--share-public) 24%, var(--background));
+  --shadow-share:
+    0 0 0 0.5px color-mix(in srgb, var(--foreground) 10%, var(--background)), 0 12px 32px rgb(0 0 0 / 0.4);
+}
+/* </share-tokens> */

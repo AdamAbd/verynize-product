@@ -19,7 +19,28 @@ export async function webAccess(): Promise<Exclude<WebAccess, "checking">> {
   if (platform.kind !== "web") return "signed-in";
   const [signedIn] = await Promise.all([checkWebSession(), loadLegacyStyles()]);
   if (signedIn) return "signed-in";
-  return isPublicLink() ? "public" : "signed-out";
+  return isPublicLink() || (await openRoomLink()) ? "public" : "signed-out";
+}
+
+/**
+ * A `#room=<id>[&token=…]` link that this server opens without an account: a public room (CONTRACT §1: anonymous
+ * viewers), or a link whose token is enough here. The editor then opens it read-only without the sign-in wall
+ * (web/src/islands/collab/links.ts); private rooms keep the wall, with the link kept in the address.
+ */
+async function openRoomLink(timeout = 8000): Promise<boolean> {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const id = params.get("room") ?? "";
+  const token = params.get("token");
+  if (!/^[0-9a-f-]{36}$/.test(id)) return false;
+  try {
+    const response = await fetch(`/api/rooms/${id}/access`, {
+      headers: token && /^[0-9a-f]{64}$/.test(token) ? { Authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(timeout),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /**

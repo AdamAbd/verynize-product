@@ -21,7 +21,7 @@
   openFigma:()=>{close();document.getElementById('figma-import')?.click();},
   copyMcp:async()=>{try{await navigator.clipboard.writeText('npm run mcp -- --root /absolute/design-folder');status('Command copied; replace the folder path');}catch(e){status(e.message)}},
   openAgent:()=>{close();window.agentWorkspace?.openChat();},
-  share:()=>{close();document.getElementById('cloud-toggle')?.click();},
+  share:()=>{close();window.cloudWorkspace?.openDialog();},
   discoverAgents:async()=>window.verynizePlatform.can('agents')?(await window.desktop.discoverAgents()||[]):null,
   auth:async(kind,agent)=>{const label=text=>{accounts[agent]=text;const el=$('account-status-'+agent);if(el)el.textContent=text;renderer?.update?.();};try{if(kind==='check'){const result=await window.desktop.agentAccountStatus({agent});label(result.loggedIn?'Signed in · '+result.method:'Signed out');status('Account status checked');}else if(kind==='login'){if(!confirm('This changes the machine-wide '+agent+' CLI account. Existing credentials may be replaced immediately, even if sign-in is canceled. Continue?'))return;const result=await window.desktop.startAgentLogin({agent});signIns.set(agent,result.id);status('Complete sign-in in your browser.');}else if(kind==='logout'){if(!confirm('Sign out of the machine-wide '+agent+' CLI account?'))return;await window.desktop.agentLogout({agent});label('Signed out');status('Signed out');}else{const id=signIns.get(agent);if(id)await window.desktop.cancelAgentLogin({id});else status('No sign-in is running');}}catch(e){status(e.message);}},
  };
