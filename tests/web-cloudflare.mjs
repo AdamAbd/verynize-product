@@ -7,8 +7,16 @@
 // Web sign-in (cloud/README.md "Web sign-in"): signed out, every editor path shows the sign-in screen and the editor
 // does not boot; the server refuses the page's anonymous room requests; creating an account asks to verify the email;
 // signing in with a password boots the editor at the requested path with its invite fragment, which the editor's
-// invite handler then sees, and the AI setup steps open for the new account; a published snapshot (#public=) opens
-// without an account. The verified account is seeded into the local D1 (local Cloudflare email cannot be read back).
+// link handler (web/src/islands/collab/links.ts) then opens, and the AI setup steps open for the new account; a
+// published snapshot (#public=) opens without an account. The verified account is seeded into the local D1 (local
+// Cloudflare email cannot be read back).
+//
+// File links (share-audit CONTRACT §3 "C", B7): `/#room=<id>&token=…` opens the file straight in the editor (no
+// Share dialog, no confirm()), the token leaves the address bar, a room this account cannot open shows "You don’t have
+// access to this file" (Back to files, Sign in with another account), and a public room opens read-only without
+// signing in when the server offers public rooms. A signed-in account invited to the file's workspace gets "You have an
+// invitation" instead, and Join opens the file with the invited role. In dev mode the same link checks also run in WebKit (Safari's
+// engine) when Playwright's WebKit is installed (`npx playwright install webkit`).
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
@@ -17,6 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { hashPassword } from "better-auth/crypto";
 import { Miniflare } from "miniflare";
+import { webkit } from "@playwright/test";
 import {
   launchBrowser,
   screenshot,
@@ -30,6 +39,8 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const state = await fs.mkdtemp(path.join(os.tmpdir(), "web-cloudflare-"));
 const vp = (...args) => [process.execPath, ["node_modules/vite-plus/bin/vp", ...args]];
 const EMAIL = "web@example.test";
+// A second verified account: a signed-in non-member who is invited to the first account's workspace.
+const GUEST = "guest@example.test";
 const PASSWORD = "a long enough password";
 // Secrets for the local Worker (the Cloudflare plugin reads them from the environment).
 const SECRETS = {
@@ -85,7 +96,7 @@ async function check(mode) {
     await server.stop();
   }
   console.log(
-    `PASS web (Cloudflare ${mode}): sign-in screen before the editor (anonymous room refused, sign-up asks to verify, password sign-in keeps path + invite fragment, AI setup opens), public snapshot anonymous, client-only editor boot, rectangle added, shell routes, one router (clicks, Back/Forward, deep links, room fragment), /api via worker, room WebSocket, web/src not served`,
+    `PASS web (Cloudflare ${mode}): sign-in screen before the editor (anonymous room refused, sign-up asks to verify, password sign-in keeps path + link fragment, AI setup opens), file links (direct open, token stripped, no-access screen, invitation modal + Join for an invited non-member, public rooms read-only without sign-in; WebKit in dev), public snapshot anonymous, client-only editor boot, rectangle added, shell routes, one router (clicks, Back/Forward, deep links, room fragment), /api via worker, room WebSocket, web/src not served`,
   );
 }
 
@@ -135,6 +146,24 @@ async function seedAccount() {
           "web-user",
           "credential",
           "web-user",
+          await hashPassword(PASSWORD),
+          now,
+          now,
+        ),
+      db
+        .prepare(
+          'INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)',
+        )
+        .bind("guest-user", "Gita Guest", GUEST, now, now),
+      db
+        .prepare(
+          'INSERT INTO "account" (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        )
+        .bind(
+          "guest-account",
+          "guest-user",
+          "credential",
+          "guest-user",
           await hashPassword(PASSWORD),
           now,
           now,
@@ -245,18 +274,16 @@ async function checkApp(origin, mode) {
     timeout: 20000,
   });
   assert.equal(await gate.locator("#web-sign-in").count(), 0);
+  // The link opens without the Share dialog; this room does not exist, so: no access. The token left the address.
+  await gate.locator("#room-no-access[data-signed-in='true']").waitFor();
   assert.deepEqual(
     await gate.evaluate(() => ({
       path: location.pathname,
       hash: location.hash,
       account: window.cloudAccount.get()?.account.email,
+      dialog: !!document.getElementById("cloud-dialog")?.open,
     })),
-    { path: "/settings/preferences", hash: INVITE, account: EMAIL },
-  );
-  await gate.waitForFunction(
-    () =>
-      document.getElementById("cloud-dialog")?.open &&
-      /Invite detected/.test(document.getElementById("cloud-status").textContent),
+    { path: "/settings/preferences", hash: `#room=${ROOM}`, account: EMAIL, dialog: false },
   );
   // First sign-in of this account: the AI setup steps.
   await gate.locator("#onboarding[data-step='ai'] #onboarding-ai-providers").waitFor();
@@ -381,5 +408,187 @@ async function checkApp(origin, mode) {
   assert.equal(await page.evaluate(async () => (await fetch("/src/ui.tsx")).status), 404);
   assert.deepEqual(errors, []);
   await page.close();
+
+  await checkLinks(browser, origin, { session, me, viewport, mode, label: "chrome" });
+  if (mode === "dev") {
+    const safari = await webkit.launch().catch((error) => {
+      console.log(`SKIP WebKit link checks: ${error.message.split("\n")[0]}`);
+      return null;
+    });
+    if (safari)
+      try {
+        await checkLinks(safari, origin, { session, me, viewport, mode, label: "webkit" });
+        console.log("PASS web file links in WebKit (Safari engine)");
+      } finally {
+        await safari.close();
+      }
+  }
   return context;
+}
+
+/** File links in `engine` (Chromium or WebKit): direct open, token stripping, no access, public rooms. */
+async function checkLinks(engine, origin, { session, me, viewport, mode, label }) {
+  // Room creation is rate limited per CF-Connecting-IP; these rooms get their own test address per run.
+  const json = {
+    "content-type": "application/json",
+    "cf-connecting-ip": `198.51.100.${(label === "webkit" ? 20 : 10) + (mode === "dev" ? 0 : 1)}`,
+  };
+  const authed = (route, init = {}) =>
+    fetch(origin + route, {
+      ...init,
+      headers: { ...json, "x-verynize-session": session, ...init.headers },
+    });
+  const doc = (name) => ({ ...DOCUMENT, name });
+  const owned = await (
+    await authed("/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ document: doc(`Linked ${label}`) }),
+    })
+  ).json();
+  const { token } = await (
+    await authed(`/api/rooms/${owned.id}/tokens`, {
+      method: "POST",
+      body: JSON.stringify({ role: "editor", label: "Editor invite" }),
+    })
+  ).json();
+  // A room this account is not a member of (an anonymous script's room).
+  const stranger = await (
+    await fetch(origin + "/api/rooms", {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ document: doc("Not yours") }),
+    })
+  ).json();
+  assert.ok(stranger.id, `anonymous scripts still create rooms: ${JSON.stringify(stranger)}`);
+
+  const context = await signedInContext(
+    engine,
+    origin,
+    { session, ...me },
+    { viewport, deviceScaleFactor: 2 },
+  );
+  const page = await context.newPage();
+  const dialogs = [];
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.message());
+    void dialog.dismiss();
+  });
+  // Direct open: the editor shows the file, the token is gone from the address bar, no dialog.
+  await page.goto(`${origin}/#room=${owned.id}&token=${token}`);
+  await page.waitForFunction((id) => window.cloudWorkspace?.room()?.id === id, owned.id, {
+    timeout: 30000,
+  });
+  await page.waitForFunction(
+    () => location.pathname === "/editor" && !document.body.classList.contains("files-view"),
+  );
+  assert.equal(await page.evaluate(() => window.design.getDocument().name), `Linked ${label}`);
+  assert.equal(await page.evaluate(() => location.hash), `#room=${owned.id}`);
+  assert.equal(await page.evaluate(() => !!document.getElementById("cloud-dialog")?.open), false);
+  await page.locator("#presence-tools").waitFor();
+  await screenshot(page, `web-SL2-${label}-${mode}-open.png`);
+  // Reloading the token-free address opens it again (the token stayed with the file).
+  await page.reload();
+  await page.waitForFunction((id) => window.cloudWorkspace?.room()?.id === id, owned.id, {
+    timeout: 30000,
+  });
+
+  // No access: the screen, then Back to files.
+  await page.goto(`${origin}/#room=${stranger.id}`);
+  const denied = page.locator("#room-no-access[data-signed-in='true']");
+  await denied.waitFor({ timeout: 30000 });
+  assert.match(await denied.innerText(), /You don’t have access to this file/);
+  assert.match(await denied.innerText(), /Sign in with another account/);
+  await screenshot(page, `web-SL2-${label}-${mode}-no-access.png`);
+  await page.locator("#room-no-access-back").click();
+  await page.waitForFunction(
+    () =>
+      document.body.classList.contains("files-view") && location.pathname === "/" && !location.hash,
+  );
+  assert.deepEqual(dialogs, [], `${label}: no native dialogs`);
+  await context.close();
+
+  // A signed-in non-member who was invited (Share popover → POST share-invitations, as Editor) gets the in-app
+  // invitation when opening the plain link, like Wonder's; Join opens the file with that role. Afterwards the guest
+  // leaves the workspace again, so the next engine/mode starts uninvited.
+  const invited = await (
+    await authed(`/api/rooms/${owned.id}/share-invitations`, {
+      method: "POST",
+      body: JSON.stringify({ emails: [GUEST], role: "editor" }),
+    })
+  ).json();
+  assert.deepEqual(invited, { invited: [{ email: GUEST, status: "invited" }], errors: [] });
+  const guestSignIn = await fetch(origin + "/api/auth/sign-in/email", {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ email: GUEST, password: PASSWORD }),
+  });
+  assert.equal(guestSignIn.status, 200, await guestSignIn.clone().text());
+  const guestSession = guestSignIn.headers.get("set-auth-token");
+  const guestMe = await (
+    await fetch(origin + "/api/me", { headers: { "x-verynize-session": guestSession } })
+  ).json();
+  const guest = await signedInContext(
+    engine,
+    origin,
+    { session: guestSession, ...guestMe },
+    { viewport, deviceScaleFactor: 2 },
+  );
+  const invitee = await guest.newPage();
+  invitee.on("dialog", (dialog) => {
+    dialogs.push(dialog.message());
+    void dialog.dismiss();
+  });
+  await invitee.goto(`${origin}/#room=${owned.id}`);
+  const invitation = invitee.locator("#room-invitation");
+  await invitation.waitFor({ timeout: 30000 });
+  const invitationText = await invitation.innerText();
+  for (const expected of [
+    "You have an invitation",
+    "Join to work with your team in a shared workspace.",
+    "Web Tester invited you as Editor",
+    "Decline",
+    "Join",
+    "Maybe later",
+  ])
+    assert.ok(invitationText.includes(expected), `${label}: invitation shows “${expected}”`);
+  await screenshot(invitee, `web-SL2-${label}-${mode}-invitation.png`);
+  await invitee.locator("#room-invitation-join").click();
+  await invitee.waitForFunction((id) => window.cloudWorkspace?.room()?.id === id, owned.id, {
+    timeout: 30000,
+  });
+  await invitee.waitForFunction(() => window.cloudWorkspace.role() === "editor");
+  assert.equal(await invitation.count(), 0);
+  assert.equal(await invitee.locator("#view-only-pill").count(), 0);
+  assert.equal(await invitee.evaluate(() => window.design.getDocument().name), `Linked ${label}`);
+  await screenshot(invitee, `web-SL2-${label}-${mode}-joined.png`);
+  assert.deepEqual(dialogs, [], `${label}: no native dialogs`);
+  await guest.close();
+  const left = await authed("/api/auth/organization/remove-member", {
+    method: "POST",
+    body: JSON.stringify({ organizationId: me.personalOrganizationId, memberIdOrEmail: GUEST }),
+  });
+  assert.equal(left.status, 200, await left.clone().text());
+
+  // Public rooms (CONTRACT §1, server workstream A) open read-only without signing in.
+  const visibility = await authed(`/api/rooms/${owned.id}/visibility`, {
+    method: "PUT",
+    body: JSON.stringify({ visibility: "public" }),
+  });
+  if (!visibility.ok) {
+    console.log(
+      `SKIP public room link (${label}): this server has no room visibility yet (${visibility.status})`,
+    );
+    return;
+  }
+  const visitor = await engine.newContext({ viewport, deviceScaleFactor: 2 });
+  const anonymous = await visitor.newPage();
+  await anonymous.goto(`${origin}/#room=${owned.id}`);
+  await anonymous.waitForFunction(() => document.documentElement.dataset.webAuth === "public");
+  await anonymous.waitForFunction((id) => window.cloudWorkspace?.room()?.id === id, owned.id, {
+    timeout: 30000,
+  });
+  await anonymous.locator("#view-only-pill").waitFor();
+  assert.equal(await anonymous.locator("#web-sign-in").count(), 0);
+  await screenshot(anonymous, `web-SL2-${label}-${mode}-public.png`);
+  await visitor.close();
 }

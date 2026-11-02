@@ -64,6 +64,8 @@ const TOOLS: { id: string; tool: string; label: string; key: string; icon: Icon 
 ];
 /** Index of the first creation tool (Frame); a divider separates it from the pointer tools. */
 const TOOL_GROUP_SPLIT = TOOLS.findIndex((t) => t.id === "add-frame");
+// Viewers in a shared room (body.cloud-read-only) get Move and Hand only, as in Wonder (share-audit collab/13).
+const VIEWER_TOOLS = TOOLS.filter((t) => t.tool === "move" || t.tool === "hand");
 const LAYOUT_ICONS: Record<LayoutName, Icon> = {
   details: DetailsLayoutIcon,
   design: DesignLayoutIcon,
@@ -95,6 +97,8 @@ export function CanvasOverlays() {
 /* ---------- Bottom toolbar ---------- */
 function Toolbar() {
   const tool = useTool();
+  const readOnly = useBodyClass("cloud-read-only");
+  const tools = readOnly ? VIEWER_TOOLS : TOOLS;
   useBodyClass("left-collapsed");
   useBodyClass("right-collapsed");
   const layout = currentLayout();
@@ -113,8 +117,8 @@ function Toolbar() {
       )}
     >
       <div className="flex items-center gap-1 pr-2 pl-1.5">
-        {TOOLS.map(({ id, tool: name, label, key, icon: Icon }, index) => (
-          <ToolSlot key={id} separator={index === TOOL_GROUP_SPLIT}>
+        {tools.map(({ id, tool: name, label, key, icon: Icon }, index) => (
+          <ToolSlot key={id} separator={!readOnly && index === TOOL_GROUP_SPLIT}>
             <Tip label={label} shortcut={key}>
               <button
                 type="button"

@@ -317,12 +317,12 @@ try {
   // Disconnect (from another tab, say): the next config check brings the gate back.
   assert.ok((await api("/api/ai/credentials/openrouter", { method: "DELETE" })).ok);
 
-  // Join the room the way an invite link does (#room=, Share dialog › Join invite).
+  // Join the room the way a file link does: `#room=` opens the file directly (web/src/islands/collab/links.ts).
   const joinRoom = async () => {
     await ready(page);
-    await page.locator("#cloud-connect").click();
-    await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, room.id);
-    await page.evaluate(() => document.getElementById("cloud-dialog").close());
+    await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, room.id, {
+      timeout: 30000,
+    });
   };
   await page.goto(origin + `/editor#room=${room.id}`);
   await page.reload(); // a fragment-only navigation does not load the page again

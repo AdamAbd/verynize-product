@@ -152,6 +152,8 @@ function openDesignLink(url: string) {
       return;
     }
     ws?.setCodeMode?.(false);
+    // The collab island opens the file directly (collab/links.ts); the Share dialog's Join is the fallback.
+    if (window.cloudLinks?.open(invite)) return;
     const input = document.getElementById("cloud-invite") as HTMLInputElement | null;
     const dialog = document.getElementById("cloud-dialog") as HTMLDialogElement | null;
     if (!input || !dialog) return;

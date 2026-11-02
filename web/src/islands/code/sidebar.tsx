@@ -22,7 +22,7 @@ import {
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { PlusIcon } from "@/components/icons";
-import { legacyClick } from "@/lib/bridge";
+import { openSharePopover } from "../share/api";
 import { cn } from "@/lib/utils";
 import { ChatMenu, ChatMenuContent, ChatMenuItem, ChatMenuSeparator, ChatMenuTrigger } from "../chat/menu";
 import type { ChatState, ChatSummary } from "../chat/store";
@@ -270,7 +270,7 @@ function NextSteps({ connected }: { connected: boolean }) {
       run: () => {
         steps.mark("invited");
         workspace()?.setCodeMode?.(false);
-        legacyClick("cloud-toggle");
+        requestAnimationFrame(openSharePopover);
       },
     },
     { id: "publish", label: "Publish a Preview", done: steps.published, run: () => document.getElementById("code-start-preview")?.click() },

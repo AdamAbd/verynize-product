@@ -4,13 +4,18 @@ import { room, member } from "./schema.js";
 // Organizations as room owners (D1). Every room created by a Better Auth user belongs to one
 // organization (`room` table, cloud/migrations/0002_rooms.sql); each user gets a personal
 // organization on first use. Organization membership grants a room role:
-//   owner, admin -> owner;  member -> the organization's metadata.roomRole (default editor).
+//   owner, admin -> owner;  editor -> editor;  viewer -> viewer;
+//   member -> the organization's metadata.roomRole (default editor).
+// `viewer` and `editor` are custom Better Auth roles (cloud/auth.js) with a member's permissions:
+// they pin one member's room role, so it overrides the workspace default.
 // The router computes that role from D1 and forwards it to the room as x-verynize-org-role. The
 // room keeps it per live socket, so organization changes are pushed with applyOrgRoles.
 import { APIError } from "better-auth/api";
 import { profileIdForEmail, profilesById } from "./profiles.js";
 
 export const MEMBER_ROOM_ROLES = ["viewer", "commenter", "editor"];
+/** Organization member roles that pin a room role (custom Better Auth roles, cloud/auth.js). */
+export const PINNED_ROLES = ["viewer", "editor"];
 
 const parseMetadata = (value) => {
   if (value && typeof value === "object") return value;
@@ -31,8 +36,15 @@ export function roomRoleFor(memberRole, metadata) {
     .split(",")
     .map((role) => role.trim());
   if (roles.includes("owner") || roles.includes("admin")) return "owner";
-  return roles.includes("member") ? memberRoomRole(metadata) : null;
+  if (roles.includes("editor")) return "editor";
+  if (roles.includes("member")) return memberRoomRole(metadata);
+  return roles.includes("viewer") ? "viewer" : null;
 }
+/** True for organization roles that may invite and manage members (owner, admin). */
+export const managesOrganization = (memberRole) =>
+  String(memberRole || "")
+    .split(",")
+    .some((role) => ["owner", "admin"].includes(role.trim()));
 export const isPersonal = (metadata) => parseMetadata(metadata).personal === true;
 
 /** The organization a room belongs to, or null for rooms outside D1 (legacy or anonymous). */
@@ -88,6 +100,49 @@ export async function ensurePersonalOrganization(env, auth, user) {
     if (raced) return raced.id;
     throw error;
   }
+}
+
+const timeOf = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : Date.parse(value);
+};
+/** An invitation as shown to its invitee: {id, organizationId, organizationName, inviterName, role}. */
+const describeInvitation = (row) =>
+  row && {
+    id: row.id,
+    organizationId: row.organizationId,
+    organizationName: row.organizationName,
+    inviterName: row.inviterName || row.inviterEmail || "",
+    role: row.role || "member",
+    email: row.email,
+    expiresAt: row.expiresAt,
+  };
+const INVITATION_SELECT = sql`SELECT i."id" AS id, i."organizationId" AS organizationId, i."email" AS email, i."role" AS role, i."status" AS status, i."expiresAt" AS expiresAt, o."name" AS organizationName, u."name" AS inviterName, u."email" AS inviterEmail FROM "invitation" i JOIN "organization" o ON o."id" = i."organizationId" LEFT JOIN "user" u ON u."id" = i."inviterId"`;
+
+/** The newest pending, unexpired invitation of `email` into an organization, or null. */
+export async function pendingInvitation(env, organizationId, email) {
+  if (!env.DB || !organizationId || !email) return null;
+  const rows = await database(env).all(
+    sql`${INVITATION_SELECT} WHERE i."organizationId" = ${organizationId} AND lower(i."email") = ${String(email).toLowerCase()} AND i."status" = 'pending' ORDER BY i."createdAt" DESC`,
+  );
+  const row = rows.find((invitation) => !(timeOf(invitation.expiresAt) < Date.now()));
+  return describeInvitation(row || null);
+}
+
+/** Change the role of pending invitations without sending anything (role-only updates). */
+export async function setInvitationRole(env, invitationId, role) {
+  await database(env).run(
+    sql`UPDATE "invitation" SET "role" = ${role} WHERE "id" = ${invitationId}`,
+  );
+}
+
+/** The organization member with this email, or null: {id, role}. */
+export async function memberByEmail(env, organizationId, email) {
+  return (
+    (await database(env).get(
+      sql`SELECT m."id" AS id, m."role" AS role FROM "member" m JOIN "user" u ON u."id" = m."userId" WHERE m."organizationId" = ${organizationId} AND lower(u."email") = ${String(email).toLowerCase()}`,
+    )) || null
+  );
 }
 
 export async function addRoom(env, { id, organizationId, title, userId }) {

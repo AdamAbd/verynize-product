@@ -1,10 +1,20 @@
-// Settings › Members (design/wonder/77): the active workspace's members, roles and invitations,
-// the default room access of plain members, invitations addressed to you, and leaving or deleting
-// a team. Data comes from the Better Auth organization plugin (cloud/auth.js) through
-// window.cloudAccount; room access follows these roles on the server (cloud/orgs.js).
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+// Settings › Members (design/wonder/77, share-audit SI4/SI5): the active workspace's members with
+// their Viewer / Editor / Admin roles, pending invitations (Resend / Cancel invitation), the
+// default room access of plain members, invitations addressed to you, and leaving or deleting a
+// team. Data comes from the Better Auth organization plugin (cloud/auth.js) through
+// window.cloudAccount; room access follows these roles on the server (cloud/orgs.js): owner and
+// admin manage every file, editor edits, viewer views, and a plain member gets the default.
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MailIcon, PlusIcon, SearchIcon, UsersIcon } from "lucide-react";
+import {
+  ArrowUpIcon,
+  EllipsisIcon,
+  MailIcon,
+  PlusIcon,
+  SearchIcon,
+  Trash2Icon,
+  UsersIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   authRequest,
@@ -26,6 +36,20 @@ import {
 import { accountScope, queryKeys, SIGNED_OUT, type AccountScope } from "@/lib/query/keys";
 import { cn } from "@/lib/utils";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Card,
   NativeSelect,
   PageHeader,
@@ -35,7 +59,15 @@ import {
   TextField,
 } from "./controls";
 
-const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
+const ROLE_LABEL: Record<string, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  editor: "Editor",
+  viewer: "Viewer",
+  member: "Member",
+};
+/** Roles offered when inviting or changing a member (owners also see Owner). */
+const MEMBER_ROLES = ["viewer", "editor", "admin"] as const;
 const ROOM_ROLE_LABEL: Record<MemberRoomRole, string> = {
   viewer: "Can view",
   commenter: "Can comment",
@@ -51,7 +83,7 @@ function ago(value: string) {
   const time = new Date(value).getTime();
   if (!Number.isFinite(time)) return "";
   const minutes = Math.round((Date.now() - time) / 60000);
-  if (minutes < 1) return "just now";
+  if (minutes < 1) return "Just now";
   if (minutes < 60) return `${minutes}m ago`;
   if (minutes < 60 * 24) return `${Math.round(minutes / 60)}h ago`;
   return `${Math.round(minutes / 60 / 24)}d ago`;
@@ -133,6 +165,67 @@ function IncomingInvitations({
   );
 }
 
+/** Wonder's confirmation before a destructive member action. */
+type Confirmation = {
+  id: string;
+  title: string;
+  description: string;
+  cancel: string;
+  confirm: string;
+  /** A destructive action: Wonder's red confirm button (as in the Share visibility dialog). */
+  danger?: boolean;
+  run(): void;
+};
+
+function ConfirmDialog({
+  confirmation,
+  onClose,
+}: {
+  confirmation: Confirmation | null;
+  onClose(): void;
+}) {
+  return (
+    <Dialog open={!!confirmation} onOpenChange={(open) => (open ? undefined : onClose())}>
+      <DialogContent className="max-w-md" showCloseButton={false} data-members-confirm>
+        <DialogHeader>
+          <DialogTitle>{confirmation?.title}</DialogTitle>
+          <DialogDescription>{confirmation?.description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <SettingsButton onClick={onClose}>{confirmation?.cancel}</SettingsButton>
+          <SettingsButton
+            id={confirmation?.id}
+            variant="primary"
+            className={cn(confirmation?.danger && "bg-share-danger hover:bg-share-danger-hover")}
+            onClick={() => {
+              confirmation?.run();
+              onClose();
+            }}
+          >
+            {confirmation?.confirm}
+          </SettingsButton>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The ellipsis menu at the end of a member or invitation row. */
+function RowMenu({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <SettingsButton variant="ghost" aria-label={label} data-row-menu={label}>
+          <EllipsisIcon />
+        </SettingsButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onEscapeKeyDown={(event) => event.stopPropagation()}>
+        {children}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 type MembersAction = {
   run(): Promise<unknown>;
   /** Toast shown on success. */
@@ -155,7 +248,8 @@ export function MembersPage() {
   const [query, setQuery] = useState("");
   const [inviting, setInviting] = useState(false);
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState("member");
+  const [role, setRole] = useState("viewer");
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const client = useQueryClient();
   const loadError = organizationQuery.error;
   useEffect(() => {
@@ -173,6 +267,9 @@ export function MembersPage() {
     );
   }, [full, query]);
   const pending = (full?.invitations ?? []).filter((i) => i.status === "pending");
+  const pendingShown = pending.filter(
+    (i) => !query.trim() || i.email.toLowerCase().includes(query.trim().toLowerCase()),
+  );
 
   const action = useMutation({
     mutationFn: ({ run }: MembersAction) => run(),
@@ -277,7 +374,7 @@ export function MembersPage() {
             <input
               id="members-search"
               type="search"
-              aria-label="Search members"
+              aria-label="Search members and invitations"
               placeholder="Search members..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -317,8 +414,11 @@ export function MembersPage() {
               value={role}
               onChange={(e) => setRole(e.target.value)}
             >
-              <option value="member">Member</option>
-              <option value="admin">Admin</option>
+              {MEMBER_ROLES.map((value) => (
+                <option key={value} value={value}>
+                  {ROLE_LABEL[value]}
+                </option>
+              ))}
             </NativeSelect>
             <SettingsButton id="members-invite-send" type="submit" variant="primary">
               Send invite
@@ -386,8 +486,17 @@ export function MembersPage() {
                       }}
                     >
                       {owner ? <option value="owner">Owner</option> : null}
-                      <option value="admin">Admin</option>
-                      <option value="member">Member</option>
+                      {[...MEMBER_ROLES].reverse().map((value) => (
+                        <option key={value} value={value}>
+                          {ROLE_LABEL[value]}
+                        </option>
+                      ))}
+                      {roleNames(member.role)[0] === "member" ? (
+                        // Plain members follow the workspace default (Room access below).
+                        <option value="member">
+                          Member ({ROOM_ROLE_LABEL[memberRoomRole(active!)].toLowerCase()})
+                        </option>
+                      ) : null}
                     </NativeSelect>
                   ) : (
                     <span className="text-foreground">{roleLabel(member.role)}</span>
@@ -399,64 +508,123 @@ export function MembersPage() {
                 >
                   <span className="truncate whitespace-nowrap">{ago(member.createdAt)}</span>
                   {editable ? (
-                    <SettingsButton
-                      variant="ghost"
-                      data-org-remove-member={member.user.email}
-                      aria-label={`Remove ${member.user.email}`}
-                      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                      onClick={() => {
-                        if (!window.confirm(`Remove ${member.user.email} from ${active!.name}?`))
-                          return;
-                        act(
-                          () =>
-                            authRequest("/organization/remove-member", {
-                              organizationId: active!.id,
-                              memberIdOrEmail: member.id,
-                            }),
-                          "Member removed",
-                        );
-                      }}
-                    >
-                      Remove
-                    </SettingsButton>
+                    <RowMenu label={`Actions for ${member.user.email}`}>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        data-org-remove-member={member.user.email}
+                        onSelect={() =>
+                          setConfirmation({
+                            id: "members-remove-confirm",
+                            title: "Remove member",
+                            danger: true,
+                            description: `Remove ${member.user.name || member.user.email} from this organization? They’ll lose access to its files immediately.`,
+                            cancel: "Cancel",
+                            confirm: "Remove",
+                            run: () =>
+                              act(
+                                () =>
+                                  authRequest("/organization/remove-member", {
+                                    organizationId: active!.id,
+                                    memberIdOrEmail: member.id,
+                                  }),
+                                "Member removed",
+                              ),
+                          })
+                        }
+                      >
+                        <Trash2Icon />
+                        Remove from workspace
+                      </DropdownMenuItem>
+                    </RowMenu>
                   ) : null}
                 </span>
               </div>
             );
           })}
-          {members.length === 0 ? (
+          {manager
+            ? pendingShown.map((invitation) => (
+                <div
+                  key={invitation.id}
+                  role="row"
+                  data-pending-invitation={invitation.email}
+                  className="grid grid-cols-12 items-center gap-3 border-t border-divider px-4 py-2.5"
+                >
+                  <span
+                    role="cell"
+                    className="col-span-4 flex min-w-0 items-center gap-2.5 text-muted-foreground"
+                  >
+                    <Initial name={invitation.email} />
+                    <span className="truncate">Invitation pending</span>
+                  </span>
+                  <span role="cell" className="col-span-4 truncate text-muted-foreground">
+                    {invitation.email}
+                  </span>
+                  <span role="cell" className="col-span-2 text-foreground">
+                    {roleLabel(invitation.role || "member")}
+                  </span>
+                  <span
+                    role="cell"
+                    className="col-span-2 flex items-center justify-between gap-2 text-muted-foreground"
+                  >
+                    <span className="truncate whitespace-nowrap">
+                      {invitation.createdAt ? ago(invitation.createdAt) : ""}
+                    </span>
+                    <RowMenu label={`Actions for the invitation to ${invitation.email}`}>
+                      <DropdownMenuItem
+                        data-resend-invitation={invitation.email}
+                        onSelect={() =>
+                          act(
+                            () =>
+                              authRequest("/organization/invite-member", {
+                                email: invitation.email,
+                                role: invitation.role || "viewer",
+                                organizationId: active!.id,
+                                resend: true,
+                              }),
+                            `Invitation resent to ${invitation.email}`,
+                          )
+                        }
+                      >
+                        <ArrowUpIcon />
+                        Resend invitation
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        data-cancel-invitation={invitation.email}
+                        onSelect={() =>
+                          setConfirmation({
+                            id: "members-cancel-invitation-confirm",
+                            title: "Cancel invitation",
+                            danger: true,
+                            description: `Cancel the invitation to ${invitation.email}? Their invite link will stop working immediately.`,
+                            cancel: "Keep invitation",
+                            confirm: "Cancel invitation",
+                            run: () =>
+                              act(
+                                () =>
+                                  authRequest("/organization/cancel-invitation", {
+                                    invitationId: invitation.id,
+                                  }),
+                                "Invitation canceled",
+                              ),
+                          })
+                        }
+                      >
+                        <Trash2Icon />
+                        Cancel invitation
+                      </DropdownMenuItem>
+                    </RowMenu>
+                  </span>
+                </div>
+              ))
+            : null}
+          {members.length === 0 && !(manager && pendingShown.length) ? (
             <p className="px-4 py-3 text-sm text-muted-foreground">
               {full ? "No members match your search." : "Loading members…"}
             </p>
           ) : null}
         </div>
-        {manager && pending.length ? (
-          <Card className="mt-3" id="members-pending">
-            {pending.map((invitation) => (
-              <Row
-                key={invitation.id}
-                title={invitation.email}
-                description={`Invited as ${roleLabel(invitation.role || "member")} · expires ${new Date(invitation.expiresAt).toLocaleDateString()}`}
-              >
-                <SettingsButton
-                  variant="ghost"
-                  data-cancel-invitation={invitation.email}
-                  onClick={() =>
-                    act(
-                      () =>
-                        authRequest("/organization/cancel-invitation", {
-                          invitationId: invitation.id,
-                        }),
-                      "Invitation canceled",
-                    )
-                  }
-                >
-                  Cancel
-                </SettingsButton>
-              </Row>
-            ))}
-          </Card>
-        ) : null}
+        <ConfirmDialog confirmation={confirmation} onClose={() => setConfirmation(null)} />
       </Section>
 
       {active ? (

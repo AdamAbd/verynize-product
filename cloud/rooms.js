@@ -26,6 +26,9 @@ const MAX_SOCKETS = 32;
 const FUTURE_SKEW = 5 * 60 * 1000;
 const TOKEN_ROLES = ["viewer", "commenter", "editor", "owner"];
 const ORG_ROLES = ["viewer", "commenter", "editor", "owner"];
+// File visibility: private rooms need a link, a membership or an organization role; public rooms
+// also let anyone (no token, no session) read them as a viewer.
+export const VISIBILITIES = ["private", "public"];
 const PAGE_ID = (id) => typeof id === "string" && id.length > 0 && id.length <= 200;
 const MAX_PAGE_REQUEST = 200;
 const requireDocument = (document) => {
@@ -119,6 +122,22 @@ export class DesignRoom extends DurableObject {
   title() {
     return this.store.title();
   }
+  /** "private" (default) or "public", kept in the meta table. */
+  visibility() {
+    const value = this.sql
+      .exec("SELECT value FROM meta WHERE key='visibility'")
+      .toArray()[0]?.value;
+    return value === "public" ? "public" : "private";
+  }
+  /** RPC for the router: whether the room exists and is public (anonymous reads allowed). */
+  publicRoom() {
+    return !!this.row() && this.visibility() === "public";
+  }
+  /** Role from links, membership and organization, plus viewer on public rooms. */
+  effectiveRole(...roles) {
+    const role = bestRole(...roles);
+    return role || (this.visibility() === "public" ? "viewer" : null);
+  }
 
   async issueToken(role, label) {
     if (!TOKEN_ROLES.includes(role)) fail(400, "Unknown role");
@@ -157,8 +176,12 @@ export class DesignRoom extends DurableObject {
       : null;
     const org = request.headers.get("x-verynize-org-role");
     const orgRole = ORG_ROLES.includes(org) ? org : null;
+    const granted = bestRole(capability?.role, member?.role, orgRole);
     return {
-      role: bestRole(capability?.role, member?.role, orgRole),
+      role: this.effectiveRole(granted),
+      // True when only the room's public visibility lets this caller in.
+      publicOnly: !granted && this.visibility() === "public",
+      member: member?.role || null,
       capability: capability?.id || null,
       account,
       orgRole,
@@ -453,7 +476,7 @@ export class DesignRoom extends DurableObject {
     return { applied: message.ops.length, rejected: message.rejected, revision: message.revision };
   }
 
-  accessSummary(role) {
+  accessSummary(role, publicOnly = false) {
     const members = this.sql
       .exec("SELECT account_id,email,handle,role,added_at FROM members ORDER BY added_at")
       .toArray()
@@ -463,7 +486,13 @@ export class DesignRoom extends DurableObject {
         handle: row.handle,
         role: row.role,
       }));
-    const result = { role, members, title: this.title() };
+    // Visitors of a public room see the file, never who it is shared with.
+    const result = {
+      role,
+      members: publicOnly ? [] : members,
+      title: this.title(),
+      visibility: this.visibility(),
+    };
     if (role === "owner")
       result.links = this.sql
         .exec("SELECT id,role,label,created_at FROM capabilities ORDER BY created_at")
@@ -477,8 +506,11 @@ export class DesignRoom extends DurableObject {
     return result;
   }
 
-  /** Re-evaluate every live socket after links or members change; revoked peers are disconnected. */
-  refreshSockets() {
+  /**
+   * Re-evaluate every live socket after links, members or visibility change; revoked peers are
+   * disconnected (`revoked` with `reason` "private" when the room just stopped being public).
+   */
+  refreshSockets(reason = "removed") {
     for (const socket of this.ctx.getWebSockets()) {
       const state = socket.deserializeAttachment() || {};
       const capability = state.capability
@@ -487,11 +519,18 @@ export class DesignRoom extends DurableObject {
       const member = state.accountId
         ? this.sql.exec("SELECT role FROM members WHERE account_id=?", state.accountId).toArray()[0]
         : null;
-      const role = bestRole(capability?.role, member?.role, state.orgRole);
+      const role = this.effectiveRole(capability?.role, member?.role, state.orgRole);
       if (!role) {
         try {
           socket.send(
-            JSON.stringify({ type: "revoked", error: "Your access to this room was revoked" }),
+            JSON.stringify({
+              type: "revoked",
+              reason,
+              error:
+                reason === "private"
+                  ? "This file is now private"
+                  : "Your access to this room was revoked",
+            }),
           );
           socket.close(4401, "Access revoked");
         } catch {}
@@ -530,7 +569,10 @@ export class DesignRoom extends DurableObject {
         return json({ document: this.store.published(row), revision: row.public_revision });
       }
       if (!row) return json({ error: "Unauthorized" }, 401);
-      const { role, capability, account, orgRole } = await this.access(request, url);
+      const { role, capability, account, orgRole, publicOnly, member } = await this.access(
+        request,
+        url,
+      );
       if (!role) return json({ error: "Unauthorized" }, 401);
       const need = (wanted) => {
         if (!atLeast(role, wanted)) fail(403, `This needs the ${wanted} role; you are a ${role}`);
@@ -617,13 +659,39 @@ export class DesignRoom extends DurableObject {
         this.store.unpublish();
         return json({ unpublished: true });
       }
-      if (action === "/access" && method === "GET") return json(this.accessSummary(role));
+      if (action === "/access" && method === "GET")
+        return json({
+          ...this.accessSummary(role, publicOnly),
+          // For the router's `you` (cloud/worker.js): direct membership role, signed-in or not.
+          member,
+          publicOnly,
+        });
+      if (action === "/visibility" && method === "PUT") {
+        need("owner");
+        const data = await readJson(request, 16 * 1024);
+        if (!VISIBILITIES.includes(data.visibility))
+          fail(400, "Visibility must be private or public");
+        const previous = this.visibility();
+        this.sql.exec(
+          "INSERT OR REPLACE INTO meta (key,value) VALUES ('visibility',?)",
+          data.visibility,
+        );
+        if (previous !== data.visibility) {
+          this.broadcast({ type: "visibility", visibility: data.visibility });
+          // Sockets that were only here because the room was public lose access now.
+          if (data.visibility === "private") this.refreshSockets("private");
+        }
+        return json({ visibility: data.visibility, title: this.title() });
+      }
       if (action === "/members" && method === "POST") {
         need("owner");
         const data = await readJson(request);
         const target = data.account;
         if (!target?.id || !["viewer", "commenter", "editor", "owner"].includes(data.role))
           fail(400, "Choose an account and a role");
+        const previous =
+          this.sql.exec("SELECT role FROM members WHERE account_id=?", target.id).toArray()[0]
+            ?.role || null;
         this.addMember(target, data.role);
         this.refreshSockets();
         return json({
@@ -633,6 +701,8 @@ export class DesignRoom extends DurableObject {
             handle: target.handle,
             role: data.role,
           },
+          // The role before this call, null for a new member: only new members are emailed.
+          previousRole: previous,
           title: this.title(),
         });
       }
@@ -643,8 +713,11 @@ export class DesignRoom extends DurableObject {
         const ownerLinks = this.sql
           .exec("SELECT COUNT(*) AS n FROM capabilities WHERE role='owner'")
           .one().n;
-        if (owners.length === 1 && owners[0].account_id === memberMatch[1] && !ownerLinks)
-          fail(409, "Add another owner before removing the last one");
+        const lastOwner = owners.length === 1 && owners[0].account_id === memberMatch[1];
+        // The last owner account never removes itself, even while an owner link exists.
+        if (lastOwner && account?.id === memberMatch[1])
+          fail(409, "You are the last owner. Add another owner before leaving.");
+        if (lastOwner && !ownerLinks) fail(409, "Add another owner before removing the last one");
         this.sql.exec("DELETE FROM members WHERE account_id=?", memberMatch[1]);
         this.refreshSockets();
         return json({ removed: memberMatch[1] });

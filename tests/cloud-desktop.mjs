@@ -1,6 +1,7 @@
 import { Miniflare as Workerd } from 'miniflare';
 import { Miniflare, cloudOptions } from './cloud-harness.mjs';
 import {_electron as electron} from '@playwright/test';
+import { openSharedDesign } from "./helpers/shared-design.cjs";
 import {createRequire} from 'node:module';
 const {moveOffCursor}=createRequire(import.meta.url)('./helpers/off-cursor.cjs');
 import assert from 'node:assert/strict';
@@ -11,13 +12,13 @@ const mf=new Miniflare(options);
 const apps=[];let legacyMf;try{const server=(await mf.ready).origin;const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;delete env.VERYNIZE_CLOUD_SERVER;env.VERYNIZE_SKIP_ONBOARDING='1';
  // A fresh desktop profile offers the production server (desktop/cloud-defaults.cjs), but automated runs can never reach it.
  {const app=await electron.launch({env,args:['.',`--user-data-dir=${path.join(dir,'fresh')}`]});apps.push(app);let log='';app.process().stderr.on('data',chunk=>{log+=chunk});const page=await app.firstWindow();await moveOffCursor(app);
-  await page.waitForFunction(()=>document.documentElement.dataset.uiReady==='true'&&document.getElementById('cloud-server')?.value==='https://verynize.gayaloo.app');await page.locator('#cloud-toggle').click();await page.locator('#cloud-create').click();
+  await page.waitForFunction(()=>document.documentElement.dataset.uiReady==='true'&&document.getElementById('cloud-server')?.value==='https://verynize.gayaloo.app');await openSharedDesign(page);await page.locator('#cloud-create').click();
   await page.waitForFunction(()=>/fetch/i.test(document.getElementById('cloud-status').textContent));assert.equal(await page.evaluate(()=>window.cloudWorkspace.isConnected()),false);
   for(let i=0;i<50&&!log.includes('Blocked a request to verynize.gayaloo.app');i++)await new Promise(r=>setTimeout(r,100));assert.match(log,/Blocked a request to verynize\.gayaloo\.app in an automated run: POST \/api\/rooms/);await apps.pop().close();}
  // Tests choose their server with VERYNIZE_CLOUD_SERVER.
  env.VERYNIZE_CLOUD_SERVER=server;for(const label of ['a','b'])apps.push(await electron.launch({env,args:['.',`--user-data-dir=${path.join(dir,label)}`]}));const [a,b]=await Promise.all(apps.map(app=>app.firstWindow()));await Promise.all(apps.map(moveOffCursor));await Promise.all([a,b].map(page=>page.waitForFunction(()=>!!window.design)));
- await a.waitForFunction(server=>document.getElementById('cloud-server').value===server,server);await a.locator('#cloud-toggle').click();await a.locator('#cloud-create').click();await a.waitForFunction(()=>document.getElementById('cloud-invite').value.includes('token='));const invite=await a.locator('#cloud-invite').inputValue();
- b.on('dialog',async dialog=>dialog.accept(dialog.type()==='prompt'?invite:undefined));await b.locator('#cloud-toggle').click();await b.locator('#cloud-invite').fill(invite);
+ await a.waitForFunction(server=>document.getElementById('cloud-server').value===server,server);await openSharedDesign(a);await a.locator('#cloud-create').click();await a.waitForFunction(()=>document.getElementById('cloud-invite').value.includes('token='));const invite=await a.locator('#cloud-invite').inputValue();
+ b.on('dialog',async dialog=>dialog.accept(dialog.type()==='prompt'?invite:undefined));await openSharedDesign(b);await b.locator('#cloud-invite').fill(invite);
  await b.evaluate(()=>{const s=document.getElementById('cloud-status');window.__statuses=[];new MutationObserver(()=>window.__statuses.push(s.textContent)).observe(s,{childList:true,characterData:true,subtree:true})});
  await b.locator('#cloud-connect').click();await b.waitForFunction(()=>document.getElementById('cloud-status').textContent.includes('Connected'));await a.waitForFunction(()=>document.getElementById('cloud-presence').textContent==='2 connected');
  assert.deepEqual((await b.evaluate(()=>window.__statuses)).filter(text=>/Disconnected/.test(text)),[],'joining never reports Disconnected');
@@ -65,7 +66,7 @@ const apps=[];let legacyMf;try{const server=(await mf.ready).origin;const env={.
  await b.evaluate(id=>window.design.updateNodes([id],n=>({text:'B '+n.text})),textId);await both(id=>window.design.getDocument().pages[0].nodes.find(n=>n.id===id).text==='B Our Shared words! A',textId);
  await a.evaluate(()=>window.design.runCommand('edit.undo'));await both(id=>window.design.getDocument().pages[0].nodes.find(n=>n.id===id).text==='B Our Shared words!',textId);
  assert.deepEqual([(await rect(a)).x,(await rect(b)).y],[500,600]);assert.equal(await sharedDoc(a),await sharedDoc(b));
- const loser=a;await loser.locator('#cloud-toggle').click();
+ const loser=a;await openSharedDesign(loser);
  await loser.locator('#cloud-publish').click();await loser.waitForFunction(()=>document.getElementById('cloud-public').textContent.includes('public='));const publicLink=await loser.locator('#cloud-public').textContent();const publicId=new URLSearchParams(new URL(publicLink).hash.slice(1)).get('public');assert.equal((await fetch(server+'/api/public/'+publicId)).status,200);await loser.locator('#cloud-unpublish').click();await loser.waitForFunction(()=>document.getElementById('cloud-status').textContent.includes('removed'));assert.equal((await fetch(server+'/api/public/'+publicId)).status,404);
  // Servers without operation support (the previous Worker) keep the snapshot protocol: simultaneous edits retain the losing client's work and require explicit resolution.
  const legacyOptions=await cloudOptions(path.join(dir,'legacy'));const legacyConfig=legacyOptions.workers[0].config;legacyConfig.manifest={mainModule:'worker.js',modules:{'worker.js':{type:'esm',contents:await fs.readFile(new URL('./fixtures/cloud-worker-v1.js',import.meta.url),'utf8')}}};legacyConfig.env={ROOM_CREATION:legacyConfig.env.ROOM_CREATION,ROOMS:legacyConfig.env.ROOMS};legacyConfig.exports={DesignRoom:{type:'durable-object',storage:'sqlite'}};
