@@ -49,8 +49,10 @@ const { execFileSync } = require("node:child_process");
     timeout: 20000,
   });
   try {
-    await connectElectronProvider(app, provider);
+    // After the first window: an evaluate while the main process is still starting up can lose its
+    // result promise ("Resulting promise was garbage collected", seen on Linux CI).
     const page = await app.firstWindow({ timeout: 20000 });
+    await connectElectronProvider(app, provider);
     await waitForUiReady(page);
     await page.waitForSelector("#project-toggle", { state: "attached" });
     await page.evaluate(() => window.agentWorkspace.openChat());

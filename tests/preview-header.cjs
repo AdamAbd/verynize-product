@@ -9,6 +9,7 @@
 const { _electron } = require('@playwright/test');
 const { mod } = require("./helpers/keys.cjs");
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
+const { seedChatGPTAccount } = require('./helpers/chatgpt-provider.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -36,6 +37,8 @@ process.on('SIGTERM',()=>process.exit(0));
   await fs.chmod(path.join(bin, 'codex'), 0o755);
   const env = { ...process.env, ...identity, PATH: bin + path.delimiter + process.env.PATH, VERYNIZE_WORKSPACES_DIR: workspaces, VERYNIZE_BRANCH_PREFIX: 'verynize', VERYNIZE_SKIP_ONBOARDING: '1' };
   delete env.ELECTRON_RUN_AS_NODE;
+  // Chat turns check the Codex sign-in first: a preauthorized local SIWC account, never the developer's login.
+  await seedChatGPTAccount(path.join(root, 'profile'));
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`, '--force-device-scale-factor=2', '--force-color-profile=srgb'], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
