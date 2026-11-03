@@ -1,3 +1,4 @@
+import { alreadyReported, prepareImage } from "@/lib/image-upload";
 // Masks (design/wonder/2026-10-30/18–21, validation/v09, extra/52): Linear / Radial / Conic fades, an embedded
 // Image or a Custom CSS gradient, each with alpha, rotation, invert and visibility, plus Advanced options
 // (Mode, Repeat, Position, Size) and how the mask combines with the masks below it (Add, Subtract, Intersect,
@@ -81,16 +82,15 @@ const DEFAULT_CUSTOM = "radial-gradient(circle, black 50%, transparent 51%)";
 function pickMaskImage(onPick: (src: string) => void) {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = "image/png,image/jpeg,image/webp,image/gif,image/svg+xml";
-  input.onchange = () => {
+  input.accept = window.imageUpload.ACCEPT;
+  input.onchange = async () => {
     const file = input.files?.[0];
     if (!file) return;
-    if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type))
-      return notify("Choose a PNG, JPEG, WebP, GIF or SVG image");
-    const reader = new FileReader();
-    reader.onload = () => onPick(String(reader.result));
-    reader.onerror = () => notify("Unable to read the image");
-    reader.readAsDataURL(file);
+    try {
+      onPick((await prepareImage(file)).src);
+    } catch (error) {
+      if (!alreadyReported(error)) notify(error instanceof Error ? error.message : String(error));
+    }
   };
   input.click();
 }
