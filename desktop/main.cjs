@@ -24,9 +24,11 @@ app.setName('Verynize');
 // Linux CI (xvfb, no desktop keyring): use Chromium's basic password store instead of probing D-Bus/libsecret, so
 // safeStorage reports encryption unavailable at once (generate.cjs keeps keys in memory, figma-oauth.cjs refuses to persist).
 if(process.platform==='linux'&&process.env.CI&&!app.commandLine.hasSwitch('password-store'))app.commandLine.appendSwitch('password-store','basic');
-// Linux CI renders like the macOS dev machines the tests were measured on: a 2x display (Retina), overlay scrollbars
-// (no gutter eating panel width), and SwiftShader WebGL (xvfb has no GPU; shaders otherwise never become ready).
-if(process.platform==='linux'&&process.env.CI){const sw=app.commandLine;if(!sw.hasSwitch('force-device-scale-factor'))sw.appendSwitch('force-device-scale-factor','2');sw.appendSwitch('enable-features','OverlayScrollbar');sw.appendSwitch('enable-unsafe-swiftshader');sw.appendSwitch('ignore-gpu-blocklist');sw.appendSwitch('use-angle','swiftshader');}
+// Linux CI renders like the macOS dev machines the tests were measured on: a 2x display (Retina) and overlay scrollbars
+// (no gutter eating panel width). xvfb has no GPU: compositing stays in software (--disable-gpu, as Chromium falls back
+// to anyway) and WebGL gets its SwiftShader fallback, or shaders never become ready. Compositing through SwiftShader GL
+// (use-angle=swiftshader) instead loses clicks into out-of-process iframes and delays frames (preview, mask pixels).
+if(process.platform==='linux'&&process.env.CI){const sw=app.commandLine;if(!sw.hasSwitch('force-device-scale-factor'))sw.appendSwitch('force-device-scale-factor','2');sw.appendSwitch('enable-features','OverlayScrollbar');sw.appendSwitch('disable-gpu');sw.appendSwitch('enable-unsafe-swiftshader');}
 require('./app-preferences.cjs').attachDeepLinks(app); // verynize:// design links (Settings › Preferences › Advanced)
 app.whenReady().then(async () => {
   appProtocol.registerHandler(protocol, net);

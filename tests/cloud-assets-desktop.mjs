@@ -216,6 +216,13 @@ try {
     null,
     { timeout: 30000 },
   );
+  // The owner's invite field holds a token-free link until the role-limited invite token arrives.
+  await a.waitForFunction((first) => {
+    const hash = new URLSearchParams(
+      new URL(document.getElementById("cloud-invite").value || "about:blank").hash.slice(1),
+    );
+    return hash.get("token") && hash.get("room") && hash.get("room") !== first;
+  }, room.get("room"));
   const created = new URLSearchParams(
     new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
   );
