@@ -46,16 +46,21 @@ export function StorageAlerts() {
       setBlocked((event as CustomEvent<StorageProblem>).detail);
     }, []),
   );
+  // web/image-upload.js refuses an image before it reaches the canvas ("add image").
+  const imageRefused = blocked?.action === "add image";
   return (
     <Dialog open={!!blocked} onOpenChange={(open) => !open && setBlocked(null)}>
       <DialogContent id="storage-limit-dialog" className="max-w-sm" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>File is too large to {blocked?.action ?? "sync"}</DialogTitle>
+          <DialogTitle>
+            {imageRefused ? "Image not added" : `File is too large to ${blocked?.action ?? "sync"}`}
+          </DialogTitle>
           <DialogDescription>{blocked?.message}</DialogDescription>
         </DialogHeader>
         <p className="text-xs text-muted-foreground">
-          Your changes are kept on this device. Split large pages into several pages or files, or
-          replace large embedded files, then try again.
+          {imageRefused
+            ? "The canvas was not changed. Remove large images, or split the page or file, then add the image again."
+            : "Your changes are kept on this device. Split large pages into several pages or files, or replace large embedded files, then try again."}
         </p>
         <DialogFooter>
           <Button size="sm" onClick={() => setBlocked(null)} aria-label="Close size error">
