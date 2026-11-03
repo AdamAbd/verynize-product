@@ -9,7 +9,7 @@ on:
     branches: [staging]
   schedule:
     # Nightly full suite. Schedules only fire from the default branch (main); the jobs check out staging.
-    - cron: '17 19 * * *'
+    - cron: "17 19 * * *"
   workflow_dispatch:
     inputs:
       debug:
@@ -25,10 +25,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  CI: '1'
+  CI: "1"
   # Schedules check out staging; every other event uses the event's own ref ('' = default).
   CHECKOUT_REF: ${{ github.event_name == 'schedule' && 'staging' || '' }}
-  NODE_VERSION: '24'
+  NODE_VERSION: "24"
 
 jobs:
   quality:
@@ -84,11 +84,13 @@ jobs:
         id: plan
         # The runner selects from GITHUB_EVENT_NAME / GITHUB_EVENT_PATH: PR into staging = affected
         # tests only, everything else = full suite. --list prints the selection without running it.
-        # Counting lines that name a test file keeps this independent of headers in the listing.
+        # Counting lines that name a test file keeps this independent of headers in the listing
+        # ('# ...' summary lines can name a changed file; 'skip' lines are platform skips). The runner
+        # imports only Node built-ins, so this job needs no npm ci.
         run: |
           set -euo pipefail
           list() { node scripts/run-tests.mjs --ci-event --list "$@"; }
-          count() { grep -cE '(tests|integrations|eval)/[^[:space:]]+\.(c|m)?js' || true; }
+          count() { grep -vE '^(#|skip )' | grep -cE '(tests|integrations|eval)/[^[:space:]]+\.(c|m)?js' || true; }
           browser() { grep -qE 'tests/web-' && echo true || echo false; }
           list > "$RUNNER_TEMP/all.txt"
           list --lane node --lane cloud > "$RUNNER_TEMP/node.txt"
@@ -191,8 +193,12 @@ jobs:
           sudo sed -i 's#http://[a-z.]*archive.ubuntu.com#http://fr.archive.ubuntu.com#g' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
           # Ubuntu 24.04 names: the t64 packages replace libgtk-3-0 / libatk-bridge2.0-0 / libasound2.
+          # Also: Mesa (software GL/WebGL under xvfb: shaders, canvas-shaders), zsh (the terminal tests'
+          # shell), poppler-utils (pdftoppm, capture-export-fonts), and a toolchain in case node-pty has
+          # to build from source (it ships a linux-x64 prebuild).
           sudo apt-get install -y --no-install-recommends xvfb xauth libnss3 libatk-bridge2.0-0t64 \
-            libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxkbcommon0 libdrm2 libcups2t64 fonts-liberation
+            libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxkbcommon0 libdrm2 libcups2t64 fonts-liberation \
+            libgl1 libegl1 libgl1-mesa-dri mesa-utils zsh poppler-utils build-essential python3
       - name: Allow the Chromium sandbox
         # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor, so Electron's Chromium
         # sandbox aborts ("No usable sandbox") unless chrome-sandbox is setuid root, which npm cannot
@@ -210,8 +216,12 @@ jobs:
           path: ~/.cache/electron
           key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+      - name: Download Electron
+        # npm 11 may skip dependency install scripts, and electron fetches its binary lazily on first
+        # use otherwise (inside a timed test). install.js is a no-op when it is already there.
+        run: node node_modules/electron/install.js
       - name: Run electron lane
-        # No DISPLAY on the VM: the runner wraps each Electron test in `xvfb-run -a`.
+        # No DISPLAY on the VM: the runner wraps each Electron test in `xvfb-run -a -s "-screen 0 1920x1080x24"`.
         run: node scripts/run-tests.mjs --ci-event --lane electron --shard "$SHARD" --report "$RUNNER_TEMP/report"
         env:
           SHARD: ${{ matrix.shard }}
@@ -251,8 +261,13 @@ jobs:
           set -euo pipefail
           sudo sed -i 's#http://[a-z.]*archive.ubuntu.com#http://fr.archive.ubuntu.com#g' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
+          # Ubuntu 24.04 names: the t64 packages replace libgtk-3-0 / libatk-bridge2.0-0 / libasound2.
+          # Also: Mesa (software GL/WebGL under xvfb: shaders, canvas-shaders), zsh (the terminal tests'
+          # shell), poppler-utils (pdftoppm, capture-export-fonts), and a toolchain in case node-pty has
+          # to build from source (it ships a linux-x64 prebuild).
           sudo apt-get install -y --no-install-recommends xvfb xauth libnss3 libatk-bridge2.0-0t64 \
-            libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxkbcommon0 libdrm2 libcups2t64 fonts-liberation
+            libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxkbcommon0 libdrm2 libcups2t64 fonts-liberation \
+            libgl1 libegl1 libgl1-mesa-dri mesa-utils zsh poppler-utils build-essential python3
       - name: Allow the Chromium sandbox
         # See the electron job.
         run: |
@@ -269,6 +284,9 @@ jobs:
             ~/.cache/ms-playwright
           key: browsers-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+      - name: Download Electron
+        # See the electron job.
+        run: node node_modules/electron/install.js
       - name: Install Playwright Chromium (web tests)
         if: needs.plan.outputs.serial_browser == 'true'
         run: npx --no-install playwright install --with-deps chromium

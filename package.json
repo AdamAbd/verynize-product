@@ -128,5 +128,11 @@
   "overrides": {
     "vite": "$vite",
     "vitest": "5.0.5"
+  },
+  "allowScripts": {
+    "workerd": true,
+    "node-pty": true,
+    "fsevents": true,
+    "@openrouter/sdk": false
   }
 }

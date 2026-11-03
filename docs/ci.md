@@ -14,24 +14,26 @@ feature/*  --PR-->  staging  --PR-->  main
 
 ## What runs where
 
-| Event | `quality` | `tests` | `identity` | `staging-promotion` |
-| - | - | - | - | - |
-| PR into `staging` | yes | affected tests only (`base.sha..head.sha`) | yes | no |
-| PR into `main` | yes | full suite | yes | yes |
-| Push to `staging` | yes | full suite | (per `identity.yml`) | no |
-| Nightly (19:17 UTC, checks out `staging`) | yes | full suite | no | no |
-| Manual (`workflow_dispatch`) | yes | full suite | no | no |
+| Event                                     | `quality` | `tests`                                    | `identity`           | `staging-promotion` |
+| ----------------------------------------- | --------- | ------------------------------------------ | -------------------- | ------------------- |
+| PR into `staging`                         | yes       | affected tests only (`base.sha..head.sha`) | yes                  | no                  |
+| PR into `main`                            | yes       | full suite                                 | yes                  | yes                 |
+| Push to `staging`                         | yes       | full suite                                 | (per `identity.yml`) | no                  |
+| Nightly (19:17 UTC, checks out `staging`) | yes       | full suite                                 | no                   | no                  |
+| Manual (`workflow_dispatch`)              | yes       | full suite                                 | no                   | no                  |
 
 `tests.yml` jobs:
 
 - `quality` (`boat`): `npm ci`, `build:ui`, `check`, `lint`, `typecheck:ui`, `format:check`.
-- `plan` (`boat-small`): `node scripts/run-tests.mjs --ci-event --list` per lane. It counts the selected tests and builds the Electron shard matrix: 4 shards for the full suite, 1 for affected.
+- `plan` (`boat-small`): `node scripts/run-tests.mjs --ci-event --list` per lane. It counts the selected tests and builds the Electron shard matrix: 4 shards for the full suite, 1 for affected. The runner imports only Node built-ins, so this job skips `npm ci`.
 - `node + cloud` (`boat`): `--lane node --lane cloud`. No display is needed. Playwright Chromium is installed only when `tests/web-*` is selected.
-- `electron (i/n)` (`boat-large`, matrix): `--lane electron --shard i/n`. The job installs the Electron system libraries and `xvfb`. The runner wraps each test in `xvfb-run -a` when `DISPLAY` is unset.
-- `serial` (`boat-large`): `--lane serial`, for tests that must run alone (for example the two-client cloud desktop tests).
+- `electron (i/n)` (`boat-large`, matrix): `--lane electron --shard i/n`. The job installs the Electron system libraries, `xvfb`, Mesa (software WebGL), `zsh` (terminal tests), `poppler-utils` (`pdftoppm`, PDF export check) and a build toolchain for `node-pty`, then downloads the Electron binary (`node node_modules/electron/install.js`). The runner wraps each test in `xvfb-run -a -s "-screen 0 1920x1080x24"` when `DISPLAY` is unset.
+- `serial` (`boat-large`): `--lane serial`, for tests that must run alone (today `integrations/design-files.test.mjs`, whose `fs.watch` wait misses under parallel load). Same system setup as the Electron jobs.
 - `tests` (`boat-small`): an aggregate job that always runs. It fails if `plan` failed or any lane failed or was cancelled. It passes when lanes were skipped because nothing was affected. Use this stable name as the required check.
 
 Each lane writes `--report $RUNNER_TEMP/report` (`results.json`, `junit.xml`, `summary.md`, plus the job summary). The report is uploaded as a `test-report-*` artifact, kept for 14 days.
+
+Install scripts: npm 11 can skip dependency install scripts that `allowScripts` in `package.json` does not list. `workerd`, `node-pty` and `fsevents` are allowed there; Electron has no install script and is downloaded by the explicit step above.
 
 Electron on Ubuntu 24.04: AppArmor blocks unprivileged user namespaces, and npm cannot make `chrome-sandbox` setuid root. Without a fix, the Chromium sandbox aborts. The Electron jobs turn namespaces back on with `sysctl kernel.apparmor_restrict_unprivileged_userns=0` (the VM is thrown away after the job), so tests keep the real sandbox. Only if that fails do they set `ELECTRON_DISABLE_SANDBOX=1`, with a warning.
 
