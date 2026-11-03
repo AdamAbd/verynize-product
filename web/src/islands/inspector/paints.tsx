@@ -1,3 +1,4 @@
+import { alreadyReported, prepareImage } from "@/lib/image-upload";
 // Paint stack for Background Fill and Text Fill (design/wonder/2026-10-30 05–07, 23–26): several paints per
 // layer (top paint first), each Solid, Linear, Radial or Conic gradient, or Image, with per-paint opacity and
 // visibility. Solid colours and gradient stops bind to colour variables; detaching keeps the resolved colour.
@@ -12,7 +13,19 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { ArrowDown, ArrowLeftRight, ArrowUp, Eye, GripVertical, ImageIcon, Plus, RotateCw, Square, Unlink, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeftRight,
+  ArrowUp,
+  Eye,
+  GripVertical,
+  ImageIcon,
+  Plus,
+  RotateCw,
+  Square,
+  Unlink,
+  X,
+} from "lucide-react";
 import { ClosedEyeIcon, GradientPaintIcon, RemoveIcon } from "@/components/icons";
 import type { DesignDocument } from "@/lib/bridge";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
@@ -200,33 +213,20 @@ function previewSolid(nodes: Node[], color: string) {
 
 /** Read an image file as an embedded data URL plus its natural size. */
 async function readImage(file: File) {
-  if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type))
-    throw Error("Choose a PNG, JPEG, WebP, GIF or SVG image");
-  const src = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(Error("Unable to read the image"));
-    reader.readAsDataURL(file);
-  });
-  const image = new Image();
-  await new Promise((resolve, reject) => {
-    image.onload = resolve;
-    image.onerror = () => reject(Error("Unable to decode the image"));
-    image.src = src;
-  });
-  return { src, imageWidth: image.naturalWidth || 1, imageHeight: image.naturalHeight || 1 };
+  const { src, pixelWidth, pixelHeight } = await prepareImage(file);
+  return { src, imageWidth: pixelWidth, imageHeight: pixelHeight };
 }
 function pickImage(onPick: (image: Awaited<ReturnType<typeof readImage>>) => void) {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = "image/png,image/jpeg,image/webp,image/gif,image/svg+xml";
+  input.accept = window.imageUpload.ACCEPT;
   input.onchange = async () => {
     const file = input.files?.[0];
     if (!file) return;
     try {
       onPick(await readImage(file));
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error));
+      if (!alreadyReported(error)) notify(error instanceof Error ? error.message : String(error));
     }
   };
   input.click();
@@ -323,9 +323,23 @@ export function PaintStack({
       >
         {paints.map((p, i) =>
           p.type === "solid" ? (
-            <SolidRow key={i} doc={doc} node={node} selection={selection} paints={paints} index={i} />
+            <SolidRow
+              key={i}
+              doc={doc}
+              node={node}
+              selection={selection}
+              paints={paints}
+              index={i}
+            />
           ) : (
-            <PaintRow key={i} doc={doc} node={node} selection={selection} paints={paints} index={i} />
+            <PaintRow
+              key={i}
+              doc={doc}
+              node={node}
+              selection={selection}
+              paints={paints}
+              index={i}
+            />
           ),
         )}
       </div>
@@ -489,7 +503,8 @@ function Row({
 const rowBox =
   "group/paint flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md bg-input pr-2 pl-1 text-xs shadow-field has-focus-visible:ring-1 has-focus-visible:ring-ring";
 // Wonder A1: the number ends 4 px before the "%" (x 181 / 185.5), the % ends at 194.
-const percentField = "h-5 w-12 shrink-0 gap-0.5 bg-transparent px-0 shadow-none focus-within:ring-0";
+const percentField =
+  "h-5 w-12 shrink-0 gap-0.5 bg-transparent px-0 shadow-none focus-within:ring-0";
 
 /**
  * The colour an unbound solid actually paints. Older documents (and agents) may carry a paint `opacity` on top of
@@ -587,7 +602,13 @@ function SolidRow({ doc, node, selection, paints, index, legacy }: RowProps) {
         onDetach={p.token ? () => detachAt(selection, index, target) : undefined}
         typeSwitch={
           legacy ? undefined : (
-            <PaintTypeSwitch doc={doc} node={node} selection={selection} paints={paints} index={index} />
+            <PaintTypeSwitch
+              doc={doc}
+              node={node}
+              selection={selection}
+              paints={paints}
+              index={index}
+            />
           )
         }
         headTools={

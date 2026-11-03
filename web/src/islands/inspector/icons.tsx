@@ -56,26 +56,7 @@ const fromBase64 = (data: string) =>
 
 /** Parse and clean SVG markup (no scripts, event handlers or external references). Returns null when it is not SVG. */
 function cleanSvg(markup: string): SVGSVGElement | null {
-  const parsed = new DOMParser().parseFromString(markup.trim(), "image/svg+xml");
-  const root = parsed.documentElement;
-  if (root.nodeName !== "svg" || parsed.querySelector("parsererror")) return null;
-  for (const el of root.querySelectorAll("script, foreignObject")) el.remove();
-  for (const el of [root, ...root.querySelectorAll("*")]) {
-    // Copy first: removing attributes while iterating the live NamedNodeMap would skip some.
-    for (const attr of Array.from(el.attributes)) {
-      const value = attr.value.trim().toLowerCase();
-      if (attr.name.toLowerCase().startsWith("on") || value.startsWith("javascript:"))
-        el.removeAttribute(attr.name);
-      else if (
-        /href$/i.test(attr.name) &&
-        !value.startsWith("#") &&
-        !value.startsWith("data:image/")
-      )
-        el.removeAttribute(attr.name);
-    }
-  }
-  if (!root.getAttribute("xmlns")) root.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  return root as unknown as SVGSVGElement;
+  return window.sanitizeSvg(markup);
 }
 
 /** Intrinsic size from width/height, else the viewBox; 24px when neither says. */
@@ -83,7 +64,9 @@ function svgSize(svg: SVGSVGElement) {
   const box = (svg.getAttribute("viewBox") ?? "").split(/[\s,]+/).map(Number);
   const read = (key: "width" | "height", fallback: number | undefined) => {
     const value = parseFloat(svg.getAttribute(key) ?? "");
-    return Number.isFinite(value) && !(svg.getAttribute(key) ?? "").endsWith("%") ? value : fallback;
+    return Number.isFinite(value) && !(svg.getAttribute(key) ?? "").endsWith("%")
+      ? value
+      : fallback;
   };
   const w = read("width", box.length === 4 ? box[2] : undefined) ?? 24;
   const h = read("height", box.length === 4 ? box[3] : undefined) ?? w;
@@ -124,10 +107,15 @@ function addIcons(entries: { name: string; markup: string }[]) {
     const svg = cleanSvg(markup);
     if (!svg) continue;
     const title = svg.querySelector("title")?.textContent?.trim();
+    const src = SVG_PREFIX + toBase64(new XMLSerializer().serializeToString(svg));
+    if (src.length > 200_000) {
+      toast.error("Icon source exceeds 200,000 characters.");
+      continue;
+    }
     added.push({
       id: crypto.randomUUID(),
       name: (name.trim() || title || `Icon ${library().length + added.length + 1}`).slice(0, 100),
-      src: SVG_PREFIX + toBase64(new XMLSerializer().serializeToString(svg)),
+      src,
     });
   }
   if (!added.length) {
@@ -362,6 +350,14 @@ export function IconsSection({
           const files = [...(event.target.files ?? [])];
           event.target.value = "";
           if (!files.length) return;
+          try {
+            window.imageUpload.batch(files);
+            if (files.some((f) => f.size > 1_000_000))
+              throw Error("SVG images must be at most 1 MB.");
+          } catch (error) {
+            toast.error(String(error));
+            return;
+          }
           const entries = await Promise.all(
             files.map(async (f) => ({
               name: f.name.replace(/\.svg$/i, ""),

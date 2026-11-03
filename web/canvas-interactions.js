@@ -1463,11 +1463,18 @@
       // Layers copied in Figma (binary scene in text/html), converted by web/figma-panel.js + the main process.
       const html = e.clipboardData?.getData('text/html') || '';
       if (window.figmaPaste?.accepts(html)) { window.figmaPaste.convert(html).then(layers => { if (layers) paste(layers, {inPlace}); }); return; }
-      const file = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/') && f.size < 8e6);
+      const imageFiles = [...(e.clipboardData?.files || [])];
+      try { window.imageUpload.batch(imageFiles); } catch(error) { footer(error.message); return; }
+      if(imageFiles.length>1){const rect=document.getElementById('canvas-wrap').getBoundingClientRect();window.imageDrop.dropFiles(imageFiles,rect.x+rect.width/2,rect.y+rect.height/2);return;}
+      const file = imageFiles[0];
       if (file) {
-        const reader = new FileReader();
-        reader.onload = () => { const img = new Image(); img.onload = () => { const w = Math.min(600, img.width), h = w * img.height / img.width, p = placeInView(w, h); ed.add('image', {name: file.name || 'Pasted image', src: reader.result, w, h, x: p.x, y: p.y, parentId: null, color: 'transparent'}); }; img.src = reader.result; };
-        reader.readAsDataURL(file); return;
+        const pageId = ed.page().id;
+        window.imageUpload.prepare(file).then(image => {
+          if (ed.page().id !== pageId) return;
+          const w = Math.min(600, image.originalWidth), h = w * image.originalHeight / image.originalWidth, p = placeInView(w, h);
+          ed.add('image', {name: file.name || 'Pasted image', src: image.src, w, h, x: p.x, y: p.y, parentId: null, color: 'transparent'});
+        }).catch(error => footer(error.message));
+        return;
       }
       if (text.trim()) { const p = placeInView(320, 80); ed.add('text', {text: text.slice(0, 100000), name: 'Pasted text', x: p.x, y: p.y, w: 320, h: 80, parentId: null}); return; }
       paste(clipboard, {inPlace});
