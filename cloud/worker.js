@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { database } from "./db.js";
-import { readAccountState, writeAccountState } from "./account-state.js";
+import { ACCOUNT_REQUEST_BYTES, readAccountState, writeAccountState } from "./account-state.js";
 // Verynize collaboration Worker: routes the HTTP API to the room, account and app Durable Objects.
 // API reference: cloud/README.md.
 import {
@@ -298,7 +298,7 @@ async function handleAuth(request, env, url) {
     const account = await requireAccount(env, request, url);
     const key = decodeURIComponent(path.slice("/api/me/state/".length));
     return json(
-      await writeAccountState(env, account.id, key, await readJson(request, 1024 * 1024)),
+      await writeAccountState(env, account.id, key, await readJson(request, ACCOUNT_REQUEST_BYTES)),
     );
   }
   if (path === "/api/me/rooms" && request.method === "GET") {

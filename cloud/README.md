@@ -62,7 +62,7 @@ connection. Legacy anonymous capability rooms retain their offline outbox behavi
 
 - `GET /api/me/state`: `{items: [{key, value, revision}], account}` for the authenticated account.
 - `PUT /api/me/state/:key`: `{value, revision}`; `value` is a JSON string or `null` (a tombstone),
-  and revision zero means create. A stale revision returns 409. Bodies are limited to 1 MiB.
+  and revision zero means create. A stale revision returns 409. Values are limited to 20 MiB of UTF-8 JSON (the request allows 40 MiB plus envelope overhead for double JSON escaping). Large records are split into internal `@chunk:` rows in the same table and committed atomically with the revision check. Reads return the original value; chunks are private implementation details and are reclaimed on replacement or deletion. Existing records remain readable without a schema migration.
 - Keys are `preference:*`, `agent-default:*`, `chat:*`, `draft:*`, `folder:*`, and `file:*`.
   Transcripts use individual chat IDs; preferences use individual fields, so unrelated edits
   never replace an entire account snapshot. Concurrent transcript edits preserve a conflict copy.
