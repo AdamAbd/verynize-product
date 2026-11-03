@@ -10,6 +10,8 @@ GitHub Actions splits compute jobs between Instabox and Blacksmith, using Ubuntu
 
 Allocation follows the job, not the branch: affected tests and release tests use the same provider for each lane. The branch/event selection below is unchanged. Install each provider's GitHub App with access to this repository before enabling its runner labels. Instabox uses a fresh machine per job and supports `instabox-medium` on its free plan; no Instabox API key is needed for this integration.
 
+At setup, the Instabox free workspace has one machine slot: quality and Node/cloud jobs queue until that slot is free. Blacksmith's monthly free allowance is 3,000 equivalent 2-vCPU Linux minutes, consumed faster by larger runners. Keep Node/cloud on Instabox to reserve Blacksmith credits for the browser-heavy lanes. Check both dashboards for current limits and usage; free access does not mean unlimited capacity.
+
 Runner references: [Instabox CI](https://instabox.sh/docs/ci), [Blacksmith runners](https://docs.blacksmith.sh/blacksmith-runners/overview). Validate the first CI run on both providers before merging; image compatibility alone does not establish that every Electron or cloud test passes.
 
 ## Branch flow
