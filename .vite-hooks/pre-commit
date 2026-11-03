@@ -1,0 +1,3 @@
+# Identity/PII guard on the staged blobs and the commit identity (docs/identity-guard.md).
+# Also OCRs staged images when tesseract is installed. Skip all hooks once: VP_GIT_HOOKS=0.
+node scripts/check-identity.mjs --staged --author
