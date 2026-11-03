@@ -22,6 +22,32 @@
     visibilityRoom = "",
     creating = null,
     lastState = "";
+  const uploads = new Map();
+  window.addEventListener("beforeunload", (event) => {
+    if (uploads.size) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
+
+  // One upload per library file, including imports, duplicates and files from before sign-in.
+  function storeFile(id) {
+    if (uploads.has(id)) return uploads.get(id);
+    const lib = window.fileLibrary;
+    const file = lib?.list().find((file) => file.id === id);
+    if (!file || file.cloud || file.invalid || !window.cloudAccount?.get())
+      return Promise.resolve();
+    const upload = ws
+      .storeDocument(file.document)
+      .then(async (cloud) => {
+        lib.setCloud(id, cloud, true);
+        if (lib.currentId === id && !ws.room()) await ws.attachRoom(cloud, file.document);
+        return cloud;
+      })
+      .finally(() => uploads.delete(id));
+    uploads.set(id, upload);
+    return upload;
+  }
 
   const roomKey = (room = ws.room()) => (room ? `${room.server}|${room.id}` : "");
   const colorFor = (id) => {
@@ -73,7 +99,15 @@
     if (room) return { server: room.server, roomId: room.id };
     const account = window.cloudAccount?.get();
     if (!account) throw Object.assign(Error("Sign in to share this file."), { code: "sign-in" });
-    creating ??= ws.createRoom(account.server).finally(() => (creating = null));
+    creating ??= (async () => {
+      const id = window.fileLibrary?.currentId;
+      if (!id) return ws.createRoom(account.server);
+      await storeFile(id);
+      const cloud = window.fileLibrary.cloudOf(id);
+      if (window.fileLibrary.currentId !== id || !cloud) return null;
+      await ws.openRoom({ server: cloud.server, id: cloud.roomId, token: cloud.token });
+      return cloud;
+    })().finally(() => (creating = null));
     const created = await creating;
     const current = ws.room();
     if (!created || !current) throw Error("The file could not be shared. Try again.");
@@ -203,6 +237,7 @@
   });
 
   Object.assign(ws, {
+    storeFile,
     ensureRoom,
     access,
     setVisibility,
@@ -214,5 +249,21 @@
   window.addEventListener("cloud-room-changed", roomChanged);
   window.addEventListener("cloud-panel-state", emit);
   window.addEventListener("cloud-account-changed", emit);
+  async function migrateFiles() {
+    if (!window.cloudAccount?.get()) return;
+    for (const file of window.fileLibrary?.list() || []) {
+      if (file.cloud || file.invalid) continue;
+      try {
+        await storeFile(file.id);
+      } catch (error) {
+        const status = document.getElementById("library-status");
+        if (status) status.textContent = `File not saved to the database: ${error.message}`;
+        break;
+      }
+    }
+  }
+  window.addEventListener("cloud-account-changed", migrateFiles);
+  window.addEventListener("online", migrateFiles);
+  window.addEventListener("DOMContentLoaded", migrateFiles);
   roomChanged();
 })();

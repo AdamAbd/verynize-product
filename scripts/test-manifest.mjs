@@ -27,6 +27,7 @@ export const CORE_ELECTRON = [
   "web/document-safety.js",
   "web/index.html",
   "web/platform.js",
+  "web/account-store.js",
   "web/style.css",
   "web/ui.css",
   "web/ui.js",
@@ -489,6 +490,7 @@ export const CLOUD_SCENARIOS = [
   "tests/cloud-web-access.mjs",
   "tests/cloud-auth-bridge.mjs",
   "tests/cloud-orgs.mjs",
+  "tests/cloud-account-state.mjs",
   "tests/cloud-share.mjs",
   "tests/cloud-directory-migration.mjs",
   "tests/cloud-merge.mjs",
@@ -555,6 +557,13 @@ const e2eCloud = [
   electron("tests/cloud-pages-desktop.mjs", "e2e-cloud", [
     ...AREA.cloudRenderer,
     "web/page-loader.js",
+  ]),
+  electron("tests/cloud-database-sync.mjs", "e2e-cloud", [
+    ...AREA.cloudRenderer,
+    "web/account-store.js",
+    "web/settings.js",
+    "web/desktop-panel.js",
+    ...isl("home"),
   ]),
   electron("tests/cloud-files-desktop.mjs", "e2e-cloud", [...AREA.cloudRenderer, ...isl("home")]),
   electron(
