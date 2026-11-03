@@ -1,6 +1,16 @@
 # CI
 
-GitHub Actions runs on GitHub-hosted runners (`runs-on: ubuntu-24.04`): a fresh Ubuntu 24.04 VM per job, with sudo. Electron tests are Linux-portable (`tests/helpers/keys.cjs`) so CI covers the Linux build, lint and tests; macOS runners bill at 10× on private repos. macOS packaging (`npm run package:mac`) and live agent tests stay local.
+GitHub Actions splits compute jobs between Instabox and Blacksmith, using Ubuntu 24.04 images. Planning, result aggregation, identity, branch policy and production deployment stay on GitHub-hosted runners. Electron tests are Linux-portable (`tests/helpers/keys.cjs`) so CI covers the Linux build, lint and tests. macOS packaging (`npm run package:mac`) and live agent tests stay local.
+
+## Runner allocation
+
+- `quality` and `node + cloud`: `instabox-medium` (4 vCPU, 8 GiB). These jobs build, lint, typecheck and run Node/cloud tests; browser tests install Chromium when selected.
+- `electron (i/n)` and `serial`: `blacksmith-4vcpu-ubuntu-2404` (4 vCPU, 16 GB). The additional memory supports Electron, browser processes and the Worker build. Existing system dependency installation and Electron sharding still apply.
+- `plan` and the aggregate `tests` job: `ubuntu-24.04`. They do little computation and do not need provider capacity.
+
+Allocation follows the job, not the branch: affected tests and release tests use the same provider for each lane. The branch/event selection below is unchanged. Install each provider's GitHub App with access to this repository before enabling its runner labels. Instabox uses a fresh machine per job and supports `instabox-medium` on its free plan; no Instabox API key is needed for this integration.
+
+Runner references: [Instabox CI](https://instabox.sh/docs/ci), [Blacksmith runners](https://docs.blacksmith.sh/blacksmith-runners/overview). Validate the first CI run on both providers before merging; image compatibility alone does not establish that every Electron or cloud test passes.
 
 ## Branch flow
 
