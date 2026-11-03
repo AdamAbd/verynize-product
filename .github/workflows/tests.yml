@@ -213,11 +213,12 @@ jobs:
           <fontconfig>
             <alias binding="strong"><family>Sans</family><prefer><family>Inter</family></prefer></alias>
             <alias binding="strong"><family>system-ui</family><prefer><family>Inter</family></prefer></alias>
+            <alias binding="strong"><family>sans-serif</family><prefer><family>Inter</family></prefer></alias>
           </fontconfig>
           XML
           sudo fc-cache -f > /dev/null
           echo "Inter files: $(fc-list :family=Inter file | wc -l); conf.d: $(ls /etc/fonts/conf.d | tr '\n' ' ')"
-          for family in 'system\-ui' Sans Sans:semibold Arial; do
+          for family in 'system\-ui' Sans sans\-serif Sans:semibold Arial; do
             match=$(fc-match "$family"); echo "$family -> $match"
             case "$family:$match" in Arial:*|*'"Inter"'*) ;; *) echo "::warning::fontconfig maps $family to $match, not Inter; text-layout tests will wrap differently" ;; esac
           done
@@ -302,11 +303,12 @@ jobs:
           <fontconfig>
             <alias binding="strong"><family>Sans</family><prefer><family>Inter</family></prefer></alias>
             <alias binding="strong"><family>system-ui</family><prefer><family>Inter</family></prefer></alias>
+            <alias binding="strong"><family>sans-serif</family><prefer><family>Inter</family></prefer></alias>
           </fontconfig>
           XML
           sudo fc-cache -f > /dev/null
           echo "Inter files: $(fc-list :family=Inter file | wc -l); conf.d: $(ls /etc/fonts/conf.d | tr '\n' ' ')"
-          for family in 'system\-ui' Sans Sans:semibold Arial; do
+          for family in 'system\-ui' Sans sans\-serif Sans:semibold Arial; do
             match=$(fc-match "$family"); echo "$family -> $match"
             case "$family:$match" in Arial:*|*'"Inter"'*) ;; *) echo "::warning::fontconfig maps $family to $match, not Inter; text-layout tests will wrap differently" ;; esac
           done
