@@ -193,6 +193,15 @@
     emit();
   }
 
+  // Every new file is stored in the active workspace, private until shared: the room is created as soon as the
+  // library opens the file (web/wonder-shell.js `library-file-created`). Signed out, the file stays on this device.
+  window.addEventListener("library-file-created", (event) => {
+    const id = event.detail?.id;
+    if (!id || !window.cloudAccount?.get() || ws.room()) return;
+    if (window.fileLibrary?.currentId !== id) return;
+    ensureRoom().catch((e) => console.warn("Could not store the new file in the workspace:", e));
+  });
+
   Object.assign(ws, {
     ensureRoom,
     access,

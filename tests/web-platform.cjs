@@ -154,6 +154,43 @@ async function openBrowser(url) {
       false,
       "no desktop onboarding on the web",
     );
+    // No window controls on the web: the title bar starts at the 8px edge gap, and there is no repositories sidebar.
+    const chrome = await page.evaluate(() => ({
+      platform: document.documentElement.dataset.platform,
+      inset: getComputedStyle(document.querySelector('[data-chrome-bar][role="banner"]')).paddingLeft,
+      sidebar: !!document.getElementById("chrome-sidebar"),
+    }));
+    assert.deepEqual(chrome, { platform: "web", inset: "8px", sidebar: false });
+    // Every opened file keeps its own tab; + opens the file switcher; closing the shown tab opens its neighbour.
+    for (const name of ["Tab two", "Tab three"])
+      await page.evaluate(async (name) => {
+        const doc = window.design.getDocument();
+        doc.name = name;
+        await window.fileLibrary.createFromDocument(doc);
+      }, name);
+    const tabNames = () =>
+      page.locator("[data-file-tab]:visible").evaluateAll((tabs) =>
+        tabs.map((tab) => tab.querySelector("input")?.value ?? tab.textContent.trim()),
+      );
+    assert.deepEqual((await tabNames()).slice(-2), ["Tab two", "Tab three"]);
+    await page.locator("#shell-new-file").click();
+    const switcher = page.locator("#file-switcher");
+    await switcher.waitFor();
+    assert.equal(await switcher.locator("[data-switcher-new]").isVisible(), true, "New file row");
+    assert.equal(
+      await switcher.locator('[data-switcher-section="Recents"] [data-switcher-file] [data-switcher-name]').first().innerText(),
+      "Tab three",
+      "Recents are newest first",
+    );
+    await page.keyboard.type("two");
+    await page.keyboard.press("Enter");
+    await switcher.waitFor({ state: "detached" });
+    await page.waitForFunction(() => window.design.getDocument().name === "Tab two");
+    assert.deepEqual((await tabNames()).slice(-2), ["Tab two", "Tab three"], "opening keeps every tab");
+    await page.locator("[data-document-tab]").hover();
+    await page.locator("[data-document-tab] [data-file-tab-close]").click();
+    await page.waitForFunction(() => window.design.getDocument().name === "Tab three");
+    assert.equal((await tabNames()).includes("Tab two"), false, "closed tab is gone");
     const notes = await page.evaluate(async () => {
       const $ = (id) => document.getElementById(id);
       const settle = () => new Promise((resolve) => setTimeout(resolve, 50));

@@ -446,6 +446,7 @@ const integrations = integrationFiles.map((name) => {
 
 const ux = [
   electron("tests/wonder-shell.cjs", "ux", AREA.shell),
+  electron("tests/file-tabs.cjs", "ux", [...AREA.shell, "web/cloud-share.js"]),
   electron("tests/settings.cjs", "ux", AREA.settings),
   electron("tests/views-templates.cjs", "ux", [
     "web/views-templates.*",

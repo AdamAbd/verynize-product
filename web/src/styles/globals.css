@@ -144,10 +144,15 @@ html[data-ui-theme="light"] {
   --spacing-chrome: 40px; /* window chrome height */
   --spacing-panel: 280px; /* left / right panel width */
   --spacing-chat: 499px; /* chat dock width */
-  --spacing-traffic: 80px; /* macOS traffic-light inset */
+  --spacing-traffic: var(--traffic-inset, 80px); /* macOS traffic-light inset (8px on the web, below) */
 
   --shadow-menu: 0 12px 32px rgb(0 0 0 / 0.4);
   --shadow-toolbar: 0 6px 24px rgb(0 0 0 / 0.3);
+}
+
+/* The web build has no window controls: the traffic-light inset shrinks to the 8px edge gap (web/platform.js). */
+html[data-platform="web"] {
+  --traffic-inset: 8px;
 }
 
 /* Scoped reset for island roots and their portals (legacy CSS keeps owning everything else). */
