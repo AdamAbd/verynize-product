@@ -10,11 +10,13 @@ import { AppMenu } from "./chrome/AppMenu";
 import { CanvasOverlays } from "./chrome/CanvasOverlays";
 import { CanvasContextMenu } from "./context-menu/CanvasContextMenu";
 import { CommandPalette } from "./chrome/CommandPalette";
+import { FileSwitcher } from "./chrome/FileSwitcher";
 import { ShortcutsDrawer } from "./chrome/ShortcutsDrawer";
 import { applyLayout, toggleBodyClass, type LayoutName } from "./chrome/hooks";
 import { initLegacy } from "./chrome/legacy";
 import { PreviewTabView } from "./chrome/preview-tab/PreviewTabView";
 import { installPreviewTabs } from "./chrome/preview-tab/store";
+import { initPanelWidths, PanelResizeHandles } from "./chrome/panel-resize";
 import "./chrome/chrome.css";
 
 function useLayoutShortcuts() {
@@ -59,8 +61,10 @@ function Island({ overlayHost }: { overlayHost: HTMLElement | null }) {
       <AppMenu />
       <CanvasContextMenu />
       <CommandPalette />
+      <FileSwitcher />
       <ShortcutsDrawer />
       <PreviewTabView />
+      <PanelResizeHandles />
       {overlayHost ? createPortal(<CanvasOverlays />, overlayHost) : null}
     </>
   );
@@ -69,6 +73,7 @@ function Island({ overlayHost }: { overlayHost: HTMLElement | null }) {
 function container() {
   initLegacy();
   installPreviewTabs();
+  initPanelWidths();
   document.body.classList.add("bd-chrome");
   let root = document.getElementById("bd-chrome-root");
   if (!root) {

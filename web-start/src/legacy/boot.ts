@@ -9,9 +9,17 @@
 //    parallel);
 // 4. a DOMContentLoaded event. A parsed page fires it after its scripts; legacy listeners
 //    registered during startup (cloud-panel.js reconnects the open file's room on it) need it.
+//
+// web/dist/ui.js is not loaded: at its place in the order the same UI runs from source, bundled into
+// this app (legacy/ui.ts), so the islands and Start's routes share one React.
 import shell from "virtual:verynize/legacy-shell";
+import { loadLegacyUi } from "./ui";
+
+/** The desktop UI bundle; on the web its source is part of Start's client build instead. */
+const isUiBundle = (src: string | undefined) => !!src && /(^|\/)dist\/ui\.js(\?|$)/.test(src);
 
 let booted: Promise<void> | undefined;
+let styled: Promise<void> | undefined;
 
 /** Starts the legacy editor once per page. Later calls return the same promise. */
 export function bootLegacyEditor(): Promise<void> {
@@ -27,11 +35,17 @@ const loaded = (element: HTMLLinkElement | HTMLScriptElement, label: string) =>
     });
   });
 
-async function run() {
-  const root = document.documentElement;
-  root.dataset.legacyEditor = "booting";
-  if (shell.title) document.title = shell.title;
+/**
+ * Step 1 alone: the stylesheets of web/index.html (web/dist/ui.css included), once per page. The sign-in screen shown
+ * before the editor boots (routes/_editor.tsx) uses them too.
+ */
+export function loadLegacyStyles(): Promise<void> {
+  styled ??= styles();
+  return styled;
+}
 
+async function styles() {
+  if (shell.title) document.title = shell.title;
   const styles: Promise<void>[] = [];
   for (const style of shell.styles) {
     if (style.href === undefined) {
@@ -47,6 +61,12 @@ async function run() {
     document.head.append(link);
   }
   await Promise.all(styles);
+}
+
+async function run() {
+  const root = document.documentElement;
+  root.dataset.legacyEditor = "booting";
+  await loadLegacyStyles();
 
   for (const [name, value] of Object.entries(shell.bodyAttributes))
     document.body.setAttribute(name, value);
@@ -55,7 +75,19 @@ async function run() {
   document.body.prepend(template.content);
 
   let last: Promise<void> = Promise.resolve();
+  let afterUi = false;
   for (const script of shell.scripts) {
+    if (isUiBundle(script.attrs.src)) {
+      // Runs after the scripts before it, like the ordered script it replaces.
+      last = last.then(loadLegacyUi).then(
+        () => undefined,
+        (error: Error) => console.error(error),
+      );
+      afterUi = true;
+      continue;
+    }
+    // Inserted scripts only keep their order among themselves: anything after the UI waits for it.
+    if (afterUi) await last;
     const element = document.createElement("script");
     for (const [name, value] of Object.entries(script.attrs)) element.setAttribute(name, value);
     element.async = false;

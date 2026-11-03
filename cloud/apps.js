@@ -1,5 +1,8 @@
 // Published applications: one SQLite Durable Object per app holding immutable, versioned
-// static builds (HTML/JS/CSS/assets uploaded from the desktop after a local build).
+// static builds (HTML/JS/CSS/assets uploaded from the desktop after a local build). The bytes of
+// each file live in the ASSETS_BUCKET R2 bucket (key apps/<app>/<sha256>, shared by the versions
+// that contain the same file); the object keeps only the version and file index. Servers without
+// the bucket, and files stored before it, keep their bytes in 1 MB SQLite chunks.
 import { DurableObject } from "#cloud-runtime";
 import { rpcFail, bytesHex } from "./http.js";
 
@@ -79,7 +82,38 @@ export class PublishedApp extends DurableObject {
     return this.sql.exec("SELECT * FROM versions WHERE version=?", version).toArray()[0] || null;
   }
 
-  createVersion(note) {
+  /** The R2 bucket for file bytes, or null (bytes then stay in SQLite chunks). */
+  bucket() {
+    return this.env?.ASSETS_BUCKET || null;
+  }
+  objectKey(sha256) {
+    return `apps/${this.ctx.id.toString()}/${sha256}`;
+  }
+  /** Delete the R2 objects of `hashes` that no stored file references any more. */
+  async release(hashes) {
+    const bucket = this.bucket();
+    if (!bucket) return;
+    for (const sha256 of new Set(hashes)) {
+      const used = this.sql
+        .exec("SELECT COUNT(*) AS n FROM files WHERE sha256=? AND chunks=0", sha256)
+        .one().n;
+      if (!used) await bucket.delete(this.objectKey(sha256));
+    }
+  }
+  /** SHA-256 of the R2-stored files of a version (or one path of it). */
+  storedHashes(version, path) {
+    return this.sql
+      .exec(
+        path === undefined
+          ? "SELECT sha256 FROM files WHERE version=? AND chunks=0"
+          : "SELECT sha256 FROM files WHERE version=? AND path=? AND chunks=0",
+        ...(path === undefined ? [version] : [version, path]),
+      )
+      .toArray()
+      .map((row) => row.sha256);
+  }
+
+  async createVersion(note) {
     const ready = this.sql.exec("SELECT COUNT(*) AS n FROM versions WHERE state='ready'").one().n;
     if (ready >= MAX_VERSIONS) rpcFail(409, `Delete an old version first (limit ${MAX_VERSIONS})`);
     // Abandoned uploads older than a day are discarded.
@@ -89,7 +123,7 @@ export class PublishedApp extends DurableObject {
         Date.now() - 86400000,
       )
       .toArray())
-      this.dropVersion(old.version);
+      await this.dropVersion(old.version);
     this.sql.exec(
       "INSERT INTO versions (state,note,created_at) VALUES ('uploading',?,?)",
       typeof note === "string" ? note.slice(0, 200) : null,
@@ -113,16 +147,26 @@ export class PublishedApp extends DurableObject {
     if (files > MAX_FILES) rpcFail(413, `A version holds at most ${MAX_FILES} files`);
     if (total > MAX_VERSION_BYTES) rpcFail(413, "A version is limited to 100 MB");
     const sha256 = await bytesHex(bytes);
+    const replaced = this.storedHashes(version, path);
     this.sql.exec("DELETE FROM chunks WHERE version=? AND path=?", version, path);
-    const count = Math.max(1, Math.ceil(bytes.byteLength / CHUNK));
-    for (let i = 0; i < count; i++)
-      this.sql.exec(
-        "INSERT INTO chunks (version,path,idx,data) VALUES (?,?,?,?)",
-        version,
-        path,
-        i,
-        bytes.subarray(i * CHUNK, (i + 1) * CHUNK),
-      );
+    const bucket = this.bucket();
+    let count = 0;
+    if (bucket)
+      await bucket.put(this.objectKey(sha256), bytes, {
+        httpMetadata: { contentType: contentTypeOf(path) },
+        sha256,
+      });
+    else {
+      count = Math.max(1, Math.ceil(bytes.byteLength / CHUNK));
+      for (let i = 0; i < count; i++)
+        this.sql.exec(
+          "INSERT INTO chunks (version,path,idx,data) VALUES (?,?,?,?)",
+          version,
+          path,
+          i,
+          bytes.subarray(i * CHUNK, (i + 1) * CHUNK),
+        );
+    }
     this.sql.exec(
       "INSERT OR REPLACE INTO files (version,path,content_type,size,sha256,chunks) VALUES (?,?,?,?,?,?)",
       version,
@@ -133,11 +177,12 @@ export class PublishedApp extends DurableObject {
       count,
     );
     this.sql.exec("UPDATE versions SET files=?,bytes=? WHERE version=?", files, total, version);
+    await this.release(replaced.filter((hash) => hash !== sha256));
     return { path, size: bytes.byteLength, sha256 };
   }
 
   /** Seal an upload: every manifest entry must match what was stored; stray files are dropped. */
-  finalize(version, manifest) {
+  async finalize(version, manifest) {
     const row = this.version(version);
     if (!row || row.state !== "uploading") rpcFail(409, "This version is not accepting files");
     if (!Array.isArray(manifest) || !manifest.length || manifest.length > MAX_FILES)
@@ -162,11 +207,14 @@ export class PublishedApp extends DurableObject {
       if (file.size !== entry.size || file.sha256 !== entry.sha256)
         rpcFail(409, `Upload changed in transit: ${path}`);
     }
+    const stray = [];
     for (const path of stored.keys())
       if (!wanted.has(path)) {
+        stray.push(...this.storedHashes(version, path));
         this.sql.exec("DELETE FROM chunks WHERE version=? AND path=?", version, path);
         this.sql.exec("DELETE FROM files WHERE version=? AND path=?", version, path);
       }
+    await this.release(stray);
     const totals = this.sql
       .exec(
         "SELECT COUNT(*) AS files, COALESCE(SUM(size),0) AS bytes FROM files WHERE version=?",
@@ -201,14 +249,16 @@ export class PublishedApp extends DurableObject {
     return this.version(version)?.state === "ready";
   }
 
-  dropVersion(version) {
+  async dropVersion(version) {
+    const hashes = this.storedHashes(version);
     this.sql.exec("DELETE FROM chunks WHERE version=?", version);
     this.sql.exec("DELETE FROM files WHERE version=?", version);
     this.sql.exec("DELETE FROM versions WHERE version=?", version);
+    await this.release(hashes);
   }
-  deleteVersion(version) {
+  async deleteVersion(version) {
     if (!this.version(version)) rpcFail(404, "Version not found");
-    this.dropVersion(version);
+    await this.dropVersion(version);
     return { deleted: version };
   }
 
@@ -216,7 +266,7 @@ export class PublishedApp extends DurableObject {
    * File for a request path inside a ready version. Directory paths resolve to index.html, and
    * extension-less paths fall back to the root index.html so client-side routes load.
    */
-  read(version, rawPath) {
+  async read(version, rawPath) {
     if (!this.isReady(version)) return null;
     const candidates = [];
     if (!rawPath) candidates.push("index.html");
@@ -233,6 +283,12 @@ export class PublishedApp extends DurableObject {
         .exec("SELECT * FROM files WHERE version=? AND path=?", version, path)
         .toArray()[0];
       if (!file) continue;
+      if (file.chunks === 0) {
+        const object = await this.bucket()?.get(this.objectKey(file.sha256));
+        if (!object) return null;
+        const body = new Uint8Array(await new Response(object.body).arrayBuffer());
+        return { path, contentType: file.content_type, sha256: file.sha256, body };
+      }
       const body = new Uint8Array(file.size);
       let offset = 0;
       for (const chunk of this.sql.exec(

@@ -197,8 +197,9 @@
         runBC = (c - b + n) % n || n;
       const pa = loop[a],
         pb = loop[b];
-      points.push({ x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2, corner: false });
-      if (runAB >= cornerRun && runBC >= cornerRun) points.push({ x: pb.x, y: pb.y, corner: true });
+      points.push({ x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2, corner: false, run: runAB });
+      if (runAB >= cornerRun && runBC >= cornerRun)
+        points.push({ x: pb.x, y: pb.y, corner: true, run: 0 });
     }
     return points;
   }
@@ -353,6 +354,31 @@
     return unit(sum);
   };
 
+  // A straight edge through a corner-to-corner chain: the chord's direction through the centroid of
+  // its interior run midpoints, weighted by run length (long runs lie exactly on the edge). Null
+  // without interior runs (the chord itself is the edge).
+  function edgeLine(chain) {
+    let weight = 0,
+      x = 0,
+      y = 0;
+    for (let i = 1; i < chain.length - 1; i++) {
+      const w = chain[i].run || 0;
+      weight += w;
+      x += chain[i].x * w;
+      y += chain[i].y * w;
+    }
+    const direction = unit(sub(chain[chain.length - 1], chain[0]));
+    if (!weight || (!direction.x && !direction.y)) return null;
+    return { point: { x: x / weight, y: y / weight }, direction };
+  }
+  function intersect(a, b) {
+    const det = a.direction.x * b.direction.y - a.direction.y * b.direction.x;
+    if (Math.abs(det) < 0.2) return null; // nearly parallel: no well-defined vertex
+    const d = sub(b.point, a.point),
+      t = (d.x * b.direction.y - d.y * b.direction.x) / det;
+    return add(a.point, mul(a.direction, t));
+  }
+
   // One closed loop → SVG path data (absolute commands, viewBox units).
   function loopPath(loop, options) {
     let points = runPoints(loop, options.cornerRun);
@@ -379,6 +405,7 @@
       const t = unit(sub(points[1], points[n - 1]));
       fitCubic(closed, t, mul(t, -1), options.fitError, segments);
     } else {
+      const lines = []; // per corner k: the straight edge leaving it, or null for a curve
       for (let k = 0; k < corners.length; k++) {
         const start = corners[k],
           end = corners[(k + 1) % corners.length];
@@ -389,9 +416,11 @@
           if (chain.length > n + 1) break;
         }
         if (chain.length === 2 || rdp(chain, options.lineEpsilon).length === 2) {
+          lines.push({ segment: segments.length, line: edgeLine(chain) });
           segments.push([chain[0], null, null, chain[chain.length - 1]]);
           continue;
         }
+        lines.push(null);
         fitCubic(
           chain,
           tangentAt(chain, 0, 1),
@@ -399,6 +428,18 @@
           options.fitError,
           segments,
         );
+      }
+      // A polygon vertex between two straight edges is where those edges meet. The RDP vertex is a
+      // staircase run midpoint, up to half a pixel inside the shape when it borders a long
+      // axis-aligned run (a flat edge on a pixel boundary): move it to the edges' intersection.
+      for (let k = 0; k < lines.length; k++) {
+        const before = lines[(k - 1 + lines.length) % lines.length],
+          after = lines[k];
+        if (!before?.line || !after?.line || before === after) continue;
+        const corner = segments[after.segment][0],
+          meet = intersect(before.line, after.line);
+        if (!meet || len(sub(meet, corner)) > options.cornerSnap) continue;
+        segments[before.segment][3] = segments[after.segment][0] = meet;
       }
     }
     const first = segments[0][0];
@@ -418,6 +459,7 @@
       cornerAngle: 60,
       cornerSpan: 1.5,
       lineEpsilon: 0.8,
+      cornerSnap: 1.5,
       fitError: 0.7,
       maxColors: 16,
       ...options,

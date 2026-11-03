@@ -109,28 +109,23 @@ const os = require("node:os");
       assert.equal((await state()).hash, hash);
       await page.locator("#settings-back").click();
       await expectAt("/", hash);
-      // Reload keeps path and fragment; the startup invite/public handling sees it again.
+      // Reload keeps path and fragment.
       await page.reload();
       await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
       await expectAt("/", hash);
-      await page.waitForFunction(() => document.getElementById("cloud-dialog").open);
-      await page.evaluate(() => document.getElementById("cloud-dialog").close());
       await page.evaluate(() => (location.hash = ""));
     }
 
-    // Invite link opened in the app window: the dialog asks to join, the hash survives navigation.
+    // Invite fragment on the app window's own address: it is no http(s) link (collab/links.ts opens those), so nothing
+    // opens and no dialog asks; the hash survives navigation.
     const invite = `#room=${ROOM}&token=${TOKEN}`;
     // From app://verynize/ a goto to the same path would only change the fragment: load it fresh.
     await page.goto(`app://verynize/editor`);
     await page.goto(`app://verynize/${invite}`);
     await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
     await expectAt("/", invite);
-    await page.waitForFunction(() => document.getElementById("cloud-dialog").open);
-    assert.match(await page.locator("#cloud-status").innerText(), /Invite detected/);
-    await page.evaluate(() => {
-      document.getElementById("cloud-dialog").close();
-      window.shellRouter.navigate({ to: "/editor" });
-    });
+    assert.equal(await page.evaluate(() => document.getElementById("cloud-dialog").open), false);
+    await page.evaluate(() => window.shellRouter.navigate({ to: "/editor" }));
     await expectAt("/editor", invite);
 
     // Leaving the room clears its fragment; Back onto an older entry of that room drops it again.
@@ -148,7 +143,7 @@ const os = require("node:os");
         };
         const remote = structuredClone(window.design.getDocument());
         window.fetch = async (url) => {
-          const data = String(url).endsWith(`/api/rooms/${room}`)
+          const data = new URL(String(url)).pathname.endsWith(`/api/rooms/${room}`)
             ? { document: remote, revision: 0, role: "owner" }
             : {};
           return { ok: true, status: 200, json: async () => data };

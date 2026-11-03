@@ -206,13 +206,15 @@ export async function renderArtwork({
       height: Math.ceil(html.height * scale),
     };
   }
+  // The offscreen renderer loads no network URLs: room assets (images, fonts) become data URIs.
+  const offline = (await window.cloudAssets?.inlineHtml?.(html.content!)) ?? html.content!;
   if (format === "PDF") {
     if (!native?.renderPDF) throw Error("Open the desktop app for PDF export.");
-    const pdf = await native.renderPDF({ html: html.content!, width, height, title: name });
+    const pdf = await native.renderPDF({ html: offline, width, height, title: name });
     return { data: pdf.dataURL, extension: "pdf", width: pdf.width, height: pdf.height };
   }
   if (!native?.renderDesign) throw Error("Open the desktop app for pixel-accurate raster export.");
-  const raster = await native.renderDesign({ html: html.content!, width, height, scale });
+  const raster = await native.renderDesign({ html: offline, width, height, scale });
   const data =
     format === "PNG"
       ? raster.dataURL

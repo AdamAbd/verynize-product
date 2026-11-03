@@ -1,0 +1,374 @@
+name: Tests
+# Runs on GitHub-hosted Ubuntu 24.04 runners. See docs/ci.md.
+# PR -> staging: quality + affected tests. PR -> main, push to staging, nightly, manual: full suite.
+# Required status checks: `quality` and `tests` (the aggregate job at the bottom).
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging]
+  schedule:
+    # Nightly full suite. Schedules only fire from the default branch (main); the jobs check out staging.
+    - cron: "17 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CI: "1"
+  # Schedules check out staging; every other event uses the event's own ref ('' = default).
+  CHECKOUT_REF: ${{ github.event_name == 'schedule' && 'staging' || '' }}
+  NODE_VERSION: "24"
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Restore Electron download cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - run: npm run build:ui
+      - run: npm run check
+      - run: npm run lint
+      - run: npm run typecheck:ui
+      # The tree predates the formatter (hundreds of unformatted files), so only files a PR adds
+      # must be formatted. Run `npm run format:check` locally for the whole tree.
+      - name: Format check (files added by this PR)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git diff --name-only -z --diff-filter=A "$BASE_SHA" HEAD -- \
+            | grep -zE '\.(js|cjs|mjs|ts|tsx|json|css|md|yml|yaml)$' \
+            | xargs -0 -r npx --no-install vp fmt --check
+
+  plan:
+    name: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      count: ${{ steps.plan.outputs.count }}
+      node_count: ${{ steps.plan.outputs.node_count }}
+      electron_count: ${{ steps.plan.outputs.electron_count }}
+      serial_count: ${{ steps.plan.outputs.serial_count }}
+      electron_shards: ${{ steps.plan.outputs.electron_shards }}
+      node_browser: ${{ steps.plan.outputs.node_browser }}
+      serial_browser: ${{ steps.plan.outputs.serial_browser }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          # Affected-test selection diffs base.sha..head.sha, so it needs full history.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Select tests
+        id: plan
+        # The runner selects from GITHUB_EVENT_NAME / GITHUB_EVENT_PATH: PR into staging = affected
+        # tests only, everything else = full suite. --list prints the selection without running it.
+        # Counting lines that name a test file keeps this independent of headers in the listing
+        # ('# ...' summary lines can name a changed file; 'skip' lines are platform skips). The runner
+        # imports only Node built-ins, so this job needs no npm ci.
+        run: |
+          set -euo pipefail
+          list() { node scripts/run-tests.mjs --ci-event --list "$@"; }
+          count() { grep -vE '^(#|skip )' | grep -cE '(tests|integrations|eval)/[^[:space:]]+\.(c|m)?js' || true; }
+          browser() { grep -qE 'tests/web-' && echo true || echo false; }
+          list > "$RUNNER_TEMP/all.txt"
+          list --lane node --lane cloud > "$RUNNER_TEMP/node.txt"
+          list --lane electron > "$RUNNER_TEMP/electron.txt"
+          list --lane serial > "$RUNNER_TEMP/serial.txt"
+          all=$(count < "$RUNNER_TEMP/all.txt")
+          electron=$(count < "$RUNNER_TEMP/electron.txt")
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "$GITHUB_BASE_REF" = staging ]; then
+            mode=affected
+          else
+            mode=full
+          fi
+          # About 20 Electron tests per shard (~4 min), at most 4 shards. An affected run that touches core
+          # files selects the full suite, so size by count rather than by event.
+          shards=$(( (electron + 19) / 20 )); [ "$shards" -lt 1 ] && shards=1; [ "$shards" -gt 4 ] && shards=4
+          matrix=$(node -e 'const n=+process.argv[1];console.log(JSON.stringify(Array.from({length:n},(_,i)=>(i+1)+"/"+n)))' "$shards")
+          {
+            echo "mode=$mode"
+            echo "count=$all"
+            echo "node_count=$(count < "$RUNNER_TEMP/node.txt")"
+            echo "electron_count=$electron"
+            echo "serial_count=$(count < "$RUNNER_TEMP/serial.txt")"
+            echo "electron_shards=$matrix"
+            echo "node_browser=$(browser < "$RUNNER_TEMP/node.txt")"
+            echo "serial_browser=$(browser < "$RUNNER_TEMP/serial.txt")"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Test plan ($mode)"
+            echo
+            echo "$all selected: node+cloud $(count < "$RUNNER_TEMP/node.txt"), electron $electron in $shards shard(s), serial $(count < "$RUNNER_TEMP/serial.txt")."
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/all.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  node-cloud:
+    name: node + cloud
+    needs: plan
+    if: needs.plan.outputs.node_count != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Restore Electron and Playwright caches
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/ms-playwright
+          key: browsers-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Install Playwright Chromium (web tests)
+        if: needs.plan.outputs.node_browser == 'true'
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Run node and cloud lanes
+        run: node scripts/run-tests.mjs --ci-event --lane node --lane cloud --report "$RUNNER_TEMP/report"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-report-node-cloud
+          path: ${{ runner.temp }}/report
+          if-no-files-found: ignore
+          retention-days: 14
+
+  electron:
+    name: electron (${{ matrix.shard }})
+    needs: plan
+    if: needs.plan.outputs.electron_count != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.electron_shards) }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install Electron system dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          # Ubuntu 24.04 names: the t64 packages replace libgtk-3-0 / libatk-bridge2.0-0 / libasound2.
+          # Also: Mesa (software GL/WebGL under xvfb: shaders, canvas-shaders), zsh (the terminal tests'
+          # shell), poppler-utils (pdftoppm, capture-export-fonts), and a toolchain in case node-pty has
+          # to build from source (it ships a linux-x64 prebuild).
+          sudo apt-get install -y --no-install-recommends xvfb xauth libnss3 libatk-bridge2.0-0t64 \
+            libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxkbcommon0 libdrm2 libcups2t64 fonts-liberation \
+            libgl1 libegl1 libgl1-mesa-dri mesa-utils zsh poppler-utils build-essential python3 fonts-inter
+          # The system UI font (CSS system-ui; documents' default font-sans) is SF Pro on macOS, where the
+          # text-layout tests were measured, and fontconfig's "Sans" (DejaVu Sans, much wider) here. Inter has
+          # close to SF metrics, so headings wrap as on macOS. Arial/Helvetica keep Liberation Sans.
+          # The aliases go straight into conf.d (52, after 51-local.conf, before 60-latin's DejaVu
+          # preferences). A run with them in /etc/fonts/local.conf still matched DejaVu Sans, so the
+          # step prints what fontconfig sees. fc-match parses "-" as a size: system-ui is written system\-ui.
+          sudo tee /etc/fonts/conf.d/52-ci-system-font.conf > /dev/null <<'XML'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+          <fontconfig>
+            <alias binding="strong"><family>Sans</family><prefer><family>Inter</family></prefer></alias>
+            <alias binding="strong"><family>system-ui</family><prefer><family>Inter</family></prefer></alias>
+            <alias binding="strong"><family>sans-serif</family><prefer><family>Inter</family></prefer></alias>
+          </fontconfig>
+          XML
+          sudo fc-cache -f > /dev/null
+          echo "Inter files: $(fc-list :family=Inter file | wc -l); conf.d: $(ls /etc/fonts/conf.d | tr '\n' ' ')"
+          for family in 'system\-ui' Sans sans\-serif Sans:semibold Arial; do
+            match=$(fc-match "$family"); echo "$family -> $match"
+            case "$family:$match" in Arial:*|*'"Inter"'*) ;; *) echo "::warning::fontconfig maps $family to $match, not Inter; text-layout tests will wrap differently" ;; esac
+          done
+      - name: Allow the Chromium sandbox
+        # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor, so Electron's Chromium
+        # sandbox aborts ("No usable sandbox") unless chrome-sandbox is setuid root, which npm cannot
+        # do. Re-enable user namespaces on this throwaway VM so tests keep the real sandbox; only if
+        # that fails, fall back to ELECTRON_DISABLE_SANDBOX=1 (Electron's equivalent of --no-sandbox).
+        run: |
+          knob=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -e "$knob" ] && ! sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
+            echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
+            echo '::warning::User namespaces unavailable; Electron runs with ELECTRON_DISABLE_SANDBOX=1'
+          fi
+      - name: Restore Electron cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Download Electron
+        # npm 11 may skip dependency install scripts, and electron fetches its binary lazily on first
+        # use otherwise (inside a timed test). install.js is a no-op when it is already there.
+        run: node node_modules/electron/install.js
+      - name: Run electron lane
+        # No DISPLAY on the VM: the runner wraps each Electron test in `xvfb-run -a -s "-screen 0 3840x2160x24"`.
+        run: node scripts/run-tests.mjs --ci-event --lane electron --shard "$SHARD" --report "$RUNNER_TEMP/report"
+        env:
+          SHARD: ${{ matrix.shard }}
+      - name: Name report artifact
+        if: always()
+        id: artifact
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: echo "name=test-report-electron-${SHARD/\//-of-}" >> "$GITHUB_OUTPUT"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ runner.temp }}/report
+          if-no-files-found: ignore
+          retention-days: 14
+
+  serial:
+    name: serial
+    needs: plan
+    if: needs.plan.outputs.serial_count != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install Electron system dependencies
+        run: |
+          set -euo pipefail
+          sudo sed -i 's#http://[a-z.]*archive.ubuntu.com#http://fr.archive.ubuntu.com#g' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update
+          # Ubuntu 24.04 names: the t64 packages replace libgtk-3-0 / libatk-bridge2.0-0 / libasound2.
+          # Also: Mesa (software GL/WebGL under xvfb: shaders, canvas-shaders), zsh (the terminal tests'
+          # shell), poppler-utils (pdftoppm, capture-export-fonts), and a toolchain in case node-pty has
+          # to build from source (it ships a linux-x64 prebuild).
+          sudo apt-get install -y --no-install-recommends xvfb xauth libnss3 libatk-bridge2.0-0t64 \
+            libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxkbcommon0 libdrm2 libcups2t64 fonts-liberation \
+            libgl1 libegl1 libgl1-mesa-dri mesa-utils zsh poppler-utils build-essential python3 fonts-inter
+          # The system UI font (CSS system-ui; documents' default font-sans) is SF Pro on macOS, where the
+          # text-layout tests were measured, and fontconfig's "Sans" (DejaVu Sans, much wider) here. Inter has
+          # close to SF metrics, so headings wrap as on macOS. Arial/Helvetica keep Liberation Sans.
+          # The aliases go straight into conf.d (52, after 51-local.conf, before 60-latin's DejaVu
+          # preferences). A run with them in /etc/fonts/local.conf still matched DejaVu Sans, so the
+          # step prints what fontconfig sees. fc-match parses "-" as a size: system-ui is written system\-ui.
+          sudo tee /etc/fonts/conf.d/52-ci-system-font.conf > /dev/null <<'XML'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+          <fontconfig>
+            <alias binding="strong"><family>Sans</family><prefer><family>Inter</family></prefer></alias>
+            <alias binding="strong"><family>system-ui</family><prefer><family>Inter</family></prefer></alias>
+            <alias binding="strong"><family>sans-serif</family><prefer><family>Inter</family></prefer></alias>
+          </fontconfig>
+          XML
+          sudo fc-cache -f > /dev/null
+          echo "Inter files: $(fc-list :family=Inter file | wc -l); conf.d: $(ls /etc/fonts/conf.d | tr '\n' ' ')"
+          for family in 'system\-ui' Sans sans\-serif Sans:semibold Arial; do
+            match=$(fc-match "$family"); echo "$family -> $match"
+            case "$family:$match" in Arial:*|*'"Inter"'*) ;; *) echo "::warning::fontconfig maps $family to $match, not Inter; text-layout tests will wrap differently" ;; esac
+          done
+      - name: Allow the Chromium sandbox
+        # See the electron job.
+        run: |
+          knob=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -e "$knob" ] && ! sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
+            echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
+            echo '::warning::User namespaces unavailable; Electron runs with ELECTRON_DISABLE_SANDBOX=1'
+          fi
+      - name: Restore Electron and Playwright caches
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/ms-playwright
+          key: browsers-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Download Electron
+        # See the electron job.
+        run: node node_modules/electron/install.js
+      - name: Install Playwright Chromium (web tests)
+        if: needs.plan.outputs.serial_browser == 'true'
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Run serial lane
+        run: node scripts/run-tests.mjs --ci-event --lane serial --report "$RUNNER_TEMP/report"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-report-serial
+          path: ${{ runner.temp }}/report
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Stable required status check. Skipped lanes (nothing affected) count as success;
+  # a failed or cancelled plan or lane fails this job.
+  tests:
+    name: tests
+    needs: [plan, node-cloud, electron, serial]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Check lane results
+        env:
+          PLAN: ${{ needs.plan.result }}
+          NODE_CLOUD: ${{ needs.node-cloud.result }}
+          ELECTRON: ${{ needs.electron.result }}
+          SERIAL: ${{ needs.serial.result }}
+          COUNT: ${{ needs.plan.outputs.count }}
+          MODE: ${{ needs.plan.outputs.mode }}
+        run: |
+          echo "plan=$PLAN ($MODE, ${COUNT:-?} tests) node-cloud=$NODE_CLOUD electron=$ELECTRON serial=$SERIAL"
+          if [ "$PLAN" != success ]; then echo '::error::Test planning did not succeed'; exit 1; fi
+          for result in "$NODE_CLOUD" "$ELECTRON" "$SERIAL"; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::A test lane ended with: $result"; exit 1 ;;
+            esac
+          done
+          if [ "${COUNT:-0}" = 0 ]; then echo 'No tests affected by this change.'; fi

@@ -3,6 +3,7 @@
 // Custom masks, Advanced mask options (Mode, Repeat, Position, Size), mask operations and "Detach mask as
 // shape". Everything goes through the real inspector, renders on the canvas, is undoable and survives reload.
 const { _electron } = require("@playwright/test");
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -25,7 +26,7 @@ const PNG =
     timeout: 20000,
   });
   try {
-    let page = await app.firstWindow({ timeout: 20000 });
+    let page = await app.firstWindow({ timeout: 20000 }); await moveOffCursor(app);
     await page.waitForSelector("#canvas .layer");
     const doc = () => page.evaluate(() => window.design.getDocument());
     const node = (id) =>

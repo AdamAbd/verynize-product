@@ -1,3 +1,4 @@
+import { platform } from "@/lib/platform";
 // Usage ring beside Send (29, 35, 51, 72) and its popover: the provider account's plan limits (5-hour, weekly, per
 // model; desktop/agent-usage.cjs, refreshed by rate-limit events of the chat's runs) and the chat's context window
 // with a breakdown. The ring shows the most constraining value.
@@ -232,6 +233,9 @@ export function UsageRing({ state }: { state: ChatState }) {
           <p data-usage-row="limits-message" className="py-1 text-sm text-muted-foreground">
             {account?.message || (account ? "No plan limits reported." : "Checking plan limits…")}
           </p>
+        )}
+        {agent === "codex" && (
+          <Button variant="ghost" size="sm" onClick={() => void platform.desktop?.openExternal("https://chatgpt.com/settings/usage")}>Manage usage</Button>
         )}
         <Separator className="my-1.5" />
         <ContextSection usage={usage} breakdown={breakdown} />

@@ -1,21 +1,15 @@
-// Panel header (design/wonder 22: 40px row): panel toggle, presence avatar + chevron, purple Share.
+// Panel header (design/wonder 22: 40px row): panel toggle, presence avatar + chevron, purple Share (with the Share
+// popover, share/share-popover.tsx).
 // With the panel hidden (`right-collapsed`) the same controls move into a floating pill at the canvas top-right,
 // mirroring Wonder's left-sidebar pill (22: 7px inset, 42px tall, 1px edge, radius 8). The controls render in exactly
 // one place at a time, so `#cloud-toggle` stays unique.
-import { useCallback, useState, type ReactElement } from "react";
+import { type ReactElement } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown } from "lucide-react";
 import { PanelRightIcon } from "@/components/icons";
-import { useBodyClass, useWindowEvent } from "@/lib/bridge";
+import { useBodyClass } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { Tip } from "../chrome/tip";
-import { openShare } from "./legacy";
-
-function initial() {
-  const prefs = (window.appPreferences?.get?.() ?? {}) as { displayName?: string; name?: string };
-  const name = String(prefs.displayName || prefs.name || "Verynize").trim();
-  return { letter: name[0]?.toUpperCase() || "B", name };
-}
+import { ShareButton } from "../share/share-popover";
 
 // Focus follows the toggle: hiding the panel focuses "Show properties" in the pill and vice versa.
 let focusToggleOnMount = false;
@@ -33,11 +27,6 @@ function setCollapsed(collapsed: boolean, fromKeyboardFocus: boolean) {
 }
 
 function Controls({ collapsed, tipSide }: { collapsed: boolean; tipSide: "top" | "bottom" | "left" | "right" }) {
-  const [profile, setProfile] = useState(initial);
-  useWindowEvent(
-    "app-preferences-changed",
-    useCallback(() => setProfile(initial()), []),
-  );
   const label = collapsed ? "Show properties" : "Hide properties";
   const withTip = (text: string, child: ReactElement) => (
     <Tip label={text} side={tipSide}>
@@ -59,29 +48,10 @@ function Controls({ collapsed, tipSide }: { collapsed: boolean; tipSide: "top" |
           <PanelRightIcon className="size-4" />
         </button>,
       )}
-      {withTip(
-        "Account",
-        <button
-          type="button"
-          aria-label={`Account: ${profile.name}`}
-          className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-1 text-foreground-3 outline-none hover:bg-muted hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
-          onClick={() => window.appSettings?.open("account")}
-        >
-          <span className="flex size-6 items-center justify-center rounded-full bg-primary-tint text-xs font-medium text-primary-text">
-            {profile.letter}
-          </span>
-          <ChevronDown className="size-3" aria-hidden />
-        </button>,
-      )}
+      {/* Presence avatars + Multiplayer tools (collab island, collab/presence.tsx) render into this slot. */}
+      <div id="presence-slot" className="flex shrink-0 items-center" />
       <div className={collapsed ? "w-2 shrink-0" : "flex-1"} />
-      <button
-        type="button"
-        id="cloud-toggle"
-        className="static h-6 shrink-0 rounded-md border-0 bg-primary px-2.5 py-0 text-xs font-medium text-primary-foreground hover:bg-primary-hover focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        onClick={openShare}
-      >
-        Share
-      </button>
+      <ShareButton />
     </>
   );
 }

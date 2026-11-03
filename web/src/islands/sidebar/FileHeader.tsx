@@ -1,8 +1,8 @@
 // 40px file header: app menu trigger (menu rendered by the chrome island), file name, visibility, collapse.
 import { useState } from "react";
-import { Globe, Lock } from "lucide-react";
+import { Lock } from "lucide-react";
 import { legacy, legacySet } from "@/lib/bridge";
-import { runLegacy } from "./legacy";
+import { openSharePopover, useCloudState } from "../share/api";
 import { useDocSummary } from "./hooks";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -19,18 +19,21 @@ function renameDocument(name: string) {
   legacySet(legacy<HTMLInputElement>("document-name"), name);
 }
 
-/** Live cloud room state from the legacy share panel (cloud-panel.js); otherwise the file is private. */
-function isShared() {
-  const cloud = (window as unknown as { cloudWorkspace?: { isConnected?: () => boolean } }).cloudWorkspace;
-  return Boolean(cloud?.isConnected?.());
+/** Visibility of the open file (B1: follows the room live through `verynize:cloud-state`). */
+function useVisibilityLabel() {
+  const cloud = useCloudState();
+  if (cloud.connected && cloud.visibility === "public")
+    return { public: true, aria: "Public file · Share settings", tip: "Public · Anyone with the link" };
+  if (cloud.connected)
+    return { public: false, aria: "Shared file · Share settings", tip: "Private · Only members can access" };
+  return { public: false, aria: "Private file · Share", tip: "Private · Share" };
 }
 
 export function FileHeader({ onCollapse }: { onCollapse: () => void }) {
   const doc = useDocSummary();
   const [renaming, setRenaming] = useState(false);
   const name = doc.name || "Untitled";
-  const shared = isShared();
-  const visibilityLabel = shared ? "Shared file · Share settings" : "Private file · Share";
+  const visibility = useVisibilityLabel();
 
   return (
     <div className="flex h-10 shrink-0 items-center border-b border-divider pr-3 pl-1.5">
@@ -71,16 +74,32 @@ export function FileHeader({ onCollapse }: { onCollapse: () => void }) {
       </div>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={visibilityLabel}
-            className="ml-2 inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-input text-muted-foreground hover:bg-accent hover:text-foreground"
-            onClick={() => runLegacy("cloud-toggle")}
-          >
-            {shared ? <Globe className="size-3" /> : <Lock className="size-3" />}
-          </button>
+          {visibility.public ? (
+            // Wonder SV2: a public file shows a green "Public" badge where the lock was.
+            <button
+              type="button"
+              id="file-visibility"
+              data-visibility="public"
+              aria-label={visibility.aria}
+              className="ml-2 inline-flex h-5 shrink-0 items-center rounded-md border border-share-public-edge bg-share-public-tint px-1.5 text-xs text-share-public hover:brightness-125"
+              onClick={openSharePopover}
+            >
+              Public
+            </button>
+          ) : (
+            <button
+              type="button"
+              id="file-visibility"
+              data-visibility="private"
+              aria-label={visibility.aria}
+              className="ml-2 inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-input text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={openSharePopover}
+            >
+              <Lock className="size-3" />
+            </button>
+          )}
         </TooltipTrigger>
-        <TooltipContent side="bottom">{shared ? "Shared · Share settings" : "Private · Share"}</TooltipContent>
+        <TooltipContent side="bottom">{visibility.tip}</TooltipContent>
       </Tooltip>
       <IconButton label="Hide sidebar" className="ml-2.75 text-muted-foreground" onClick={onCollapse}>
         <PanelLeftIcon className="size-4" />

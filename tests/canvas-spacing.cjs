@@ -1,5 +1,7 @@
 // On-canvas spacing handles: drag padding and gaps of the selected auto-layout frame.
 const {_electron} = require('@playwright/test');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
+const { mod } = require("./helpers/keys.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
@@ -9,7 +11,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
   env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({env, args: ['.', `--user-data-dir=${dir}`], timeout: 20000});
   try {
-    const page = await app.firstWindow({timeout: 20000});
+    const page = await app.firstWindow({timeout: 20000}); await moveOffCursor(app);
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.waitForSelector('#canvas .layer');
@@ -51,12 +53,12 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.deepEqual([s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft], [24, 24, 54, 24], 'bottom padding drag changes only the bottom side');
     assert.deepEqual([s.x, s.y], [0, 0], 'pressing a spacing handle does not move the frame');
     assert.deepEqual(await page.evaluate(() => window.design.getSelection()), ['stack'], 'the frame stays selected');
-    await page.keyboard.press('Meta+z');
+    await page.keyboard.press(mod('z'));
     s = await node('stack');
     assert.equal(s.paddingBottom, undefined, 'one undo restores the padding'); assert.equal(s.padding, 24);
     await dragBy(await band('stack', '.spacing-padding[data-side="1"]'), -12, 0); // fixed width: the inner edge follows the pointer left
     assert.equal((await node('stack')).paddingRight, 36, 'right padding on a fixed axis grows when dragged inward');
-    await page.keyboard.press('Meta+z');
+    await page.keyboard.press(mod('z'));
 
     await dragBy(await band('stack', '.spacing-padding[data-side="0"]'), 0, 10, ['Shift']);
     s = await node('stack');

@@ -19,6 +19,7 @@ const path = require('node:path');
   env.VERYNIZE_SKIP_ONBOARDING = '1';
   // Auto-title helper threads (agent-workdirs/titles) are excluded so assertions see chat turns only.
   const rpc = async method => (await fs.readFile(log, 'utf8')).trim().split('\n').map(JSON.parse).filter(c => c.rpc === method && !/agent-workdirs[\/\\]titles|word title for a design chat/.test(JSON.stringify(c.params || {})));
+  await require('./helpers/chatgpt-provider.cjs').seedChatGPTAccount(path.join(root, 'profile'));
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
@@ -117,14 +118,13 @@ const path = require('node:path');
     for (const item of starters) assert.ok(item.title && item.style && item.prompt.length > 120, `starter brief "${item.title}" names a style and is detailed`);
     assert.equal(new Set(starters.map(item => item.style)).size, 12, 'every starter brief uses a different style direction');
     await page.waitForFunction(() => document.querySelectorAll('[data-suggestion]').length === 4);
-    // Clicking a starter brief fills the composer and pins the brief's style in the composer style picker (sent as designStyle).
+    // Clicking a starter brief fills the composer and pins the brief's style (window.chatDesignStyle, sent as designStyle).
     await ws(() => window.chatDesignStyle?.set(''));
     const shownTitle = await page.locator('[data-suggestion]').first().getAttribute('data-suggestion');
     const shown = starters.find(item => item.title === shownTitle);
     await page.locator('[data-suggestion] button').first().click();
     assert.equal(await page.locator('#project-prompt').inputValue(), shown.prompt, 'a starter brief fills the composer');
     assert.equal(await ws(() => window.chatDesignStyle?.get()), shown.style, 'a starter brief selects its design style');
-    if (await page.locator('#chat-style-picker').count()) await page.waitForFunction(id => document.getElementById('chat-style-picker')?.dataset.styleId === id, shown.style);
     await ws(() => window.chatDesignStyle.set(''));
     await page.locator('#project-prompt').fill('');
     await ws(() => window.agentWorkspace.setDraft('draft for the new chat'));

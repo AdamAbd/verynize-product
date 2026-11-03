@@ -255,7 +255,7 @@ class AgentProfiles {
 }
 
 /** Display account of a profile (email/plan claims only). */
-async function profileAccount(agent, dir, { claudeStatus } = {}) {
+async function profileAccount(agent, dir, { claudeStatus, executable, spawnProcess } = {}) {
   const tools = require("./agent-tools.cjs");
   const readJson = async (file) => {
     try {
@@ -264,20 +264,23 @@ async function profileAccount(agent, dir, { claudeStatus } = {}) {
       return null;
     }
   };
-  if (agent === "codex")
-    return tools.codexAccountFromAuth(await readJson(path.join(dir, "auth.json")));
+  // Codex: app-server `account/read` with the account's CODEX_HOME, auth.json claims only as a fallback.
+  if (agent === "codex") return tools.codexAccount({ executable, codexHome: dir, spawnProcess });
   return tools.claudeAccountFrom(claudeStatus, await readJson(path.join(dir, ".claude.json")));
 }
 
-function registerAgentProfiles(handle, { userData, store = null, usage = null } = {}) {
+function registerAgentProfiles(handle, { userData, store = null, usage = null, siwc = null } = {}) {
   const profiles = store || new AgentProfiles({ userData });
   handle("agentProfilesList", () => profiles.list());
   handle("agentProfilesAdd", (options) => profiles.add(options || {}));
   handle("agentProfilesRename", (options) => profiles.rename(options || {}));
   handle("agentProfilesRemove", async (options) => {
+    const profile = await profiles.find(options?.id);
+    let signout;
+    if (profile.agent === 'codex' && siwc) { require('./agent-auth.cjs').accountChanged('codex', profile.id); signout = await siwc.logout(profile.id); }
     const result = await profiles.remove(options || {});
     usage?.forget?.(options?.id);
-    return result;
+    return { ...result, ...(signout && !signout.revoked ? { message: signout.message } : {}) };
   });
   handle("agentProfilesSetDefault", (options) => profiles.setDefault(options || {}));
   handle("agentProfilesSetChat", (options) => profiles.setChat(options || {}));

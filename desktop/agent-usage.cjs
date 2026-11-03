@@ -165,6 +165,22 @@ async function fetchCodexUsage({ executable, spawnProcess = spawn, timeout = FET
   } finally { rpc.close(); }
 }
 
+/**
+ * `account/read` on a short-lived `codex app-server` for an account (`env`: a named account's CODEX_HOME). Resolves the
+ * raw result ({account: {type, email?, planType?, workspaceName?} | null, requiresOpenaiAuth}); rejects when the CLI has
+ * no app-server or does not answer. The supported source of the email/plan (desktop/agent-tools.cjs codexAccountFromRead).
+ */
+async function readCodexAccount({ executable, spawnProcess = spawn, timeout = 8000, env = {} } = {}) {
+  const { JsonRpcChild } = require('./agent-runtime.cjs');
+  const child = spawnProcess(executable, ['app-server'], { env: agents.childEnv(env), stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+  const rpc = new JsonRpcChild(child);
+  try {
+    await rpc.request('initialize', { clientInfo: { name: 'verynize', title: 'Verynize', version: '0' } }, timeout);
+    rpc.notify('initialized');
+    return await rpc.request('account/read', { refreshToken: false }, timeout);
+  } finally { rpc.close(); }
+}
+
 function friendlyError(error) {
   const text = String(error?.message || error || '');
   if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network|offline|fetch failed|timed out/i.test(text)) return 'Couldn\'t reach the service. Check your connection and refresh.';
@@ -230,8 +246,8 @@ function recordGeneratedLayers(count) { return layerLog ? layerLog.record(count)
 // --- IPC -----------------------------------------------------------------------------------------
 class AgentUsage {
   // `profileEnv(agent, id)`: CLAUDE_CONFIG_DIR / CODEX_HOME of a named account (desktop/agent-profiles.cjs).
-  constructor({ userData, discover = agents.discover, claude = fetchClaudeUsage, codex = fetchCodexUsage, disabled = process.env.VERYNIZE_DISABLE_AGENT_USAGE === '1', profileEnv = null } = {}) {
-    Object.assign(this, { userData, discover, claude, codex, disabled, profileEnv });
+  constructor({ userData, discover = agents.discover, claude = fetchClaudeUsage, codex = fetchCodexUsage, disabled = process.env.VERYNIZE_DISABLE_AGENT_USAGE === '1', profileEnv = null, siwc = null } = {}) {
+    Object.assign(this, { userData, discover, claude, codex, disabled, profileEnv, siwc });
     this.cache = new Map();
   }
   /** Forget cached limits of a removed account. */
@@ -242,6 +258,10 @@ class AgentUsage {
     const env = named ? (this.profileEnv ? await this.profileEnv(agent, named) : null) : {};
     if (!env) throw Error('Named accounts are not available');
     const cacheKey = named ? `${agent}:${named}` : agent;
+    if (agent === 'codex' && this.siwc) {
+      const account = await this.siwc.status(named || 'system');
+      return { agent, status: account.loggedIn ? 'unavailable' : 'signed-out', email: account.email, plan: account.plan, limits: [], updatedAt: Date.now(), message: account.loggedIn ? 'Using your ChatGPT plan. View limits and manage Verynize access in ChatGPT Settings → Usage.' : 'Continue with ChatGPT in Verynize to use your plan.' };
+    }
     const cached = this.cache.get(cacheKey);
     if (!refresh && cached && Date.now() - cached.at < CACHE_MS) return cached.value;
     if (cached?.pending) return cached.pending;
@@ -264,12 +284,12 @@ class AgentUsage {
   }
 }
 
-function registerAgentUsage(handle, { userData, profiles = null }) {
+function registerAgentUsage(handle, { userData, profiles = null, siwc = null }) {
   layerLog = new LayerLog(path.join(userData, 'agent-usage.json'));
-  const usage = new AgentUsage({ userData, ...(profiles ? { profileEnv: (agent, id) => profiles.envFor(agent, id) } : {}) });
+  const usage = new AgentUsage({ userData, siwc, ...(profiles ? { profileEnv: (agent, id) => profiles.envFor(agent, id) } : {}) });
   handle('agentUsage', options => usage.provider(options?.agent, { refresh: !!options?.refresh, profile: typeof options?.profile === 'string' ? options.profile : null }));
   handle('agentLayerUsage', () => layerLog.summary());
   return usage;
 }
 
-module.exports = { registerAgentUsage, AgentUsage, parseClaudeUsage, parseCodexUsage, fetchClaudeUsage, fetchCodexUsage, LayerLog, countNewNodes, recordGeneratedLayers, weekStart, claudePlan, codexPlan, friendlyError };
+module.exports = { registerAgentUsage, AgentUsage, parseClaudeUsage, parseCodexUsage, fetchClaudeUsage, fetchCodexUsage, readCodexAccount, LayerLog, countNewNodes, recordGeneratedLayers, weekStart, claudePlan, codexPlan, friendlyError };

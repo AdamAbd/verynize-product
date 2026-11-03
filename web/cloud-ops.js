@@ -280,7 +280,8 @@
    * Apply operations to a document copy. With `clock` (a {get,set,clear} stamp store) the
    * call is authoritative: stale stamps lose, and the resolved operations to broadcast are
    * returned in `applied`. Without it (replicas replaying accepted operations) every valid
-   * operation applies in order.
+   * operation applies in order. `external(id)` (optional) is true for node ids used on pages
+   * the document copy leaves out.
    */
   function apply(document, ops, options = {}) {
     const stamps = options.stamps || null;
@@ -299,7 +300,9 @@
         const index = page.nodes.findIndex((node) => node.id === id);
         if (index >= 0) return { page, node: page.nodes[index], index };
       }
-      return null;
+      // Paged rooms (cloud/room-store.js) hold only the pages a batch touches; `external` reports
+      // ids used on the pages left out, so node ids stay unique across the whole document.
+      return options.external?.(id) ? { external: true } : null;
     };
     const pageOf = (id) => (isStructured(doc) ? doc.pages.find((page) => page.id === id) : null);
     const createsCycle = (page, id, parent) => {
@@ -473,6 +476,25 @@
     return { doc, applied, rejected };
   }
 
+  /**
+   * Pages an operation list reads or writes: `all` for a root replacement, otherwise the ids of
+   * the pages whose properties or nodes change (document keys and page order touch none).
+   */
+  function touchedPages(ops) {
+    const pages = new Set();
+    let all = false;
+    for (const op of ops || []) {
+      if (!isObject(op)) continue;
+      if (op.t === "root") all = true;
+      else if (op.t === "addPage" || op.t === "removePage") pages.add(op.id);
+      else if (typeof op.page === "string") pages.add(op.page);
+    }
+    return { all, pages };
+  }
+  /** True for operations on the nodes of a page (not its properties, existence or order). */
+  const NODE_KINDS = new Set(["add", "remove", "node", "text", "nodeOrder"]);
+  const isNodeOp = (op) => isObject(op) && NODE_KINDS.has(op.t);
+
   /** A stamp store backed by a plain object (tests and in-memory replicas). */
   function memoryStamps(initial = {}) {
     const data = { ...initial };
@@ -498,5 +520,7 @@
     isStructured,
     memoryStamps,
     pathOf,
+    touchedPages,
+    isNodeOp,
   });
 })(typeof globalThis !== "undefined" ? globalThis : this);

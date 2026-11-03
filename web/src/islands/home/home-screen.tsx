@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   ArchiveIcon,
   FileIcon,
@@ -33,13 +34,25 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "archived", label: "Archived" },
 ];
 
-export function HomeScreen() {
-  const open = useBodyClass("files-view");
+// View choices outlive the screen: on the web, Start's Files route unmounts it while another area is shown.
+const kept = new Map<string, unknown>();
+function useKeptState<T>(key: string, initial: T) {
+  const [value, setValue] = useState<T>(() => (kept.has(key) ? (kept.get(key) as T) : initial));
+  useEffect(() => {
+    kept.set(key, value);
+  }, [key, value]);
+  return [value, setValue] as const;
+}
+
+/** `routed`: rendered by Start's Files route (web), which means open; else open follows `body.files-view`. */
+export function HomeScreen({ routed = false }: { routed?: boolean } = {}) {
+  const shown = useBodyClass("files-view");
+  const open = routed || shown;
   const { files: all, folders, folder } = useLibrary(open);
   const owner = useWorkspaceName();
-  const [filter, setFilter] = useState<Filter>("all");
-  const [list, setList] = useState(false);
-  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useKeptState<Filter>("filter", "all");
+  const [list, setList] = useKeptState("list", false);
+  const [query, setQuery] = useKeptState("query", "");
   const [dialog, setDialog] = useState<NameRequest | null>(null);
 
   const lib = library();
@@ -115,7 +128,7 @@ export function HomeScreen() {
           id="library-new-file"
           variant="primary"
           className="-ml-0.5"
-          onClick={() => void lib.create()}
+          onClick={() => void lib.create().catch((error) => toast(error.message))}
         >
           <PlusIcon />
           New file

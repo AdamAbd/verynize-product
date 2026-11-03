@@ -46,8 +46,8 @@ type FileLibraryApi = {
   setFolder(id: string | null): void;
   open(id: string): Promise<string | undefined>;
   create(): Promise<void>;
-  rename(id: string, name: string): boolean;
-  duplicate(id: string): string | null;
+  rename(id: string, name: string): Promise<boolean>;
+  duplicate(id: string): Promise<string | null>;
   move(id: string, folderId: string | null): boolean;
   setArchived(id: string, archived: boolean): boolean;
   createFolder(name: string): string | null;

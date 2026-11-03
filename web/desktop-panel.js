@@ -1,9 +1,14 @@
 (() => {
   const host = document.createElement('section');
   host.id = 'desktop-panel';
-  host.innerHTML = `<button id="project-toggle" title="Code workspace">Code workspace</button><div id="project-workspace" hidden><span id="project-name">No repository</span><p id="project-status" role="status"></p><section class="project-agent"><div class="chat-heading"><strong>Chats</strong><button id="chat-new" title="New quick chat">＋</button><button id="chat-dock" title="Dock chat">◧</button></div><select id="chat-history" aria-label="Conversation history"></select><p id="chat-session" class="chat-session"></p><div id="chat-messages" aria-live="polite"></div><div id="chat-queue"></div><details class="agent-config"><summary id="agent-config-label">Model & access</summary><select id="project-agent" aria-label="Local agent"><option value="codex">Codex</option><option value="claude">Claude</option></select><input id="agent-model" aria-label="Model" placeholder="Agent default model" list="agent-model-list" autocomplete="off"><datalist id="agent-model-list"></datalist><div class="agent-options"><select id="agent-access" aria-label="Agent access"><option value="ask">Ask · approve each action</option><option value="edit">Edit · auto-approve file edits</option><option value="auto">Auto · reviewer approves</option><option value="full">Full · never ask</option></select><select id="agent-effort" aria-label="Reasoning effort"><option value="">Default effort</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></div><p id="project-agent-status">Checking installed tools…</p></details><textarea id="project-prompt" aria-label="Agent task" placeholder="Ask about this design or describe a change… (paste images here)"></textarea><div id="chat-attachments"></div><div class="chat-attachment-actions"><button id="chat-attach-file">＋ Open file</button><button id="chat-attach-canvas">◇ Canvas</button><button id="chat-attach-image">▣ Image</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden></div><label><input type="checkbox" id="agent-canvas-context" checked> Send canvas context (document, page, selection ids)</label><label><input type="checkbox" id="project-context"> Include the open file in the prompt</label><div><button id="project-run">Send</button><button id="project-cancel" disabled>Stop</button><button id="project-review">Review changes</button><button id="project-apply-design">Apply canvas</button></div><p class="project-note">Runs with your installed Claude Code or Codex account. Chats without a project run in a private scratch folder.</p><details class="agent-log"><summary>Execution log</summary><pre id="project-output" aria-label="Agent output"></pre></details></section></div>`;
+  host.innerHTML = `<button id="project-toggle" title="Code workspace">Code workspace</button><div id="project-workspace" hidden><span id="project-name">No repository</span><p id="project-status" role="status"></p><section class="project-agent"><div class="chat-heading"><strong>Chats</strong><button id="chat-new" title="New quick chat">＋</button><button id="chat-dock" title="Dock chat">◧</button></div><select id="chat-history" aria-label="Conversation history"></select><p id="chat-session" class="chat-session"></p><div id="chat-messages" aria-live="polite"></div><div id="chat-queue"></div><details class="agent-config"><summary id="agent-config-label">Model & access</summary><select id="project-agent" aria-label="Local agent"><option value="codex">Codex</option><option value="claude">Claude</option></select><input id="agent-model" aria-label="Model" placeholder="Agent default model" list="agent-model-list" autocomplete="off"><datalist id="agent-model-list"></datalist><div class="agent-options"><select id="agent-access" aria-label="Agent access"><option value="ask">Ask · approve each action</option><option value="edit">Edit · auto-approve file edits</option><option value="auto">Auto · reviewer approves</option><option value="full">Full · never ask</option></select><select id="agent-effort" aria-label="Reasoning effort"><option value="">Default effort</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></div><p id="project-agent-status">Checking installed tools…</p></details><textarea id="project-prompt" aria-label="Agent task" placeholder="Ask about this design or describe a change… (paste images here)"></textarea><div id="chat-attachments"></div><div class="chat-attachment-actions"><button id="chat-attach-file">＋ Open file</button><button id="chat-attach-canvas">◇ Canvas</button><button id="chat-attach-image">▣ Image</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" multiple hidden></div><label><input type="checkbox" id="agent-canvas-context" checked> Send canvas context (document, page, selection ids)</label><label><input type="checkbox" id="project-context"> Include the open file in the prompt</label><div><button id="project-run">Send</button><button id="project-cancel" disabled>Stop</button><button id="project-review">Review changes</button><button id="project-apply-design">Apply canvas</button></div><p class="project-note">Runs with your installed Claude Code or Codex account. Chats without a project run in a private scratch folder.</p><details class="agent-log"><summary>Execution log</summary><pre id="project-output" aria-label="Agent output"></pre></details></section></div>`;
   document.body.append(host);
   const $ = id => document.getElementById(id), api = window.verynizePlatform.desktop;
+  // Chat turns run through the platform's AgentService (web/src/lib/agent-service.ts, registered by the React bundle):
+  // Claude/Codex over IPC on the desktop, the cloud backend's model API (agent `openrouter`) on the web.
+  const agentService=()=>{const svc=window.verynizePlatform.agents.service();if(!svc)throw Error(api?'The agent runtime is not ready yet':'Chat is not available in this build');return svc;};
+  // The web build offers only the model API, never Claude/Codex.
+  if(!api){const select=$('project-agent');select.replaceChildren(new Option('OpenRouter','openrouter'));select.setAttribute('aria-label','Chat model API');}
   // The file open in the Code workspace editor (web/src/islands/code), for "Include the open file" / attach file.
   let openFile = null;
   const status = text => { $('project-status').textContent = text; statusText = String(text||''); statusAt = Date.now(); notify(); };
@@ -13,6 +18,7 @@
   // `runs` maps runId -> entry so events reach the conversation that started them even after the user switches away.
   // The chat selected when the app last closed (read before the startup quick-chat selection overwrites it).
   let initialSelection=null;try{initialSelection=JSON.parse(localStorage.getItem('verynize-code-last')||'null')}catch{}
+  const imageJobs=new Map();
   let chatFactory=null,projectKey='unattached',conversations=[],conversation=null,attachments=[],frame=0,inflight=0,drafts={};
   const active=new Map(),runs=new Map(),queues=new Map(),orphans=[],taskOf=new WeakMap(),checkpoints=new Map();
   const entryOf=chat=>chat?active.get(chat.id)||null:null,isRunning=chat=>!!entryOf(chat);
@@ -22,23 +28,25 @@
   const ACCESS=['ask','edit','auto','full'],ACCESS_LABEL={ask:'Ask',edit:'Edit',auto:'Auto',full:'Full access'},LEGACY_ACCESS={'read-only':'ask','workspace-write':'edit'};
   const normalizeAccess=value=>LEGACY_ACCESS[value]||(ACCESS.includes(value)?value:'edit');
   let defaults={agent:'codex',model:'',access:'edit',effort:'',instructions:''};
-  try{defaults={...defaults,...JSON.parse(localStorage.getItem('better-agent-defaults')||'{}')}}catch{}
+  try{defaults={...defaults,...JSON.parse((window.accountStore||localStorage).getItem('better-agent-defaults')||'{}')}}catch{}
   defaults.access=normalizeAccess(defaults.access);
+  if(!api)defaults.agent='openrouter';
   const stats={runs:0,completed:0,failed:0};try{Object.assign(stats,JSON.parse(localStorage.getItem('better-agent-usage')||'{}'))}catch{}
+  const storage=window.accountStore||localStorage;
   const chatsKey=key=>'better-agent-chats:'+key;
-  const persist=()=>{try{localStorage.setItem(chatsKey(projectKey),JSON.stringify(conversations.slice(-30)));localStorage.setItem('better-agent-usage',JSON.stringify(stats));}catch{status('Chat storage full; export or clear older conversations.')}window.dispatchEvent(new Event('agent-usage-changed'));};
+  const persist=()=>{try{storage.setItem(chatsKey(projectKey),JSON.stringify(conversations.slice(-30)));localStorage.setItem('better-agent-usage',JSON.stringify(stats));}catch{status('Chat storage full; export or clear older conversations.')}window.dispatchEvent(new Event('agent-usage-changed'));};
   // A run can outlive a project switch: its conversation is then written into the other project's saved list.
-  const persistChat=entry=>{if(!entry||entry.key===projectKey){persist();return;}try{const saved=JSON.parse(localStorage.getItem(chatsKey(entry.key))||'[]'),list=Array.isArray(saved)?saved:[],i=list.findIndex(c=>c?.id===entry.chat.id);if(i>=0)list[i]=entry.chat;else list.push(entry.chat);localStorage.setItem(chatsKey(entry.key),JSON.stringify(list.slice(-30)));localStorage.setItem('better-agent-usage',JSON.stringify(stats));}catch{}window.dispatchEvent(new Event('agent-usage-changed'));};
+  const persistChat=entry=>{if(!entry||entry.key===projectKey){persist();return;}try{const saved=JSON.parse(storage.getItem(chatsKey(entry.key))||'[]'),list=Array.isArray(saved)?saved:[],i=list.findIndex(c=>c?.id===entry.chat.id);if(i>=0)list[i]=entry.chat;else list.push(entry.chat);storage.setItem(chatsKey(entry.key),JSON.stringify(list.slice(-30)));localStorage.setItem('better-agent-usage',JSON.stringify(stats));}catch{}window.dispatchEvent(new Event('agent-usage-changed'));};
   // Composer drafts, per conversation and project.
-  const loadDrafts=()=>{try{const saved=JSON.parse(localStorage.getItem('better-agent-drafts:'+projectKey)||'{}');drafts=saved&&typeof saved==='object'?saved:{};}catch{drafts={}}};
-  const setDraft=(text,chat=conversation)=>{if(!chat)return;text=String(text||'');if(text.trim())drafts[chat.id]=text.slice(0,20000);else delete drafts[chat.id];try{localStorage.setItem('better-agent-drafts:'+projectKey,JSON.stringify(drafts))}catch{}};
+  const loadDrafts=()=>{try{const saved=JSON.parse(storage.getItem('better-agent-drafts:'+projectKey)||'{}');drafts=saved&&typeof saved==='object'?saved:{};}catch{drafts={}}};
+  const setDraft=(text,chat=conversation)=>{if(!chat)return;text=String(text||'');if(text.trim())drafts[chat.id]=text.slice(0,20000);else{delete drafts[chat.id];if(window.accountStore?.signedIn())window.accountStore.put('draft:'+chat.id,null);}try{storage.setItem('better-agent-drafts:'+projectKey,JSON.stringify(drafts))}catch{}};
   const currentDefaults=()=>({agent:$('project-agent').value,model:$('agent-model').value.trim(),access:$('agent-access').value,effort:$('agent-effort').value,instructions:defaults.instructions||''});
   // Mode for new chats (Settings › Agents): a chat started in a repository with its own mode keeps it in chat.access;
   // the composer's mode picker then changes that chat, while Settings (Default row / Default Models) change the default.
   const behavior=()=>window.agentBehavior?.get?.()||{};
   const effectiveAccess=()=>conversation?.access&&ACCESS.includes(conversation.access)?conversation.access:defaults.access;
   const showAccess=()=>{$('agent-access').value=effectiveAccess();$('agent-config-label').textContent=(defaults.model||defaults.agent+' default')+' · '+ACCESS_LABEL[effectiveAccess()];};
-  const setDefaults=value=>{if(conversation?.access&&value&&value.access&&!document.body.classList.contains('settings-open')){conversation.access=normalizeAccess(value.access);persist();value={...value,access:defaults.access};}defaults={...defaults,...value};defaults.access=normalizeAccess(defaults.access);$('project-agent').value=defaults.agent;$('agent-model').value=defaults.model;$('agent-access').value=effectiveAccess();$('agent-effort').value=defaults.effort;$('agent-config-label').textContent=(defaults.model||defaults.agent+' default')+' · '+ACCESS_LABEL[effectiveAccess()];try{localStorage.setItem('better-agent-defaults',JSON.stringify(defaults))}catch{}notify();};
+  const setDefaults=(value,remote=false)=>{if(!remote&&conversation?.access&&value&&value.access&&!document.body.classList.contains('settings-open')){conversation.access=normalizeAccess(value.access);persist();value={...value,access:defaults.access};}defaults={...defaults,...value};defaults.access=normalizeAccess(defaults.access);$('project-agent').value=defaults.agent;$('agent-model').value=defaults.model;$('agent-access').value=effectiveAccess();$('agent-effort').value=defaults.effort;$('agent-config-label').textContent=(defaults.model||defaults.agent+' default')+' · '+ACCESS_LABEL[effectiveAccess()];try{if(!remote)storage.setItem('better-agent-defaults',JSON.stringify(defaults))}catch{}notify();};
   const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
   const pretty=value=>{if(typeof value==='string')return value;try{return JSON.stringify(value,null,2)}catch{return String(value)}};
   const clip=(text,n)=>{text=String(text??'');return text.length>n?text.slice(0,n)+'…':text;};
@@ -122,6 +130,8 @@
 
   // ---------- Seed: compact transcript summary for a fresh provider session ----------
   const LINK_RE=/verynize:\/\/node\/[^\s"'<>)\]]+/g;
+  // Earlier turns for the model API (POST /api/ai/runs `history`): plain user/assistant text, newest 50.
+  const historyOf=messages=>messages.filter(m=>(m.role==='user'||m.role==='assistant')&&!m.review&&String(m.text||'').trim()).slice(-50).map(m=>({role:m.role,text:String(m.text).slice(0,20000)}));
   const buildSeed=(messages,turns=10)=>{
     const starts=[];messages.forEach((m,i)=>{if(m.role==='user')starts.push(i);});
     const from=starts.length>turns?starts[starts.length-turns]:0,lines=[],links=new Set(),artboards=new Set();
@@ -141,7 +151,7 @@
   };
 
   // ---------- Legacy transcript DOM (used only while no React island is subscribed) ----------
-  const answerPermission=(part,allow,always)=>{if(part.state!=='pending')return;part.state=allow?'allowed':'denied';if(always&&allow)part.always=true;api.respondAgentPermission?.({requestId:part.requestId,allow,...(always?{always:true}:{})}).catch(e=>status(e.message));notify();scheduleReply();};
+  const answerPermission=(part,allow,always)=>{if(part.state!=='pending')return;part.state=allow?'allowed':'denied';if(always&&allow)part.always=true;Promise.resolve().then(()=>agentService().respondPermission({requestId:part.requestId,allow,...(always?{always:true}:{})})).catch(e=>status(e.message));notify();scheduleReply();};
   const renderPart=part=>{
     if(part.kind==='text')return el('div','chat-message-content',part.text);
     if(part.kind==='thinking'){const box=el('details','chat-thinking');box.append(el('summary',null,'Thinking'),el('div',null,part.text));return box;}
@@ -160,6 +170,7 @@
     }
     if(part.kind==='question'){const card=el('div','chat-question '+(part.state||''));for(const q of part.questions||[])card.append(el('p',null,q.question+(part.answers?' → '+(part.answers[q.id]||'No answer'):'')));return card;}
     if(part.kind==='error')return el('div','chat-error',part.text);
+    if(part.kind==='auth')return el('div','chat-auth',part.text);
     return el('div');
   };
   const renderMessage=(message,index)=>{
@@ -182,7 +193,7 @@
   };
   // Streaming updates re-render at most once per frame.
   const scheduleReply=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;if(subscribers.size)notify();else renderHistory();});};
-  const switchTo=chat=>{const prompt=$('project-prompt');if(conversation&&conversation!==chat)setDraft(prompt.value,conversation);const changed=conversation!==chat;conversation=chat;showAccess();if(changed){prompt.value=drafts[chat?.id]||'';prompt.dispatchEvent(new Event('input',{bubbles:true}));}renderHistory();activate();try{localStorage.setItem('verynize-code-last',JSON.stringify({key:projectKey,name:projectName,chatId:chat?.id||null}))}catch{}};
+  const switchTo=chat=>{const prompt=$('project-prompt');if(conversation&&conversation!==chat)setDraft(prompt.value,conversation);const changed=conversation!==chat;if(changed)for(const controller of imageJobs.keys())controller.abort();conversation=chat;showAccess();if(changed){prompt.value=drafts[chat?.id]||'';prompt.dispatchEvent(new Event('input',{bubbles:true}));}renderHistory();activate();try{localStorage.setItem('verynize-code-last',JSON.stringify({key:projectKey,name:projectName,chatId:chat?.id||null}))}catch{}};
   // Folder a chat works in: its own worktree, else the repository root; quick chats (null) use a scratch folder.
   const rootOf=(chat,key=projectKey)=>chat?.worktree?.path||(key==='unattached'?null:key);
   // The main process's active project (files, git changes, dev server, agent default cwd) follows the active chat.
@@ -196,15 +207,22 @@
   const loadChats=(root,options={})=>{
     if(conversation)setDraft($('project-prompt').value,conversation);
     projectKey=root;loadDrafts();
-    try{const saved=JSON.parse(localStorage.getItem(chatsKey(root))||'[]');conversations=Array.isArray(saved)?saved.filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string'&&Array.isArray(c.messages)).slice(-30).map(c=>({...c,sessionId:typeof c.sessionId==='string'?c.sessionId:null,messages:c.messages.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.text==='string').map(restoreMessage)})):[]}catch{conversations=[]}
+    try{const saved=JSON.parse(storage.getItem(chatsKey(root))||'[]');conversations=Array.isArray(saved)?saved.filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string'&&Array.isArray(c.messages)).slice(-30).map(c=>({...c,sessionId:typeof c.sessionId==='string'?c.sessionId:null,messages:c.messages.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.text==='string').map(restoreMessage)})):[]}catch{conversations=[]}
     // Conversations still running keep their live objects.
     for(const entry of active.values())if(entry.key===root){const i=conversations.findIndex(c=>c.id===entry.chat.id);if(i>=0)conversations[i]=entry.chat;else conversations.push(entry.chat);}
     conversation=null;const pick=conversations.find(c=>c.id===options.select)||conversations.at(-1);if(pick)switchTo(pick);else if(options.create!==false)newChat();else{renderHistory();activate();}
   };
+  window.addEventListener('account-store-changed',()=>{
+    const selected=conversation?.id,prompt=$('project-prompt'),typing=document.activeElement===prompt,typed=prompt.value,start=prompt.selectionStart,end=prompt.selectionEnd;
+    if(!window.accountStore?.ready()){conversations=[];conversation=null;drafts={};attachments=[];prompt.value='';setDefaults({model:'',effort:'',access:'edit',instructions:''},true);renderAttachments();renderHistory();return;}
+    conversation=null;loadChats(projectKey,{select:selected,create:false});
+    if(typing&&conversation?.id===selected){prompt.value=typed;prompt.setSelectionRange(start,end);setDraft(typed);}
+    const saved=JSON.parse(storage.getItem('better-agent-defaults')||'{}');setDefaults(saved,true);
+  });
   // Chat summaries of any project key (the open one live, others from storage) for the Code workspace sidebar.
   const summaryOf=c=>({id:c.id,title:c.title,created:c.created,count:c.messages?.length||0,...(c.worktree?.branch?{branch:c.worktree.branch}:{}),...(c.worktree?.path?{root:c.worktree.path}:{}),...(active.has(c.id)?{busy:true}:{})});
-  const chatSummaries=key=>{if(key===projectKey)return conversations.map(summaryOf).reverse();try{const saved=JSON.parse(localStorage.getItem(chatsKey(key))||'[]');return (Array.isArray(saved)?saved:[]).filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string').map(c=>{const live=[...active.values()].find(e=>e.chat.id===c.id);return summaryOf(live?live.chat:c);}).reverse();}catch{return [];}};
-  const removeChat=id=>{const i=conversations.findIndex(c=>c.id===id);if(i<0)return false;if(active.has(id))throw Error('Stop the chat before archiving it');const [chat]=conversations.splice(i,1);queues.delete(id);setDraft('',chat);persist();if(conversation===chat){conversation=null;const last=conversations.at(-1);if(last)switchTo(last);else{renderHistory();activate();}}else renderHistory();return true;};
+  const chatSummaries=key=>{if(key===projectKey)return conversations.map(summaryOf).reverse();try{const saved=JSON.parse(storage.getItem(chatsKey(key))||'[]');return (Array.isArray(saved)?saved:[]).filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string').map(c=>{const live=[...active.values()].find(e=>e.chat.id===c.id);return summaryOf(live?live.chat:c);}).reverse();}catch{return [];}};
+  const removeChat=id=>{const i=conversations.findIndex(c=>c.id===id);if(i<0)return false;if(active.has(id))throw Error('Stop the chat before archiving it');const [chat]=conversations.splice(i,1);if(window.accountStore?.signedIn())window.accountStore.put('chat:'+id,null);queues.delete(id);setDraft('',chat);persist();if(conversation===chat){conversation=null;const last=conversations.at(-1);if(last)switchTo(last);else{renderHistory();activate();}}else renderHistory();return true;};
   const agentSection=host.querySelector('.project-agent');
   const dock=document.createElement('aside');dock.id='agent-chat-dock';dock.innerHTML='<div class="chat-dock-bar"><strong>Chat</strong><button id="chat-project-files">Project files</button><button id="chat-hide">×</button></div>';document.body.append(dock);
   const openChat=()=>{setCodeMode(false);dock.append(agentSection);document.body.classList.add('agent-chat-open');requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));};
@@ -212,7 +230,9 @@
   let codeHost=null;
   // setCodeMode requests /code or /editor (web/shell-request.js); the shell router applies it with applyCodeMode.
   const setCodeMode=on=>{if(document.body.classList.contains('code-mode')===!!on)return;window.shellRequest({view:on?'/code':'/editor'},()=>applyCodeMode(on));};
-  const applyCodeMode=on=>{const body=document.body.classList;if(body.contains('code-mode')===!!on)return;body.toggle('code-mode',!!on);if(on&&codeHost)codeHost.append(agentSection);else if(!on)dock.append(agentSection);try{localStorage.setItem('verynize-code-mode',on?'1':'0')}catch{}requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));notify();};
+  const applyCodeMode=on=>{const body=document.body.classList;if(body.contains('code-mode')===!!on)return;body.toggle('code-mode',!!on);syncCodeMode(on);};
+  // Web app: Start's Code route owns body.code-mode and the workspace; it reports the mode here (chat section host, launch restore, layout, listeners).
+  const syncCodeMode=on=>{if(on&&codeHost)codeHost.append(agentSection);else if(!on)dock.append(agentSection);try{localStorage.setItem('verynize-code-mode',on?'1':'0')}catch{}requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));notify();};
   const openProject=()=>setCodeMode(true);
   const attachCodeHost=el=>{codeHost=el;if(el&&document.body.classList.contains('code-mode'))el.append(agentSection);else if(!el)dock.append(agentSection);};
   const queueView=q=>q.map(t=>({id:t.id,text:t.displayPrompt||t.prompt,...(t.images.length?{images:t.images.map(i=>i.name)}:{}),...(t.mentions?.length?{mentions:t.mentions}:{}),at:t.at}));
@@ -229,7 +249,7 @@
     switchProject:(key,name,options={})=>{if(typeof key!=='string'||!key)throw Error('Invalid project');projectName=key==='unattached'?'':String(name||key.split(/[\\/]/).pop());$('project-name').textContent=projectName||'No repository';if(key===projectKey&&conversations.length){const next=conversations.find(c=>c.id===options.select);if(next)switchTo(next);else{renderHistory();activate();}return;}loadChats(key,options);},
     chatSummaries,removeChat,rootOf:()=>rootOf(conversation),initialSelection:()=>initialSelection,setStatus:text=>status(text),
     setOpenFile:file=>{openFile=file&&typeof file.path==='string'?{path:file.path,text:String(file.text||'')}:null;},
-    attachCodeHost,setCodeMode,applyCodeMode,
+    attachCodeHost,setCodeMode,applyCodeMode,syncCodeMode,
     actions:{openDesign:()=>openDesign(),saveDesign:()=>action(()=>saveDesign(false))(),saveDesignAs:()=>action(()=>saveDesign(true))(),gitStatus:()=>gitStatus(),createWorktree:()=>createWorktree(),livePreview:()=>livePreview(),captureApp:()=>captureApp(),exportPDF:()=>exportPDF()},
     selectChat:id=>{const next=conversations.find(c=>c.id===id);if(!next)return false;switchTo(next);return true;},
     forkAt:index=>forkAt(index),
@@ -249,16 +269,17 @@
   const action = fn => async () => { try { await fn(); } catch (e) { status(e.message || String(e)); } };
   $('project-toggle').onclick = () => setCodeMode(!document.body.classList.contains('code-mode'));
   if (!api) {
+    // Web: no project files, attachments from disk or local agents. The chat itself keeps its controls and runs on the
+    // model API when the platform's AgentService can (signed in, model API enabled, a cloud room open).
     $('project-agent-status').textContent = 'Open the desktop app to use project files and local agents.';
-    host.querySelectorAll('button:not(#project-toggle),input,textarea,select').forEach(e => e.disabled=true);
-    return;
+    host.querySelectorAll('#project-review,#project-apply-design,#chat-attach-file,#chat-attach-canvas,#chat-attach-image,#chat-image-file,#project-context').forEach(e => e.disabled=true);
   }
   // Former project-dialog actions, now in the Code workspace menus (repository row, Start preview menu) and the app menu.
   const openDesign=action(async()=>{const result=await api.designOpen().catch(error=>{window.documentSafety.reportOpenFailure({error,source:'native',name:'Design file',kept:'The file was not changed.'});throw error});if(result){if(window.fileLibrary?.openNative)await window.fileLibrary.openNative(result);else {await window.documentLifecycle?.prepareSwitch({preserveNative:true});window.design.setDocument(result.document);}status('Opened '+result.path);}});
-  const saveDesign=async saveAs=>{const fileId=window.fileLibrary?.currentId;const result=await api.designSave({document:window.design.getDocument(),saveAs});if(result&&!result.detached&&fileId===window.fileLibrary?.currentId){window.fileLibrary?.setNativePath?.(result.path);status('Saved '+result.path+' · MCP can edit this file');}};
-  document.getElementById('save-project').onclick=action(()=>saveDesign(false));
-  document.getElementById('open-project').onclick=openDesign;
-  api.onDesignFileChanged(event=>{const active=window.fileLibrary?.list().find(file=>file.id===window.fileLibrary.currentId);if(active&&!active.nativePath)return;if(active?.nativePath&&active.nativePath!==event.path)return;if(event.error){status(event.error);return;}status('Design changed on disk: '+event.path);if(window.confirm('The design file changed outside the editor. Load its latest version?'))api.designReload().then(result=>{window.design.setDocument(result.document);status('Loaded external design changes');}).catch(e=>status(e.message));});
+  const saveDesign=async saveAs=>{await window.pageLoader?.ensureAll();const fileId=window.fileLibrary?.currentId;const result=await api.designSave({document:window.design.getDocument(),saveAs}).catch(error=>{/* size limits: web/storage-limits.js */if(window.storageLimits?.isSizeError(error))window.storageLimits.reportError(error.message,'save');throw error});if(result&&!result.detached&&fileId===window.fileLibrary?.currentId){window.fileLibrary?.setNativePath?.(result.path);status('Saved '+result.path+' · MCP can edit this file');}};
+  if(api){document.getElementById('save-project').onclick=action(()=>saveDesign(false));
+  document.getElementById('open-project').onclick=openDesign;}
+  if(api)api.onDesignFileChanged(event=>{const active=window.fileLibrary?.list().find(file=>file.id===window.fileLibrary.currentId);if(active&&!active.nativePath)return;if(active?.nativePath&&active.nativePath!==event.path)return;if(event.error){status(event.error);return;}status('Design changed on disk: '+event.path);if(window.confirm('The design file changed outside the editor. Load its latest version?'))api.designReload().then(result=>{window.design.setDocument(result.document);status('Loaded external design changes');}).catch(e=>status(e.message));});
   const gitStatus=action(async()=>{status(await api.gitStatus() || 'Working tree clean');});
   const livePreview=action(async()=>{const url=await window.askText('Local app URL','http://localhost:3000');if(url){if(window.livePreview){setCodeMode(false);window.livePreview.show(url);}else await api.previewApp({url});}});
   const captureApp=action(async()=>{const url=await window.askText('Local app URL to capture','http://localhost:3000');if(!url)return;const bounds=await window.askText('Optional region x,y,width,height (blank for full viewport)','');if(bounds===null)return;let region;if(bounds.trim()){const parts=bounds.split(',').map(Number);if(parts.length!==4||parts.some(n=>!Number.isFinite(n)))throw Error('Use four comma-separated numbers');region={x:parts[0],y:parts[1],width:parts[2],height:parts[3]};}status('Capturing visible app elements…');const result=await api.previewApp({url,capture:true,region});if(result.document){const doc=window.design.getDocument(),source=result.document.pages[0].nodes,ids=new Map(source.map(n=>[n.id,crypto.randomUUID()]));doc.pages.find(p=>p.id===doc.activePage).nodes.push(...source.map(n=>({...n,id:ids.get(n.id),parentId:n.parentId?ids.get(n.parentId):null})));window.design.setDocument(doc);}else window.design.importHTML(result.html);status('Captured app region.'+(result.warnings?.length?' '+result.warnings.join(' '):''));});
@@ -271,17 +292,20 @@
   $('chat-attach-file').onclick=()=>{if(!openFile){status('Open a file in the Code workspace first');return;}attachments.push({kind:'text',name:openFile.path,text:openFile.text.slice(0,16000)});renderAttachments();};
   $('chat-attach-canvas').onclick=()=>{attachments.push({kind:'text',name:'Canvas',text:JSON.stringify(window.design.getDocument()).slice(0,20000)});renderAttachments();};
   // Images are saved under userData/agent-attachments/<chat> by the main process; only their paths are sent.
-  const attachImage=async blob=>{if(!conversation)newChat();if(attachments.filter(a=>a.kind==='image').length>=10)throw Error('Attach up to 10 images');if(blob.size>8*1024*1024)throw Error('Images must be under 8 MB');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob);});const saved=await api.saveAgentImage({chatId:conversation.id,name:blob.name||'pasted image',data});attachments.push({kind:'image',name:saved.name,path:saved.path});renderAttachments();status('Image attached');};
+
+  const attachImage=async blob=>{if(!api?.saveAgentImage)throw Error('Attach images in the desktop app');if(!conversation)newChat();const chatId=conversation.id,target=attachments;const pending=[...imageJobs.values()].filter(j=>j.chatId===chatId).length;if(target.filter(a=>a.kind==='image').length+pending>=10)throw Error('Attach up to 10 images');const controller=new AbortController();imageJobs.set(controller,{chatId});status('Preparing image · '+(pending+1)+' pending · Esc to cancel');try{const {src:data}=await window.imageUpload.prepare(blob,{purpose:'chat',signal:controller.signal});const saved=await api.saveAgentImage({chatId,name:blob.name||'pasted image',data});controller.signal.throwIfAborted();target.push({kind:'image',name:saved.name,path:saved.path});if(conversation?.id===chatId)renderAttachments();status((blob.name||'Image')+' attached');}finally{imageJobs.delete(controller);}};
+  const attachImageBatch=async files=>{let done=0;const errors=[];await Promise.all([...files].map(async file=>{try{await attachImage(file);done++;}catch(error){errors.push((file.name||'Image')+': '+error.message);}status(done+'/'+files.length+' images attached'+(errors.length?' · '+errors.join('; '):''));}));};
+  $('project-prompt').addEventListener('keydown',event=>{if(event.key==='Escape'&&imageJobs.size){for(const controller of imageJobs.keys())controller.abort();status('Image uploads cancelled');}});
   $('chat-attach-image').onclick=()=>$('chat-image-file').click();
-  $('chat-image-file').onchange=action(async()=>{for(const file of $('chat-image-file').files)await attachImage(file);$('chat-image-file').value='';});
-  $('project-prompt').addEventListener('paste',event=>{const images=[...(event.clipboardData?.items||[])].filter(item=>item.kind==='file'&&item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);if(!images.length)return;event.preventDefault();action(async()=>{for(const image of images)await attachImage(image);})();});
+  $('chat-image-file').onchange=action(async()=>{const files=[...$('chat-image-file').files];$('chat-image-file').value='';await attachImageBatch(files);});
+  $('project-prompt').addEventListener('paste',event=>{const images=[...(event.clipboardData?.items||[])].filter(item=>item.kind==='file'&&item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);if(!images.length)return;event.preventDefault();action(async()=>{await attachImageBatch(images);})();});
   // Text files are inlined (≤5 files, ≤200 KB each); a folder is attached as its file tree (≤300 entries).
   const MAX_FILE_BYTES=200*1024,MAX_FILES=5,MAX_INLINE=60000,MAX_PROMPT=190000;
   const attachText=(name,text,size)=>{if(attachments.filter(a=>a.kind==='file').length>=MAX_FILES)throw Error('Attach up to 5 files');if((size??text.length)>MAX_FILE_BYTES)throw Error(name+' is over 200 KB');if(text.slice(0,4096).includes('\u0000'))throw Error(name+' is not a text file');attachments.push({kind:'file',name,text:text.length>MAX_INLINE?text.slice(0,MAX_INLINE)+'\n… (truncated)':text});};
   const attachTree=(name,paths)=>{const list=[...new Set(paths)].filter(p=>!/(^|\/)(node_modules|\.git)(\/|$)/.test(p)).sort();attachments.push({kind:'folder',name,text:list.slice(0,300).join('\n')+(list.length>300?`\n… ${list.length-300} more entries`:'')});};
   const attachFiles=async input=>{
-    if(input&&typeof input.length==='number'){for(const file of input){if(file.type?.startsWith('image/'))await attachImage(file);else attachText(file.name,await file.text(),file.size);}renderAttachments();return;}
-    const folder=!!input?.folder,picker=api.pickAgentFiles||api.pickFiles||api.openFiles;
+    if(input&&typeof input.length==='number'){await attachImageBatch([...input].filter(file=>file.type?.startsWith('image/')));for(const file of input){if(!file.type?.startsWith('image/'))attachText(file.name,await file.text(),file.size);}renderAttachments();return;}
+    const folder=!!input?.folder,picker=api?.pickAgentFiles||api?.pickFiles||api?.openFiles;
     if(picker){
       const picked=await picker({folder,multiple:true});const items=Array.isArray(picked)?picked:picked?.files||(picked?[picked]:[]);
       for(const item of items){if(!item)continue;const name=item.name||item.path||'file';if(Array.isArray(item.entries)||Array.isArray(item.tree))attachTree(name,item.entries||item.tree);else if(typeof item.text==='string')attachText(item.path||name,item.text,item.size);}
@@ -291,17 +315,17 @@
     const chosen=await new Promise(resolve=>{picker2.onchange=()=>resolve([...picker2.files]);picker2.oncancel=()=>resolve([]);picker2.click();});
     if(!chosen.length)return;
     if(folder){attachTree(chosen[0].webkitRelativePath.split('/')[0]||'Folder',chosen.map(f=>f.webkitRelativePath||f.name));renderAttachments();return;}
-    for(const file of chosen){if(file.type.startsWith('image/'))await attachImage(file);else attachText(file.name,await file.text(),file.size);}
+    await attachImageBatch(chosen.filter(file=>file.type.startsWith('image/')));for(const file of chosen){if(!file.type.startsWith('image/'))attachText(file.name,await file.text(),file.size);}
     renderAttachments();
   };
   const attachFigma=url=>{url=String(url||'').trim();if(!/^https:\/\/([\w-]+\.)?figma\.com\/(file|design|proto|board)\//.test(url))throw Error('Paste a figma.com file or design link');const title=decodeURIComponent(/\/(?:file|design|proto|board)\/[^/]+\/([^/?#]+)/.exec(url)?.[1]||'Figma file').replace(/-/g,' ');attachments.push({kind:'figma',name:'Figma · '+title.slice(0,60),url});renderAttachments();};
   // Link a chat (any repository): its transcript is attached to the next message and its worktree becomes a working directory.
-  const storedChat=(id,key)=>{if(!key||key===projectKey)return conversations.find(c=>c.id===id);try{const saved=JSON.parse(localStorage.getItem(chatsKey(key))||'[]');return (Array.isArray(saved)?saved:[]).find(c=>c&&c.id===id&&Array.isArray(c.messages));}catch{return null;}};
+  const storedChat=(id,key)=>{if(!key||key===projectKey)return conversations.find(c=>c.id===id);try{const saved=JSON.parse(storage.getItem(chatsKey(key))||'[]');return (Array.isArray(saved)?saved:[]).find(c=>c&&c.id===id&&Array.isArray(c.messages));}catch{return null;}};
   const linkChat=(id,key)=>{const other=storedChat(id,key);if(!other||other===conversation)throw Error('Choose another chat');const text=buildSeed(other.messages);const dir=other.worktree?.path||(key&&key!=='unattached'&&key!==projectKey?key:null);if(!text&&!dir)throw Error('That chat is empty');if(!conversation)newChat();if(text)attachments.push({kind:'chat',name:'Chat · '+other.title.slice(0,60),text,chatId:id});if(dir&&dir!==rootOf(conversation))addDirectory(dir);renderAttachments();status(`Linked “${other.title.slice(0,60)}”`);};
   // Extra working directories of the current chat (composer /add-dir, linked worktrees): sent as runAgent `directories`.
   const addDirectory=dir=>{dir=String(dir||'');if(!dir.startsWith('/'))throw Error('Choose a folder');if(!conversation)newChat();const dirs=conversation.dirs||(conversation.dirs=[]);if(!dirs.includes(dir)){if(dirs.length>=10)throw Error('A chat can have up to 10 working directories');dirs.push(dir);persist();}notify();};
   const removeDirectory=dir=>{if(!conversation?.dirs)return;conversation.dirs=conversation.dirs.filter(d=>d!==dir);persist();notify();};
-  const attachImagePaths=list=>{if(!conversation)newChat();for(const item of Array.isArray(list)?list:[]){if(!item||typeof item.path!=='string')continue;if(attachments.filter(a=>a.kind==='image').length>=10)throw Error('Attach up to 10 images');attachments.push({kind:'image',name:String(item.name||'image').slice(0,120),path:item.path});}renderAttachments();};
+  const attachImagePaths=list=>{if(!conversation)newChat();for(const item of Array.isArray(list)?list:[]){if(!item||typeof item.path!=='string')continue;if(attachments.filter(a=>a.kind==='image').length+[...imageJobs.values()].filter(j=>j.chatId===conversation.id).length>=10)throw Error('Attach up to 10 images');attachments.push({kind:'image',name:String(item.name||'image').slice(0,120),path:item.path});}renderAttachments();};
   const attachTextBlock=(kind,name,text,meta={})=>{text=String(text||'');if(!text.trim())throw Error('Nothing to attach');attachments.push({kind,name:String(name).slice(0,120),text:text.length>MAX_INLINE?'… (earlier output omitted)\n'+text.slice(-MAX_INLINE):text,...meta});renderAttachments();};
   const escapeAttr=text=>String(text).replace(/[&"<>]/g,c=>({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'})[c]);
   const attachmentBlock=a=>a.kind==='file'?`<attached-file path="${escapeAttr(a.name)}">\n${a.text}\n</attached-file>`:a.kind==='folder'?`<attached-folder path="${escapeAttr(a.name)}">\n${a.text}\n</attached-folder>`:a.kind==='figma'?`<figma-link url="${escapeAttr(a.url)}">The user linked this Figma file. You cannot open Figma links yourself. If you need its contents, ask the user to bring it onto the canvas with Import Figma, then read it with the canvas tools.</figma-link>`:a.kind==='chat'?`<linked-chat title="${escapeAttr(a.name)}">\n${a.text}\n</linked-chat>`:a.kind==='terminal'?`<terminal-output cwd="${escapeAttr(a.cwd||'')}">\n${a.text}\n</terminal-output>`:'Attachment '+a.name+':\n'+a.text;
@@ -317,7 +341,7 @@
   };
   const enqueue=(chat,task)=>{const q=queueOf(chat);if(q.length>=10)throw Error('Queue is full');q.push(task);renderHistory();status(`${q.length} queued ${q.length===1?'task':'tasks'}`);};
   let versionRequest=null;
-  const toolsVersion=()=>versionRequest||(versionRequest=api.agentToolsVersion?Promise.resolve().then(()=>api.agentToolsVersion()).then(v=>typeof v==='string'?v:v?String(v):'').catch(()=>{versionRequest=null;return '';}):Promise.resolve(''));
+  const toolsVersion=()=>versionRequest||(versionRequest=api?.agentToolsVersion?Promise.resolve().then(()=>api.agentToolsVersion()).then(v=>typeof v==='string'?v:v?String(v):'').catch(()=>{versionRequest=null;return '';}):Promise.resolve(''));
   const normalizeQuestions=list=>(Array.isArray(list)?list:[]).slice(0,10).map((q,i)=>({id:String(q?.id??'q'+(i+1)),question:String(q?.question??''),...(q?.header?{header:String(q.header)}:{}),...(Array.isArray(q?.options)?{options:q.options.map(o=>typeof o==='string'?{label:o}:{label:String(o?.label??''),...(o?.description?{description:String(o.description)}:{})})}:{}),...(q?.multiSelect?{multiSelect:true}:{})}));
   const num=(...values)=>{for(const v of values)if(Number.isFinite(v))return v;return undefined;};
   const normalizeUsage=(event,previous={})=>{
@@ -329,7 +353,7 @@
     return next;
   };
   const finalizeReply=(reply,event,last)=>{if(reply.state==='running'){reply.end=Date.now();reply.state=event.stopped?'stopped':event.code===0?'complete':'failed';}for(const part of reply.parts||[]){if(part.kind==='tool'&&part.state==='running')part.state=event.code===0?'done':'interrupted';if((part.kind==='permission'||part.kind==='question')&&part.state==='pending')part.state='expired';}if(last&&!reply.text&&!(reply.parts||[]).length)reply.text=event.stopped?'Stopped.':'No response.';};
-  const autoTitle=(entry,chat)=>{if(chat.autoTitled)return;chat.autoTitled=true;if(!api.agentTitle)return;const first=chat.messages.find(m=>m.role==='user');if(!first)return;Promise.resolve(api.agentTitle({agent:entry.task.agent,text:first.text.slice(0,2000)})).then(result=>{if(result?.source==='heuristic')return;let title=typeof result==='string'?result:result?.title;title=typeof title==='string'?title.trim().replace(/^["']|["']$/g,''):'';if(!title)return;chat.title=title.slice(0,80);persistChat(entry);renderHistory();}).catch(()=>{});};
+  const autoTitle=(entry,chat)=>{if(chat.autoTitled)return;chat.autoTitled=true;if(!api?.agentTitle)return;const first=chat.messages.find(m=>m.role==='user');if(!first)return;Promise.resolve(api.agentTitle({agent:entry.task.agent,text:first.text.slice(0,2000)})).then(result=>{if(result?.source==='heuristic')return;let title=typeof result==='string'?result:result?.title;title=typeof title==='string'?title.trim().replace(/^["']|["']$/g,''):'';if(!title)return;chat.title=title.slice(0,80);persistChat(entry);renderHistory();}).catch(()=>{});};
   const finishRun=(entry,event)=>{
     const chat=entry.chat;active.delete(chat.id);if(entry.runId)runs.delete(entry.runId);
     entry.replies.forEach((reply,i)=>finalizeReply(reply,event,i===entry.replies.length-1));
@@ -338,7 +362,7 @@
     if(event.sessionId&&event.resumeAt&&entry.replies.length)entry.replies.at(-1).resumePoint={sessionId:event.sessionId,at:event.resumeAt,agent:entry.task.agent,key:entry.key,toolsVersion:entry.version};
     if(event.code===0||event.stopped)stats.completed++;else stats.failed++;
     output(`\n[${event.stopped?'stopped':'exit '+event.code}]\n`);persistChat(entry);renderHistory();window.dispatchEvent(new CustomEvent('code-files-changed',{detail:{root:rootOf(chat,entry.key)}}));
-    status(chat!==conversation?`“${chat.title}” ${event.stopped?'stopped':event.code===0?'finished':'failed'}`:event.stopped?'Stopped':event.code===0?'Done':'The agent reported an error');
+    status(chat!==conversation?`“${chat.title}” ${event.stopped?'stopped':event.code===0?'finished':entry.authRequired?'needs sign-in':'failed'}`:event.stopped?'Stopped':event.code===0?'Done':entry.authRequired?'Sign in to continue':'The agent reported an error');
     if(event.code===0)autoTitle(entry,chat);
     // Stop keeps the queue (paused); "send now" stops the run and starts the chosen task.
     const q=queueOf(chat);let next=null;
@@ -367,7 +391,9 @@
       case 'question-request':reply.parts.push({kind:'question',requestId:event.requestId,runId:event.id,questions:normalizeQuestions(event.questions),state:'pending',at:Date.now()});status((here?'':`“${chat.title}”: `)+'The agent has a question');persistChat(entry);break;
       case 'question-resolved':{const part=entry.replies.flatMap(r=>r.parts||[]).find(p=>p.kind==='question'&&p.requestId===event.requestId);if(part&&part.state==='pending'){part.state=event.answers?'answered':'expired';if(event.answers)part.answers=event.answers;}break;}
       case 'usage':reply.usage=normalizeUsage(event,reply.usage);chat.usage=reply.usage;break;
-      case 'error':reply.parts.push({kind:'error',text:event.text});output('\n[error] '+event.text+'\n');break;
+      case 'error':if(entry.authRequired)break;reply.parts.push({kind:'error',text:event.text});output('\n[error] '+event.text+'\n');break;
+      // Signed-out provider account (desktop/agent-runtime.cjs requireAuth): one sign-in card per run (chat/auth-card.tsx); later errors are dropped.
+      case 'auth-required':{if(entry.authRequired)break;entry.authRequired=true;const a=event.account&&typeof event.account==='object'?event.account:{};reply.parts.push({kind:'auth',agent:String(event.agent||entry.task.agent),text:String(event.text||'').slice(0,600),account:{id:String(a.id||'system'),name:String(a.name||''),system:a.system!==false}});output('\n['+(event.text||'Sign-in needed')+']\n');if(here)status(event.text||'Sign-in needed');persistChat(entry);break;}
       // Chat autonomy (desktop/agent-autonomy.cjs): the run's effective settings and automatic allow/deny/limit decisions.
       case 'autonomy':if(event.text)reply.parts.push({kind:'autonomy',text:String(event.text).slice(0,600)});break;
       case 'policy':reply.parts.push({kind:'policy',decision:String(event.decision||''),toolName:String(event.toolName||''),text:String(event.text||'').slice(0,600)});output('\n['+(event.text||event.decision)+']\n');if(event.decision==='limit'&&here)status(event.text);break;
@@ -375,8 +401,8 @@
     }
     scheduleReply();
   };
-  // Events can arrive before runAgent() resolves with the run id; unknown ids are buffered while a start is in flight.
-  api.onAgentEvent(event=>handleEvent(event));
+  // Events can arrive before run() resolves with the run id; unknown ids are buffered while a start is in flight.
+  // The subscription itself is made by bindAgents (end of file) on the platform's AgentService.
   const runTask=async(task,chat)=>{
     if(!chat)chat=conversation||newChat();
     if(active.has(chat.id)){enqueue(chat,task);return;}
@@ -391,22 +417,24 @@
     const reply={role:'assistant',text:'',parts:[],agent:task.agent,model:task.model,at:Date.now(),state:'running'};chat.messages.push(reply);entry.reply=reply;entry.replies.push(reply);
     persistChat(entry);renderHistory();
     try{
+      const svc=agentService(),web=svc.kind==='web';
       entry.version=await toolsVersion();
       // Resume only the same provider/project session created with the same canvas tool set; otherwise seed a new session.
-      const resume=chat.sessionId&&chat.sessionAgent===task.agent&&chat.sessionKey===entry.key&&(!entry.version||chat.toolsVersion===entry.version)?chat.sessionId:'';
-      const seed=resume?'':buildSeed(prior.slice(chat.seedFrom||0)),seedParam=!!api.agentToolsVersion;
+      // The model API (web) keeps no provider session: every turn sends the earlier turns as `history` instead.
+      const resume=!web&&chat.sessionId&&chat.sessionAgent===task.agent&&chat.sessionKey===entry.key&&(!entry.version||chat.toolsVersion===entry.version)?chat.sessionId:'';
+      const seed=resume||web?'':buildSeed(prior.slice(chat.seedFrom||0)),seedParam=!!api?.agentToolsVersion;
       let prompt=task.prompt;
       if(seed&&!seedParam)prompt=tail('<previous-conversation>\n'+seed+'\n</previous-conversation>',Math.max(0,195000-prompt.length))+'\n\n'+prompt;
       if(!seedParam&&task.mentions?.length)prompt+='\n\nReferenced canvas elements: '+task.mentions.map(m=>`${m.label} (id ${m.id}${m.shortId?', short id '+m.shortId:''}, page ${m.pageId})`).join('; ');
       entry.resumed=!!resume;
       // agent-runtime parity: after a rewind, fork the provider session at the kept reply (the seed stays as the fallback).
       const fork=!resume&&seedParam&&chat.forkFrom&&chat.forkFrom.agent===task.agent&&chat.forkFrom.key===entry.key&&(!entry.version||chat.forkFrom.toolsVersion===entry.version)?chat.forkFrom:null;
-      const result=await api.runAgent({...(api.repositories?{root:rootOf(chat,entry.key)}:{}),agent:task.agent,model:task.model==='default'?'':task.model,access:task.access,effort:task.effort,instructions:task.instructions,prompt,chatId:chat.id,...(resume?{sessionId:resume}:{}),...(fork?{fork:{sessionId:fork.sessionId,at:fork.at}}:{}),...(seed&&seedParam?{seed}:{}),...(task.mentions?.length?{mentions:task.mentions}:{}),...(chat.dirs?.length?{directories:chat.dirs.slice()}:{}),...(task.designStyle?{designStyle:task.designStyle}:{}),context});
+      const result=await svc.run({...(api?.repositories?{root:rootOf(chat,entry.key)}:{}),...(web?{history:historyOf(prior.slice(chat.seedFrom||0))}:{}),agent:task.agent,model:task.model==='default'?'':task.model,access:task.access,effort:task.effort,instructions:task.instructions,prompt,chatId:chat.id,...(resume?{sessionId:resume}:{}),...(fork?{fork:{sessionId:fork.sessionId,at:fork.at}}:{}),...(seed&&seedParam?{seed}:{}),...(task.mentions?.length?{mentions:task.mentions}:{}),...(chat.dirs?.length?{directories:chat.dirs.slice()}:{}),...(task.designStyle?{designStyle:task.designStyle}:{}),context});
       entry.runId=result.id;runs.set(result.id,entry);reply.access=result.access;reply.runtime=result.runtime;inflight--;chat.forkFrom=null;
-      if(chat===conversation)status((result.quickChat?'Quick chat · scratch folder':'Running in project')+' · '+result.runtime+(result.mcp?' · canvas tools connected':' · canvas tools not connected')+(resume?' · resumed session':result.rewound?' · session rewound':seed?' · new session seeded from transcript':''));
+      if(chat===conversation)status(web?'Running on the model API'+(result.model?' · '+result.model:''):(result.quickChat?'Quick chat · scratch folder':'Running in project')+' · '+result.runtime+(result.mcp?' · canvas tools connected':' · canvas tools not connected')+(resume?' · resumed session':result.rewound?' · session rewound':seed?' · new session seeded from transcript':''));
       for(const event of orphans.filter(e=>e.id===result.id)){orphans.splice(orphans.indexOf(event),1);handleEvent(event);}
       if(!inflight)orphans.length=0;
-      if(entry.cancelOnStart&&active.get(chat.id)===entry)api.cancelAgent(result.id).catch(e=>status(e.message));
+      if(entry.cancelOnStart&&active.get(chat.id)===entry)svc.cancel(result.id).catch(e=>status(e.message));
     }catch(e){
       inflight--;if(!inflight)orphans.length=0;
       reply.text=e.message;reply.state='error';reply.end=Date.now();stats.failed++;active.delete(chat.id);persistChat(entry);renderHistory();status(e.message);
@@ -415,7 +443,7 @@
   };
   // Steering: the runtime injects a message into the running turn; the transcript shows it and continues in a new reply.
   const trySteer=async(entry,task)=>{
-    if(!api.steerAgent||!entry.runId)return false;
+    if(!api?.steerAgent||!entry.runId)return false;
     let result;try{result=await api.steerAgent({runId:entry.runId,chatId:entry.chat.id,text:task.prompt,...(task.images.length?{images:task.images.map(i=>i.path)}:{}),...(task.mentions?.length?{mentions:task.mentions}:{})});}catch{return false;}
     if(!result||result.queued||active.get(entry.chat.id)!==entry)return false;
     const chat=entry.chat,previous=entry.reply;if(previous.state==='running'){previous.state='complete';previous.end=Date.now();}
@@ -430,7 +458,7 @@
     if(!entry){q.splice(q.indexOf(task),1);renderHistory();await runTask(task,chat);return;}
     if(await trySteer(entry,task)){const i=q.indexOf(task);if(i>=0)q.splice(i,1);renderHistory();return;}
     entry.nextTaskId=id;entry.userStopped=false;
-    if(entry.runId)await api.cancelAgent(entry.runId);else entry.cancelOnStart=true;
+    if(entry.runId)await agentService().cancel(entry.runId);else entry.cancelOnStart=true;
     status('Stopping the current turn to send the queued message');
   };
   const editQueued=(id,text)=>{const task=queueOf(conversation).find(t=>t.id===id);text=String(text||'').trim();if(!task||!text)return;const suffix=task.prompt.startsWith(task.displayPrompt)?task.prompt.slice(task.displayPrompt.length):'';task.displayPrompt=text;task.prompt=text+suffix;renderHistory();};
@@ -456,7 +484,7 @@
   const resend=(message,text)=>{const original=taskOf.get(message);const displayPrompt=text??message.text;const suffix=original&&original.prompt.startsWith(original.displayPrompt)?original.prompt.slice(original.displayPrompt.length):'';return runTask({...currentDefaults(),id:crypto.randomUUID(),at:Date.now(),prompt:displayPrompt+suffix,displayPrompt,images:original?.images||[],mentions:original?.mentions||message.mentions||[],withCanvas:original?original.withCanvas:!!message.canvas},conversation);};
   // agent-runtime parity: second opinion. The other provider reviews the latest reply (and uncommitted changes), read-only.
   const secondOpinion=async index=>{
-    const chat=conversation;if(!chat)return;if(!api.reviewAgent)throw Error('Second opinions need the desktop agent runtime');if(isRunning(chat))throw Error('Wait for the current task to finish');
+    const chat=conversation;if(!chat)return;if(!api?.reviewAgent)throw Error('Second opinions need the desktop agent runtime');if(isRunning(chat))throw Error('Wait for the current task to finish');
     let i=Math.min(index??chat.messages.length-1,chat.messages.length-1);while(i>0&&(chat.messages[i]?.role!=='assistant'||chat.messages[i].review))i--;
     const reply=chat.messages[i];if(!reply||reply.role!=='assistant'||reply.review)throw Error('Choose a reply to review');
     const answer=(reply.parts||[]).filter(p=>p.kind==='text'&&p.text).map(p=>p.text).join('\n\n')||reply.text||'';if(!answer.trim()||reply.state==='error')throw Error('There is no answer to review yet');
@@ -472,28 +500,29 @@
     review.end=Date.now();persist();renderHistory();
   };
   const copyMessage=index=>{const message=conversation?.messages[index];if(!message)return;const text=message.text||(message.parts||[]).filter(p=>p.kind==='text').map(p=>p.text).join('\n\n');const fallback=()=>{const area=document.createElement('textarea');area.value=text;document.body.append(area);area.select();document.execCommand('copy');area.remove();};(navigator.clipboard?.writeText?navigator.clipboard.writeText(text):Promise.reject()).catch(fallback).then(()=>status('Copied'));};
-  const answerQuestion=(messageIndex,partIndex,answers)=>{const part=conversation?.messages[messageIndex]?.parts?.[partIndex];if(part?.kind!=='question'||part.state!=='pending')return;const clean={};for(const [key,value] of Object.entries(answers||{}))clean[key]=Array.isArray(value)?value.join(', '):String(value);part.answers=clean;part.state='answered';const runId=part.runId||entryOf(conversation)?.runId;if(api.respondAgentQuestion)Promise.resolve().then(()=>api.respondAgentQuestion({runId,requestId:part.requestId,answers:clean})).catch(e=>status(e.message));else status('This agent runtime cannot receive answers');persist();renderHistory();};
+  const answerQuestion=(messageIndex,partIndex,answers)=>{const part=conversation?.messages[messageIndex]?.parts?.[partIndex];if(part?.kind!=='question'||part.state!=='pending')return;const clean={};for(const [key,value] of Object.entries(answers||{}))clean[key]=Array.isArray(value)?value.join(', '):String(value);part.answers=clean;part.state='answered';const runId=part.runId||entryOf(conversation)?.runId;if(api?.respondAgentQuestion)Promise.resolve().then(()=>api.respondAgentQuestion({runId,requestId:part.requestId,answers:clean})).catch(e=>status(e.message));else status('This agent runtime cannot receive answers');persist();renderHistory();};
   // Follow-ups while a turn runs (Settings › Agents › Follow-up messages): Send goes the default way (Queue or Steer);
   // ⌘↵ sends the other way. A steer the runtime cannot take falls back to the queue.
   let sendOtherWay=false;
   const followUpSteers=other=>(behavior().followUp==='steer')!==other;
   $('project-run').onclick=action(async()=>{const other=sendOtherWay;sendOtherWay=false;const text=$('project-prompt').value.trim();if(!text)throw Error('Enter a task.');const chat=conversation||newChat();const task=composeTask(text);$('project-prompt').value='';setDraft('',chat);if(isRunning(chat)){const entry=entryOf(chat);if(followUpSteers(other)&&entry&&await trySteer(entry,task))return;enqueue(chat,task);return;}await runTask(task,chat);});
   $('project-prompt').addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();sendOtherWay=isRunning(conversation);$('project-run').click();sendOtherWay=false;}});
-  $('project-cancel').onclick=action(async()=>{const entry=entryOf(conversation);if(!entry)return;entry.userStopped=true;entry.nextTaskId=null;if(entry.runId)await api.cancelAgent(entry.runId);else entry.cancelOnStart=true;const kept=queueOf(conversation).length;renderHistory();status('Stopping agent'+(kept?` · ${kept} queued kept`:''));});
+  $('project-cancel').onclick=action(async()=>{const entry=entryOf(conversation);if(!entry)return;entry.userStopped=true;entry.nextTaskId=null;if(entry.runId)await agentService().cancel(entry.runId);else entry.cancelOnStart=true;const kept=queueOf(conversation).length;renderHistory();status('Stopping agent'+(kept?` · ${kept} queued kept`:''));});
   $('project-review').onclick=()=>{$('project-prompt').value='Review the current uncommitted Git changes. Inspect the diff and relevant source. Report correctness, security, and regression findings with file references. Do not edit files.';setDefaults({...currentDefaults(),access:'ask'});status('Review prompt ready. Choose an agent and run it.');};
   $('project-apply-design').onclick=()=>{$('project-prompt').value='Implement the attached canvas design in this project using its existing stack. Inspect source, preserve working behavior, apply the design and run checks.';$('chat-attach-canvas').click();status('Canvas attached to task. Choose an agent and run it.');};
   // Model picker: populated from the provider (Claude SDK supportedModels / Codex model/list); free text still allowed.
   const modelLists=new Map();
-  const loadModels=async()=>{const agent=$('project-agent').value;const list=$('agent-model-list');try{if(!modelLists.has(agent))modelLists.set(agent,await api.listAgentModels({agent}));if($('project-agent').value!==agent)return;list.replaceChildren();for(const model of modelLists.get(agent)){if(model.id==='default')continue;const option=document.createElement('option');option.value=model.id;option.label=model.name+(model.description?' — '+model.description.slice(0,60):'');list.append(option);}}catch(e){modelLists.delete(agent);output('[model list unavailable: '+e.message+']\n');}};
+  const loadModels=async()=>{const agent=$('project-agent').value;const list=$('agent-model-list');try{if(!modelLists.has(agent))modelLists.set(agent,await agentService().models({agent}));if($('project-agent').value!==agent)return;list.replaceChildren();for(const model of modelLists.get(agent)){if(model.id==='default')continue;const option=document.createElement('option');option.value=model.id;option.label=model.name+(model.description?' — '+model.description.slice(0,60):'');list.append(option);}}catch(e){modelLists.delete(agent);output('[model list unavailable: '+e.message+']\n');}};
   host.querySelector('.agent-config').addEventListener('toggle',event=>{if(event.target.open)loadModels();});
   loadChats(projectKey);
   const run=fn=>(...args)=>action(()=>fn(...args))();
   Object.assign(window.agentWorkspace,{
-    attachImages:files=>action(async()=>{for(const file of files)await attachImage(file);})(),
-    listModels:async agent=>{if(!modelLists.has(agent))modelLists.set(agent,await api.listAgentModels({agent}));return modelLists.get(agent);},
+    cancelImageUploads:()=>{for(const controller of imageJobs.keys())controller.abort();},
+    attachImages:files=>action(async()=>{await attachImageBatch(files);})(),
+    listModels:async agent=>{if(!modelLists.has(agent))modelLists.set(agent,await agentService().models({agent}));return modelLists.get(agent);},
     answerQuestion,steer:run(steer),queueMessage:run(async text=>{text=String(text||'').trim();if(!text)return;const chat=conversation||newChat(),task=composeTask(text);if(isRunning(chat))enqueue(chat,task);else await runTask(task,chat);}),editQueued,moveQueued,removeQueued,sendQueuedNow:run(sendQueuedNow),
     rewindTo:run(index=>{rewindCore(index);}),
-    secondOpinion:run(secondOpinion),
+    ...(api?{secondOpinion:run(secondOpinion)}:{}),
     retry:run(async index=>{const r=rewindCore(index);if(r)await resend(r.message);}),
     editMessage:run(async(index,text)=>{text=String(text||'').trim();if(!text)throw Error('Enter a message');const r=rewindCore(index);if(r)await resend(r.message,text);}),
     copyMessage,attachFiles:run(attachFiles),attachFigma:run(attachFigma),linkChat:run(linkChat),
@@ -503,5 +532,14 @@
     clearSession:()=>{if(!conversation)return;if(isRunning(conversation))throw Error('Stop the chat first');conversation.sessionId=null;conversation.forkFrom=null;conversation.seedFrom=conversation.messages.length;persist();status('The next message starts a fresh agent session');notify();},
     getQueue:()=>queueView(queueOf(conversation)),
   });
-  api.discoverAgents().then(agents=>{$('project-agent-status').textContent=agents.map(a=>`${a.id}: ${a.available?'installed':'not found'}`).join(' · ');for(const option of $('project-agent').options)option.disabled=!agents.find(a=>a.id===option.value)?.available;const first=agents.find(a=>a.available);if(first&&!agents.find(a=>a.id===$('project-agent').value&&a.available))$('project-agent').value=first.id;notify();}).catch(e=>status(e.message));
+  // The platform's AgentService: its events reach handleEvent, and the agents it offers enable the picker's options. Rebound
+  // when the service is registered or its readiness changes (web: sign in/out, the server's model API config).
+  let boundService=null,unbindEvents=null;
+  const bindAgents=()=>{
+    const svc=window.verynizePlatform.agents.service();
+    if(svc!==boundService){unbindEvents?.();unbindEvents=svc?svc.subscribe(event=>handleEvent(event)):null;boundService=svc;}
+    if(!svc)return;modelLists.clear();
+    svc.discover().then(agents=>{if(svc!==boundService)return;if(api)$('project-agent-status').textContent=agents.map(a=>`${a.id}: ${a.available?'installed':'not found'}`).join(' · ');for(const option of $('project-agent').options)option.disabled=!agents.find(a=>a.id===option.value)?.available;const first=agents.find(a=>a.available);if(first&&!agents.find(a=>a.id===$('project-agent').value&&a.available))$('project-agent').value=first.id;notify();}).catch(e=>status(e.message));
+  };
+  window.verynizePlatform.agents.subscribe(bindAgents);bindAgents();
 })();

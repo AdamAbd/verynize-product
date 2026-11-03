@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
@@ -60,7 +61,9 @@ export function FileActions({
           <PencilIcon />
           Rename
         </MenuItem>
-        <MenuItem onSelect={() => lib.duplicate(file.id)}>
+        <MenuItem
+          onSelect={() => void lib.duplicate(file.id).catch((error) => toast(error.message))}
+        >
           <CopyIcon />
           Duplicate
         </MenuItem>

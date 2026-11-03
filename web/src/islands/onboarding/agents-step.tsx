@@ -201,8 +201,8 @@ function AgentStatus({
       </Button>
     );
   return (
-    <Button variant="secondary" size="sm" data-status="signed-out" onClick={onConnect}>
-      Connect
+    <Button variant="secondary" size="sm" data-status="signed-out" data-oai-siwc-button={id === "codex" ? "" : undefined} onClick={onConnect}>
+      {id === "codex" ? "Continue with ChatGPT" : "Connect"}
     </Button>
   );
 }

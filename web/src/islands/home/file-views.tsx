@@ -1,6 +1,6 @@
 import { CloudIcon, FolderIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { isRemoteRoom, openEntry, ROLE_LABEL } from "./cloud-files";
+import { openEntry, ROLE_LABEL } from "./cloud-files";
 import { FileActions, type FileActionHandlers } from "./file-actions";
 import { hook, library, relativeDay, type LibraryFile, type LibraryFolder } from "./library";
 import { Thumbnail } from "./thumbnail";
@@ -115,14 +115,12 @@ export function FileGrid({ files, folders, shownFolders, allFiles, owner, handle
                   </span>
                 </span>
               </button>
-              {!isRemoteRoom(file) && (
-                <FileActions
-                  file={file}
-                  folders={folders}
-                  handlers={handlers}
-                  className="absolute right-2 bottom-7"
-                />
-              )}
+              <FileActions
+                file={file}
+                folders={folders}
+                handlers={handlers}
+                className="absolute right-2 bottom-7"
+              />
             </article>
           ))}
         </div>
@@ -202,14 +200,12 @@ export function FileList({ files, folders, shownFolders, allFiles, handlers }: V
               <span />
               <span className="text-sm text-foreground-2">{relativeDay(file.updated)}</span>
             </button>
-            {!isRemoteRoom(file) && (
-              <FileActions
-                file={file}
-                folders={folders}
-                handlers={handlers}
-                className="absolute top-1/2 right-2 -translate-y-1/2"
-              />
-            )}
+            <FileActions
+              file={file}
+              folders={folders}
+              handlers={handlers}
+              className="absolute top-1/2 right-2 -translate-y-1/2"
+            />
           </article>
         ))}
       </div>

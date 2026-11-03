@@ -96,6 +96,32 @@ function codexAccountFromAuth(auth) {
   return null;
 }
 
+/** Codex account from app-server `account/read`: {email, organization, plan, method}, or null when signed out. */
+function codexAccountFromRead(result) {
+  const account = result?.account;
+  if (!account || typeof account !== 'object') return null;
+  if (account.type === 'chatgpt') {
+    const workspace = typeof account.workspaceName === 'string' && !/^personal$/i.test(account.workspaceName) ? account.workspaceName : '';
+    return { email: typeof account.email === 'string' ? account.email : '', organization: workspace, plan: chatgptPlan(account.planType === 'unknown' ? '' : account.planType), method: 'ChatGPT' };
+  }
+  if (account.type === 'apiKey') return { email: '', organization: '', plan: 'API key', method: 'API key' };
+  return { email: '', organization: '', plan: typeof account.type === 'string' ? titleCase(account.type) : 'CLI account', method: 'CLI account' };
+}
+
+/**
+ * Display account of a Codex home: `account/read` first (works with keyring credential storage and future formats),
+ * then the auth.json id_token claims as a fallback for CLIs without app-server.
+ */
+async function codexAccount({ executable, codexHome, spawnProcess, readAccount = options => require('./agent-usage.cjs').readCodexAccount(options) } = {}) {
+  if (executable) {
+    try {
+      const account = codexAccountFromRead(await readAccount({ executable, env: codexHome ? { CODEX_HOME: codexHome } : {}, ...(spawnProcess ? { spawnProcess } : {}) }));
+      if (account) return account;
+    } catch {}
+  }
+  return codexHome ? codexAccountFromAuth(await readJson(path.join(codexHome, 'auth.json'))) : null;
+}
+
 /** Claude account from `claude auth status --json` output and/or ~/.claude.json. */
 function claudeAccountFrom(status, config) {
   const oauth = config?.oauthAccount || {};
@@ -106,7 +132,7 @@ function claudeAccountFrom(status, config) {
   return { email, organization: /'s Organization$/.test(organization) ? '' : organization, plan: claudePlan({ subscriptionType: status?.subscriptionType, authMethod: method }), method };
 }
 
-async function providerAccounts({ home = os.homedir(), discover, lookup = findExecutable, spawnProcess } = {}) {
+async function providerAccounts({ home = os.homedir(), discover, lookup = findExecutable, spawnProcess, siwc = null } = {}) {
   const exec = { claude: await lookup('claude', home), codex: await lookup('codex', home), opencode: await lookup('opencode', home), cursor: await lookup('cursor-agent', home) };
   if (discover) for (const item of await discover().catch(() => [])) if (item?.available && item.path && Object.hasOwn(exec, item.id)) exec[item.id] = item.path;
   const claude = (async () => {
@@ -125,10 +151,11 @@ async function providerAccounts({ home = os.homedir(), discover, lookup = findEx
   const codex = (async () => {
     const entry = { id: 'codex', name: 'Codex', installed: !!exec.codex, loggedIn: false, accounts: [], hint: "This computer's Codex login. Your terminal and the Codex app use it too." };
     if (!exec.codex) return entry;
+    if (siwc) { const status = await siwc.status(); entry.loggedIn = status.loggedIn; entry.hint = 'Your ChatGPT connection for Verynize. Tokens stay on this Mac; your terminal login is separate.'; if (status.loggedIn) entry.accounts.push({ email: status.email, plan: status.plan, method: status.method, default: true }); return entry; }
     const result = await runCli(exec.codex, ['login', 'status'], { timeout: 15000, home, spawnProcess });
     entry.loggedIn = result.code === 0 && !/not logged in/i.test(result.stdout + result.stderr);
     if (entry.loggedIn) {
-      const account = codexAccountFromAuth(await readJson(path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'auth.json')));
+      const account = await codexAccount({ executable: exec.codex, codexHome: process.env.CODEX_HOME || path.join(home, '.codex'), spawnProcess });
       entry.accounts.push({ ...(account || { email: '', organization: '', plan: /API key/i.test(result.stdout + result.stderr) ? 'API key' : 'ChatGPT', method: 'CLI account' }), default: true });
     }
     return entry;
@@ -280,7 +307,8 @@ async function commandExists(command, home) {
 }
 
 class AgentTools {
-  constructor({ home = os.homedir(), discover = null, lookup = findExecutable, spawnProcess = spawn, userData, getRuntime = () => null } = {}) {
+  constructor({ home = os.homedir(), discover = null, lookup = findExecutable, spawnProcess = spawn, userData, getRuntime = () => null, siwc = null } = {}) {
+    this.siwc = siwc;
     Object.assign(this, { home, discover, lookup, spawnProcess, userData, getRuntime });
     this.logins = new Map();
   }
@@ -290,7 +318,7 @@ class AgentTools {
   }
   cli(agent, executable, args, options = {}) { return runCli(executable, args, { home: this.home === os.homedir() ? undefined : this.home, spawnProcess: this.spawnProcess, ...options }); }
 
-  accounts() { return providerAccounts({ home: this.home, discover: this.discover, lookup: this.lookup, spawnProcess: this.spawnProcess }); }
+  accounts() { return providerAccounts({ home: this.home, discover: this.discover, lookup: this.lookup, spawnProcess: this.spawnProcess, siwc: this.siwc }); }
 
   /** {agent, installed, servers, checked, error?}. `check` asks the CLI for live status (slower). */
   async listServers({ agent, check = false } = {}) {
@@ -431,8 +459,9 @@ class AgentTools {
   }
 
   // --- access -------------------------------------------------------------------------------------
-  getAccess() { return agentAccess.loadAccessSettings(this.userData); }
+  async getAccess() { const settings = await agentAccess.loadAccessSettings(this.userData); return this.siwc ? { ...settings, codexApps: false, codexComputerUse: false } : settings; }
   async setAccess(changes) {
+    if (this.siwc) changes = { ...changes, codexApps: false, codexComputerUse: false };
     const { previous, settings } = await agentAccess.saveAccessSettings(this.userData, changes);
     let stopped = [];
     if (previous.codexComputerUse && !settings.codexComputerUse) stopped = this.getRuntime()?.stopComputerUse?.() || [];
@@ -440,8 +469,8 @@ class AgentTools {
   }
 }
 
-function registerAgentTools(handle, win, { userData, getRuntime = () => null } = {}) {
-  const tools = new AgentTools({ userData, getRuntime });
+function registerAgentTools(handle, win, { userData, getRuntime = () => null, siwc = null } = {}) {
+  const tools = new AgentTools({ userData, getRuntime, siwc });
   handle('agentProviderAccounts', () => tools.accounts());
   handle('agentMcpList', options => tools.listServers(options || {}));
   handle('agentMcpAdd', options => tools.addServer(options || {}));
@@ -453,6 +482,6 @@ function registerAgentTools(handle, win, { userData, getRuntime = () => null } =
 }
 
 module.exports = {
-  AgentTools, registerAgentTools, providerAccounts, codexAccountFromAuth, claudeAccountFrom, claudePlan, chatgptPlan, jwtClaims,
+  AgentTools, registerAgentTools, providerAccounts, codexAccountFromAuth, codexAccountFromRead, codexAccount, claudeAccountFrom, claudePlan, chatgptPlan, jwtClaims,
   parseToml, claudeConfiguredServers, codexConfiguredServers, parseClaudeMcpList, parseCodexMcpList, runCli, findExecutable, redact,
 };

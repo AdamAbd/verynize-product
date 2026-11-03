@@ -22,7 +22,12 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=req
     await page.waitForTimeout(150);
     assert.equal(await frame.evaluate(()=>scrollY),0,'scroll is blocked until Navigate');
     await page.evaluate(url=>window.livePreview.show(url),url);
-    await page.locator('#preview-navigate').click();p=await point();await page.mouse.click(p.x,p.y);
+    await page.locator('#preview-navigate').click();
+    // Navigate turns the cross-origin iframe's pointer-events on; Chromium routes clicks to it only after the next
+    // painted frame, so wait for the mode and two frames before clicking (a click in the same frame hits the editor).
+    await page.waitForFunction(()=>document.getElementById('preview-navigate')?.getAttribute('aria-pressed')==='true'&&getComputedStyle(document.getElementById('live-frame')).pointerEvents==='auto');
+    await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+    p=await point();await page.mouse.click(p.x,p.y);
     assert.equal(await frame.evaluate(()=>window.clicks),1);
     await page.mouse.wheel(0,250);await frame.waitForFunction(()=>scrollY>0);
     const wrap=await page.locator('#canvas-wrap').boundingBox();

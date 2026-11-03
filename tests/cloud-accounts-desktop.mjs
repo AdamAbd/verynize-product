@@ -35,7 +35,7 @@ try {
   const [a, b] = await Promise.all(apps.map((app) => app.firstWindow()));
   for (const page of [a, b]) {
     await page.waitForFunction(() => !!window.design && !!window.cloudWorkspace);
-    page.on("dialog", (dialog) => dialog.accept());
+    page.on("dialog", (dialog) => dialog.accept().catch(() => {}));
   }
   const panel = (page, open = true) =>
     page.evaluate((open) => {
@@ -81,6 +81,7 @@ try {
     await page.locator("#cloud-signin").click();
     await page.waitForFunction(() => !document.getElementById("cloud-signed-in").hidden);
     assert.match(await page.locator("#cloud-account").textContent(), new RegExp(email));
+    await page.waitForFunction(() => !!window.cloudWorkspace.room());
   }
 
   // Sign in and edit the public profile.
@@ -96,8 +97,7 @@ try {
   await signIn(b, "bob@example.test");
 
   // A signed-in owner creates a room and invites Bob by email as a viewer.
-  await a.locator("#cloud-create").click();
-  await statusIncludes(a, "Connected");
+  await a.waitForFunction(() => !!window.cloudWorkspace.room());
   assert.equal(await a.locator("#cloud-role").textContent(), "Owner");
   await section(a, "cloud-access-section");
   await a.locator("#cloud-member-email").fill("bob@example.test");
@@ -114,6 +114,7 @@ try {
   // Bob opens the room from his account without any link token; viewers cannot change it.
   await b.locator("#cloud-rooms-refresh").click();
   await b.locator(`[data-open-room="${roomId}"]`).click();
+  await b.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, roomId);
   await statusIncludes(b, "Connected");
   assert.equal(await b.locator("#cloud-role").textContent(), "Viewer");
   assert.doesNotMatch(await b.locator("#cloud-invite").inputValue(), /token=/);
@@ -148,9 +149,16 @@ try {
   const viewerToken = new URLSearchParams(
     new URL(await a.locator("#cloud-link-output").inputValue()).hash.slice(1),
   ).get("token");
-  const oldToken = new URLSearchParams(
-    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
-  ).get("token");
+  // The file keeps the owner link privately; the invite field shows an editor link instead.
+  const ownerToken = () =>
+    a.evaluate(() => window.fileLibrary.cloudOf(window.fileLibrary.currentId).token);
+  const inviteToken = async () =>
+    new URLSearchParams(new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1)).get(
+      "token",
+    );
+  const oldToken = await ownerToken();
+  const oldInvite = await inviteToken();
+  assert.ok(oldInvite && oldInvite !== oldToken, "the invite never carries the owner token");
   assert.equal(
     (
       await fetch(`${server}/api/rooms/${roomId}`, {
@@ -160,12 +168,18 @@ try {
     200,
   );
   await a.locator("#cloud-rotate").click();
-  await statusIncludes(a, "Rotated links: 2 old links revoked");
-  const newToken = new URLSearchParams(
-    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
-  ).get("token");
+  // Owner link, editor invite and viewer link.
+  await statusIncludes(a, "Rotated links: 3 old links revoked");
+  const newToken = await ownerToken();
   assert.notEqual(newToken, oldToken);
-  for (const token of [oldToken, viewerToken])
+  await a.waitForFunction(
+    (old) =>
+      /token=/.test(document.getElementById("cloud-invite").value) &&
+      !document.getElementById("cloud-invite").value.includes(old),
+    oldInvite,
+  );
+  assert.notEqual(await inviteToken(), newToken);
+  for (const token of [oldToken, oldInvite, viewerToken])
     assert.equal(
       (
         await fetch(`${server}/api/rooms/${roomId}`, {
@@ -201,9 +215,7 @@ try {
   await a.locator("#cloud-rooms-refresh").click();
   await a.locator(`[data-recover-room="${roomId}"]`).click();
   await statusIncludes(a, "Recovered owner access");
-  const recovered = new URLSearchParams(
-    new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
-  ).get("token");
+  const recovered = await ownerToken();
   assert.notEqual(recovered, newToken);
   assert.equal(
     (
@@ -268,7 +280,16 @@ try {
     "PASS desktop accounts: email + password sign-up, verification, sign-in, profile edit, email invite with roles, token-free member join, viewer enforcement, live promotion, role links, rotation, comments, owner recovery, project app build/publish/rollback/unpublish, sign out everywhere",
   );
 } finally {
-  await Promise.all(apps.map((app) => app.close()));
+  await Promise.all(
+    apps.map(async (app) => {
+      await app
+        .evaluate(({ BrowserWindow }) => {
+          for (const win of BrowserWindow.getAllWindows()) win.destroy();
+        })
+        .catch(() => {});
+      await app.close();
+    }),
+  );
   await mf.dispose();
   await fs.rm(dir, { recursive: true, force: true });
 }

@@ -62,6 +62,9 @@ export default {
   await fs.mkdir(other); await fs.mkdir(zdot);
   // Deterministic interactive zsh: no user dotfiles, plain prompt.
   await fs.writeFile(path.join(zdot, '.zshrc'), "PS1='%~ %# '\nunsetopt BEEP\n");
+  // Debian/Ubuntu's /etc/zsh/zshrc runs compinit unless this is set; on a CI image with group-writable completion
+  // folders it stops at "Ignore insecure directories and continue [y] or abort compinit [n]?" and eats the input.
+  await fs.writeFile(path.join(zdot, '.zshenv'), 'skip_global_compinit=1\n');
   git(project, 'init', '--initial-branch=main');
   await fs.writeFile(path.join(project, 'index.html'), '<h1>Hello</h1>\n');
   git(project, 'add', '.'); git(project, 'commit', '-m', 'Initial');
@@ -101,7 +104,7 @@ export default {
       });
       assert.equal(await page.evaluate(() => window.__term.offType), 'function');
       const output = id => page.evaluate(id => window.__term.data[id] || '', id);
-      const waitOutput = (id, pattern, label = String(pattern)) => waitUntil(async () => pattern.test(await output(id)), 15000, label);
+      const waitOutput = (id, pattern, label = String(pattern)) => waitUntil(async () => pattern.test(await output(id)), 15000, label).catch(async error => { error.message += `\n--- terminal output (last 1500 chars) ---\n${JSON.stringify((await output(id)).slice(-1500))}`; throw error; });
       const write = (id, data) => page.evaluate(options => window.desktop.terminalWrite(options), { id, data });
       const shellPid = async id => { await write(id, 'echo "PID=$$"\r'); await waitOutput(id, /\nPID=\d+/); const pid = Number((await output(id)).match(/\nPID=(\d+)/)[1]); pids.push(pid); return pid; };
 
@@ -217,10 +220,12 @@ export default {
       await waitUntil(async () => (await surface()) === 'rgb(247, 247, 247)', 5000, 'light terminal theme');
       await page.evaluate(() => document.documentElement.removeAttribute('data-ui-theme'));
       await waitUntil(async () => (await surface()) === 'rgb(28, 28, 28)', 5000, 'dark terminal theme again');
-      // ⌘K clears the buffer.
+      // ⌘K clears the buffer (Terminal.app; macOS only: elsewhere Ctrl+K stays the shell's kill-line).
       await panel.locator('[role=tabpanel]:not([hidden]) .xterm').click();
-      await page.keyboard.press('Meta+k');
-      await page.waitForFunction(() => !/PANEL_OK/.test(document.querySelector('#panel-a [role=tabpanel]:not([hidden]) .xterm-rows')?.textContent || ''), null, { timeout: 5000 });
+      if (process.platform === 'darwin') {
+        await page.keyboard.press('Meta+k');
+        await page.waitForFunction(() => !/PANEL_OK/.test(document.querySelector('#panel-a [role=tabpanel]:not([hidden]) .xterm-rows')?.textContent || ''), null, { timeout: 5000 });
+      }
       // "+" adds a focused tab; the first tab keeps its shell while hidden.
       await panel.getByRole('button', { name: 'New terminal' }).click();
       await waitUntil(async () => (await panel.getByRole('tab', { name: 'zsh' }).count()) === 2, 10000, 'second tab');

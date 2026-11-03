@@ -2,6 +2,7 @@
 // multi-selection union box, rotate zones outside the corners, edge resize with Shift / Alt, and the Scale tool's
 // proportional factor.
 const { _electron } = require("@playwright/test");
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require("node:assert/strict");
 const { waitForUiReady } = require("./helpers/ui-ready.cjs");
 const fs = require("node:fs/promises"),
@@ -19,7 +20,7 @@ const fs = require("node:fs/promises"),
     timeout: 20000,
   });
   try {
-    const page = await app.firstWindow({ timeout: 20000 });
+    const page = await app.firstWindow({ timeout: 20000 }); await moveOffCursor(app);
     const installTrace = () => {
       window.__inputTrace = [];
       for (const type of [

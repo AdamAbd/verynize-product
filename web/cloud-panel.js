@@ -2,6 +2,8 @@
 // link rotation, comments, design snapshots and published apps. API: cloud/README.md.
 (() => {
   const Ops = window.VerynizeOps;
+  // Lazy pages (web/page-loader.js): stubs until fetched, edits on them held until they load.
+  const Pages = window.pageLoader;
   const LOCAL_KEYS = ["activePage"];
   const ACCOUNT_KEY = "verynize.cloud.account";
   const SESSION_TOKEN = /^(vs_[0-9a-f]{64}|[A-Za-z0-9]{16,64}\.[A-Za-z0-9+/=_%-]{16,128})$/;
@@ -10,10 +12,11 @@
   root.id = "cloud-panel";
   root.innerHTML = `<button id="cloud-toggle">Share & collaborate</button><dialog id="cloud-dialog"><header><strong>Shared design</strong><button id="cloud-close">Close</button></header>
 <label>Server URL<input id="cloud-server" placeholder="https://your-app.workers.dev"></label><label>Your name<input id="cloud-name" maxlength="80" placeholder="Designer"></label>
-<p>Create a private room, then share its invite link with collaborators. Anyone with an owner or editor link can edit.</p>
+<p>Create a private room, then share its invite link with collaborators. Invite links let people edit (or only view); owner access stays with you.</p>
 <div class="cloud-actions"><button id="cloud-create">Create room</button><button id="cloud-connect">Join invite</button><button id="cloud-leave">Disconnect</button></div>
 <label>Invite link<input id="cloud-invite" placeholder="Paste a private invite URL to join"></label>
-<div class="cloud-actions"><button id="cloud-copy">Copy invite</button><button id="cloud-publish">Publish snapshot</button><button id="cloud-unpublish">Unpublish</button></div>
+<div class="cloud-actions"><select id="cloud-invite-role" aria-label="Role for people who join with the invite" hidden><option value="editor">Can edit</option><option value="viewer">Can view</option></select><button id="cloud-copy">Copy invite</button></div>
+<div class="cloud-actions"><button id="cloud-publish" hidden>Publish snapshot</button><button id="cloud-unpublish" hidden>Unpublish</button></div>
 <a id="cloud-public" target="_blank" rel="noopener noreferrer"></a><p id="cloud-status" role="status">Not connected</p>
 <div id="cloud-conflict" hidden><p>A collaborator changed the design while you were editing. Your work has not been overwritten.</p><button id="cloud-reload">Load shared version</button><button id="cloud-overwrite">Replace shared version with mine</button></div>
 <details class="cloud-section" id="cloud-account-section"><summary>Account</summary>
@@ -82,11 +85,15 @@
     timer,
     retryTimer,
     unsub,
+    lazySocket = false,
     generation = 0,
+    joinRequest = 0,
     retries = 0,
     lastLocal = "",
     lastLocalDoc = null,
     submitted = "";
+  // B6: the signed-in account is not yet a member of the open room (from its access list).
+  let claimable = false;
   let peerList = [],
     selfId = null,
     lastPointerAt = 0,
@@ -94,6 +101,9 @@
     app = null;
   const status = (text) => {
     $("cloud-status").textContent = text;
+    // Size limits (web/storage-limits.js): server refusals become the size island's blocking error.
+    if (window.storageLimits?.isSizeError(text))
+      window.storageLimits.reportError(String(text), "sync");
   };
   const action = (fn) => async () => {
     let epoch = generation;
@@ -106,6 +116,8 @@
     }
   };
   const canEdit = () => role === "owner" || role === "editor";
+  // Role and presence changes for the Share popover's state event (web/cloud-share.js).
+  const stateChanged = () => window.dispatchEvent(new Event("cloud-panel-state"));
   const randomId = () =>
     Array.from(crypto.getRandomValues(new Uint8Array(9)), (n) => n.toString(36).padStart(2, "0"))
       .join("")
@@ -117,7 +129,19 @@
   };
 
   // ---- presence -------------------------------------------------------------------------------
+  // Presence UI (avatars, cursors, selections, Multiplayer tools) lives in web/src/islands/collab: it receives the
+  // room state here and shapes the outgoing presence message. Without it, the plain cursor labels below are drawn.
+  const presenceState = () => ({
+    connected: !!connection,
+    server: connection?.server || null,
+    roomId: connection?.id || null,
+    fileId: connection?.fileId || null,
+    role,
+    selfId,
+    peers: peerList,
+  });
   function drawPeers() {
+    if (window.cloudPresence) return window.cloudPresence.sync(presenceState());
     document.getElementById("cloud-cursors")?.remove();
     const canvas = document.getElementById("canvas");
     if (!canvas || !connection) return;
@@ -153,31 +177,41 @@
     canvas.append(overlay);
   }
   function sendPresence() {
-    if (socket?.readyState === WebSocket.OPEN)
-      socket.send(
-        JSON.stringify({
-          type: "presence",
-          name: $("cloud-name").value.trim() || "Designer",
-          cursor,
-          pageId: window.design.getDocument().activePage,
-        }),
-      );
-  }
-  $("cloud-name").value = "Designer " + Math.floor(Math.random() * 900 + 100);
-  $("cloud-name").onchange = sendPresence;
-  document.getElementById("canvas").addEventListener("pointermove", (event) => {
-    if (!connection) return;
-    const box = event.currentTarget.getBoundingClientRect();
-    cursor = {
-      x: ((event.clientX - box.left) * 1000) / box.width,
-      y: ((event.clientY - box.top) * 700) / box.height,
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    const base = {
+      type: "presence",
+      name: presenceName(),
+      cursor,
+      pageId: window.design.getDocument().activePage,
     };
+    // null: "Go invisible" sends nothing (collab/presence-engine.ts).
+    const message = window.cloudPresence ? window.cloudPresence.message(base) : base;
+    if (message) socket.send(JSON.stringify(message));
+  }
+  // Signed in, collaborators see the account's name unless one was typed here (contract §2: never "Designer NNN").
+  let nameEdited = false;
+  const presenceName = () =>
+    (!nameEdited && (account?.account.displayName || account?.account.email)) ||
+    $("cloud-name").value.trim() ||
+    "Designer";
+  $("cloud-name").value = "Designer " + Math.floor(Math.random() * 900 + 100);
+  $("cloud-name").onchange = () => {
+    nameEdited = true;
+    sendPresence();
+  };
+  window.addEventListener("cloud-account-changed", () => sendPresence());
+  // The whole canvas area, not only the board: cursors follow the pointer anywhere on the page.
+  const canvasArea = document.getElementById("workspace") || document.getElementById("canvas");
+  canvasArea.addEventListener("pointermove", (event) => {
+    if (!connection) return;
+    // World coordinates (the #canvas layer's own px), the space cursors are drawn in.
+    cursor = window.design.screenToWorld(event.clientX, event.clientY);
     if (Date.now() - lastPointerAt > 80) {
       lastPointerAt = Date.now();
       sendPresence();
     }
   });
-  document.getElementById("canvas").addEventListener("pointerleave", () => {
+  canvasArea.addEventListener("pointerleave", () => {
     cursor = null;
     sendPresence();
   });
@@ -190,6 +224,15 @@
     return u.origin;
   }
   $("cloud-server").value = location.protocol.startsWith("http") ? location.origin : "";
+  // Desktop (app://, no HTTP origin): the production service, or VERYNIZE_CLOUD_SERVER in tests
+  // (desktop/cloud-defaults.cjs), unless a saved account, preference or room already set it.
+  if (!$("cloud-server").value && window.verynizePlatform.can("cloudDefaults"))
+    window.desktop
+      .cloudDefaults()
+      .then(({ server }) => {
+        if (!$("cloud-server").value && server) $("cloud-server").value = server;
+      })
+      .catch(() => {});
   const loadAccount = () => {
     try {
       const value = JSON.parse(localStorage.getItem(ACCOUNT_KEY) || "null");
@@ -227,13 +270,32 @@
     }
     return data;
   }
+  // Owners share a role-limited link (web/cloud-invite.js), never their own owner token. Others
+  // share the link they joined with, or a token-free link that opens for account members. Servers
+  // without roles (protocol 1) have a single room token, which stays the invite.
+  const sharesLinks = () => role === "owner" && protocol >= 2;
   function updateInvite() {
-    const url = new URL(connection.server);
-    url.hash = new URLSearchParams(
-      connection.token ? { room: connection.id, token: connection.token } : { room: connection.id },
-    ).toString();
-    $("cloud-invite").value = url.href;
+    const owner = sharesLinks();
+    $("cloud-invite-role").hidden = !owner;
+    $("cloud-invite").value = window.cloudInvites.url(connection, owner ? null : connection.token);
+    // Errors surface on Copy invite, which asks again.
+    if (owner && $("cloud-dialog").open) shareInvite().catch(() => {});
   }
+  async function shareInvite() {
+    const info = connection;
+    if (!info || !sharesLinks()) return $("cloud-invite").value;
+    const href = await window.cloudInvites.create(
+      info,
+      $("cloud-invite-role").value,
+      (path, options) => request(path, options, info),
+    );
+    if (connection?.id === info.id && connection.server === info.server && sharesLinks())
+      $("cloud-invite").value = href;
+    return href;
+  }
+  $("cloud-invite-role").onchange = () => {
+    if (connection) updateInvite();
+  };
 
   // ---- legacy snapshot protocol (servers without operation support) ---------------------------
   function markConflict() {
@@ -313,6 +375,7 @@
     if (window.cloudAssets?.holding?.()) return;
     let doc = confirmed;
     for (const batch of pending) doc = Ops.apply(doc, batch.ops).doc;
+    if (Pages.deferredOps().length) doc = Ops.apply(doc, Pages.deferredOps()).doc;
     const current = window.design.getDocument();
     const next = { ...doc };
     if (Ops.isStructured(doc) && doc.pages.some((page) => page.id === current.activePage))
@@ -368,14 +431,14 @@
     }
     // cloud-assets: embedded images upload first; their URL is sent instead of the data URI.
     if (window.cloudAssets?.hold?.(now, () => (localChange(), rebuild()))) return;
-    const ops = Ops.diff(lastLocalDoc, now, { ignore: LOCAL_KEYS });
+    const changes = Ops.diff(lastLocalDoc, now, { ignore: LOCAL_KEYS });
+    const ops = Pages.splitLocal(changes);
     const before = lastLocalDoc;
     lastLocalDoc = now;
     lastLocal = text;
-    if (ops.length) {
-      recordLocal(before, now);
-      queueOps(ops);
-    }
+    if (changes.length) recordLocal(before, now);
+    if (ops.length) queueOps(ops);
+    else if (changes.length) saveOutbox();
   }
 
   // ---- collaborative undo ---------------------------------------------------------------------
@@ -460,7 +523,9 @@
     }
     apply(next);
     to.push({ from: current, to: lastLocalDoc, seq: remoteSeq, at: 0, history: true });
-    queueOps(changes);
+    const send = Pages.splitLocal(changes);
+    if (send.length) queueOps(send);
+    else saveOutbox();
     status(label === "undo" ? "Undid your last change" : "Redid your change");
     refreshHistoryButtons();
   }
@@ -497,13 +562,15 @@
   function receiveOps(message) {
     if (message.client !== clientId && message.ops?.length) markRemote(message.ops);
     if (message.ops?.length) {
-      confirmed = Ops.apply(confirmed, message.ops).doc;
+      confirmed = Ops.apply(confirmed, Pages.filterRemote(message.ops)).doc;
       for (const op of message.ops) if (op.s) clock.observe(op.s);
     }
     if (Number.isSafeInteger(message.revision)) revision = Math.max(revision, message.revision);
     if (message.client === clientId) {
       pending = pending.filter((batch) => batch.n > message.batch);
+      const sizeReason = message.reasons?.find((r) => window.storageLimits?.isSizeError(r?.reason));
       if (message.error) status(message.error);
+      else if (sizeReason) status(sizeReason.reason);
       else if (message.rejected)
         status(
           `${message.rejected} change${message.rejected === 1 ? " was" : "s were"} superseded by newer edits`,
@@ -513,6 +580,41 @@
     rebuild();
     saveOutbox();
   }
+  /**
+   * Pages fetched on the socket (lazy rooms): each replaces its stub in the confirmed document and
+   * in the undo steps, and the edits made on it while it loaded are sent.
+   */
+  function receivePages(message) {
+    for (const id of message.missing || []) Pages.missing(id);
+    if (!confirmed || !Ops.isStructured(confirmed)) return;
+    const released = [];
+    let loaded = false;
+    for (const page of message.pages || []) {
+      // A page that is loaded already (a repeated request) is newer here than in the message.
+      if (!Pages.isUnloaded(page?.id)) continue;
+      if (!confirmed.pages.some((item) => item.id === page.id)) {
+        Pages.missing(page.id);
+        continue;
+      }
+      confirmed = Pages.fill(confirmed, { ...page, nodes: page.nodes || [] });
+      for (const step of undoStack.concat(redoStack)) {
+        step.from = Pages.fill(step.from, page);
+        step.to = Pages.fill(step.to, page);
+      }
+      released.push(...Pages.received(page.id));
+      loaded = true;
+    }
+    if (!loaded) return;
+    remoteSeq++; // a loaded page ends the current undo step
+    if (released.length && canEdit()) queueOps(released);
+    rebuild();
+    saveOutbox();
+  }
+  /** Ids of the pages this client holds (lazy rooms request these again after a reconnect). */
+  const loadedPages = () =>
+    Ops.isStructured(confirmed)
+      ? confirmed.pages.map((page) => page.id).filter((id) => !Pages.isUnloaded(id))
+      : [];
   /** Make sure local operations reached the server (used before publishing). */
   async function flushOps() {
     if (!pending.length || !connection) return;
@@ -523,7 +625,7 @@
       const until = Date.now() + 5000;
       while (pending.length && Date.now() < until && epoch === generation)
         await new Promise((resolve) => setTimeout(resolve, 50));
-      return;
+      if (!pending.length || epoch !== generation) return;
     }
     for (const batch of pending.slice()) {
       const result = await request(
@@ -537,6 +639,18 @@
       if (epoch !== generation) return;
       receiveOps(result);
     }
+  }
+
+  async function flushBeforeSwitch() {
+    if (!connection) return;
+    const until = Date.now() + 15000;
+    while (window.cloudAssets?.holding() && Date.now() < until)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    if (window.cloudAssets?.holding()) throw Error("Images have not reached the database yet.");
+    if (Pages.deferredOps().length) await Pages.ensureAll();
+    await flush();
+    if (pending.length || legacyPending || conflict)
+      throw Error("Changes have not reached the database. Reconnect before switching files.");
   }
 
   // ---- persistent outbox ----------------------------------------------------------------------
@@ -593,6 +707,7 @@
       confirmed,
       revision,
       role,
+      pages: Pages.stored(),
       savedAt: Date.now(),
     };
   }
@@ -601,6 +716,12 @@
     clearTimeout(outboxTimer);
     outboxTimer = null;
     if (!connection) return;
+    // Signed-in files live in the database. Pending operations stay in memory; navigation
+    // waits for acknowledgement instead of relying on a second document on this device.
+    if (sessionFor(connection.server)) {
+      clearOutbox(roomKey(connection));
+      return;
+    }
     const write = () => {
       outboxTimer = null;
       const state = outboxState();
@@ -644,12 +765,14 @@
       old.close();
     }
     connection = null;
+    lazySocket = false;
+    Pages.attach(null);
     peerList = [];
     selfId = null;
     role = null;
     confirmed = null;
     pending = [];
-    document.getElementById("cloud-cursors")?.remove();
+    drawPeers();
     legacyPending = false;
     inflight = null;
     submitted = "";
@@ -659,6 +782,32 @@
     $("cloud-presence").textContent = "";
     renderAccess(null);
     status(message);
+    roomChanged();
+  }
+  /**
+   * `cloud-access-revoked` (detail {reason, roomId, fileName}): this account lost access to the open room (removed,
+   * made private, link revoked). Returns the dispatcher so callers name the file before the room is left.
+   */
+  function accessEnded(reason, fileId = connection?.fileId) {
+    const file =
+      fileId &&
+      library()
+        ?.list?.()
+        .find((f) => f.id === fileId);
+    const detail = {
+      reason: reason || "removed",
+      roomId: connection?.id || null,
+      fileName: file?.name || window.design.getDocument().name || "Untitled",
+    };
+    return () => window.dispatchEvent(new CustomEvent("cloud-access-revoked", { detail }));
+  }
+  /** `cloud-room-changed`: the open room changed (joined, left); detail = window.cloudWorkspace.room(). */
+  function roomChanged() {
+    window.dispatchEvent(
+      new CustomEvent("cloud-room-changed", {
+        detail: connection ? { server: connection.server, id: connection.id } : null,
+      }),
+    );
   }
   function scheduleReconnect(epoch) {
     if (epoch !== generation || !connection) return;
@@ -674,10 +823,12 @@
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     if (info.token) url.searchParams.set("token", info.token);
     if (clientId) url.searchParams.set("client", clientId);
+    url.searchParams.set("lazy", "1");
     const session = sessionFor(info.server);
     if (session) url.searchParams.set("session", session);
     const ws = new WebSocket(url);
     socket = ws;
+    lazySocket = false;
     ws.onopen = () => {
       if (epoch !== generation || ws !== socket) {
         ws.close();
@@ -695,26 +846,49 @@
         if (message.type === "welcome") {
           selfId = message.id;
           if (message.role) setRole(message.role);
+          // Lazy rooms send their snapshot after `sync`: the pages held here, or the active one.
+          if (message.lazyPages) {
+            lazySocket = true;
+            const active = window.design.getView?.().page;
+            const pages = loadedPages();
+            ws.send(
+              JSON.stringify({
+                type: "sync",
+                pages: pages.length ? pages : active ? [active] : [],
+                ...(confirmed ? { revision } : {}),
+              }),
+            );
+          }
           return;
         }
         if (message.type === "presence") {
           peerList = message.peers || [];
           $("cloud-presence").textContent = `${peerList.length} connected`;
           drawPeers();
+          stateChanged();
           return;
         }
         if (message.type === "snapshot") {
           if (protocol < 2) return receiveSnapshot(message);
-          if (confirmed) markRemote(Ops.diff(confirmed, message.document, { ignore: LOCAL_KEYS }));
-          confirmed = message.document;
+          let released = [];
+          // `same`: the room is still at this client's revision, so its document stands.
+          if (!message.same) {
+            if (confirmed)
+              markRemote(Ops.diff(confirmed, message.document, { ignore: LOCAL_KEYS }));
+            confirmed = message.document;
+            released = Pages.reset(message.unloaded || [], message.pages);
+          }
           revision = message.revision;
           pending = pending.filter((batch) => batch.n > (message.acked || 0));
           for (const batch of pending) batch.sent = false;
+          if (released.length && canEdit()) queueOps(released);
           rebuild();
           sendPending();
+          Pages.resume();
           saveOutbox();
           return;
         }
+        if (message.type === "pages") return receivePages(message);
         if (message.type === "ops") return receiveOps(message);
         if (message.type === "role") {
           setRole(message.role);
@@ -722,8 +896,11 @@
           return;
         }
         if (message.type === "revoked") {
-          if (!rotating)
+          if (!rotating) {
+            const ended = accessEnded(message.reason);
             disconnect("Your access to this room was revoked. Local design retained.", true);
+            ended();
+          }
           return;
         }
         if (message.type === "comment") {
@@ -749,7 +926,10 @@
    * reusing the open one); without it the current file becomes the room's record (Create room).
    * A stored outbox is restored, and when the server is unreachable the file opens offline.
    */
-  async function connect(info, load = true, expected) {
+  async function connect(info, load = true, expected, baseline = null) {
+    const requestId = ++joinRequest;
+    if (expected === undefined) await flushBeforeSwitch();
+    if (requestId !== joinRequest) return;
     const u = new URL(info.server);
     const lib = library();
     let fileId = lib?.findCloud?.(u.origin, info.id) || null;
@@ -759,36 +939,51 @@
     if (
       !["http:", "https:"].includes(u.protocol) ||
       !/^[0-9a-f-]{36}$/.test(info.id) ||
-      (token ? !/^[0-9a-f]{64}$/.test(token) : !session)
+      (token ? !/^[0-9a-f]{64}$/.test(token) : !session && !info.anonymous)
     )
       throw Error(
         token || session ? "Invalid room invite" : "Sign in to open a room without a link token",
       );
     info = { id: info.id, token, server: u.origin };
     if (expected !== undefined && expected !== generation) return;
-    if (expected === undefined) disconnect();
-    const epoch = generation;
+    if (expected === undefined) status("Opening file…");
+    let epoch = generation;
+    // Joining loads the active page first (the rest arrives on the socket). Create room keeps the
+    // open document, and a detached copy is compared with the whole room, so both read it all.
+    const lazy = load && !record?.detached;
     const [stored, fetched] = await Promise.all([
       readOutbox(roomKey(info)),
-      request(`/api/rooms/${info.id}`, {}, info).then(
+      request(`/api/rooms/${info.id}${lazy ? "?lazy=1" : ""}`, {}, info).then(
         (value) => ({ value }),
         (error) => ({ error }),
       ),
     ]);
-    if (epoch !== generation) return;
+    if (epoch !== generation || requestId !== joinRequest) return;
     let current = fetched.value,
       offline = false;
     if (fetched.error) {
       const e = fetched.error;
       if (fileId && [401, 403, 404].includes(e.status)) {
         // Access ended (revoked, removed, deleted): the local copy stays, detached.
+        accessEnded("removed", fileId)();
         forgetRoom({ ...info, fileId });
-        throw Error(`${e.message}. The local copy of this file is kept.`);
+        throw Object.assign(Error(`${e.message}. The local copy of this file is kept.`), {
+          status: e.status,
+          data: e.data,
+        });
       }
       // Unreachable server: a room this device has state for opens offline and reconnects.
       if (e.status || !stored?.confirmed || !fileId) throw e;
       offline = true;
       current = { document: null, revision: stored.revision, role: stored.role, protocol: 2 };
+    }
+    // Keep the current room connected while fetching the next one. A failed open must not
+    // strand subsequent edits in a disconnected editor. Flush edits made during the fetch too.
+    if (expected === undefined) {
+      await flushBeforeSwitch();
+      if (epoch !== generation || requestId !== joinRequest) return;
+      disconnect("Connecting…");
+      epoch = generation;
     }
     // A detached copy edited since leaving stays a separate local file; the room gets a new record.
     if (load && record?.detached && !offline) {
@@ -801,14 +996,18 @@
     const cloud = {
       server: info.server,
       roomId: info.id,
+      ...(session && account?.server === info.server ? { accountId: account.account.id } : {}),
       ...(info.token ? { token: info.token } : {}),
       role: current.role || "owner",
     };
     let restoreFile = false;
     if (load && fileId) {
       if (lib.currentId !== fileId) {
-        await lib.open(fileId, { cloudJoinEpoch: epoch, isCurrent: () => epoch === generation });
-        if (epoch !== generation) return;
+        await lib.open(fileId, {
+          cloudJoinEpoch: epoch,
+          isCurrent: () => epoch === generation && requestId === joinRequest,
+        });
+        if (epoch !== generation || requestId !== joinRequest) return;
       }
       lib.setCloud(fileId, cloud);
       // With stored state the file's own document is kept and rebased; otherwise the room's loads.
@@ -817,14 +1016,14 @@
     } else if (load && lib?.createFromDocument) {
       fileId = await lib.createFromDocument(current.document, {
         cloudJoinEpoch: epoch,
-        isCurrent: () => epoch === generation,
+        isCurrent: () => epoch === generation && requestId === joinRequest,
         cloud,
       });
-      if (epoch !== generation) return;
+      if (epoch !== generation || requestId !== joinRequest) return;
       load = false;
     } else if (load && window.documentLifecycle) {
       await window.documentLifecycle.prepareSwitch({ cloudJoinEpoch: epoch });
-      if (epoch !== generation) return;
+      if (epoch !== generation || requestId !== joinRequest) return;
     } else if (!load && lib?.setCloud && lib.currentId) {
       // Create room: the open file becomes the room's file.
       fileId = lib.currentId;
@@ -845,6 +1044,15 @@
     // Restored batches were made on the stored confirmed document. The socket snapshot replaces it
     // and drops the batches the server acknowledged for this client id.
     confirmed = restore ? restore.confirmed : current.document;
+    if (restore) Pages.restore(restore.pages);
+    else Pages.reset(current.unloaded || [], current.pages);
+    Pages.attach({
+      online: () => socket?.readyState === WebSocket.OPEN && lazySocket,
+      request: (ids) => {
+        if (epoch !== generation || socket?.readyState !== WebSocket.OPEN || !lazySocket) return;
+        socket.send(JSON.stringify({ type: "pages", ids }));
+      },
+    });
     setRole(current.role || "owner");
     $("cloud-server").value = info.server;
     updateInvite();
@@ -853,16 +1061,27 @@
     lastLocalDoc = window.design.getDocument();
     lastLocal = shared(lastLocalDoc);
     unsub = window.design.subscribe(localChange);
+    // Edits made while POST /rooms was in flight must also reach the new room.
+    if (baseline && !load && !restore && protocol >= 2 && canEdit()) {
+      const changes = Ops.diff(baseline, lastLocalDoc, { ignore: LOCAL_KEYS });
+      // Preserve uploaded URLs and replay only edits made while creation was in flight.
+      apply(Ops.apply(confirmed, changes).doc);
+      lastLocalDoc = confirmed;
+      lastLocal = shared(confirmed);
+      localChange();
+    }
     if (restore) {
       // Edits the file holds beyond confirmed + pending (made while the room was closed, or not yet
       // stored when the app quit) become one more batch.
       let base = confirmed;
       for (const batch of pending) base = Ops.apply(base, batch.ops).doc;
-      const ops = Ops.diff(base, lastLocalDoc, { ignore: LOCAL_KEYS });
+      base = Ops.apply(base, Pages.deferredOps()).doc;
+      const ops = Pages.splitLocal(Ops.diff(base, lastLocalDoc, { ignore: LOCAL_KEYS }));
       if (ops.length && canEdit()) queueOps(ops);
     }
     if (protocol >= 2) saveOutbox(true);
     openSocket(epoch);
+    roomChanged();
     status(
       offline
         ? "Offline. Edits stay on this device and are sent when the room is reachable."
@@ -888,6 +1107,38 @@
       reconnectFile(id, lib.cloudOf?.(id));
   });
   window.cloudWorkspace = {
+    flush: flushBeforeSwitch,
+    storeDocument: (document) => storeDocument(document),
+    readFile: (cloud) =>
+      request(
+        `/api/rooms/${cloud.roomId}`,
+        {},
+        { server: cloud.server, id: cloud.roomId, token: cloud.token },
+      ),
+    renameFile: async (cloud, name) => {
+      const client = randomId();
+      const result = await request(
+        `/api/rooms/${cloud.roomId}/ops`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            client,
+            batch: 1,
+            ops: [{ t: "doc", key: "name", value: name, s: Ops.createClock(client).next() }],
+          }),
+        },
+        { server: cloud.server, id: cloud.roomId, token: cloud.token },
+      );
+      if (result.rejected) throw Error("The file could not be renamed.");
+      window.dispatchEvent(new CustomEvent("cloud-files-changed"));
+    },
+    attachRoom: (info, baseline) =>
+      connect(
+        { server: info.server, id: info.roomId, token: info.token },
+        false,
+        undefined,
+        baseline,
+      ),
     disconnect: () => disconnect(undefined, true),
     isConnected: () => !!connection,
     /** The open room ({server, id, fileId}) or null. */
@@ -895,10 +1146,28 @@
       connection
         ? { server: connection.server, id: connection.id, fileId: connection.fileId }
         : null,
-    /** Open a room as a file (Files home): its library record, created on first open. */
-    openRoom: (info) => connect({ server: info.server, id: info.id, token: info.token }),
+    /**
+     * Open a room as a file (Files home, links): its library record, created on first open. `anonymous` opens a
+     * public room without a token or session (read-only).
+     */
+    openRoom: async (info) => {
+      if (account) await window.cloudWorkspace.storeFile?.(library()?.currentId);
+      return connect({
+        server: info.server,
+        id: info.id,
+        token: info.token,
+        anonymous: !!info.anonymous,
+      });
+    },
+    /** Room state for the presence UI (web/src/islands/collab), and a presence update after a local change. */
+    presence: presenceState,
+    sendPresence: () => sendPresence(),
+    /** True when a session for `server` exists (a room link without a token can open). */
+    hasSession: (server) => !!sessionFor(server),
     /** Unacknowledged local batches of the open room. */
     pendingCount: () => pending.length,
+    /** Lazy pages of the open room: {unloaded, requested, deferred} (web/page-loader.js). */
+    pages: () => Pages.state(),
     /** The stored outbox of a room (client id, batches, confirmed document), for diagnostics. */
     storedOutbox: (server, id) => readOutbox(roomKey({ server, id })),
     role: () => role,
@@ -906,40 +1175,123 @@
     // cloud-assets (web/cloud-assets.js): the connected room and authenticated room requests.
     room: () => (connection ? { server: connection.server, id: connection.id } : null),
     request: (path, options) => request(path, options),
+    // Share popover (web/cloud-share.js builds ensureRoom/access/setVisibility/invite/shareLink on these).
+    createRoom: (server) => createRoom(server),
+    /** The connection settings' server (the field in the legacy dialog), or "". */
+    server: () => {
+      try {
+        return base();
+      } catch {
+        return "";
+      }
+    },
+    /** Live presence of the open room: the server's peers and this socket's id. */
+    peers: () => ({ selfId, peers: peerList.slice() }),
+    /** The legacy "Shared design" dialog (Settings › Share a design). */
+    openDialog: () => openDialog(),
   };
+  window.addEventListener("beforeunload", (event) => {
+    if (!pending.length && !legacyPending) return;
+    event.preventDefault();
+    event.returnValue = "Changes have not reached the database yet.";
+  });
   window.addEventListener("document-will-change", (event) => {
     if (event.detail?.cloudJoinEpoch !== generation) disconnect();
   });
 
-  $("cloud-toggle").onclick = () => {
-    $("cloud-dialog").showModal();
+  function openDialog() {
+    if (!$("cloud-dialog").open) $("cloud-dialog").showModal();
     renderAccount();
-  };
+    if (connection) updateInvite();
+    updateActions();
+  }
+  $("cloud-toggle").onclick = openDialog;
   $("cloud-close").onclick = () => $("cloud-dialog").close();
-  $("cloud-create").onclick = action(async () => {
+  /** Create a room from the open file in the active workspace; it becomes the room's file. */
+  async function createRoom(server = base()) {
     if (connection) throw Error("Disconnect before creating another room");
-    const server = base();
-    disconnect();
+    disconnect("Creating room…");
     const epoch = generation,
-      result = await request(
-        "/api/rooms",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            document: window.design.getDocument(),
-            // Email accounts create rooms in the workspace chosen in the file browser.
-            ...(account?.server === server &&
-            !account.session.startsWith("vs_") &&
-            activeOrganization()
-              ? { organizationId: activeOrganization() }
-              : {}),
-          }),
-        },
-        { server },
-      );
-    if (epoch !== generation) return;
-    await connect({ server, id: result.id, token: result.token }, false, epoch);
-  });
+      document = window.design.getDocument(),
+      create = (document) =>
+        request(
+          "/api/rooms",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              document,
+              // Email accounts create rooms in the workspace chosen in the file browser.
+              ...(account?.server === server &&
+              !account.session.startsWith("vs_") &&
+              activeOrganization()
+                ? { organizationId: activeOrganization() }
+                : {}),
+            }),
+          },
+          { server },
+        ),
+      // Embedded binaries are uploaded as room assets first (web/cloud-assets.js createRoom).
+      result = window.cloudAssets
+        ? await window.cloudAssets.createRoom(document, {
+            server,
+            create,
+            request: (path, options, room) => request(path, options, { server, ...room }),
+            progress: status,
+          })
+        : await create(document);
+    if (epoch !== generation) return null;
+    await connect({ server, id: result.id, token: result.token }, false, epoch, document);
+    return connection && connection.id === result.id ? { server, id: result.id } : null;
+  }
+  /** Create a database file without changing whichever document is currently open. */
+  async function storeDocument(document) {
+    if (!account) throw Error("Sign in to save files to the database.");
+    const identity = account;
+    const server = identity.server;
+    const send = (path, options, room = {}) => {
+      if (account?.session !== identity.session || account?.server !== server)
+        throw Error("The cloud account changed");
+      return request(path, options, { server, ...room });
+    };
+    const create = (document) =>
+      send("/api/rooms", {
+        method: "POST",
+        body: JSON.stringify({
+          document,
+          ...(activeOrganization() ? { organizationId: activeOrganization() } : {}),
+        }),
+      });
+    const result = window.cloudAssets
+      ? await window.cloudAssets.createRoom(document, {
+          server,
+          create,
+          request: send,
+          progress: status,
+        })
+      : await create(document);
+    if (account?.session !== identity.session || account?.server !== server)
+      throw Error("The cloud account changed");
+    window.dispatchEvent(new CustomEvent("cloud-files-changed"));
+    return { server, roomId: result.id, token: result.token, role: "owner" };
+  }
+  $("cloud-create").onclick = action(() => createRoom());
+  // B9: Join invite only where it does something: always before joining, otherwise for another room's link.
+  function joinable() {
+    if (!connection) return true;
+    try {
+      const u = new URL($("cloud-invite").value),
+        id = new URLSearchParams(u.hash.slice(1)).get("room");
+      return !!id && (id !== connection.id || u.origin !== connection.server);
+    } catch {
+      return false;
+    }
+  }
+  function updateActions() {
+    $("cloud-connect").hidden = !joinable();
+    $("cloud-leave").hidden = !connection;
+  }
+  $("cloud-invite").addEventListener("input", updateActions);
+  updateActions();
   function parseInvite(input) {
     const u = new URL(input),
       p = new URLSearchParams(u.hash.slice(1));
@@ -962,7 +1314,14 @@
       return;
     await connect(info);
   });
-  $("cloud-leave").onclick = () => disconnect(undefined, true);
+  $("cloud-leave").onclick = action(async () => {
+    // The local copy stays as a detached file: load the pages it does not hold yet.
+    if (connection && Pages.unloadedIds().length) {
+      status("Loading every page before disconnecting…");
+      await Pages.ensureAll().catch(() => {});
+    }
+    disconnect(undefined, true);
+  });
   const openLink = (event) => {
     if (window.verynizePlatform.can("externalLinks")) {
       event.preventDefault();
@@ -973,13 +1332,33 @@
   $("cloud-app-url").onclick = openLink;
   $("cloud-copy").onclick = action(async () => {
     const epoch = generation;
-    await navigator.clipboard.writeText($("cloud-invite").value);
-    if (epoch === generation) status("Invite copied");
+    const href = await shareInvite();
+    if (epoch !== generation) return;
+    try {
+      await navigator.clipboard.writeText(href);
+    } catch {
+      // The desktop denies the clipboard permission (desktop/main.cjs): copy the selected field.
+      const input = $("cloud-invite");
+      input.value = href;
+      input.select();
+      if (!document.execCommand("copy")) throw Error("Select the invite link and copy it");
+    }
+    if (epoch !== generation) return;
+    const shared = connection && sharesLinks() ? $("cloud-invite-role").value : null;
+    status(
+      shared
+        ? `Invite copied: people who join can ${shared === "viewer" ? "view" : "edit"}`
+        : "Invite copied",
+    );
   });
   $("cloud-publish").onclick = action(async () => {
     if (!connection) throw Error("Create or join a room first");
     const epoch = generation,
       info = connection;
+    // Edits made on pages that were still loading are sent once those pages arrive.
+    if (Pages.deferredOps().length)
+      await Pages.ensure(Pages.deferredOps().map((op) => op.page ?? op.id));
+    if (epoch !== generation) return;
     await flush();
     if (epoch !== generation) return;
     if (inflight) await inflight;
@@ -992,6 +1371,7 @@
     u.hash = new URLSearchParams({ public: result.publicId }).toString();
     $("cloud-public").href = u.href;
     $("cloud-public").textContent = u.href;
+    $("cloud-unpublish").hidden = false;
     window.dispatchEvent(
       new CustomEvent("design-publication-changed", {
         detail: {
@@ -1016,6 +1396,7 @@
     if (epoch !== generation) return;
     $("cloud-public").removeAttribute("href");
     $("cloud-public").textContent = "";
+    $("cloud-unpublish").hidden = true;
     window.dispatchEvent(
       new CustomEvent("design-publication-changed", { detail: { published: false } }),
     );
@@ -1064,15 +1445,28 @@
 
   // ---- roles & access -------------------------------------------------------------------------
   function setRole(next) {
+    const previous = role;
     role = next;
     $("cloud-role").textContent = ROLE_LABEL[next] || "Not connected";
     $("cloud-owner-tools").hidden = next !== "owner";
+    // B6: only offered once the access list shows the signed-in account is not a member yet.
     $("cloud-claim").hidden = !(
       next === "owner" &&
       connection?.token &&
-      sessionFor(connection.server)
+      sessionFor(connection.server) &&
+      claimable
     );
     document.body.classList.toggle("cloud-read-only", !!connection && !!next && !canEdit());
+    drawPeers();
+    // Only what this role can do: no Create room while in a room, no publishing below editor.
+    $("cloud-create").hidden = !!connection;
+    $("cloud-publish").hidden = !connection || !canEdit();
+    // B9: Unpublish only once there is a snapshot to remove.
+    $("cloud-unpublish").hidden =
+      !connection || !canEdit() || !$("cloud-public").getAttribute("href");
+    updateActions();
+    if (connection && next !== previous) updateInvite();
+    if (next !== previous) stateChanged();
   }
   function listItem(text, buttons = []) {
     const li = document.createElement("li");
@@ -1094,10 +1488,13 @@
       links = $("cloud-links");
     members.replaceChildren();
     links.replaceChildren();
+    claimable = false;
     if (!data) {
       setRole(null);
       return;
     }
+    claimable = !!account && !(data.members || []).some((m) => m.accountId === account.account.id);
+    setRole(role);
     for (const member of data.members || []) {
       const self = account && member.accountId === account.account.id;
       const buttons = [];
@@ -1245,6 +1642,7 @@
       const result = await request(`/api/rooms/${info.id}/tokens/rotate`, { method: "POST" }, info);
       if (epoch !== generation) return;
       connection = { ...info, token: result.token };
+      window.cloudInvites.forget(info);
       const lib = library(),
         cloud = info.fileId && lib?.cloudOf?.(info.fileId);
       if (cloud) lib.setCloud(info.fileId, { ...cloud, token: result.token });
@@ -1313,6 +1711,8 @@
 
   // ---- account --------------------------------------------------------------------------------
   function saveAccount(next) {
+    if (account && (account.account.id !== next?.account.id || account.server !== next?.server))
+      disconnect("Account changed");
     account = next;
     if (next) localStorage.setItem(ACCOUNT_KEY, JSON.stringify(next));
     else localStorage.removeItem(ACCOUNT_KEY);
@@ -1346,6 +1746,13 @@
     return { email, password: $("cloud-password").value };
   };
   async function signInWith(server, email, password) {
+    if (account) {
+      if (window.agentWorkspace?.getState().busyChats?.length)
+        throw Error("Stop running chats before changing accounts.");
+      await window.cloudWorkspace.storeFile?.(library()?.currentId);
+      await flushBeforeSwitch();
+      await window.accountStore?.flush();
+    }
     if (!email) throw Error("Enter your email address");
     if (!password) throw Error("Enter your password");
     const response = await fetch(server + "/api/auth/sign-in/email", {
@@ -1440,6 +1847,11 @@
   });
   async function signOut(everywhere) {
     if (!account) return;
+    if (window.agentWorkspace?.getState().busyChats?.length)
+      throw Error("Stop running chats before signing out.");
+    await window.cloudWorkspace.storeFile?.(library()?.currentId);
+    await flushBeforeSwitch();
+    await window.accountStore?.flush();
     passkeyRun++;
     $("cloud-passkeys").replaceChildren();
     const ended = account;
@@ -1452,7 +1864,7 @@
     } finally {
       saveAccount(null);
       $("cloud-my-rooms").replaceChildren();
-      if (connection && !connection.token) disconnect("Signed out. Local design retained.");
+      if (connection) disconnect("Signed out.");
     }
     status(everywhere ? "Signed out on every device" : "Signed out");
   }
@@ -1470,6 +1882,13 @@
     return account.personalOrganizationId || null;
   };
   window.cloudAccount = {
+    applyProfile(profile) {
+      if (
+        account?.account.id === profile?.id &&
+        JSON.stringify(account.account) !== JSON.stringify(profile)
+      )
+        saveAccount({ ...account, account: profile });
+    },
     defaultServer: () =>
       account?.server ||
       $("cloud-server").value ||
@@ -1489,6 +1908,18 @@
     signOut: (everywhere = false) => signOut(everywhere),
     /** Authenticated JSON request to the account's server. */
     request: (path, options = {}) => accountRequest(path, options),
+    /** Authenticated request to the account's server, raw Response (streamed model API runs, web/src/lib/agent-transport.ts). */
+    fetch: (path, options = {}) => {
+      if (!account) return Promise.reject(Error("Sign in first"));
+      return fetch(account.server + path, {
+        ...options,
+        headers: {
+          ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+          "X-Verynize-Session": account.session,
+          ...options.headers,
+        },
+      });
+    },
     activeOrganization,
     setActiveOrganization(id) {
       if (!account) return;
@@ -1757,19 +2188,8 @@
   });
 
   // ---- links opened in a browser ----------------------------------------------------------------
+  // `#room=<id>[&token=…]` opens the file directly: web/src/islands/collab/links.ts (no dialog, no confirm).
   const params = new URLSearchParams(location.hash.slice(1));
-  if (params.has("room") && (params.has("token") || sessionFor(location.origin))) {
-    $("cloud-dialog").showModal();
-    status("Invite detected. Join invite to load this shared design.");
-    $("cloud-connect").onclick = action(async () => {
-      if (!window.confirm("Load this shared design?")) return;
-      await connect({
-        server: location.origin,
-        id: params.get("room"),
-        token: params.get("token"),
-      });
-    });
-  }
   if (params.has("public")) {
     const epoch = generation;
     fetch(`/api/public/${encodeURIComponent(params.get("public"))}`)

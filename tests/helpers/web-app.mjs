@@ -68,3 +68,38 @@ export async function launchBrowser() {
     return chromium.launch({ channel: "chrome" });
   }
 }
+
+/**
+ * A browser context signed in to `origin`: the session record the web sign-in screen and web/cloud-panel.js share
+ * (`verynize.cloud.account`), so the editor boots instead of the sign-in screen. `aiSetupDone` (default true) also
+ * marks the web AI setup steps as done on this browser, so they do not cover the editor.
+ */
+export async function signedInContext(
+  browser,
+  origin,
+  { session, account, personalOrganizationId = null },
+  { aiSetupDone = true, ...options } = {},
+) {
+  const context = await browser.newContext(options);
+  const stored = JSON.stringify({ server: origin, session, account, personalOrganizationId });
+  const setupKey = aiSetupDone ? `verynize.web-ai-setup.${account.id || account.email}` : "";
+  // Top document only: sandboxed preview frames have no storage.
+  await context.addInitScript(
+    ([value, key]) => {
+      if (window !== window.top) return;
+      localStorage.setItem("verynize.cloud.account", value);
+      if (key) localStorage.setItem(key, "done");
+    },
+    [stored, setupKey],
+  );
+  return context;
+}
+
+/** Saves a screenshot into $VERYNIZE_SCREENSHOTS when it is set (review material, not an assertion). */
+export async function screenshot(page, name) {
+  const dir = process.env.VERYNIZE_SCREENSHOTS;
+  if (!dir) return;
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(dir, { recursive: true });
+  await page.screenshot({ path: `${dir}/${name}` });
+}

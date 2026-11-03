@@ -15,6 +15,7 @@ import { database } from "./db.js";
 import * as schema from "./schema.js";
 import { betterAuth } from "better-auth";
 import { bearer, organization } from "better-auth/plugins";
+import { adminAc, defaultAc, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 import { sendMail } from "./mail.js";
 import { organizationHooks } from "./orgs.js";
 
@@ -76,6 +77,17 @@ export function authOptions(env = {}, { baseURL, database } = {}) {
     plugins: [
       bearer(),
       organization({
+        // Workspace roles: owner, admin, member (room role from metadata.roomRole) and the
+        // custom viewer / editor, which pin one member's room role (cloud/orgs.js roomRoleFor).
+        // Viewers and editors have a member's organization permissions.
+        ac: defaultAc,
+        roles: {
+          owner: ownerAc,
+          admin: adminAc,
+          member: memberAc,
+          editor: defaultAc.newRole(memberAc.statements),
+          viewer: defaultAc.newRole(memberAc.statements),
+        },
         // Room access follows membership (cloud/orgs.js); these push changes to live sockets.
         organizationHooks: organizationHooks(env),
         sendInvitationEmail: async ({ email, organization: org, inviter, id }) => {

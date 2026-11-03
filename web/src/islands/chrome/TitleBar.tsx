@@ -1,13 +1,22 @@
 // Window chrome (03/11/22/29): 40px bar, traffic-light inset, sidebar + chat toggles, Files tab, document tab,
 // new file, search and the design/code mode switch. The bar drags the window; controls opt out (no-drag).
-import { useRef, type KeyboardEvent } from "react";
-import { Braces, File, LayoutGrid, MessageSquare, Palette, Search } from "lucide-react";
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { Braces, File, LayoutGrid, MessageSquare, Palette, Search, X } from "lucide-react";
 import { PanelLeftIcon, PlusIcon } from "@/components/icons";
-import { activePage, legacy, legacySet, useBodyClass, useDesign } from "@/lib/bridge";
+import { legacy, legacySet, useBodyClass, useDesign } from "@/lib/bridge";
+import { can } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { Menu, MenuContent, MenuItem, MenuSeparator } from "../context-menu/parts";
+import { closeFileTab, closeOtherFileTabs, moveFileTab, openFileTab, useFileTabs } from "./file-tabs";
+import { openFileSwitcher } from "./FileSwitcher";
 import { run } from "./legacy";
 import { PreviewTabs } from "./preview-tab/PreviewTabs";
-import { activate as showPreviewTab, VIEW_CLASS } from "./preview-tab/store";
+import {
+  activate as showPreviewTab,
+  close as closePreviewTab,
+  usePreviewTabs,
+  VIEW_CLASS,
+} from "./preview-tab/store";
 import { Tip } from "./tip";
 
 const iconButton =
@@ -29,9 +38,20 @@ export function TitleBar() {
   const codeMode = useBodyClass("code-mode");
   const codeSidebarCollapsed = useBodyClass("code-sidebar-collapsed");
   const nameRef = useRef<HTMLInputElement>(null);
-  const page = doc ? activePage(doc) : null;
+  // The tab is a plain tab (arrow cursor, click to show the file); double-click renames the file in place.
+  const [renaming, setRenaming] = useState(false);
+  useEffect(() => {
+    if (!renaming) return;
+    nameRef.current?.focus();
+    nameRef.current?.select();
+  }, [renaming]);
+  const { tabs: previewTabs } = usePreviewTabs();
+  const { tabs: fileTabs, currentId, hidden: currentHidden } = useFileTabs();
+  // The repositories / chats sidebar lists local repositories: desktop only.
+  const repositories = can("projects");
 
   const commitName = () => {
+    setRenaming(false);
     const input = nameRef.current;
     const original = legacy<HTMLInputElement>("document-name");
     if (!input || !original) return;
@@ -42,7 +62,83 @@ export function TitleBar() {
     }
     legacySet(original, value);
   };
+  // "Other tabs" are the other open files and the expanded preview tabs.
+  const closeOthers = (id: string) => {
+    for (const tab of previewTabs) closePreviewTab(tab.frameId);
+    showPreviewTab(null);
+    closeOtherFileTabs(id);
+  };
+  // Drag a tab to reorder the strip: the strip reorders live while the tab passes over its neighbours' midpoints.
+  const [dragging, setDragging] = useState<string | null>(null);
+  const dragProps = (id: string) => ({
+    draggable: !renaming,
+    "data-dragging": dragging === id ? "" : undefined,
+    onDragStart: (event: DragEvent<HTMLDivElement>) => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("application/x-verynize-file-tab", id);
+      setDragging(id);
+    },
+    onDragOver: (event: DragEvent<HTMLDivElement>) => {
+      if (!dragging) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (dragging === id) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      const after = event.clientX > rect.left + rect.width / 2;
+      const rest = fileTabs.map((file) => file.id).filter((tab) => tab !== dragging);
+      moveFileTab(dragging, rest.indexOf(id) + (after ? 1 : 0));
+    },
+    onDrop: (event: DragEvent<HTMLDivElement>) => {
+      if (dragging) event.preventDefault();
+      setDragging(null);
+    },
+    onDragEnd: () => setDragging(null),
+  });
+  const showFile = (id: string) => {
+    showPreviewTab(null);
+    openFileTab(id);
+  };
+  // Right-click menu of a file tab (New Tab opens the file switcher, like the + button).
+  const tabMenu = (id: string, children: ReactNode) => (
+    <Menu.Root key={id} modal={false}>
+      <Menu.Trigger asChild>{children}</Menu.Trigger>
+      <MenuContent data-file-tab-menu={id}>
+        <MenuItem label="New Tab" onSelect={openFileSwitcher} />
+        <MenuSeparator />
+        <MenuItem label="Close Tab" onSelect={() => closeFileTab(id)} />
+        <MenuItem
+          label="Close Other Tabs"
+          disabled={fileTabs.length < 2 && !previewTabs.length}
+          onSelect={() => closeOthers(id)}
+        />
+        <MenuSeparator />
+        <MenuItem label="Reload" onSelect={() => window.location.reload()} />
+      </MenuContent>
+    </Menu.Root>
+  );
+  const closeButton = (id: string, name: string, group: string) => (
+    <button
+      type="button"
+      data-file-tab-close={id}
+      aria-label={`Close ${name}`}
+      className={cn(
+        "invisible ml-1 flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:visible focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3",
+        group,
+      )}
+      onClick={(event) => {
+        event.stopPropagation();
+        closeFileTab(id);
+      }}
+    >
+      <X />
+    </button>
+  );
+
   const onNameKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!renaming) {
+      if (event.key === "Enter" || event.key === "F2") setRenaming(true);
+      return;
+    }
     if (event.key === "Enter") event.currentTarget.blur();
     if (event.key === "Escape") {
       event.currentTarget.value = doc?.name ?? "";
@@ -50,6 +146,49 @@ export function TitleBar() {
     }
     event.stopPropagation();
   };
+
+  // The shown design file's tab owns `#document-name` (legacy render() writes it), so it always renders; it is hidden
+  // while the file has no tab (its tab was closed and Files took over).
+  const documentTab = (
+    <div
+      data-document-tab=""
+      data-file-tab={currentId ?? undefined}
+      {...(currentId && !currentHidden ? dragProps(currentId) : {})}
+      aria-current={documentActive ? "page" : undefined}
+      className={cn(
+        tab,
+        "group/document-tab min-w-0 shrink gap-0 pr-1 data-dragging:opacity-50",
+        documentActive && tabActive,
+        currentHidden && "hidden",
+      )}
+      onClick={() => {
+        showPreviewTab(null);
+        if (filesView) (window.fileLibrary as { showEditor?: () => void } | undefined)?.showEditor?.();
+      }}
+      onDoubleClick={() => setRenaming(true)}
+    >
+      <File className="mr-1.5" />
+      <input
+        ref={nameRef}
+        id="document-name"
+        aria-label="Document name"
+        defaultValue={doc?.name ?? "Untitled"}
+        readOnly={!renaming}
+        spellCheck={false}
+        onBlur={() => renaming && commitName()}
+        onKeyDown={onNameKey}
+        className={cn(
+          "field-sizing-content h-5 max-w-tab-name min-w-6 truncate rounded-sm bg-transparent text-xs text-inherit outline-none",
+          renaming
+            ? "cursor-text bg-background text-foreground ring-1 ring-ring"
+            : "pointer-events-none cursor-default select-none focus-visible:ring-1 focus-visible:ring-ring",
+        )}
+      />
+      {currentId
+        ? closeButton(currentId, doc?.name ?? "Untitled", "group-hover/document-tab:visible")
+        : null}
+    </div>
+  );
 
   return (
     <div
@@ -60,7 +199,7 @@ export function TitleBar() {
         codeMode
           ? "border-transparent bg-transparent pl-0"
           : chatOpen
-            ? "border-divider bg-background pl-chat"
+            ? "border-divider bg-background pl-chat-dock"
             : chatSidebarOpen
               ? "border-divider bg-background pl-2"
               : "border-divider bg-background pl-traffic",
@@ -96,7 +235,7 @@ export function TitleBar() {
       )}
       {!chatOpen && (
         <span className={cn("contents", codeMode && "hidden")}>
-          {!chatSidebarOpen && (
+          {!chatSidebarOpen && repositories && (
             <Tip label="Show sidebar" side="bottom">
               <button
                 type="button"
@@ -147,39 +286,35 @@ export function TitleBar() {
           Files
         </button>
 
-        <div
-          data-document-tab=""
-          aria-current={documentActive ? "page" : undefined}
-          className={cn(tab, "min-w-0 shrink gap-0 pr-2.5", documentActive && tabActive)}
-          onClick={() => {
-            showPreviewTab(null);
-            if (filesView)
-              (window.fileLibrary as { showEditor?: () => void } | undefined)?.showEditor?.();
-          }}
-        >
-          <File className="mr-1.5" />
-          <input
-            ref={nameRef}
-            id="document-name"
-            aria-label="Document name"
-            defaultValue={doc?.name ?? "Untitled"}
-            spellCheck={false}
-            onBlur={commitName}
-            onKeyDown={onNameKey}
-            className="field-sizing-content h-5 max-w-tab-name min-w-6 truncate rounded-sm bg-transparent text-xs text-inherit outline-none focus:bg-background focus:text-foreground focus:ring-1 focus:ring-ring"
-          />
-          {page ? <span className="min-w-0 truncate">&nbsp;-&nbsp;{page.name}</span> : null}
-        </div>
+        {fileTabs.map((file) =>
+          file.id === currentId
+            ? tabMenu(file.id, documentTab)
+            : tabMenu(
+                file.id,
+                <div
+                  data-file-tab={file.id}
+                  {...dragProps(file.id)}
+                  className={cn(tab, "group/file-tab min-w-0 shrink gap-0 pr-1 data-dragging:opacity-50")}
+                  onClick={() => showFile(file.id)}
+                >
+                  <File className="mr-1.5" />
+                  <span className="max-w-tab-name min-w-0 truncate">{file.name}</span>
+                  {closeButton(file.id, file.name, "group-hover/file-tab:visible")}
+                </div>,
+              ),
+        )}
+        {currentHidden ? documentTab : null}
 
         <PreviewTabs tabClass={tab} activeClass={tabActive} />
 
-        <Tip label="New file" side="bottom">
+        <Tip label="New tab" side="bottom">
           <button
             type="button"
             id="shell-new-file"
-            aria-label="New file"
+            aria-label="New tab"
+            aria-haspopup="dialog"
             className={cn(iconButton, "[&_svg]:size-3.5")}
-            onClick={() => run("shell-new-file")}
+            onClick={openFileSwitcher}
           >
             <PlusIcon />
           </button>

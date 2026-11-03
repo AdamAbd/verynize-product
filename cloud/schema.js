@@ -142,6 +142,8 @@ export const profile = sqliteTable("profile", {
     .unique()
     .references(() => user.id, { onDelete: "set null" }),
   createdAt: integer("createdAt").notNull(),
+  // Web onboarding: when the AI setup steps were finished or skipped (migration 0008).
+  aiSetupAt: integer("aiSetupAt"),
 });
 
 export const roomMembership = sqliteTable(
@@ -212,4 +214,120 @@ export const roomAsset = sqliteTable(
     unique().on(table.roomId, table.sha256),
     index("room_asset_roomId_idx").on(table.roomId),
   ],
+);
+
+// Model API runtime (cloud/ai.js, migration 0005): runs, their events, approvals and the
+// recorded results of write tool calls. Times are epoch ms.
+export const aiRun = sqliteTable(
+  "ai_run",
+  {
+    id: text("id").notNull().primaryKey(),
+    accountId: text("accountId").notNull(),
+    roomId: text("roomId").notNull(),
+    chatId: text("chatId").notNull(),
+    model: text("model").notNull(),
+    access: text("access").notNull(),
+    status: text("status").notNull(),
+    code: text("code"),
+    idempotencyKey: text("idempotencyKey").notNull(),
+    cancelRequested: integer("cancelRequested", { mode: "boolean" }).notNull().default(false),
+    leaseUntil: integer("leaseUntil").notNull(),
+    createdAt: integer("createdAt").notNull(),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => [
+    unique().on(table.accountId, table.idempotencyKey),
+    index("ai_run_account_status_idx").on(table.accountId, table.status),
+  ],
+);
+
+export const aiRunEvent = sqliteTable(
+  "ai_run_event",
+  {
+    runId: text("runId").notNull(),
+    seq: integer("seq").notNull(),
+    event: text("event").notNull(),
+    createdAt: integer("createdAt").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.seq] })],
+);
+
+export const aiApproval = sqliteTable(
+  "ai_approval",
+  {
+    runId: text("runId").notNull(),
+    requestId: text("requestId").notNull(),
+    accountId: text("accountId").notNull().default(""),
+    toolCallId: text("toolCallId").notNull(),
+    toolName: text("toolName").notNull(),
+    argsHash: text("argsHash").notNull(),
+    decision: text("decision"),
+    reason: text("reason"),
+    createdAt: integer("createdAt").notNull(),
+    decidedAt: integer("decidedAt"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.requestId] }),
+    unique().on(table.runId, table.toolCallId),
+  ],
+);
+
+export const aiToolResult = sqliteTable(
+  "ai_tool_result",
+  {
+    runId: text("runId").notNull(),
+    toolCallId: text("toolCallId").notNull(),
+    toolName: text("toolName").notNull(),
+    output: text("output").notNull(),
+    isError: integer("isError", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("createdAt").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.toolCallId] })],
+);
+
+// Model API credentials (cloud/ai-credentials.js, migration 0007): per-account provider keys,
+// encrypted at rest, and pending OpenRouter PKCE sign-ins. Times are epoch ms.
+export const aiCredential = sqliteTable(
+  "ai_credential",
+  {
+    accountId: text("accountId").notNull(),
+    provider: text("provider").notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    iv: text("iv").notNull(),
+    last4: text("last4").notNull(),
+    label: text("label"),
+    source: text("source").notNull(),
+    createdAt: integer("createdAt").notNull(),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.accountId, table.provider] })],
+);
+
+export const aiOauthState = sqliteTable(
+  "ai_oauth_state",
+  {
+    stateHash: text("stateHash").notNull().primaryKey(),
+    accountId: text("accountId").notNull(),
+    provider: text("provider").notNull(),
+    verifier: text("verifier").notNull(),
+    iv: text("iv").notNull(),
+    browserHash: text("browserHash").notNull(),
+    returnTo: text("returnTo").notNull(),
+    expiresAt: integer("expiresAt").notNull(),
+    createdAt: integer("createdAt").notNull(),
+  },
+  (table) => [index("ai_oauth_state_expires_idx").on(table.expiresAt)],
+);
+
+// Private cross-device preferences, chats and file organization (migration 0009).
+export const accountState = sqliteTable(
+  "account_state",
+  {
+    accountId: text("accountId").notNull(),
+    key: text("key").notNull(),
+    value: text("value"),
+    revision: integer("revision").notNull().default(1),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.accountId, table.key] })],
 );

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { PanelLeftIcon, PlusIcon } from "@/components/icons";
 import { useBodyClass } from "@/lib/bridge";
+import { can } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import {
   ChatMenu,
@@ -128,6 +129,9 @@ function Switcher({ state }: { state: ChatState }) {
             Open in Code workspace
           </ChatMenuItem>
         )}
+        {/* Repositories and worktrees are desktop-only (the `git` capability); the web chat has its chats only. */}
+        {can("git") && (
+          <>
         <ChatMenuSeparator />
         <ChatMenuLabel>Repositories</ChatMenuLabel>
         {attached && (
@@ -154,6 +158,8 @@ function Switcher({ state }: { state: ChatState }) {
           <LaptopIcon />
           Start from local folder
         </ChatMenuItem>
+          </>
+        )}
       </ChatMenuContent>
     </ChatMenu>
   );
@@ -165,15 +171,15 @@ export function DockHeader({ state }: { state: ChatState }) {
   const sidebarOpen = useBodyClass("chat-sidebar-open") && !state.codeMode;
   return (
     <>
-      {/* Top row shares the window title bar (chrome island leaves the left 499px to the dock): traffic-light inset. */}
+      {/* Top row shares the window title bar (chrome island leaves the left --chat-dock-width to the dock): traffic-light inset. */}
       <div
         className={cn(
           hook.drag,
           "flex h-10 shrink-0 items-center gap-1 border-b border-border bg-settings pr-1.5",
-          sidebarOpen ? "pl-1.5" : "pl-20",
+          sidebarOpen ? "pl-1.5" : "pl-traffic",
         )}
       >
-        {!sidebarOpen && (
+        {!sidebarOpen && can("projects") && (
           <ChatTip label="Show sidebar" side="bottom">
             <ChatIconButton aria-label="Show sidebar" onClick={() => document.body.classList.add("chat-sidebar-open")}>
               <PanelLeftIcon className="size-4" />

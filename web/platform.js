@@ -6,6 +6,7 @@
 //   desktop       window.desktop, or null in the plain web build
 //   capabilities  {name: boolean}; a capability is true when every desktop method it needs is present
 //   can(name)     capabilities[name] === true (unknown names are false)
+//   agents        the chat AgentService registry ({provide, service, ready, changed, subscribe}), see below
 //
 // Check capabilities, not window.desktop, before showing or running a desktop feature; then call
 // platform.desktop.x() (legacy code may keep calling window.desktop.x() behind a capability check).
@@ -49,6 +50,8 @@
     // Agent MCP bridge into the editor (desktop/mcp-bridge.cjs, web/agent-bridge.js).
     agentBridge: ["agentBridge.onCall", "agentBridge.reply"],
     onboarding: ["onboardingState"],
+    // Share panel server default (desktop/cloud-defaults.cjs).
+    cloudDefaults: ["cloudDefaults"],
   };
   const exposed = root.desktop;
   const desktop = exposed && typeof exposed === "object" ? exposed : null;
@@ -58,13 +61,50 @@
   for (const [name, paths] of Object.entries(CAPABILITY_METHODS))
     capabilities[name] = !!desktop && paths.every((path) => typeof method(path) === "function");
   Object.freeze(capabilities);
+  // Chat agent transport (web/src/lib/agent-service.ts): the one AgentService chat code runs turns through. It is not a
+  // desktop capability: the React bundle provides it, over IPC on the desktop (when `agents` is true) and over the
+  // cloud backend's model API (/api/ai/*) on the web. `ready()` is the service's own "can run a turn now" answer
+  // (web: signed in on this server and GET /api/ai/config enabled); `subscribe` fires when the service or that
+  // answer changes.
+  let agentService = null;
+  const agentListeners = new Set();
+  const agentsChanged = () => {
+    for (const listener of agentListeners)
+      try {
+        listener();
+      } catch (error) {
+        console.error(error);
+      }
+  };
+  const agents = Object.freeze({
+    provide(service) {
+      agentService = service || null;
+      agentsChanged();
+      return () => {
+        if (agentService !== service) return;
+        agentService = null;
+        agentsChanged();
+      };
+    },
+    service: () => agentService,
+    ready: () => !!agentService && agentService.ready() === true,
+    changed: agentsChanged,
+    subscribe(listener) {
+      agentListeners.add(listener);
+      return () => agentListeners.delete(listener);
+    },
+  });
   const platform = Object.freeze({
     kind: desktop ? "desktop" : "web",
     desktop,
     capabilities,
     can: (name) => Object.hasOwn(capabilities, name) && capabilities[name] === true,
     CAPABILITY_METHODS: Object.freeze(CAPABILITY_METHODS),
+    agents,
   });
+  // html[data-platform=desktop|web]: CSS that differs per runtime (the macOS traffic-light inset, globals.css).
+  if (root.document && root.document.documentElement)
+    root.document.documentElement.dataset.platform = platform.kind;
   Object.defineProperty(root, "verynizePlatform", {
     value: platform,
     enumerable: false,

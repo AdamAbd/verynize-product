@@ -9,6 +9,8 @@
 // options and offer the same methods.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { Miniflare as Workerd } from "miniflare";
 import { CURRENT_WORKER, NodeCloud } from "./helpers/node-cloud.mjs";
 import { VercelCloud } from "./helpers/vercel-cloud.mjs";
@@ -25,10 +27,13 @@ export const AUTH_SECRET = "local-test-secret-not-for-production-0000";
 export const ASSET_SECRET = "local-asset-signing-secret-not-for-production";
 
 // The Worker imports npm packages (Better Auth), so tests run the same bundle that
-// `cf deploy --prebuilt` uploads. It is built once per test process.
+// `cf deploy --prebuilt` uploads. It is built once per test process, or once per run when
+// scripts/run-tests.mjs builds it and passes the bundle directory in CLOUD_WORKER_BUNDLE.
 let built;
 function buildWorker() {
   built ||= Promise.resolve().then(async () => {
+    if (process.env.CLOUD_WORKER_BUNDLE)
+      return readBundle(pathToFileURL(path.resolve(process.env.CLOUD_WORKER_BUNDLE) + "/"));
     execFileSync(
       process.execPath,
       [new URL("node_modules/vite-plus/bin/vp", root).pathname, "build"],
@@ -37,13 +42,18 @@ function buildWorker() {
         stdio: "pipe",
       },
     );
-    const modules = {};
-    for (const file of await fs.readdir(BUNDLE, { recursive: true }))
-      if (file.endsWith(".js"))
-        modules[file] = { type: "esm", contents: await fs.readFile(new URL(file, BUNDLE), "utf8") };
-    return modules;
+    return readBundle(BUNDLE);
   });
   return built;
+}
+
+async function readBundle(dir) {
+  const modules = {};
+  for (const file of await fs.readdir(dir, { recursive: true }))
+    if (file.endsWith(".js"))
+      modules[file] = { type: "esm", contents: await fs.readFile(new URL(file, dir), "utf8") };
+  if (!Object.keys(modules).length) throw new Error(`No Worker modules in ${dir.pathname}`);
+  return modules;
 }
 
 /**
@@ -130,6 +140,11 @@ export async function cloudOptions(persistence, extra = {}) {
               namespace: "1003",
               simple: { limit: 240, period: 60 },
             },
+            AI_LIMIT: {
+              type: "rate-limit",
+              namespace: "1004",
+              simple: { limit: 30, period: 60 },
+            },
             ROOMS: { type: "durable-object", worker: "verynize", exportName: "DesignRoom" },
             ACCOUNTS: {
               type: "durable-object",
@@ -137,6 +152,7 @@ export async function cloudOptions(persistence, extra = {}) {
               exportName: "AccountDirectory",
             },
             APPS: { type: "durable-object", worker: "verynize", exportName: "PublishedApp" },
+            AI_RUNS: { type: "durable-object", worker: "verynize", exportName: "AiRun" },
             DB: D1,
             BETTER_AUTH_SECRET: { type: "text", value: AUTH_SECRET },
             ASSETS_BUCKET: { type: "r2", name: "verynize-assets" },
@@ -147,6 +163,7 @@ export async function cloudOptions(persistence, extra = {}) {
             DesignRoom: { type: "durable-object", storage: "sqlite" },
             AccountDirectory: { type: "durable-object", storage: "sqlite" },
             PublishedApp: { type: "durable-object", storage: "sqlite" },
+            AiRun: { type: "durable-object", storage: "sqlite" },
           },
         },
       },

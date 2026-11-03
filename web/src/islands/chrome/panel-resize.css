@@ -1,0 +1,73 @@
+/*
+ * Panel edge strips (panel-resize.tsx). Each strip is 7px wide and centred on the panel's 1px edge, so it reaches 3px
+ * into the panel and 3px into its neighbour; its line child covers the edge exactly and shows the accent colour while
+ * the strip is dragged or keyboard-focused. Nothing is visible otherwise (Wonder only changes the cursor).
+ */
+[data-panel-resize] {
+  position: relative;
+  z-index: 20;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+[data-panel-resize-line] {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  pointer-events: none;
+}
+html[data-panel-resizing="left"] [data-panel-resize="left"] [data-panel-resize-line],
+html[data-panel-resizing="right"] [data-panel-resize="right"] [data-panel-resize-line],
+html[data-panel-resizing="chat"] [data-panel-resize="chat"] [data-panel-resize-line],
+[data-panel-resize]:focus-visible [data-panel-resize-line] {
+  background: var(--primary);
+}
+
+/* Side panels: placed in the panel's own grid cell, against the edge that faces the canvas. */
+body.bd-chrome > main > [data-panel-resize="left"] {
+  grid-area: 1 / 1 / 2 / 2;
+  justify-self: end;
+  margin-right: -3px;
+}
+body.bd-chrome > main > [data-panel-resize="right"] {
+  grid-area: 1 / 3 / 2 / 4;
+  justify-self: start;
+  margin-left: -3px;
+}
+
+/* Chat dock: fixed beside the dock's right edge, below the title bar (a window-drag region). */
+[data-panel-resize="chat"] {
+  position: fixed;
+  top: var(--spacing-chrome);
+  bottom: 0;
+  left: calc(var(--chat-dock-width) - 4px);
+  z-index: 46;
+}
+body.bd-chrome.chat-sidebar-open:not(.code-mode) [data-panel-resize="chat"] {
+  left: calc(var(--spacing-code-sidebar) + var(--chat-dock-width) - 4px);
+}
+
+body:not(.bd-chrome) [data-panel-resize],
+body.left-collapsed [data-panel-resize="left"],
+body.right-collapsed [data-panel-resize="right"],
+body:not(.agent-chat-open) [data-panel-resize="chat"],
+body.code-mode [data-panel-resize],
+body.settings-open [data-panel-resize] {
+  display: none;
+}
+
+/* While dragging: the resize cursor everywhere and no text selection or iframe stealing the pointer. */
+html[data-panel-resizing],
+html[data-panel-resizing] * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+html[data-panel-resizing] iframe,
+html[data-panel-resizing] webview {
+  pointer-events: none;
+}

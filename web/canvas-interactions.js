@@ -256,6 +256,13 @@
       }, () => { canvas.classList.remove('spacing-measure'); delete workspace.dataset.spacingLimit; spacingDrag = null; delete workspace.dataset.spacingDrag; spacingKey = ''; refreshHover(true); });
     }
 
+    // ---------- Viewers ----------
+    // A viewer or commenter in a shared room (body.cloud-read-only) looks around and selects; commands that change the
+    // document are inert (web/cloud-panel.js rolls back anything else).
+    function readOnly() { return document.body.classList.contains('cloud-read-only'); }
+    const VIEWER_COMMANDS = /^(select\.|view\.|tool\.(move|hand)$|edit\.copy(Code|Png)?$)/;
+    function allowed(id) { return !readOnly() || VIEWER_COMMANDS.test(id); }
+
     // ---------- Camera ----------
     const viewport = () => wrap.getBoundingClientRect();
     // Compositing: a permanently promoted #canvas (will-change: transform) freezes its raster scale, so after a zoom out
@@ -344,11 +351,13 @@
     }, {passive: false});
     // Opening or closing a panel on the left (layers, chat dock, chats sidebar) moves the viewport's left edge: shift the
     // camera by the same amount so the artwork stays put on screen instead of sliding with the panel (panels are ≥200px
-    // wide; smaller moves are start-up layout settling).
+    // wide; smaller moves are start-up layout settling). While a panel edge is dragged (`html[data-panel-reflow]`, set by
+    // the chrome island's panel-resize.tsx) every move of the left edge is compensated.
     let viewportLeft = null, panelToggledAt = -Infinity;
     new MutationObserver(() => { panelToggledAt = performance.now(); }).observe(document.body, {attributes: true, attributeFilter: ['class']});
     new ResizeObserver(() => {
-      const left = viewport().left, moved = viewportLeft !== null && Math.abs(left - viewportLeft) >= 100 && performance.now() - panelToggledAt < 1000;
+      const left = viewport().left, reflow = document.documentElement.hasAttribute('data-panel-reflow');
+      const moved = viewportLeft !== null && (reflow ? left !== viewportLeft : Math.abs(left - viewportLeft) >= 100 && performance.now() - panelToggledAt < 1000);
       if (moved) { cam.x -= left - viewportLeft; autoFit = false; }
       viewportLeft = left;
       if (autoFit) fit(true); else applyCamera();
@@ -376,6 +385,7 @@
 
     // ---------- Tools ----------
     function setTool(next) {
+      if (readOnly() && next !== 'hand') next = 'move'; // viewers: Move and Hand only
       if (next === 'image') { setTool('move'); $('#image')?.click(); return; }
       const previous = tool;
       tool = TOOL_BUTTONS[next] ? next : 'move';
@@ -521,6 +531,7 @@
       if (e.target.closest('.frame-label')) return;
       if (space || tool === 'hand' || e.button === 1) { startPan(e); return; }
       if (e.button !== 0) return;
+      if (readOnly()) { viewerPointerDown(e); return; }
       if (chrome.pointerDown(e)) return;
       const spacing = e.target.closest('#canvas-overlay .spacing-band');
       if (spacing) { startSpacing(e, spacingBands[Number(spacing.dataset.index)], Number(spacing.dataset.index)); return; }
@@ -547,11 +558,20 @@
         }
       });
     });
+    // Viewers (body.cloud-read-only, web/cloud-panel.js setRole) select and marquee-select; nothing moves or resizes.
+    function viewerPointerDown(e) {
+      const el = e.target.closest('#canvas .layer');
+      if (!el) { startMarquee(e); return; }
+      const id = resolveHit(el.dataset.id, deepSelect(e));
+      if (e.shiftKey) { const next = new Set(sel()); if (next.has(id)) next.delete(id); else next.add(id); select(next); }
+      else select([id]);
+      e.preventDefault();
+    }
     // Double-click edits a text layer that the first click of the pair had already selected; drilling in happens per click.
     let firstClickSelection = new Set();
     wrap.addEventListener('click', e => { if (e.detail <= 1) firstClickSelection = new Set(sel()); });
     wrap.addEventListener('dblclick', e => {
-      const el = e.target.closest('#canvas .layer'); if (!el) return;
+      const el = e.target.closest('#canvas .layer'); if (!el || readOnly()) return;
       const n = find(el.dataset.id);
       if (textEdit?.el.contains(e.target)) return; // native word selection inside the editor
       if (n?.type === 'text' && !n.locked && sel().size === 1 && sel().has(n.id) && firstClickSelection.has(n.id)) editText({x: e.clientX, y: e.clientY});
@@ -1112,7 +1132,7 @@
         const r = worldRect(n.id); if (!r || (sel().has(n.id) && sel().size === 1)) continue;
         const label = document.createElement('span'); label.className = 'frame-label' + (sel().has(n.id) ? ' selected' : '') + (n.id === hoverId ? ' hovered' : ''); label.textContent = n.name; label.dataset.id = n.id;
         label.style.left = toScreenX(r.x) + 'px'; label.style.top = toScreenY(r.y) - 18 + 'px';
-        label.onpointerdown = e => { if (e.button !== 0 || space || tool === 'hand') return; e.stopPropagation(); select(e.shiftKey ? [...sel(), n.id] : [n.id]); if (!e.shiftKey) startMove(e); };
+        label.onpointerdown = e => { if (e.button !== 0 || space || tool === 'hand') return; e.stopPropagation(); select(e.shiftKey ? [...sel(), n.id] : [n.id]); if (!e.shiftKey && !readOnly()) startMove(e); };
         frameLabels.append(label);
       }
     }
@@ -1443,11 +1463,18 @@
       // Layers copied in Figma (binary scene in text/html), converted by web/figma-panel.js + the main process.
       const html = e.clipboardData?.getData('text/html') || '';
       if (window.figmaPaste?.accepts(html)) { window.figmaPaste.convert(html).then(layers => { if (layers) paste(layers, {inPlace}); }); return; }
-      const file = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/') && f.size < 8e6);
+      const imageFiles = [...(e.clipboardData?.files || [])];
+      try { window.imageUpload.batch(imageFiles); } catch(error) { footer(error.message); return; }
+      if(imageFiles.length>1){const rect=document.getElementById('canvas-wrap').getBoundingClientRect();window.imageDrop.dropFiles(imageFiles,rect.x+rect.width/2,rect.y+rect.height/2);return;}
+      const file = imageFiles[0];
       if (file) {
-        const reader = new FileReader();
-        reader.onload = () => { const img = new Image(); img.onload = () => { const w = Math.min(600, img.width), h = w * img.height / img.width, p = placeInView(w, h); ed.add('image', {name: file.name || 'Pasted image', src: reader.result, w, h, x: p.x, y: p.y, parentId: null, color: 'transparent'}); }; img.src = reader.result; };
-        reader.readAsDataURL(file); return;
+        const pageId = ed.page().id;
+        window.imageUpload.prepare(file).then(image => {
+          if (ed.page().id !== pageId) return;
+          const w = Math.min(600, image.originalWidth), h = w * image.originalHeight / image.originalWidth, p = placeInView(w, h);
+          ed.add('image', {name: file.name || 'Pasted image', src: image.src, w, h, x: p.x, y: p.y, parentId: null, color: 'transparent'});
+        }).catch(error => footer(error.message));
+        return;
       }
       if (text.trim()) { const p = placeInView(320, 80); ed.add('text', {text: text.slice(0, 100000), name: 'Pasted text', x: p.x, y: p.y, w: 320, h: 80, parentId: null}); return; }
       paste(clipboard, {inPlace});
@@ -1540,7 +1567,7 @@
     }
     const keyIndex = new Map();
     for (const c of commands) for (const k of c.keys) keyIndex.set(k, c);
-    function runCommand(id, arg) { const c = commands.find(x => x.id === id); if (!c || (c.when && !c.when())) return false; c.run(arg); return true; }
+    function runCommand(id, arg) { const c = commands.find(x => x.id === id); if (!c || !allowed(id) || (c.when && !c.when())) return false; c.run(arg); return true; }
     const shortcutText = k => k.replace('mod+', /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+').replace('alt+', '⌥').replace('shift+', '⇧').replace('ctrl+', '⌃').toUpperCase();
 
     document.addEventListener('keydown', e => {
@@ -1550,6 +1577,7 @@
       if (e.code === 'Space') { space = true; workspace.classList.add('space-pan'); refreshHover(); e.preventDefault(); return; }
       if (e.altKey && lastHover && !e.repeat) measureTo(lastHover);
       if (e.key.startsWith('Arrow')) {
+        if (readOnly()) return;
         const list = selectedNodes().filter(n => !n.locked); if (!list.length) return;
         // Auto-layout children have no x/y: arrows step them through their stack instead.
         if (list.every(inStack)) { e.preventDefault(); arrange(e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? 'backward' : 'forward'); return; }
@@ -1559,6 +1587,7 @@
         ed.render(); return;
       }
       const command = keyIndex.get(comboOf(e)); if (!command) return;
+      if (!allowed(command.id)) { e.preventDefault(); return; }
       if (command.when && !command.when()) return;
       if (command.native) { requestPaste(command.id === 'edit.pasteInPlace'); return; } // keep default so the native paste event fires
       e.preventDefault(); command.run();
@@ -1577,6 +1606,7 @@
     wrap.addEventListener('contextmenu', e => {
       if (textEdit?.el.contains(e.target)) return;
       e.preventDefault(); closeMenu();
+      if (readOnly()) return; // its commands edit
       const label = e.target.closest('.frame-label'), el = e.target.closest('#canvas .layer'), chrome = sel().size === 1 && e.target.closest('#canvas-overlay .rotate-zone, #canvas-overlay .resize-edge, #selection-chat-chip') ? [...sel()][0] : null;
       const under = [...canvas.querySelectorAll('.layer[data-id]')].filter(l => { const r = l.getBoundingClientRect(); return r.width && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; }).map(l => l.dataset.id).reverse();
       const locked = under.find(id => find(id)?.locked), above = locked && (!el || under.indexOf(locked) < under.indexOf(el.dataset.id));
@@ -1688,7 +1718,7 @@
       if (existing) Object.assign(existing, command); else commands.push({keys: [], ...command});
       keyIndex.clear(); for (const c of commands) for (const k of c.keys) keyIndex.set(k, c);
     }
-    const context = {ed, find, sel, selectedNodes, topSelected, worldRect, union, placeInView, isFlow, inStack, footer, writeSystemClipboard, register, hooks, getClipboard: () => clipboard, paste: (data, options) => paste(data, options)};
+    const context = {ed, find, sel, selectedNodes, topSelected, worldRect, union, placeInView, screenToWorld, frameAt, isFlow, inStack, footer, writeSystemClipboard, register, hooks, getClipboard: () => clipboard, paste: (data, options) => paste(data, options)};
     for (const extend of extensions) extend(context);
 
     return {

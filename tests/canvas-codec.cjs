@@ -1,6 +1,8 @@
 // Renderer parity for codec output: JSX built by integrations/design-edit.mjs is rendered by the
 // real canvas (web/app.js) and the DOM boxes are compared with the headless layout estimate.
 const {_electron} = require('@playwright/test');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
+const { MOD } = require("./helpers/keys.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 const {pathToFileURL} = require('node:url');
@@ -12,7 +14,7 @@ const {pathToFileURL} = require('node:url');
   env.VERYNIZE_SKIP_ONBOARDING = '1';
   const app = await _electron.launch({env, args: ['.', `--user-data-dir=${dir}`], timeout: 20000});
   try {
-    const page = await app.firstWindow({timeout: 20000});
+    const page = await app.firstWindow({timeout: 20000}); await moveOffCursor(app);
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.waitForSelector('#canvas .layer');
     const blank = {version: 2, name: 'Codec', activePage: 'p1', pages: [{id: 'p1', name: 'Page', nodes: []}], tokens: {}};
@@ -80,9 +82,9 @@ const {pathToFileURL} = require('node:url');
     assert.deepEqual(abs.inset, [-8, 0, null, null]);
     await page.evaluate(id => window.design.setSelection([id]), abs.id);
     const before = await page.evaluate(id => { const r = document.querySelector(`#canvas [data-id="${id}"]`).getBoundingClientRect(); return {x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left, top: r.top}; }, abs.id);
-    await page.mouse.move(before.x, before.y); await page.mouse.down(); await page.keyboard.down('Meta'); // Meta: no snapping
+    await page.mouse.move(before.x, before.y); await page.mouse.down(); await page.keyboard.down(MOD); // ⌘ (Ctrl off macOS): no snapping
     for (let i = 1; i <= 5; i++) await page.mouse.move(before.x - 4 * i, before.y + 2 * i);
-    await page.mouse.up(); await page.keyboard.up('Meta');
+    await page.mouse.up(); await page.keyboard.up(MOD);
     const moved = await page.evaluate(id => window.design.getDocument().pages[0].nodes.find(n => n.id === id), abs.id);
     const after = await page.evaluate(id => { const r = document.querySelector(`#canvas [data-id="${id}"]`).getBoundingClientRect(); return {left: r.left, top: r.top}; }, abs.id);
     assert.deepEqual(moved.inset, [2, 20, null, null], 'top/right insets follow the drag');

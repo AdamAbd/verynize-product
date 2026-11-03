@@ -35,6 +35,8 @@ type CloudAccountApi = {
   forgotPassword(o: { server: string; email: string }): Promise<void>;
   signOut(everywhere?: boolean): Promise<void>;
   request<T = unknown>(path: string, options?: RequestInit): Promise<T>;
+  /** Authenticated request to the account's server returning the raw Response (streamed bodies, status codes). */
+  fetch(path: string, options?: RequestInit): Promise<Response>;
   activeOrganization(): string | null;
   setActiveOrganization(id: string): void;
 };
@@ -90,6 +92,7 @@ export type OrganizationInvitation = {
   role: string | null;
   status: string;
   expiresAt: string;
+  createdAt?: string;
   organizationId: string;
   organizationName?: string;
 };
@@ -193,11 +196,11 @@ export function useOrganizations() {
 /** Reload the shared list (after create, leave, accept…); resolves once it is current. */
 export const organizationsChanged = () => reloadOrganizations();
 
-/** Sign-in entry: the desktop onboarding, or the Share panel's account section on the web. */
+/** Sign-in entry: the desktop onboarding, or the "Shared design" dialog's account section on the web. */
 export function openSignIn() {
   if (platform.kind === "desktop") window.dispatchEvent(new Event("bd:open-onboarding"));
   else {
-    document.getElementById("cloud-toggle")?.click();
+    (window as unknown as { cloudWorkspace?: { openDialog?(): void } }).cloudWorkspace?.openDialog?.();
     const section = document.getElementById("cloud-account-section") as HTMLDetailsElement | null;
     if (section) section.open = true;
   }

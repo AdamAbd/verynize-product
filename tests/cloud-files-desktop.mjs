@@ -1,7 +1,7 @@
 // Cloud files against local workerd: a room is a file that the desktop reopens after a restart,
-// the Files home lists workspace rooms and rooms shared with you, and edits made while the server
-// is down survive an app restart and reach the room exactly once (persistent outbox).
+// the Files home lists workspace/shared rooms; unsaved edits block switching until the server returns.
 import { _electron as electron } from "@playwright/test";
+import { openSharedDesign } from "./helpers/shared-design.cjs";
 import { waitForUiReady } from "./helpers/ui-ready.cjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -26,15 +26,22 @@ async function launch(profile) {
   });
   apps.add(app);
   const page = await app.firstWindow({ timeout: 20000 });
+  page.setDefaultTimeout(30000);
   await waitForUiReady(page);
   await page.waitForFunction(
     () =>
       !!window.design && !!window.cloudWorkspace && !!window.fileLibrary && !!window.cloudAccount,
   );
-  page.on("dialog", (dialog) => dialog.accept());
+  page.on("dialog", (dialog) => dialog.accept().catch(() => {}));
   return { app, page };
 }
 async function quit(app) {
+  await (
+    await app.firstWindow()
+  ).evaluate(async () => {
+    await window.cloudWorkspace.flush();
+    await window.accountStore.flush();
+  });
   apps.delete(app);
   await app.close();
 }
@@ -82,13 +89,7 @@ try {
   const textId = await page.evaluate(() =>
     window.design.addNode("text", { name: "Headline", text: "Hello" }),
   );
-  await page.locator("#cloud-toggle").click();
-  await page.locator("#cloud-server").fill(server);
-  await page.locator("#cloud-create").click();
-  await page.waitForFunction(() =>
-    document.getElementById("cloud-invite").value.includes("token="),
-  );
-  await page.locator("#cloud-close").click();
+  await page.waitForFunction(() => !!window.cloudWorkspace.room());
   const roomId = (await room(page)).id;
   const cloud = await page.evaluate((id) => window.fileLibrary.cloudOf(id), fileId);
   assert.equal(cloud.server, server);
@@ -100,8 +101,7 @@ try {
 
   // 2. Restart the app: the file reopens connected to the same room, with no new copy.
   await page.waitForFunction(
-    async ({ server, roomId }) =>
-      (await window.cloudWorkspace.storedOutbox(server, roomId))?.pending.length === 0,
+    async ({ server, roomId }) => !(await window.cloudWorkspace.storedOutbox(server, roomId)),
     { server, roomId },
   );
   await quit(app);
@@ -110,13 +110,22 @@ try {
   await synced(page);
   assert.equal(await page.evaluate(() => window.fileLibrary.currentId), fileId);
   assert.equal((await files(page)).length, fileCount);
-  // Opening another file detaches; reopening the cloud file reconnects, still without a copy.
-  await page.evaluate(async () => {
+  // A new file is stored in the workspace right away (a private room of its own), signed in.
+  const newId = await page.evaluate(async () => {
     const doc = window.design.getDocument();
-    doc.name = "Local only";
-    await window.fileLibrary.createFromDocument(doc);
+    doc.name = "New file";
+    return window.fileLibrary.createFromDocument(doc);
   });
-  assert.equal(await page.evaluate(() => window.cloudWorkspace.isConnected()), false);
+  await page.waitForFunction((id) => !!window.fileLibrary.cloudOf(id), newId);
+  const newRoom = await page.evaluate((id) => window.fileLibrary.cloudOf(id), newId);
+  assert.notEqual(newRoom.roomId, roomId);
+  await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, newRoom.roomId);
+  assert.equal(
+    (await page.evaluate(() => window.cloudWorkspace.access())).visibility,
+    "private",
+    "new files start private",
+  );
+  // Opening another file switches rooms; reopening the first cloud file reconnects, still without a copy.
   await page.evaluate((id) => window.fileLibrary.open(id), fileId);
   await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, roomId);
   await synced(page);
@@ -171,65 +180,39 @@ try {
   await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, plan.id);
   assert.equal((await files(page)).length, localCount + 1, "reopening does not copy");
 
-  // 4. Offline edits: stop the server, edit, restart the app while offline, edit again, then
-  // bring the server back. The room receives every edit exactly once.
+  console.log("Database file reopen and listing passed");
+  // 4. Offline changes stay in memory, block switching, and reach the database on reconnect.
   await page.evaluate((id) => window.fileLibrary.open(id), fileId);
-  await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, roomId);
   await synced(page);
-  const before = await page.evaluate(
-    ({ server, roomId }) => window.cloudWorkspace.storedOutbox(server, roomId),
-    { server, roomId },
+  assert.equal(
+    await page.evaluate(() => window.fileLibrary.currentId),
+    fileId,
+    "open returns with the requested file active",
   );
+  assert.equal((await room(page)).id, roomId);
   await mf.dispose();
   await page.evaluate((id) => {
     window.design.addNode("rectangle", { name: "offline-1" });
     window.design.updateNodes([id], (n) => ({ text: n.text + " offline" }));
   }, textId);
-  await page.waitForFunction(
-    async ({ server, roomId }) =>
-      (await window.cloudWorkspace.storedOutbox(server, roomId))?.pending.length > 0,
-    { server, roomId },
+  assert.ok(await page.evaluate(() => window.cloudWorkspace.pendingCount() > 0));
+  assert.equal(
+    await page.evaluate(
+      ({ server, roomId }) => window.cloudWorkspace.storedOutbox(server, roomId),
+      { server, roomId },
+    ),
+    null,
   );
-  await quit(app);
-  ({ app, page } = await launch("a"));
-  await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, roomId);
-  await page.waitForFunction(() =>
-    /Offline|interrupted|unavailable/.test(document.getElementById("cloud-status").textContent),
-  );
+  await assert.rejects(page.evaluate((id) => window.fileLibrary.open(id), newId));
   assert.equal(await page.evaluate(() => window.fileLibrary.currentId), fileId);
-  assert.equal(await page.evaluate(() => window.cloudWorkspace.pendingCount() > 0), true);
   await page.evaluate(() => window.design.addNode("rectangle", { name: "offline-2" }));
-  await page.waitForFunction(
-    async ({ server, roomId }) => {
-      const stored = await window.cloudWorkspace.storedOutbox(server, roomId);
-      return stored?.pending.some((b) => b.ops.some((op) => op.value?.name === "offline-2"));
-    },
-    { server, roomId },
-  );
-  const after = await page.evaluate(
-    ({ server, roomId }) => window.cloudWorkspace.storedOutbox(server, roomId),
-    { server, roomId },
-  );
-  assert.equal(after.clientId, before.clientId, "the same client id survives the restart");
   mf = new Miniflare(options);
   server = (await mf.ready).origin;
   await synced(page);
   const remote = await api(`/api/rooms/${roomId}`, ana);
-  const named = (name) => remote.document.pages[0].nodes.filter((n) => n.name === name).length;
-  assert.equal(named("online-1"), 1);
-  assert.equal(named("offline-1"), 1);
-  assert.equal(named("offline-2"), 1);
-  assert.equal(
-    remote.document.pages[0].nodes.find((n) => n.id === textId).text,
-    "Hello offline",
-    "the offline text edit is applied once",
-  );
-  // The stored outbox empties once the server acknowledged every batch.
-  await page.waitForFunction(
-    async ({ server, roomId }) =>
-      (await window.cloudWorkspace.storedOutbox(server, roomId))?.pending.length === 0,
-    { server, roomId },
-  );
+  for (const name of ["online-1", "offline-1", "offline-2"])
+    assert.equal(remote.document.pages[0].nodes.filter((n) => n.name === name).length, 1);
+  assert.equal(remote.document.pages[0].nodes.find((n) => n.id === textId).text, "Hello offline");
 
   // 5. A second device signed in as Ana opens the room from the Files home and sees the edits.
   const second = await launch("b");
@@ -252,7 +235,7 @@ try {
   );
 
   // 6. Disconnect keeps the local copy, marks it detached and forgets the stored outbox.
-  await page.locator("#cloud-toggle").click();
+  await openSharedDesign(page);
   await page.locator("#cloud-leave").click();
   assert.equal(await page.evaluate(() => window.cloudWorkspace.isConnected()), false);
   await page.waitForFunction(
@@ -263,10 +246,19 @@ try {
   assert.equal(detached.detached, true);
   assert.equal(await page.evaluate(() => window.fileLibrary.currentId), fileId);
   console.log(
-    "PASS cloud files: create room marks the file, restart reconnects without copies, Files home lists workspace and shared rooms and joins once, offline edits across an app restart reach the room exactly once with the same client id, second device sees them, disconnect detaches and clears the outbox",
+    "PASS cloud files: create room marks the file, restart reconnects without copies, Files home lists workspace and shared rooms and joins once, in-memory offline edits block switching and reach the database exactly once, second device sees them, disconnect detaches and clears the outbox",
   );
 } finally {
-  await Promise.all([...apps].map((app) => app.close().catch(() => {})));
+  await Promise.all(
+    [...apps].map(async (app) => {
+      await app
+        .evaluate(({ BrowserWindow }) => {
+          for (const win of BrowserWindow.getAllWindows()) win.destroy();
+        })
+        .catch(() => {});
+      await app.close().catch(() => {});
+    }),
+  );
   await mf.dispose().catch(() => {});
   await fs.rm(dir, { recursive: true, force: true });
 }

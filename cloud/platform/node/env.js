@@ -87,9 +87,11 @@ export function bindingsFromEnvironment(vars, { webRoot }) {
     ROOM_CREATION: { type: "rate-limit", simple: { limit: 10, period: 60 } },
     AUTH_LIMIT: { type: "rate-limit", simple: { limit: 10, period: 60 } },
     MCP_LIMIT: { type: "rate-limit", simple: { limit: 240, period: 60 } },
+    AI_LIMIT: { type: "rate-limit", simple: { limit: 20, period: 60 } },
     ROOMS: { type: "durable-object", exportName: "DesignRoom" },
     ACCOUNTS: { type: "durable-object", exportName: "AccountDirectory" },
     APPS: { type: "durable-object", exportName: "PublishedApp" },
+    AI_RUNS: { type: "durable-object", exportName: "AiRun" },
     DB: { type: "d1", name: "verynize" },
     ASSETS: { type: "assets", directory: vars.WEB_ROOT || webRoot },
   };
@@ -102,6 +104,18 @@ export function bindingsFromEnvironment(vars, { webRoot }) {
     "EMAIL_FROM",
     "EMAIL_WEBHOOK_URL",
     "EMAIL_WEBHOOK_TOKEN",
+    // Web sign-in (cloud/web-access.js): web (default), all or off.
+    "ROOM_ACCOUNT_REQUIRED",
+    // Model API runtime (cloud/ai.js): each account brings its own OpenRouter key; the server key
+    // is a fallback only with VERYNIZE_AI_SERVER_KEY=1. VERYNIZE_AI=off turns the runtime off.
+    "VERYNIZE_AI",
+    "VERYNIZE_AI_SERVER_KEY",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+    "VERYNIZE_AI_MODELS",
+    "VERYNIZE_AI_MAX_TURNS",
+    "VERYNIZE_AI_MAX_TOOL_CALLS",
+    "VERYNIZE_AI_APPROVAL_TIMEOUT_MS",
   ])
     if (vars[name]) bindings[name] = text(vars[name]);
   const blobs = (vars.BLOB_STORE || "file").toLowerCase();

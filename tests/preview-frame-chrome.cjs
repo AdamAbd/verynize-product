@@ -4,6 +4,8 @@
 // the previous run), stop confirmation, the embedded terminal, Fix with agent, and the Publish popover.
 // PREVIEW_FRAME_SHOTS=<dir> also writes 1440×870 @2x screenshots of each state (visual parity proof).
 const {_electron} = require('@playwright/test');
+const { moveOffCursor } = require("./helpers/off-cursor.cjs");
+const { mod } = require("./helpers/keys.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -33,7 +35,7 @@ const freePort = () => new Promise(resolve => { const s = net.createServer(); s.
   const app = await _electron.launch({env, args});
   const busy = http.createServer((_q, r) => r.end('Existing app'));
   try {
-    const page = await app.firstWindow();
+    const page = await app.firstWindow(); await moveOffCursor(app);
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.waitForFunction(() => !!window.livePreview?.frameInternals && !!window.livePreview.openPublish);
     if (SHOTS) {
@@ -100,7 +102,7 @@ const freePort = () => new Promise(resolve => { const s = net.createServer(); s.
     await page.waitForFunction(() => document.getElementById('live-url').value === '/');
     await page.waitForFunction(id => !document.querySelector(`[data-id="${id}"] [data-pf=forward]`).disabled, id);
     await page.evaluate(id => { window.design.setSelection([]); window.design.setSelection([id]); document.activeElement?.blur?.(); }, id);
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+]' : 'Control+]');
+    await page.keyboard.press(mod(']'));
     await page.waitForFunction(() => document.getElementById('live-url').value === '/about/');
     // Typed path + Enter navigates.
     await page.locator('#live-url').click();

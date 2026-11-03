@@ -4,7 +4,8 @@
 // (invite, pending invitations, role change, default room access, invitations for you, leave).
 import { Miniflare } from "miniflare";
 import { _electron as electron } from "@playwright/test";
-import { waitForUiReady } from './helpers/ui-ready.cjs';
+import { openSharedDesign } from "./helpers/shared-design.cjs";
+import { waitForUiReady } from "./helpers/ui-ready.cjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -84,20 +85,21 @@ try {
   assert.ok(studio);
   assert.equal(await page.evaluate(() => window.cloudAccount.activeOrganization()), studio.id);
 
-  // Sharing a design creates the room in the active workspace.
-  await page.evaluate(() => window.fileLibrary.showEditor());
-  await page.locator("#cloud-toggle").click();
-  await page.locator("#cloud-create").click();
-  await page.waitForFunction(() =>
-    document.getElementById("cloud-invite").value.includes("token="),
+  // New designs are stored immediately in the active workspace.
+  await page.locator("#library-new-file").click();
+  await page.locator("#text-prompt-input").fill("Studio design");
+  await page.locator("#text-prompt-ok").click();
+  await page.waitForFunction(() => window.design.getDocument().name === "Studio design");
+  await openSharedDesign(page);
+  await page.waitForFunction(
+    () =>
+      window.cloudWorkspace.isConnected() &&
+      document.getElementById("cloud-invite").value.includes("room="),
   );
   const roomId = new URLSearchParams(
     new URL(await page.locator("#cloud-invite").inputValue()).hash.slice(1),
   ).get("room");
-  assert.equal(
-    (await api(`/api/rooms/${roomId}/access`, session)).organization.id,
-    studio.id,
-  );
+  assert.equal((await api(`/api/rooms/${roomId}/access`, session)).organization.id, studio.id);
   await page.evaluate(() => (document.getElementById("cloud-access-section").open = true));
   await page.waitForFunction(
     () => document.getElementById("cloud-workspace-name").textContent === "Studio",
@@ -112,28 +114,37 @@ try {
   await page.waitForSelector('[data-org-member="ana@example.test"]');
   await page.locator("#members-invite").click();
   await page.locator("#members-invite-email").fill("budi@example.test");
+  // Viewer is the default role, as in Wonder's Share.
+  assert.equal(await page.locator("#members-invite-role").inputValue(), "viewer");
   await page.locator("#members-invite-send").click();
-  await page.waitForSelector('[data-cancel-invitation="budi@example.test"]');
+  await page.waitForSelector('[data-pending-invitation="budi@example.test"]');
   const [invitation] = await api("/api/auth/organization/list-user-invitations", budi);
+  assert.equal(invitation.role, "viewer");
   await api("/api/auth/organization/accept-invitation", budi, { invitationId: invitation.id });
-  // Budi now reaches the room through the organization, as an editor by default.
-  assert.equal((await api(`/api/rooms/${roomId}`, budi)).role, "editor");
+  // Budi now reaches the room through the organization with the invited role.
+  assert.equal((await api(`/api/rooms/${roomId}`, budi)).role, "viewer");
 
-  // Default access for members, then a role change, both from the page.
+  // A per-member role from the page; the workspace default does not override it.
   await page.locator('[data-section="account"]').click();
   await page.locator('[data-section="members"]').click();
   await page.waitForSelector('[data-org-member="budi@example.test"]');
-  await page.locator("#members-room-role").selectOption("viewer");
-  for (let i = 0; i < 40 && (await api(`/api/rooms/${roomId}`, budi)).role !== "viewer"; i++)
+  await page.locator('[data-org-member-role="budi@example.test"]').selectOption("editor");
+  for (let i = 0; i < 40 && (await api(`/api/rooms/${roomId}`, budi)).role !== "editor"; i++)
     await page.waitForTimeout(100);
-  assert.equal((await api(`/api/rooms/${roomId}`, budi)).role, "viewer");
+  assert.equal((await api(`/api/rooms/${roomId}`, budi)).role, "editor");
+  await page.locator("#members-room-role").selectOption("viewer");
+  await page.waitForTimeout(300);
+  assert.equal((await api(`/api/rooms/${roomId}`, budi)).role, "editor");
   await page.locator('[data-org-member-role="budi@example.test"]').selectOption("admin");
   for (let i = 0; i < 40 && (await api(`/api/rooms/${roomId}`, budi)).role !== "owner"; i++)
     await page.waitForTimeout(100);
   assert.equal((await api(`/api/rooms/${roomId}`, budi)).role, "owner");
 
   // Invitations for you: Budi's team invites Ana, who accepts from Settings › Members.
-  const lab = await api("/api/auth/organization/create", budi, { name: "Budi Lab", slug: "budi-lab" });
+  const lab = await api("/api/auth/organization/create", budi, {
+    name: "Budi Lab",
+    slug: "budi-lab",
+  });
   await api("/api/auth/organization/invite-member", budi, {
     email: "ana@example.test",
     role: "member",
@@ -154,7 +165,7 @@ try {
   const personal = (await api("/api/me", session)).personalOrganizationId;
   await page.locator("#settings-back").click();
   await page.evaluate(() => window.fileLibrary.showEditor());
-  await page.locator("#cloud-toggle").click();
+  await openSharedDesign(page);
   await page.evaluate(() => (document.getElementById("cloud-access-section").open = true));
   await page.waitForSelector("#cloud-move-row:not([hidden])");
   await page.locator("#cloud-move-organization").selectOption(personal);

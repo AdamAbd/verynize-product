@@ -187,11 +187,41 @@ try {
   await page.locator("#members-invite").click();
   await page.locator("#members-invite-email").fill("budi@example.test");
   await page.locator("#members-invite-send").click();
-  await page.waitForSelector('[data-cancel-invitation="budi@example.test"]');
+  await page.waitForSelector('[data-pending-invitation="budi@example.test"]');
   assert.equal(await pendingCount(), 1);
-  // Cancel: it disappears.
+  // Row menu: Resend invitation sends it again; Cancel invitation asks first, then it disappears.
+  const invitationMenu = '[data-row-menu="Actions for the invitation to budi@example.test"]';
+  // A row menu opens on click; a click while the list refetches can be lost, so retry.
+  const openMenu = async (trigger) => {
+    // The success toast can precede the previous menu's exit animation.
+    // Do not mistake that closing menu for the newly requested one.
+    if ((await page.locator(trigger).getAttribute("aria-expanded")) !== "true")
+      await page.locator("[role=menu]").waitFor({ state: "hidden" });
+    for (let i = 0; i < 10; i++) {
+      if ((await page.locator(trigger).getAttribute("aria-expanded")) !== "true")
+        await page.locator(trigger).click();
+      try {
+        await page.waitForSelector("[role=menu]", { timeout: 500 });
+        return;
+      } catch {}
+    }
+    throw Error(`menu ${trigger} did not open`);
+  };
+  await openMenu(invitationMenu);
+  await page.locator('[data-resend-invitation="budi@example.test"]').click();
+  await page.waitForSelector("text=Invitation resent to budi@example.test");
+  await openMenu(invitationMenu);
   await page.locator('[data-cancel-invitation="budi@example.test"]').click();
-  await page.waitForSelector('[data-cancel-invitation="budi@example.test"]', {
+  await page.waitForSelector(
+    "text=Cancel the invitation to budi@example.test? Their invite link will stop working immediately.",
+  );
+  await page.getByRole("button", { name: "Keep invitation" }).click();
+  await page.waitForSelector("[data-members-confirm]", { state: "detached" });
+  assert.equal(await pendingCount(), 1);
+  await openMenu(invitationMenu);
+  await page.locator('[data-cancel-invitation="budi@example.test"]').click();
+  await page.locator("#members-cancel-invitation-confirm").click();
+  await page.waitForSelector('[data-pending-invitation="budi@example.test"]', {
     state: "detached",
   });
   assert.equal(await pendingCount(), 0);
@@ -216,7 +246,12 @@ try {
   ).members.find((member) => member.user.email === "budi@example.test");
   assert.equal(budiMember.role, "admin");
   // Remove: the row disappears.
+  await openMenu('[data-row-menu="Actions for budi@example.test"]');
   await page.locator('[data-org-remove-member="budi@example.test"]').click();
+  await page.waitForSelector(
+    "text=Remove Budi from this organization? They’ll lose access to its files immediately.",
+  );
+  await page.locator("#members-remove-confirm").click();
   await page.waitForSelector('[data-org-member="budi@example.test"]', { state: "detached" });
   const after = await api(
     `/api/auth/organization/get-full-organization?organizationId=${studio.id}`,

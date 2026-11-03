@@ -50,10 +50,11 @@ const ordered = (servers: McpServer[]) => [...servers.filter((s) => s.builtIn), 
 
 function attach() {
   if (attached) return;
-  const on = desktopApi()?.onAgentEvent;
-  if (!on) return;
+  // Run events come from the platform's AgentService; only the desktop runtime streams `mcp-status`.
+  const service = platform.agents.service();
+  if (!service) return;
   attached = true;
-  on((event) => {
+  service.subscribe((event) => {
     if (event?.type !== "mcp-status" || typeof event.chatId !== "string") return;
     const servers = cleanServers(event.servers);
     const previous = mcp.get(event.chatId);
