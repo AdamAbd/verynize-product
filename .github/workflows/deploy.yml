@@ -10,7 +10,7 @@ jobs:
   deploy:
     if: github.repository == 'AdamAbd/verynize-product' && github.ref == 'refs/heads/main' && vars.ENABLE_PRODUCTION_DEPLOY == 'true'
     environment: production
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
