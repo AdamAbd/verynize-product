@@ -11,7 +11,7 @@ export interface StorageProblem {
   limit?: number;
   message: string;
   /** What the limit stopped (storage-limit-error events). */
-  action?: "sync" | "save" | "share";
+  action?: "sync" | "save" | "share" | "add image";
 }
 export interface StorageReport {
   total: number;

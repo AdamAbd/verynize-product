@@ -193,11 +193,221 @@ const os = require("node:os");
     assert.match(await footer(), /Drop PNG, JPEG, WebP, GIF or SVG images/);
     const tiff = await drop([{ name: "scan.tiff", type: "image/tiff", text: "II*" }], at.x, at.y);
     assert.deepEqual(tiff.ids, []);
-    assert.match(await footer(), /Skipped scan\.tiff \(unsupported format\)/);
+    assert.match(await footer(), /Skipped scan\.tiff: Choose a PNG/);
     const fig = await drop([{ name: "Broken.fig", type: "", text: "not a fig" }], at.x, at.y);
     assert.equal(fig.ids, null, "image drop ignores .fig files");
     assert.equal(fig.dropPrevented, true, "web/figma-panel.js still takes the .fig drop");
     assert.equal((await images()).length, 3);
+
+    // Validate actual decoding, MIME restrictions and input size before creating layers.
+    const invalid = await page.evaluate(async () => {
+      const results = [];
+      for (const file of [
+        new File(["hello"], "fake.png", { type: "image/png" }),
+        new File(["hello"], "fake.png", { type: "text/plain" }),
+        new File([new Uint8Array(8_000_001)], "large.png", { type: "image/png" }),
+        new File([], "empty.png", { type: "image/png" }),
+      ]) {
+        try {
+          await window.imageUpload.prepare(file);
+          results.push("accepted");
+        } catch (error) {
+          results.push(error.message);
+        }
+      }
+      return results;
+    });
+    assert.match(invalid[0], /decode/);
+    assert.match(invalid[1], /Choose a PNG/);
+    assert.match(invalid[2], /8 MB/);
+    assert.match(invalid[3], /non-empty/);
+    const compressed = await page.evaluate(async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 3000;
+      canvas.height = 1500;
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      const result = await window.imageUpload.prepare(
+        new File([blob], "large.png", { type: "image/png" }),
+        { purpose: "chat" },
+      );
+      const image = new Image();
+      image.src = result.src;
+      await image.decode();
+      return { width: image.naturalWidth, height: image.naturalHeight, bytes: result.bytes };
+    });
+    assert.equal(compressed.width, 2048);
+    assert.equal(compressed.height, 1024);
+    assert.ok(compressed.bytes <= 2_000_000);
+
+    const policy = await page.evaluate(async () => {
+      const upload = window.imageUpload;
+      const c = document.createElement("canvas");
+      c.width = 64;
+      c.height = 32;
+      const png = await new Promise((r) => c.toBlob(r, "image/png"));
+      const original = await new Promise((r) => {
+        const reader = new FileReader();
+        reader.onload = () => r(reader.result);
+        reader.readAsDataURL(png);
+      });
+      const first = await upload.prepare(png),
+        second = await upload.prepare(png);
+      const errors = [];
+      const header = new Uint8Array(await png.arrayBuffer());
+      new DataView(header.buffer).setUint32(16, 100000);
+      new DataView(header.buffer).setUint32(20, 100000);
+      for (const file of [
+        new Blob([png], { type: "image/jpeg" }),
+        new Blob([header], { type: "image/png" }),
+      ]) {
+        try {
+          await upload.prepare(file);
+          errors.push("accepted");
+        } catch (e) {
+          errors.push(e.message);
+        }
+      }
+      const svg = await upload.prepare(
+        new Blob(
+          [
+            '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10" onload="alert(1)"><script>alert(1)</script><style>@import "https://example.com";</style><rect width="20" height="10" fill="url(https://example.com/a)"/></svg>',
+          ],
+          { type: "image/svg+xml" },
+        ),
+      );
+      const svgText = await (await fetch(svg.src)).text();
+      const gif = await upload.prepare(
+        new Blob(
+          [
+            Uint8Array.from(atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"), (c) =>
+              c.charCodeAt(0),
+            ),
+          ],
+          { type: "image/gif" },
+        ),
+      );
+      c.width = 5000;
+      c.height = 100;
+      const large = await new Promise((r) => c.toBlob(r, "image/png"));
+      const scaled = await upload.prepare(large);
+      let refusal = "";
+      try {
+        upload.preflight({
+          pages: [{ nodes: [{ src: "x".repeat(window.storageLimits.PAGE_LIMIT_BYTES) }] }],
+        });
+      } catch (e) {
+        refusal = e.message;
+      }
+      const before = JSON.stringify(window.design.getDocument());
+      let insertionRefused = false;
+      try {
+        window.design.addNode("image", {
+          src: "data:image/png;base64," + "x".repeat(21 * 1024 * 1024),
+        });
+      } catch (e) {
+        insertionRefused = /storage limit/.test(e.message);
+      }
+      const unchanged = before === JSON.stringify(window.design.getDocument());
+      const controller = new AbortController();
+      controller.abort();
+      let cancelled = false;
+      try {
+        await upload.prepare(png, { signal: controller.signal });
+      } catch (e) {
+        cancelled = e.name === "AbortError";
+      }
+      return {
+        identical: first.src === original,
+        dedupe: first.src === second.src && first.hash === second.hash,
+        errors,
+        svg: svg.src,
+        svgText,
+        gif: gif.mime,
+        scaled: [
+          scaled.originalWidth,
+          scaled.originalHeight,
+          scaled.pixelWidth,
+          scaled.pixelHeight,
+        ],
+        refusal,
+        insertionRefused,
+        unchanged,
+        cancelled,
+      };
+    });
+    assert.equal(policy.identical, true);
+    assert.equal(policy.dedupe, true);
+    assert.match(policy.errors[0], /mismatch/);
+    assert.match(policy.errors[1], /64 megapixels/);
+    assert.match(policy.svg, /^data:image\/svg\+xml/);
+    assert.doesNotMatch(policy.svgText, /script|onload|url\(|@import/);
+    assert.equal(policy.gif, "image/gif");
+    assert.deepEqual(policy.scaled, [5000, 100, 4096, 82]);
+    assert.match(policy.refusal, /storage limit/);
+    assert.equal(policy.cancelled, true);
+    assert.equal(policy.insertionRefused, true);
+    assert.equal(policy.unchanged, true);
+
+    // A refusal opens the size dialog as "Image not added"; near-limit warnings never block.
+    const dialog = page.locator("#storage-limit-dialog");
+    await dialog.waitFor({ state: "visible" });
+    assert.match(await dialog.innerText(), /Image not added[\s\S]*canvas was not changed/);
+    assert.doesNotMatch(await dialog.innerText(), /too large to/);
+    await page.getByRole("button", { name: "Close size error" }).click();
+    await dialog.waitFor({ state: "hidden" });
+
+    // Shared limits count an inline image as the asset it becomes: a page holding images whose raw
+    // data URLs exceed the 2 MB page limit still accepts another one.
+    const roomy = await page.evaluate(() => {
+      const noise = () => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 900;
+        const ctx = c.getContext("2d"),
+          data = ctx.createImageData(900, 900);
+        for (let i = 0; i < data.data.length; i++) data.data[i] = (Math.random() * 256) | 0;
+        ctx.putImageData(data, 0, 0);
+        return c.toDataURL("image/png");
+      };
+      const first = noise(),
+        second = noise();
+      const count = () => window.design.getDocument().pages.flatMap((p) => p.nodes).length;
+      const before = count(),
+        snapshot = window.design.getDocument();
+      window.design.addNode("image", { src: first, w: 90, h: 90 });
+      window.design.addNode("image", { src: second, w: 90, h: 90 });
+      const result = {
+        raw: first.length + second.length,
+        added: count() - before,
+        dialog: !!document.querySelector("#storage-limit-dialog"),
+      };
+      window.design.setDocument(snapshot);
+      return result;
+    });
+    assert.ok(roomy.raw > 2 * 1024 * 1024, "the images exceed the page limit as raw data URLs");
+    assert.equal(roomy.added, 2);
+    assert.equal(roomy.dialog, false);
+
+    const oriented = await page.evaluate(async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 80;
+      canvas.height = 40;
+      const jpeg = new Uint8Array(
+        await (await new Promise((r) => canvas.toBlob(r, "image/jpeg"))).arrayBuffer(),
+      );
+      const exif = new Uint8Array([
+        255, 225, 0, 34, 69, 120, 105, 102, 0, 0, 73, 73, 42, 0, 8, 0, 0, 0, 1, 0, 18, 1, 3, 0, 1,
+        0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0,
+      ]);
+      const result = await window.imageUpload.prepare(
+        new Blob([jpeg.slice(0, 2), exif, jpeg.slice(2)], { type: "image/jpeg" }),
+        { purpose: "chat" },
+      );
+      const image = new Image();
+      image.src = result.src;
+      await image.decode();
+      return [result.originalWidth, result.originalHeight, image.naturalWidth, image.naturalHeight];
+    });
+    assert.deepEqual(oriented, [40, 80, 40, 80], "EXIF orientation survives chat encoding");
 
     // 4. Persisted with the document.
     await page.reload();
@@ -237,6 +447,23 @@ const os = require("node:os");
     const pasted = (await images()).find((n) => ![photo.id, wide.id, small.id].includes(n.id));
     assert.match(pasted.src, /^data:image\/png;base64,/);
     assert.deepEqual(await page.evaluate(() => window.design.getSelection()), [pasted.id]);
+
+    // The image picker uses the same compression path and resets for reselecting a file.
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAK0lEQVR4nO3NMQ0AAAgDsHnCE/4dgAw4mvRvpvpExGKxWCwWi8VisVj8N15JsXjqNugkJgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    await page
+      .locator("#asset-file")
+      .setInputFiles({ name: "picker.png", mimeType: "image/png", buffer: png });
+    await page.waitForFunction(() =>
+      window.design.getDocument().pages.some((p) => p.nodes.some((n) => n.name === "picker.png")),
+    );
+    assert.match(
+      (await images()).find((n) => n.name === "picker.png").src,
+      /^data:image\/png;base64,/,
+    );
+    assert.equal(await page.locator("#asset-file").inputValue(), "");
 
     console.log("canvas image drop: ok");
   } finally {
