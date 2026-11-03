@@ -241,8 +241,8 @@ export function registryCommands(): RegistryCommand[] {
 }
 
 /* ---------- Open state for the drawer and the palette (shared by the help menu, ⌘K and the palette) ---------- */
-type Panel = "shortcuts" | "palette";
-const state: Record<Panel, boolean> = { shortcuts: false, palette: false };
+type Panel = "shortcuts" | "palette" | "files";
+const state: Record<Panel, boolean> = { shortcuts: false, palette: false, files: false };
 const listeners = new Set<() => void>();
 export function setPanelOpen(panel: Panel, open: boolean) {
   if (state[panel] === open) return;
