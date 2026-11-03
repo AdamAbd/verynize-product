@@ -10,11 +10,13 @@ async function moveOffCursor(app) {
     const cursor = screen.getCursorScreenPoint();
     for (const win of BrowserWindow.getAllWindows()) {
       const b = win.getBounds();
-      const inside = cursor.x >= b.x && cursor.x < b.x + b.width && cursor.y >= b.y && cursor.y < b.y + b.height;
+      const inside =
+        cursor.x >= b.x && cursor.x < b.x + b.width && cursor.y >= b.y && cursor.y < b.y + b.height;
       if (!inside) continue;
       // Go to whichever side of the cursor leaves more of the window on its display.
       const area = screen.getDisplayNearestPoint(cursor).workArea;
-      const right = cursor.x + 1, left = cursor.x - b.width - 1;
+      const right = cursor.x + 1,
+        left = cursor.x - b.width - 1;
       const visible = (x) => Math.min(x + b.width, area.x + area.width) - Math.max(x, area.x);
       win.setPosition(visible(right) >= visible(left) ? right : left, b.y);
     }

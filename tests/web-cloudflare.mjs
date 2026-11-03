@@ -63,12 +63,6 @@ const DOCUMENT = {
 };
 let browser;
 try {
-  // Local D1 for the dev server, the same way docs/deployment.md describes it.
-  execFileSync(process.execPath, ["scripts/db-migrate.mjs", "--local", "--persist-to", state], {
-    cwd: root,
-    stdio: "pipe",
-  });
-  await seedAccount();
   if (!(await fs.stat(path.join(root, "web/dist/ui.js")).catch(() => null)))
     execFileSync(process.execPath, ["scripts/build-ui.cjs"], { cwd: root, stdio: "pipe" });
   browser = await launchBrowser();
@@ -81,17 +75,29 @@ try {
 }
 
 async function check(mode) {
+  // Each mode is a fresh installation. Sharing account state also imports the previous
+  // mode's room library (and obsolete server URLs), which triggers extra room creation
+  // during sync and exhausts the production rate limit before link checks can run.
+  const modeState = path.join(state, mode);
+  execFileSync(process.execPath, ["scripts/db-migrate.mjs", "--local", "--persist-to", modeState], {
+    cwd: root,
+    stdio: "pipe",
+  });
+  await seedAccount(modeState);
   const port = await freePort();
   const origin = `http://localhost:${port}`;
   const server = await startProcess(...vp(mode, "--port", String(port), "--strictPort"), {
     cwd: root,
-    env: { ...process.env, ...SECRETS, VERYNIZE_CF_STATE: state },
+    env: { ...process.env, ...SECRETS, VERYNIZE_CF_STATE: modeState },
     ready: origin + "/",
   });
   try {
     const context = await checkApp(origin, mode);
     await checkWebRouter(browser, origin, context);
     await context.close();
+  } catch (error) {
+    console.error(`Cloudflare ${mode} server output:\n${server.output()}`);
+    throw error;
   } finally {
     await server.stop();
   }
@@ -101,7 +107,7 @@ async function check(mode) {
 }
 
 /** A verified email + password account in the local D1 (what sign-up + the emailed link create). */
-async function seedAccount() {
+async function seedAccount(state) {
   const { default: config } = await import("../cloudflare.config.ts");
   // The same persisted D1 the migrations above went to and the dev server opens.
   const mf = new Miniflare({
@@ -370,6 +376,8 @@ async function checkApp(origin, mode) {
       body: JSON.stringify({ document: { nodes: [] } }),
     });
     const room = await response.json();
+    if (response.status !== 201 || !room.id || !room.token)
+      throw new Error(`Room creation failed (${response.status}): ${JSON.stringify(room)}`);
     const url = new URL(
       `/api/rooms/${room.id}/socket?token=${room.token}&session=${encodeURIComponent(session)}`,
       location.href,
@@ -439,18 +447,18 @@ async function checkLinks(engine, origin, { session, me, viewport, mode, label }
       headers: { ...json, "x-verynize-session": session, ...init.headers },
     });
   const doc = (name) => ({ ...DOCUMENT, name });
-  const owned = await (
-    await authed("/api/rooms", {
-      method: "POST",
-      body: JSON.stringify({ document: doc(`Linked ${label}`) }),
-    })
-  ).json();
-  const { token } = await (
-    await authed(`/api/rooms/${owned.id}/tokens`, {
-      method: "POST",
-      body: JSON.stringify({ role: "editor", label: "Editor invite" }),
-    })
-  ).json();
+  const ownedResponse = await authed("/api/rooms", {
+    method: "POST",
+    body: JSON.stringify({ document: doc(`Linked ${label}`) }),
+  });
+  assert.equal(ownedResponse.status, 201, await ownedResponse.clone().text());
+  const owned = await ownedResponse.json();
+  const tokenResponse = await authed(`/api/rooms/${owned.id}/tokens`, {
+    method: "POST",
+    body: JSON.stringify({ role: "editor", label: "Editor invite" }),
+  });
+  assert.equal(tokenResponse.status, 201, await tokenResponse.clone().text());
+  const { token } = await tokenResponse.json();
   // A room this account is not a member of (an anonymous script's room).
   const stranger = await (
     await fetch(origin + "/api/rooms", {

@@ -20,7 +20,8 @@ const path = require("node:path");
     timeout: 20000,
   });
   try {
-    const page = await app.firstWindow({ timeout: 20000 }); await moveOffCursor(app);
+    const page = await app.firstWindow({ timeout: 20000 });
+    await moveOffCursor(app);
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.setViewportSize({ width: 1440, height: 870 });

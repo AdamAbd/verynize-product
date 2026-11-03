@@ -7,7 +7,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createChatGPTProvider, connectElectronProvider } = require('./helpers/chatgpt-provider.cjs');
+const {
+  createChatGPTProvider,
+  connectElectronProvider,
+} = require("./helpers/chatgpt-provider.cjs");
 const { execFileSync } = require("node:child_process");
 
 (async () => {
@@ -90,7 +93,9 @@ const { execFileSync } = require("node:child_process");
     await page.screenshot({ path: path.join(shots, "codex-sign-in-window.png") });
 
     // 2. Sign in through real SIWC HTTP/PKCE/JWKS against the local provider.
-    await app.evaluate((_electron, prefix) => { process.env.PATH = prefix + process.env.PATH; }, bin + path.delimiter);
+    await app.evaluate((_electron, prefix) => {
+      process.env.PATH = prefix + process.env.PATH;
+    }, bin + path.delimiter);
     await signIn.click();
     await page
       .locator(".chat-auth-retry")
@@ -106,11 +111,21 @@ const { execFileSync } = require("node:child_process");
     await page
       .locator(".chat-auth")
       .screenshot({ path: path.join(shots, "codex-sign-in-card-signed-in.png") });
-    const calls = (await fs.readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(JSON.parse);
-    assert.equal(calls.some(c => c.args?.join(" ") === "login"), false, "SIWC never invokes codex login");
-    const credential = JSON.parse(await fs.readFile(path.join(root, 'profile/chatgpt/account.json'), 'utf8'));
+    const calls = (await fs.readFile(log, "utf8").catch(() => ""))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map(JSON.parse);
+    assert.equal(
+      calls.some((c) => c.args?.join(" ") === "login"),
+      false,
+      "SIWC never invokes codex login",
+    );
+    const credential = JSON.parse(
+      await fs.readFile(path.join(root, "profile/chatgpt/account.json"), "utf8"),
+    );
     assert.match(credential.client_id, /^oaiapp_local_/);
-    assert.equal(provider.calls.filter(c => c.path.endsWith('/oauth/token')).length, 1);
+    assert.equal(provider.calls.filter((c) => c.path.endsWith("/oauth/token")).length, 1);
     await page.locator(".chat-auth-retry").last().click();
     await page.waitForFunction(
       () =>
@@ -135,7 +150,11 @@ const { execFileSync } = require("node:child_process");
       await page.locator(".chat-message.assistant").last().textContent(),
       /Reply to .*jazz night/,
     );
-    const after = (await fs.readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(JSON.parse);
+    const after = (await fs.readFile(log, "utf8").catch(() => ""))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map(JSON.parse);
     // Auto-title helper turns (agent-workdirs/titles) are not chat turns (same filter as tests/agent-chat.cjs).
     assert.equal(
       after.filter(

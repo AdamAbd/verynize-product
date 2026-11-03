@@ -135,7 +135,11 @@ export function AuthCard({ part, index, busy }: { part: ChatPart; index: number;
                     Retry
                   </ChatActionButton>
                 )}
-                <ChatActionButton hook={hook.authSignIn} onClick={signIn} data-oai-siwc-button={agent === "codex" ? "" : undefined}>
+                <ChatActionButton
+                  hook={hook.authSignIn}
+                  onClick={signIn}
+                  data-oai-siwc-button={agent === "codex" ? "" : undefined}
+                >
                   <LogInIcon />
                   {agent === "codex" ? "Continue with ChatGPT" : `Sign in to ${name}`}
                 </ChatActionButton>

@@ -20,16 +20,16 @@ doop lebih menonjol sebagai ruang kolaborasi desain manusia dan AI. Verynize pun
 
 ## Fitur doop yang terverifikasi
 
-| Fitur | Status | Bukti dan catatan |
-|---|---|---|
-| Frame menyimpan HTML/CSS | Benar | `shared/types.ts:14` (`html: string`). Agen mengedit lewat `set_frame_html`, `append_frame_html` dan `edit_frame_html`. |
-| Peran agen dalam pipeline berurutan | Benar | `shared/agents.ts:28-95`. Peran: `doop` (designer), `ux`, `copy`, `brand`, `a11y`, `polish`. `brand` dan `a11y` berperan sebagai reviewer. Server menjalankan tahap secara berurutan (`server/actions.ts:163-177`, `1252-1269`). Pipeline hanya berlaku untuk kartu board. |
-| Komentar memicu agen | Sebagian | @mention di komentar langsung memanggil agen bawaan (`actions.ts:811-848`). Komentar tidak menjadi kartu tugas. Ringkasan hasil agen bawaan masuk ke activity feed (`server/resident.ts:819`), bukan ke thread. Hanya agen MCP eksternal yang bisa membalas di thread (`reply_to_comment`). |
-| Design memory yang dikurasi | Benar | `server/distill.ts:6-15`. Usulan aturan menunggu keputusan manusia untuk diterima ke style guide atau ditolak. Aturan yang ditolak tidak diusulkan lagi. Fitur ini hanya aktif jika `ANTHROPIC_API_KEY` diset. |
-| Prototyping antarframe | Benar | `shared/prototype.ts`. Interaksi disimpan sebagai atribut `data-doop-*`. Trigger: click, hover, press, delay, key. Aksi: navigate, back, overlay, scroll-to, url. Tersedia 8 transisi. |
-| Approval `ready_for_dev` | Benar | Status otomatis berubah menjadi `needs_review` ketika HTML, lebar atau tinggi frame berubah (`server/store.ts:680-687`). Memindahkan, mengganti nama atau mengunci frame tidak membatalkan approval. Approval bisa memicu automation. |
-| Figma, Canva dan PSD hanya di Doop Cloud | Benar | README: "Figma, Canva and Photoshop (PSD) import and export are currently available in Doop Cloud and not part of the open source." |
-| Lisensi | AGPL-3.0 | Repo juga punya `CLA.md`. Verynize berlisensi MIT. |
+| Fitur                                    | Status   | Bukti dan catatan                                                                                                                                                                                                                                                                           |
+| ---------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frame menyimpan HTML/CSS                 | Benar    | `shared/types.ts:14` (`html: string`). Agen mengedit lewat `set_frame_html`, `append_frame_html` dan `edit_frame_html`.                                                                                                                                                                     |
+| Peran agen dalam pipeline berurutan      | Benar    | `shared/agents.ts:28-95`. Peran: `doop` (designer), `ux`, `copy`, `brand`, `a11y`, `polish`. `brand` dan `a11y` berperan sebagai reviewer. Server menjalankan tahap secara berurutan (`server/actions.ts:163-177`, `1252-1269`). Pipeline hanya berlaku untuk kartu board.                  |
+| Komentar memicu agen                     | Sebagian | @mention di komentar langsung memanggil agen bawaan (`actions.ts:811-848`). Komentar tidak menjadi kartu tugas. Ringkasan hasil agen bawaan masuk ke activity feed (`server/resident.ts:819`), bukan ke thread. Hanya agen MCP eksternal yang bisa membalas di thread (`reply_to_comment`). |
+| Design memory yang dikurasi              | Benar    | `server/distill.ts:6-15`. Usulan aturan menunggu keputusan manusia untuk diterima ke style guide atau ditolak. Aturan yang ditolak tidak diusulkan lagi. Fitur ini hanya aktif jika `ANTHROPIC_API_KEY` diset.                                                                              |
+| Prototyping antarframe                   | Benar    | `shared/prototype.ts`. Interaksi disimpan sebagai atribut `data-doop-*`. Trigger: click, hover, press, delay, key. Aksi: navigate, back, overlay, scroll-to, url. Tersedia 8 transisi.                                                                                                      |
+| Approval `ready_for_dev`                 | Benar    | Status otomatis berubah menjadi `needs_review` ketika HTML, lebar atau tinggi frame berubah (`server/store.ts:680-687`). Memindahkan, mengganti nama atau mengunci frame tidak membatalkan approval. Approval bisa memicu automation.                                                       |
+| Figma, Canva dan PSD hanya di Doop Cloud | Benar    | README: "Figma, Canva and Photoshop (PSD) import and export are currently available in Doop Cloud and not part of the open source."                                                                                                                                                         |
+| Lisensi                                  | AGPL-3.0 | Repo juga punya `CLA.md`. Verynize berlisensi MIT.                                                                                                                                                                                                                                          |
 
 Fitur doop lain yang tidak masuk riset awal:
 
@@ -85,15 +85,15 @@ Kandidat tambahan dari doop:
 
 `README.md` tertinggal dari `docs/implementation-status.md`:
 
-| README menulis | implementation-status.md mencatat |
-|---|---|
-| `.fig` belum diimplementasi (`:42`) | Import `.fig` dan paste dari clipboard sudah ada (`:71`) |
-| Tidak ada embedding font kustom, capture halaman remote, recovery interaksi, atau source mapping (`:54`) | Keempatnya sudah ada (`:72`) |
-| Belum ada rewind atau resume percakapan penuh (`:52`) | Resume dan rewind dengan fork sesi sudah ada (`:35`) |
-| Token Figma tidak disimpan (`:58`) | OAuth PKCE dengan token terenkripsi (`:71`) |
-| Belum ada model gambar fotografis; trace masih kotak-kotak tanpa kurva halus (`:60`) | Provider gambar dan tracing Bézier halus sudah ada (`:73`) |
-| Sinkronisasi snapshot dan berbagi kapabilitas, bukan sistem akun (`:46`, `:88`) | Akun, passkeys, role, merge berbasis operasi dan organisasi Better Auth (`:40`, `:76`) |
-| Worktree `design/name` (`:50`) | Worktree per chat (`:14`) |
+| README menulis                                                                                           | implementation-status.md mencatat                                                      |
+| -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `.fig` belum diimplementasi (`:42`)                                                                      | Import `.fig` dan paste dari clipboard sudah ada (`:71`)                               |
+| Tidak ada embedding font kustom, capture halaman remote, recovery interaksi, atau source mapping (`:54`) | Keempatnya sudah ada (`:72`)                                                           |
+| Belum ada rewind atau resume percakapan penuh (`:52`)                                                    | Resume dan rewind dengan fork sesi sudah ada (`:35`)                                   |
+| Token Figma tidak disimpan (`:58`)                                                                       | OAuth PKCE dengan token terenkripsi (`:71`)                                            |
+| Belum ada model gambar fotografis; trace masih kotak-kotak tanpa kurva halus (`:60`)                     | Provider gambar dan tracing Bézier halus sudah ada (`:73`)                             |
+| Sinkronisasi snapshot dan berbagi kapabilitas, bukan sistem akun (`:46`, `:88`)                          | Akun, passkeys, role, merge berbasis operasi dan organisasi Better Auth (`:40`, `:76`) |
+| Worktree `design/name` (`:50`)                                                                           | Worktree per chat (`:14`)                                                              |
 
 Masalah lain:
 

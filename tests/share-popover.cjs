@@ -316,13 +316,10 @@ const focusWindow = (app) =>
         .first()
         .waitFor();
       // The previous copy's toast may still be showing, so wait for the clipboard itself.
-      await A.app.evaluate(
-        async ({ clipboard }, expected) => {
-          for (let i = 0; i < 100 && clipboard.readText() !== expected; i++)
-            await new Promise((resolve) => setTimeout(resolve, 50));
-        },
-        link,
-      );
+      await A.app.evaluate(async ({ clipboard }, expected) => {
+        for (let i = 0; i < 100 && clipboard.readText() !== expected; i++)
+          await new Promise((resolve) => setTimeout(resolve, 50));
+      }, link);
       assert.equal(await A.app.evaluate(({ clipboard }) => clipboard.readText()), link);
       // Back to private from the File menu, with Wonder's private confirmation.
       await page.keyboard.press("Escape");

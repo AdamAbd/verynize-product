@@ -397,7 +397,9 @@ function ocr(buf, ext) {
     execFile(
       "tesseract",
       [file, "stdout", "--psm", "3", "quiet"],
-      { maxBuffer: 64 << 20, timeout: 120000 },
+      // Four images already run concurrently. Keep each OCR process single-threaded so
+      // OpenMP workers do not oversubscribe small CI runners and exhaust the timeout.
+      { maxBuffer: 64 << 20, timeout: 120000, env: { ...process.env, OMP_THREAD_LIMIT: "1" } },
       (error, stdout) => {
         rmSync(dir, { recursive: true, force: true });
         resolve(error ? { error: String(error.message).split("\n")[0] } : { text: stdout });
