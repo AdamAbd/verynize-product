@@ -2,6 +2,7 @@
 // the gap opens the compatible variables under the field; ↓ + Enter binds (the field becomes the chip), Escape closes
 // the list and keeps the typed text; an empty Min/Max row lists the variables as soon as it is focused.
 const { _electron } = require("@playwright/test");
+const { mod } = require("./helpers/keys.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -29,7 +30,7 @@ const path = require("node:path");
     const typeInto = async (name, text) => {
       const input = page.locator(`#properties [name="${name}"]`);
       await input.click();
-      await input.press("Meta+a");
+      await input.press(mod("a"));
       await input.pressSequentially(text);
       return input;
     };

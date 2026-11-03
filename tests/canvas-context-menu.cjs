@@ -3,6 +3,7 @@
 // until something is copied; the menu paints above the selection badge.
 const {_electron} = require('@playwright/test');
 const { moveOffCursor } = require("./helpers/off-cursor.cjs");
+const { mod } = require("./helpers/keys.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
@@ -204,7 +205,7 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await page.evaluate(() => window.agentWorkspace.closeChat());
     await page.evaluate(() => window.design.setSelection(['b']));
     await page.locator('#canvas-wrap').hover();
-    await page.keyboard.press('Meta+KeyL');
+    await page.keyboard.press(mod('KeyL'));
     assert.equal(await page.evaluate(() => document.body.classList.contains('agent-chat-open')), true, '⌘L adds context');
     await page.evaluate(() => window.agentWorkspace.closeChat());
 
