@@ -1111,7 +1111,7 @@
    "run": {
     "sel": "#preview-run-command",
     "visible": true,
-    "text": "/Users/me/Library/PhpWebStudy/env/node/bin/python3 -u -m http.server 8000 --bind 127.0.0.1",
+    "text": "~/Library/PhpWebStudy/env/node/bin/python3 -u -m http.server 8000 --bind 127.0.0.1",
     "x": 489,
     "y": 410,
     "w": 462,
@@ -1222,7 +1222,7 @@
      },
      {
       "tag": "input",
-      "text": "/Users/me/Library/PhpWebStudy/env/node/bin/python3 -u -m http.server 8000 --bind 127.0.0.1",
+      "text": "~/Library/PhpWebStudy/env/node/bin/python3 -u -m http.server 8000 --bind 127.0.0.1",
       "x": 489,
       "y": 410,
       "w": 462,

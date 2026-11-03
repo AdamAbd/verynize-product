@@ -1,6 +1,6 @@
 // Captured custom fonts (document fontFaces) are used by every export: PNG/JPG/WebP (desktop/render.cjs
-// renderDesign), PDF (renderPDF, rasterised with macOS sips for the pixel check), HTML (app.js artwork
-// HTML and integrations/export-html.mjs) and code (integrations/export-code.mjs Tailwind and CSS).
+// renderDesign), PDF (renderPDF, rasterised with macOS sips or poppler pdftoppm for the pixel check), HTML
+// (app.js artwork HTML and integrations/export-html.mjs) and code (integrations/export-code.mjs Tailwind and CSS).
 // Pixel check: the captured font is Inter Bold served as "Fixture Display" with a serif fallback, so
 // glyph masks of the export must match a reference rendered with Inter Bold and differ from the
 // serif fallback rendered without the embedded font.
@@ -47,7 +47,7 @@ const exec = require("node:util").promisify(execFile);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "capture-export-fonts-"));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  env.VERYNIZE_SKIP_ONBOARDING = '1';
+  env.VERYNIZE_SKIP_ONBOARDING = "1";
   const app = await _electron.launch({
     env,
     args: [".", `--user-data-dir=${dir}`],
@@ -112,7 +112,19 @@ const exec = require("node:util").promisify(execFile);
       const file = path.join(dir, name + ".pdf"),
         out = path.join(dir, name + ".png");
       await fs.writeFile(file, Buffer.from(dataURL.split(",")[1], "base64"));
-      await exec("sips", ["-s", "format", "png", file, "--out", out]);
+      // macOS sips; elsewhere poppler's pdftoppm at the same 72 dpi (the masks are compared with references
+      // rasterised the same way, so the rasteriser cancels out).
+      if (process.platform === "darwin")
+        await exec("sips", ["-s", "format", "png", file, "--out", out]);
+      else
+        await exec("pdftoppm", [
+          "-png",
+          "-r",
+          "72",
+          "-singlefile",
+          file,
+          out.replace(/\.png$/, ""),
+        ]);
       return "data:image/png;base64," + (await fs.readFile(out)).toString("base64");
     };
     const captured = await renderAll();

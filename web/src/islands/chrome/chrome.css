@@ -13,7 +13,7 @@
 [data-chrome-bar] {
   -webkit-app-region: drag;
 }
-[data-chrome-bar] :is(button, input, select, a, [data-document-tab]) {
+[data-chrome-bar] :is(button, input, select, a, [data-document-tab], [data-file-tab]) {
   -webkit-app-region: no-drag;
 }
 

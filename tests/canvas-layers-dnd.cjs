@@ -3,6 +3,7 @@
 // Layers preview of a canvas drag out of an auto layout (Wonder R1).
 const {_electron} = require('@playwright/test');
 const { moveOffCursor } = require("./helpers/off-cursor.cjs");
+const { mod } = require("./helpers/keys.cjs");
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
@@ -197,12 +198,12 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.evaluate(id => window.design.setSelection([id]), ellipse.id);
     assert.ok(await page.evaluate(() => window.design.runCommand('select.matching')));
     assert.equal((await selection()).length, 2, 'select matching picks every ellipse');
-    await page.keyboard.press('Meta+Shift+KeyA');
+    await page.keyboard.press(mod('Shift+KeyA'));
     assert.deepEqual(await selection(), ['a'], '⌘⇧A selects the inverse');
 
     // ---- 9. Copy as code / PNG ----
     await page.evaluate(() => window.design.setSelection(['a']));
-    await page.keyboard.press('Meta+Shift+KeyC');
+    await page.keyboard.press(mod('Shift+KeyC'));
     await page.waitForFunction(() => /Copied selection as code/.test(document.querySelector('#workspace footer, footer')?.textContent || ''));
     const code = await app.evaluate(({clipboard}) => clipboard.readText());
     assert.match(code, /^\/\*\*\n \* Made with Verynize\n/); assert.match(code, /export default function [\s\S]*className=/); // Tailwind TSX (Wonder P1-copy-code.txt)

@@ -4,6 +4,7 @@
 // still left to the Figma importer, and an image on the system clipboard pastes as an image layer (web/image-drop.js).
 const { _electron: electron } = require("@playwright/test");
 const { waitForUiReady } = require("./helpers/ui-ready.cjs");
+const { mod } = require("./helpers/keys.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -431,7 +432,7 @@ const os = require("node:os");
     });
     await page.evaluate(() => window.design.setSelection([]));
     await page.locator("#workspace").click({ position: { x: 40, y: 300 } });
-    await page.keyboard.press("Meta+V");
+    await page.keyboard.press(mod("KeyV"));
     await page.waitForFunction(
       () => {
         const d = window.design.getDocument();
