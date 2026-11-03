@@ -1,5 +1,5 @@
 name: Tests
-# Runs on Boat VMs (Ubuntu 24.04, full VM with sudo). See docs/ci.md.
+# Runs on GitHub-hosted Ubuntu 24.04 runners. See docs/ci.md.
 # PR -> staging: quality + affected tests. PR -> main, push to staging, nightly, manual: full suite.
 # Required status checks: `quality` and `tests` (the aggregate job at the bottom).
 on:
@@ -11,11 +11,6 @@ on:
     # Nightly full suite. Schedules only fire from the default branch (main); the jobs check out staging.
     - cron: "17 19 * * *"
   workflow_dispatch:
-    inputs:
-      debug:
-        description: Keep a failed Boat VM for 30 minutes (boat ssh <id>)
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -33,7 +28,7 @@ env:
 jobs:
   quality:
     name: quality
-    runs-on: ${{ inputs.debug && 'boat/debug' || 'boat' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -68,7 +63,7 @@ jobs:
 
   plan:
     name: plan
-    runs-on: boat-small
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       mode: ${{ steps.plan.outputs.mode }}
@@ -139,7 +134,7 @@ jobs:
     name: node + cloud
     needs: plan
     if: needs.plan.outputs.node_count != '0'
-    runs-on: ${{ inputs.debug && 'boat/debug' || 'boat' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -177,11 +172,10 @@ jobs:
     name: electron (${{ matrix.shard }})
     needs: plan
     if: needs.plan.outputs.electron_count != '0'
-    runs-on: ${{ inputs.debug && 'boat-large/debug' || 'boat-large' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      # $20 Boat plan includes 12 starts per minute; 4 shards stay well inside it.
       max-parallel: 4
       matrix:
         shard: ${{ fromJSON(needs.plan.outputs.electron_shards) }}
@@ -198,8 +192,6 @@ jobs:
       - name: Install Electron system dependencies
         run: |
           set -euo pipefail
-          # Boat recommends the French mirror from its sandboxes (much faster than azure.archive).
-          sudo sed -i 's#http://[a-z.]*archive.ubuntu.com#http://fr.archive.ubuntu.com#g' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
           # Ubuntu 24.04 names: the t64 packages replace libgtk-3-0 / libatk-bridge2.0-0 / libasound2.
           # Also: Mesa (software GL/WebGL under xvfb: shaders, canvas-shaders), zsh (the terminal tests'
@@ -253,7 +245,7 @@ jobs:
     name: serial
     needs: plan
     if: needs.plan.outputs.serial_count != '0'
-    runs-on: ${{ inputs.debug && 'boat-large/debug' || 'boat-large' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -316,7 +308,7 @@ jobs:
     name: tests
     needs: [plan, node-cloud, electron, serial]
     if: always()
-    runs-on: boat-small
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: Check lane results

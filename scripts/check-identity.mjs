@@ -56,7 +56,7 @@ const HOME_RE =
 // Generic or system home directories. Short real-looking names (even "me") are real accounts and
 // are reported.
 const HOME_PLACEHOLDERS = new Set([
-  "runner", // GitHub/Boat Actions runner home
+  "runner", // GitHub Actions runner home
   "node", // node:* Docker images
   "ubuntu", // cloud image default user
   "shared", // macOS /Users/Shared

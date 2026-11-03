@@ -8,7 +8,7 @@ permissions: {}
 jobs:
   staging-promotion:
     name: staging-promotion
-    runs-on: boat-small
+    runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require staging from this repository
