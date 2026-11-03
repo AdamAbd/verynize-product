@@ -1,5 +1,5 @@
 // "Sign in to Codex" card: the runtime's `auth-required` event (desktop/agent-runtime.cjs requireAuth) becomes one
-// `auth` part on the reply. The button runs the installed CLI's browser sign-in for the run's account
+// `auth` part on the reply. Codex uses Verynize’s SIWC browser sign-in for the run’s account
 // (desktop/agent-auth.cjs, the same flow as Settings › Accounts); after it completes, Retry resends the message.
 import { useEffect, useState } from "react";
 import { LogInIcon, RotateCcwIcon, UserRoundCheckIcon, UserRoundXIcon } from "lucide-react";
@@ -135,14 +135,14 @@ export function AuthCard({ part, index, busy }: { part: ChatPart; index: number;
                     Retry
                   </ChatActionButton>
                 )}
-                <ChatActionButton hook={hook.authSignIn} onClick={signIn}>
+                <ChatActionButton hook={hook.authSignIn} onClick={signIn} data-oai-siwc-button={agent === "codex" ? "" : undefined}>
                   <LogInIcon />
-                  Sign in to {name}
+                  {agent === "codex" ? "Continue with ChatGPT" : `Sign in to ${name}`}
                 </ChatActionButton>
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Run `{agent} login` in a terminal, then retry.
+                Open Verynize desktop Settings → Accounts to connect your account, then retry.
               </p>
             )}
           </div>

@@ -38,6 +38,11 @@ app.whenReady().then(async () => {
   repositories=new RepositoryRegistry({file:path.join(app.getPath('userData'),'repositories.json'),workspacesRoot:async()=>agentBehavior.workspacesOf(await behaviorStore.get()),branchPrefix:async()=>agentBehavior.resolveBranchPrefix(await behaviorStore.get())});
   // Named accounts, Verynize MCP servers/permission defaults and per-chat autonomy: one store each for all windows.
   agentStores={profiles:new (require('./agent-profiles.cjs').AgentProfiles)({userData:app.getPath('userData')}),tools:new (require('./agent-tool-config.cjs').AgentToolConfig)({userData:app.getPath('userData')}),autonomy:new (require('./agent-autonomy.cjs').AgentAutonomy)({userData:app.getPath('userData')})};
+  agentStores.siwc=new (require('./chatgpt-auth.cjs').ChatGPTAuth)({
+    userData:app.getPath('userData'),profiles:agentStores.profiles,openExternal:url=>shell.openExternal(url),
+    notice:async()=>{const result=await dialog.showMessageBox({type:'info',title:'Use your ChatGPT plan in Verynize',message:'Continue with ChatGPT',detail:'Verynize is an independent MIT-licensed app. OpenAI shares your account identity and tokens with this desktop app. Tokens stay in protected files on this Mac. Your prompts, attachments and tool results are sent to OpenAI to fulfill your requests; local Codex tools can access files according to your selected permissions. Eligible requests, including chat titles and helpers triggered by your activity, use your ChatGPT plan and its limits. This connection is free. Manage access and usage at chatgpt.com/settings/usage. Verynize does not upload these tokens to its servers.',buttons:['Continue with ChatGPT','Cancel'],defaultId:0,cancelId:1});return result.response===0;},
+    welcome:()=>dialog.showMessageBox({type:'info',title:'Verynize',message:"You're using your ChatGPT plan",detail:'Eligible AI requests in Verynize use your ChatGPT plan. You can manage usage and disconnect Verynize in ChatGPT Settings → Usage.',buttons:['Got it']})
+  });
   mcpBridge.startBridge(app,{askAgent}).catch(error=>console.error('MCP bridge failed to start:',error)); // agent-bridge hook
   // Editor windows only: the storage probe's hidden window must not count as an open editor on macOS activate.
   const editorWindows = new Set();
@@ -63,13 +68,13 @@ app.whenReady().then(async () => {
     require('./figma-oauth.cjs').registerFigmaOAuth(handle,win); // Figma account (OAuth PKCE, safeStorage tokens)
     registerRendering(handle,win);
     require('./html-import.cjs').registerHtmlImport(handle,win); // Import HTML: codec-html importer (stylesheets, cascade, viewport, :root variables)
-    registerAgentAuth(handle,win,{profiles:agentStores.profiles});
+    registerAgentAuth(handle,win,{profiles:agentStores.profiles,siwc:agentStores.siwc});
     // Settings › Preferences (desktop/app-preferences.cjs): soundChoose/soundRead/soundClear, linksReady/linksSetEnabled, worktreeLineStats.
     require('./app-preferences.cjs').registerAppPreferences(handle,win,{app,dialog,registry:repositories,userData:app.getPath('userData')});
     // Settings › Usage and Memory (desktop/agent-usage.cjs, desktop/agent-memory.cjs): agentUsage, agentLayerUsage, agentMemory*.
-    const agentUsage=require('./agent-usage.cjs').registerAgentUsage(handle,{userData:app.getPath('userData'),profiles:agentStores.profiles});
+    const agentUsage=require('./agent-usage.cjs').registerAgentUsage(handle,{userData:app.getPath('userData'),profiles:agentStores.profiles,siwc:agentStores.siwc});
     // Settings › Accounts / Tools and the chat Autonomy panel: agentProfiles*, agentToolConfig*, agentAutonomy{Get,Set}.
-    require('./agent-profiles.cjs').registerAgentProfiles(handle,{store:agentStores.profiles,usage:agentUsage});
+    require('./agent-profiles.cjs').registerAgentProfiles(handle,{store:agentStores.profiles,usage:agentUsage,siwc:agentStores.siwc});
     require('./agent-tool-config.cjs').registerAgentToolConfig(handle,{store:agentStores.tools});
     require('./agent-autonomy.cjs').registerAgentAutonomy(handle,{store:agentStores.autonomy});
     require('./agent-memory.cjs').registerAgentMemory(handle,{userData:app.getPath('userData'),shell});
@@ -110,7 +115,7 @@ app.whenReady().then(async () => {
     agentBehavior.registerAgentBehavior(handle,win,{store:behaviorStore,registry:repositories,dialog,shell,getRuntime:()=>agentRuntime,userData:app.getPath('userData')});
     primaryRuntime=agentRuntime;onWindowClosed(win,()=>{if(primaryRuntime===agentRuntime)primaryRuntime=null;});
     // Settings › Agents (desktop/agent-tools.cjs): agentProviderAccounts, agentMcp{List,Add,Remove,Login}, agentAccess{Get,Set}
-    require('./agent-tools.cjs').registerAgentTools(handle,win,{userData:app.getPath('userData'),getRuntime:()=>agentRuntime});
+    require('./agent-tools.cjs').registerAgentTools(handle,win,{userData:app.getPath('userData'),getRuntime:()=>agentRuntime,siwc:agentStores.siwc});
     // Chat composer "+" menu and slash commands: listAgentCommands (desktop/agent-commands.cjs); designReferences*, worktreeAddFiles, pickWorkingDirectory (desktop/chat-attachments.cjs).
     require('./agent-commands.cjs').registerAgentCommands(handle,{getRuntime:()=>agentRuntime});
     require('./chat-attachments.cjs').registerChatAttachments(handle,win,{userData:app.getPath('userData'),dialog,resolveRoot:root=>repositories.resolveRoot(root)});

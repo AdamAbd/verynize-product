@@ -365,6 +365,7 @@ const desktop = [
   ...[
     "agent-options",
     "agent-auth",
+    "chatgpt-auth",
     "agent-behavior",
     "agent-runtime",
     "agent-runtime-live",
@@ -379,6 +380,7 @@ const desktop = [
   ].map((name) => unit(`tests/${name}.cjs`, "desktop")),
   electron("tests/agent-chat.cjs", "desktop", AREA.chat),
   electron("tests/codex-sign-in-ui.cjs", "desktop", AREA.chat),
+  electron("tests/codex-settings.cjs", "desktop", [...AREA.chat, ...isl("settings"), "web/settings.js"]),
   electron("tests/agent-workspace-ui.cjs", "desktop", [...AREA.chat, ...AREA.code]),
   electron("tests/chat-composer-menu.cjs", "desktop", AREA.chat),
   electron("tests/chat-indicators.cjs", "desktop", AREA.chat),

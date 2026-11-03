@@ -1,3 +1,4 @@
+import { useCodexConnection } from "./codex-connection";
 // Settings › Agents, top half (ref 71 + Wonder Tools / Access): provider accounts with the signed-in account,
 // the agents' own MCP servers ("Tools") and the Access switches. Backed by desktop/agent-tools.cjs through
 // window.desktop.agentTools; everything is feature-detected so the plain web build renders a note instead.
@@ -124,7 +125,7 @@ function AccountMenu({ name, run, signedIn }: { name: string; run(kind: AuthKind
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onEscapeKeyDown={(event) => event.stopPropagation()}>
         <DropdownMenuItem onSelect={() => run("check")}>Check account</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => run("login")}>{signedIn ? "Switch account…" : "Sign in…"}</DropdownMenuItem>
+        <DropdownMenuItem data-oai-siwc-button={name === "Codex" ? "" : undefined} onSelect={() => run("login")}>{name === "Codex" ? "Continue with ChatGPT" : signedIn ? "Switch account…" : "Sign in…"}</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => run("cancel")}>Cancel sign-in</DropdownMenuItem>
         {signedIn && (
           <>
@@ -218,9 +219,9 @@ function ProviderCard({ provider, api, legacyStatus }: { provider: Provider; api
               </span>
             }
             title={<span id={`account-status-${provider.id}`}>{legacyStatus ?? "Signed out"}</span>}
-            description={`Sign in with the ${provider.name} CLI to use it in chats.`}
+            description={provider.id === "codex" ? "Connect ChatGPT to Verynize. Eligible requests use your ChatGPT plan; tokens stay on this Mac." : `Sign in with the ${provider.name} CLI to use it in chats.`}
           >
-            <SettingsButton onClick={() => run("login")}>Sign in</SettingsButton>
+            <SettingsButton data-oai-siwc-button={provider.id === "codex" ? "" : undefined} onClick={() => run("login")}>{provider.id === "codex" ? "Continue with ChatGPT" : "Sign in"}</SettingsButton>
             <AccountMenu name={provider.name} run={run} signedIn={false} />
           </Row>
         ))}
@@ -603,12 +604,13 @@ function AddToolDialog({
 }
 
 export function AgentToolsSection() {
+  const { connected: codexConnected } = useCodexConnection();
   const ipc = toolsIpc();
   return (
     <Section id="settings-agent-tools" title="Tools" description="MCP servers from your agents’ own settings on this computer.">
       <Card>
         {ipc ? (
-          MCP_AGENTS.map((agent) => <AgentServers key={agent.id} agent={agent.id} name={agent.name} />)
+          MCP_AGENTS.filter((agent) => agent.id !== "codex" || codexConnected).map((agent) => <AgentServers key={agent.id} agent={agent.id} name={agent.name} />)
         ) : (
           <Row title="Available in the desktop app" description="Tools come from Claude Code and Codex settings on this computer." />
         )}
@@ -655,6 +657,7 @@ const ACCESS_ROWS: { key: keyof AccessSettings; title: string; description: Reac
 ];
 
 export function AgentAccessSection() {
+  const { connected: codexConnected } = useCodexConnection();
   const ipc = toolsIpc();
   const [settings, setSettings] = useState<AccessSettings | null>(null);
   useEffect(() => {
@@ -676,12 +679,12 @@ export function AgentAccessSection() {
     <Section id="settings-agent-access" title="Access" description="Changes apply when a chat’s agent next starts.">
       <Card>
         {ipc ? (
-          ACCESS_ROWS.map((row) => (
-            <Row key={row.key} title={row.title} description={row.description}>
+          ACCESS_ROWS.filter((row) => !row.key.startsWith("codex") || codexConnected).map((row) => (
+            <Row key={row.key} title={row.title} description={row.key === "codexApps" || row.key === "codexComputerUse" ? "Unavailable with Sign in with ChatGPT. Local canvas and MCP tools remain available." : row.description}>
               <Toggle
                 aria-label={row.title}
                 data-access={row.key}
-                disabled={!settings}
+                disabled={!settings || row.key === "codexApps" || row.key === "codexComputerUse"}
                 checked={Boolean(settings?.[row.key])}
                 onCheckedChange={(checked) => void change(row.key, checked)}
               />

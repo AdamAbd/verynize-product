@@ -49,6 +49,7 @@ async function write(file, text) {
   delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1'; delete env.CODEX_HOME;
   const turns = async () => (await fs.readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(c => c.rpc === 'turn/start' && !/word title for a design chat/.test(JSON.stringify(c.params || {})));
   const shots = process.env.CHAT_MENU_SHOT;
+  await require('./helpers/chatgpt-provider.cjs').seedChatGPTAccount(profile);
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${profile}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });

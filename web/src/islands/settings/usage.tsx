@@ -1,3 +1,4 @@
+import { useCodexConnection } from "./codex-connection";
 // Settings › Usage (ref 72): plan limits of the user's own Claude Code and Codex accounts
 // (desktop/agent-usage.cjs) and Verynize's local count of AI-generated layers. There is no Verynize quota.
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
@@ -59,7 +60,7 @@ const PROVIDERS = [
     id: "codex",
     name: "Codex",
     manage: "Manage in ChatGPT",
-    url: "https://chatgpt.com/codex/settings/usage",
+    url: "https://chatgpt.com/settings/usage",
     mark: <CodexMark className="size-4" />,
   },
 ] as const;
@@ -370,6 +371,7 @@ function VerynizeCard({ layers }: { layers: LayerUsage | null }) {
 }
 
 export function UsageView() {
+  const codexConnection = useCodexConnection();
   const ipc = usageIpc();
   const available = typeof ipc?.read === "function";
   const now = useNow();
@@ -386,7 +388,7 @@ export function UsageView() {
       void desktopApi()
         ?.agentProfiles?.list()
         .then((list) => {
-          const accounts = list.profiles.filter((p) => !p.system);
+          const accounts = list.profiles.filter((p) => !p.system && (p.agent !== "codex" || codexConnection.profiles.has(p.id)));
           setNamed(accounts);
           const read = ipc.read;
           if (!read) return;
@@ -406,7 +408,7 @@ export function UsageView() {
           }
         })
         .catch(() => setNamed([]));
-      for (const { id } of PROVIDERS) {
+      for (const { id } of PROVIDERS.filter((provider) => provider.id !== "codex" || codexConnection.profiles.has("system"))) {
         setLoading((state) => ({ ...state, [id]: true }));
         ipc
           .read({ agent: id, refresh })
@@ -427,7 +429,7 @@ export function UsageView() {
           .finally(() => setLoading((state) => ({ ...state, [id]: false })));
       }
     },
-    [ipc],
+    [ipc, codexConnection],
   );
   useEffect(() => load(false), [load]);
   const busy = Object.values(loading).some(Boolean);
@@ -449,7 +451,7 @@ export function UsageView() {
       <div className="flex flex-col gap-12.5">
         <VerynizeCard layers={layers} />
         {available ? (
-          PROVIDERS.map((provider) => (
+          PROVIDERS.filter((provider) => provider.id !== "codex" || codexConnection.profiles.has("system")).map((provider) => (
             <ProviderCard
               key={provider.id}
               provider={provider}
@@ -460,7 +462,7 @@ export function UsageView() {
           ))
         ) : null}
         {available &&
-          named.map((p) => {
+          named.filter((p) => p.agent !== "codex" || codexConnection.profiles.has(p.id)).map((p) => {
             const base = PROVIDERS.find((x) => x.id === p.agent)!;
             return (
               <ProviderCard

@@ -1,3 +1,4 @@
+import { useCodexConnection } from "./codex-connection";
 // Settings › Tools: MCP servers Verynize passes to every chat (global or per project, to Claude, Codex or both)
 // and default permissions per tool (desktop/agent-tool-config.cjs). Environment values are write-only: the
 // page only ever sees variable names.
@@ -78,8 +79,9 @@ function ServerForm({
   onDone(): void;
 }) {
   const api = desktopApi();
+  const { connected: codexConnected } = useCodexConnection();
   const [d, setD] = useState<Draft>(initial);
-  useEffect(() => setD(initial), [initial]);
+  useEffect(() => setD(initial.id || codexConnected ? initial : { ...initial, agents: "claude" }), [initial, codexConnected]);
   const set = (patch: Partial<Draft>) => setD((v) => ({ ...v, ...patch }));
   const save = async () => {
     const [command, ...args] = argv(d.command);
@@ -188,9 +190,9 @@ function ServerForm({
           value={d.agents}
           onChange={(e) => set({ agents: e.target.value as Draft["agents"] })}
         >
-          <option value="both">Claude Code and Codex</option>
+          {(codexConnected || d.agents === "both") && <option value="both">{codexConnected ? "Claude Code and Codex" : "Claude Code"}</option>}
           <option value="claude">Claude Code only</option>
-          <option value="codex">Codex only</option>
+          {codexConnected && <option value="codex">Codex only</option>}
         </NativeSelect>
         <span className="flex-1" />
         {d.id && (
@@ -212,6 +214,7 @@ function ServerForm({
 }
 
 export function ToolsPage() {
+  const { connected: codexConnected } = useCodexConnection();
   const api = desktopApi();
   const [servers, setServers] = useState<ToolServer[]>([]);
   const [rules, setRules] = useState<PermissionRule[]>([]);
@@ -280,7 +283,7 @@ export function ToolsPage() {
           description="Disabled servers stay saved but are not passed to chats."
         >
           <Card id="tools-server-list">
-            {servers.map((s) => (
+            {servers.filter((s) => codexConnected || s.agents.includes("claude")).map((s) => (
               <div key={s.id} data-tool-server={s.name}>
                 <Row
                   title={s.name}
@@ -291,9 +294,9 @@ export function ToolsPage() {
                       </span>
                       <span>
                         {s.scope === "global" ? "All projects" : `Only ${repoName(s.project)}`} ·{" "}
-                        {s.agents.length === 2
+                        {s.agents.length === 2 && codexConnected
                           ? "Claude Code and Codex"
-                          : s.agents[0] === "claude"
+                          : s.agents.includes("claude")
                             ? "Claude Code"
                             : "Codex"}
                         {s.envKeys?.length ? ` · env: ${s.envKeys.join(", ")}` : ""}

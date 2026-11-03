@@ -363,6 +363,7 @@ function select(entries, opts, graph) {
     if (reasons.get(entry.id).length < 6) reasons.get(entry.id).push(why);
   };
   const summary = [];
+  if (opts.files && opts.mode !== "changed") fail("--files only works with --changed");
   let mode = opts.mode;
   let base = opts.base;
   let head = opts.head;
