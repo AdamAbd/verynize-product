@@ -1,14 +1,13 @@
-// Chat "Sign in to Codex" card end to end in Electron. A Codex chat with a signed-out account (an isolated, empty
-// CODEX_HOME; the real installed `codex` when there is one, else tests/fixtures/fake-codex.cjs) shows exactly one
-// sign-in card with a Sign in button and no raw error. The sign-in itself then runs against the fake Codex (its
-// `login` marks the isolated home signed in), and Retry sends the message again. Never touches ~/.codex, never runs
-// a real login and never starts a model turn. Screenshots go to $VERYNIZE_SHOTS (default: the OS temp folder).
+// Electron: a signed-out SIWC connection shows one auth card. Continue with ChatGPT
+// completes PKCE/OIDC through a local OAuth server; Retry sends the original message
+// through the Codex process fixture. No real account, model request or ~/.codex edits.
 const { _electron } = require("@playwright/test");
 const { waitForUiReady } = require("./helpers/ui-ready.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { createChatGPTProvider, connectElectronProvider } = require('./helpers/chatgpt-provider.cjs');
 const { execFileSync } = require("node:child_process");
 
 (async () => {
@@ -43,12 +42,14 @@ const { execFileSync } = require("node:child_process");
   console.log(
     `Signed-out account: ${realCodex ? "real codex " + realCodex : "fake codex"} with CODEX_HOME=${codexHome}`,
   );
+  const provider = await createChatGPTProvider();
   const app = await _electron.launch({
     env,
     args: [".", `--user-data-dir=${path.join(root, "profile")}`],
     timeout: 20000,
   });
   try {
+    await connectElectronProvider(app, provider);
     const page = await app.firstWindow({ timeout: 20000 });
     await waitForUiReady(page);
     await page.waitForSelector("#project-toggle", { state: "attached" });
@@ -71,7 +72,7 @@ const { execFileSync } = require("node:child_process");
     assert.equal(await page.locator(".chat-error").count(), 0, "no raw error next to the card");
     const signIn = page.locator(".chat-auth-signin");
     assert.ok(await signIn.isVisible(), "the card has a Sign in button");
-    assert.match(await signIn.textContent(), /Sign in to Codex/);
+    assert.match(await signIn.textContent(), /Continue with ChatGPT/);
     const reply = await page.locator(".chat-message.assistant").last().textContent();
     assert.doesNotMatch(reply, /401|Unauthorized|Agent failed/);
     assert.match(reply, /signed out/);
@@ -86,14 +87,8 @@ const { execFileSync } = require("node:child_process");
       .screenshot({ path: path.join(shots, "codex-sign-in-card.png") });
     await page.screenshot({ path: path.join(shots, "codex-sign-in-window.png") });
 
-    // 2. Sign in from the card (fake Codex login on the isolated home), then Retry sends the message again.
-    await fs.writeFile(
-      path.join(codexHome, "fake-account.json"),
-      JSON.stringify({ account: null, requiresOpenaiAuth: true }),
-    );
-    await app.evaluate((_electron, prefix) => {
-      process.env.PATH = prefix + process.env.PATH;
-    }, bin + path.delimiter);
+    // 2. Sign in through real SIWC HTTP/PKCE/JWKS against the local provider.
+    await app.evaluate((_electron, prefix) => { process.env.PATH = prefix + process.env.PATH; }, bin + path.delimiter);
     await signIn.click();
     await page
       .locator(".chat-auth-retry")
@@ -109,9 +104,11 @@ const { execFileSync } = require("node:child_process");
     await page
       .locator(".chat-auth")
       .screenshot({ path: path.join(shots, "codex-sign-in-card-signed-in.png") });
-    const calls = (await fs.readFile(log, "utf8")).trim().split("\n").map(JSON.parse);
-    const login = calls.find((c) => c.args?.join(" ") === "login");
-    assert.equal(login?.codexHome, codexHome, "the sign-in ran with the isolated CODEX_HOME");
+    const calls = (await fs.readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(JSON.parse);
+    assert.equal(calls.some(c => c.args?.join(" ") === "login"), false, "SIWC never invokes codex login");
+    const credential = JSON.parse(await fs.readFile(path.join(root, 'profile/chatgpt/account.json'), 'utf8'));
+    assert.match(credential.client_id, /^oaiapp_local_/);
+    assert.equal(provider.calls.filter(c => c.path.endsWith('/oauth/token')).length, 1);
     await page.locator(".chat-auth-retry").last().click();
     await page.waitForFunction(
       () =>
@@ -136,7 +133,7 @@ const { execFileSync } = require("node:child_process");
       await page.locator(".chat-message.assistant").last().textContent(),
       /Reply to .*jazz night/,
     );
-    const after = (await fs.readFile(log, "utf8")).trim().split("\n").map(JSON.parse);
+    const after = (await fs.readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(JSON.parse);
     // Auto-title helper turns (agent-workdirs/titles) are not chat turns (same filter as tests/agent-chat.cjs).
     assert.equal(
       after.filter(
@@ -153,6 +150,7 @@ const { execFileSync } = require("node:child_process");
     console.log("codex sign-in UI ok; screenshots in " + shots);
   } finally {
     await app.close();
+    await provider.close();
     await fs.rm(root, { recursive: true, force: true }).catch(() => {});
   }
 })().catch((error) => {

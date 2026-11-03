@@ -85,6 +85,7 @@ else process.exit(0);
   };
   delete env.ELECTRON_RUN_AS_NODE;
   env.VERYNIZE_SKIP_ONBOARDING = '1';
+  await require('./helpers/chatgpt-provider.cjs').seedChatGPTAccount(profile);
   const app = await _electron.launch({
     env,
     args: [".", `--user-data-dir=${profile}`],
