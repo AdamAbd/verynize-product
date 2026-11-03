@@ -4,6 +4,7 @@
 // Changes are announced with the `verynize:agent-behavior` window event.
 import { useSyncExternalStore } from "react";
 import { platform } from "@/lib/platform";
+import "@/lib/account-store";
 
 export type Access = "ask" | "edit" | "auto" | "full";
 export type AgentBehavior = {
@@ -20,9 +21,16 @@ export type AgentBehavior = {
   defaultFolder?: string;
 };
 /** A change: repoModes entries set to null go back to the Default. */
-export type BehaviorPatch = Partial<Omit<AgentBehavior, "repoModes">> & { repoModes?: Record<string, Access | null> };
+export type BehaviorPatch = Partial<Omit<AgentBehavior, "repoModes">> & {
+  repoModes?: Record<string, Access | null>;
+};
 export type OutputStyle = { id: string; name: string; description?: string; source?: string };
-export type CommitAuthor = { name: string; email: string; login: string | null; linked: boolean | null };
+export type CommitAuthor = {
+  name: string;
+  email: string;
+  login: string | null;
+  linked: boolean | null;
+};
 export type AllowGroup = {
   id: string;
   agent: "verynize" | "claude" | "codex";
@@ -57,6 +65,7 @@ export const behaviorIpc = (): BehaviorIpc | null => platform.desktop?.agentBeha
 
 let current: AgentBehavior = DEFAULT_BEHAVIOR;
 let loaded = false;
+let accountId = window.cloudAccount?.get()?.account.id ?? null;
 const listeners = new Set<() => void>();
 function publish(next: AgentBehavior) {
   current = next;
@@ -69,11 +78,72 @@ function subscribe(fn: () => void) {
   return () => listeners.delete(fn);
 }
 
+const portableKeys = [
+  "followUp",
+  "expandWork",
+  "claudeOutputStyle",
+  "codexPersonality",
+  "creditAgent",
+  "branchPrefix",
+] as const;
+function portableBehavior() {
+  const patch: BehaviorPatch = {};
+  for (const [key, value] of window.accountStore?.entries("preference:behavior.") ?? []) {
+    if (key === "followUp" && (value === "queue" || value === "steer")) patch.followUp = value;
+    if (key === "codexPersonality" && (value === "default" || value === "none"))
+      patch.codexPersonality = value;
+    if ((key === "expandWork" || key === "creditAgent") && typeof value === "boolean")
+      patch[key] = value;
+    if ((key === "claudeOutputStyle" || key === "branchPrefix") && typeof value === "string")
+      patch[key] = value;
+  }
+  return patch;
+}
+function syncBehavior() {
+  const store = window.accountStore;
+  const nextAccount = window.cloudAccount?.get()?.account.id ?? null;
+  if (accountId && accountId !== nextAccount) {
+    const reset = {
+      followUp: DEFAULT_BEHAVIOR.followUp,
+      expandWork: DEFAULT_BEHAVIOR.expandWork,
+      claudeOutputStyle: DEFAULT_BEHAVIOR.claudeOutputStyle,
+      codexPersonality: DEFAULT_BEHAVIOR.codexPersonality,
+      creditAgent: DEFAULT_BEHAVIOR.creditAgent,
+      branchPrefix: DEFAULT_BEHAVIOR.branchPrefix,
+    };
+    publish({ ...current, ...reset });
+    void behaviorIpc()
+      ?.set(reset)
+      .catch(() => {});
+  }
+  accountId = nextAccount;
+  if (!loaded || !store?.ready()) return;
+  const patch = portableBehavior();
+  for (const key of portableKeys)
+    if (!(key in patch)) store.put(`preference:behavior.${key}`, current[key]);
+  if (Object.entries(patch).every(([key, value]) => current[key as keyof AgentBehavior] === value))
+    return;
+  // The main process keeps the runtime's applied values; the account database owns them.
+  const ipc = behaviorIpc();
+  if (ipc)
+    void ipc
+      .set(patch)
+      .then(publish)
+      .catch(() => {});
+  else publish({ ...current, ...patch, repoModes: current.repoModes });
+}
+window.addEventListener("account-store-changed", syncBehavior);
+
 /** Saves a change; the returned promise rejects with the main-process validation error. */
 export async function setBehavior(patch: BehaviorPatch) {
   const ipc = behaviorIpc();
-  if (!ipc) throw new Error("Available in the desktop app");
-  const next = await ipc.set(patch);
+  if (!ipc && !window.accountStore?.signedIn()) throw new Error("Sign in to save preferences");
+  const next = ipc ? await ipc.set(patch) : { ...current, ...patch, repoModes: current.repoModes };
+  if (window.accountStore?.signedIn()) {
+    for (const key of portableKeys)
+      if (key in patch) window.accountStore.put(`preference:behavior.${key}`, next[key]);
+    await window.accountStore.flush();
+  }
   publish(next);
   return next;
 }
@@ -87,9 +157,17 @@ export async function chooseBehaviorFolder() {
 
 export function reloadBehavior() {
   const ipc = behaviorIpc();
-  if (!ipc) return Promise.resolve(current);
+  if (!ipc) {
+    loaded = true;
+    syncBehavior();
+    return Promise.resolve(current);
+  }
   return ipc.get().then(
-    (next) => (publish(next), next),
+    (next) => {
+      publish(next);
+      syncBehavior();
+      return next;
+    },
     () => current,
   );
 }
@@ -100,7 +178,10 @@ export function useBehavior() {
 export const behaviorLoaded = () => loaded;
 
 // Publish the global once, at bundle load.
-if (typeof window !== "undefined" && !(window as unknown as { agentBehavior?: unknown }).agentBehavior) {
+if (
+  typeof window !== "undefined" &&
+  !(window as unknown as { agentBehavior?: unknown }).agentBehavior
+) {
   (window as unknown as { agentBehavior: unknown }).agentBehavior = {
     get: () => current,
     set: setBehavior,

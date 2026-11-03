@@ -35,7 +35,7 @@ try {
   const [a, b] = await Promise.all(apps.map((app) => app.firstWindow()));
   for (const page of [a, b]) {
     await page.waitForFunction(() => !!window.design && !!window.cloudWorkspace);
-    page.on("dialog", (dialog) => dialog.accept());
+    page.on("dialog", (dialog) => dialog.accept().catch(() => {}));
   }
   const panel = (page, open = true) =>
     page.evaluate((open) => {
@@ -81,6 +81,7 @@ try {
     await page.locator("#cloud-signin").click();
     await page.waitForFunction(() => !document.getElementById("cloud-signed-in").hidden);
     assert.match(await page.locator("#cloud-account").textContent(), new RegExp(email));
+    await page.waitForFunction(() => !!window.cloudWorkspace.room());
   }
 
   // Sign in and edit the public profile.
@@ -96,8 +97,7 @@ try {
   await signIn(b, "bob@example.test");
 
   // A signed-in owner creates a room and invites Bob by email as a viewer.
-  await a.locator("#cloud-create").click();
-  await statusIncludes(a, "Connected");
+  await a.waitForFunction(() => !!window.cloudWorkspace.room());
   assert.equal(await a.locator("#cloud-role").textContent(), "Owner");
   await section(a, "cloud-access-section");
   await a.locator("#cloud-member-email").fill("bob@example.test");
@@ -114,6 +114,7 @@ try {
   // Bob opens the room from his account without any link token; viewers cannot change it.
   await b.locator("#cloud-rooms-refresh").click();
   await b.locator(`[data-open-room="${roomId}"]`).click();
+  await b.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, roomId);
   await statusIncludes(b, "Connected");
   assert.equal(await b.locator("#cloud-role").textContent(), "Viewer");
   assert.doesNotMatch(await b.locator("#cloud-invite").inputValue(), /token=/);
@@ -279,7 +280,16 @@ try {
     "PASS desktop accounts: email + password sign-up, verification, sign-in, profile edit, email invite with roles, token-free member join, viewer enforcement, live promotion, role links, rotation, comments, owner recovery, project app build/publish/rollback/unpublish, sign out everywhere",
   );
 } finally {
-  await Promise.all(apps.map((app) => app.close()));
+  await Promise.all(
+    apps.map(async (app) => {
+      await app
+        .evaluate(({ BrowserWindow }) => {
+          for (const win of BrowserWindow.getAllWindows()) win.destroy();
+        })
+        .catch(() => {});
+      await app.close();
+    }),
+  );
   await mf.dispose();
   await fs.rm(dir, { recursive: true, force: true });
 }
