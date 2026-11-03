@@ -332,7 +332,7 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   return <span className="truncate">{parts}</span>;
 }
 
-function Keycap({ children, footer = false }: { children: ReactNode; footer?: boolean }) {
+export function Keycap({ children, footer = false }: { children: ReactNode; footer?: boolean }) {
   return (
     <kbd
       className={

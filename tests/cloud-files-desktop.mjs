@@ -111,13 +111,22 @@ try {
   await synced(page);
   assert.equal(await page.evaluate(() => window.fileLibrary.currentId), fileId);
   assert.equal((await files(page)).length, fileCount);
-  // Opening another file detaches; reopening the cloud file reconnects, still without a copy.
-  await page.evaluate(async () => {
+  // A new file is stored in the workspace right away (a private room of its own), signed in.
+  const newId = await page.evaluate(async () => {
     const doc = window.design.getDocument();
-    doc.name = "Local only";
-    await window.fileLibrary.createFromDocument(doc);
+    doc.name = "New file";
+    return window.fileLibrary.createFromDocument(doc);
   });
-  assert.equal(await page.evaluate(() => window.cloudWorkspace.isConnected()), false);
+  await page.waitForFunction((id) => !!window.fileLibrary.cloudOf(id), newId);
+  const newRoom = await page.evaluate((id) => window.fileLibrary.cloudOf(id), newId);
+  assert.notEqual(newRoom.roomId, roomId);
+  await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, newRoom.roomId);
+  assert.equal(
+    (await page.evaluate(() => window.cloudWorkspace.access())).visibility,
+    "private",
+    "new files start private",
+  );
+  // Opening another file switches rooms; reopening the first cloud file reconnects, still without a copy.
   await page.evaluate((id) => window.fileLibrary.open(id), fileId);
   await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, roomId);
   await synced(page);
