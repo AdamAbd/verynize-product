@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { portalContainer } from "@/lib/bridge";
 import { HomeButton } from "./menu";
+import { toast } from "sonner";
 
 export type NameRequest = {
   title: string;
@@ -9,7 +10,7 @@ export type NameRequest = {
   value: string;
   placeholder?: string;
   submit: string;
-  onSubmit(value: string): void;
+  onSubmit(value: string): unknown;
 };
 
 /** Small single-field dialog used for "Rename file" and "New folder". */
@@ -20,12 +21,16 @@ export function NameDialog({ request, onClose }: { request: NameRequest | null; 
     if (request) setValue(request.value);
   }, [request]);
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     const name = value.trim();
     if (!name || !request) return;
-    request.onSubmit(name);
-    onClose();
+    try {
+      await request.onSubmit(name);
+      onClose();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error));
+    }
   };
 
   return (

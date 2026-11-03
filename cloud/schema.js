@@ -318,3 +318,16 @@ export const aiOauthState = sqliteTable(
   },
   (table) => [index("ai_oauth_state_expires_idx").on(table.expiresAt)],
 );
+
+// Private cross-device preferences, chats and file organization (migration 0009).
+export const accountState = sqliteTable(
+  "account_state",
+  {
+    accountId: text("accountId").notNull(),
+    key: text("key").notNull(),
+    value: text("value"),
+    revision: integer("revision").notNull().default(1),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.accountId, table.key] })],
+);

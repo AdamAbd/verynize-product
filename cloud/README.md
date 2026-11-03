@@ -42,18 +42,45 @@ Redo works the same way.
 
 This is server-sequenced operation merging, not a peer-to-peer CRDT. It needs the room to order batches, and edits made while offline are merged when the socket reconnects.
 
-## Cloud files and offline edits (`web/cloud-panel.js`, `web/wonder-shell.js`)
+## Database-backed files and account data
 
-A room behaves like a file that the desktop and the web editor open:
+Signed-in desktop and web clients use the same room database and account identity. Creating,
+importing or duplicating a design waits for a private room to be stored; existing local files
+are migrated after sign-in. File creation failures are reported and legacy copies are retained
+until the database accepts them. Opening a file fetches its room, and edits use the existing
+operation protocol over WebSocket (HTTP fallback). The file list refreshes every three seconds
+while visible and on focus. Renaming a closed file writes a document-name operation.
 
-- **Identity.** A file library record can be cloud-backed: `cloud: {server, roomId, token?, role, detached?}`. The capability token is kept only for rooms joined or created with a link, in the same device-local storage as the record itself. Rooms reached through an account (direct member or organization) store no token and reconnect with the account session. Duplicating a file drops the link.
-- **Opening.** Opening a cloud-backed record (`fileLibrary.open`, which emits `library-file-opened`), or starting the app with one as the current file, reconnects to its room. Joining a room (invite, Account › Your rooms, Files home) opens the room's existing record instead of creating another copy; the first join creates it. Create room marks the open file as the room's file. Disconnect, leaving the room and revocation keep the local copy and mark it `detached`; a detached copy that was edited since is left as a separate local file when the room is joined again, and the room gets a new record.
-- **Files home.** Signed in with an email account, the Files home lists the rooms of the active workspace (`GET /api/orgs/:id/rooms`) and rooms shared with you directly (`GET /api/me/rooms` entries without an organization), merged with the device's cloud-backed records so a room appears once. Cards carry `data-room-id`, the workspace (or "Shared with you"), a cloud mark and the role. Opening a listed room joins it (`cloudWorkspace.openRoom`).
-- **Persistent outbox.** For each room the device stores, in IndexedDB (`verynize-cloud` › `outbox`, key `<server>|<roomId>`), its client id, batch counter, unacknowledged batches, the last confirmed document and revision, and its lazy-page state (`pages: {unloaded, deferred}`). It is written shortly after every queued batch, acknowledgement or remote change, and immediately when the file is switched. Reopening the file (also after a restart) reuses the client id, so the socket's `acked` drops the batches the server already applied and the rest are resent; the server applies each batch at most once per client id. Edits in the file beyond the stored confirmed document and batches (made while the room was closed, or not yet stored when the app quit) are diffed and sent as one more batch. Beyond 4000 operations or about 1.5 MB of batches only the confirmed document is kept, and the file is diffed against it again (whole-document fallback).
-- **Offline.** When the server is unreachable, a file with a stored outbox opens offline: edits queue and persist, and the socket keeps retrying (backoff up to 15 s). On reconnect the server snapshot replaces the confirmed document and the pending batches are rebased onto it as usual. A file never opened on the device cannot open offline.
-- **Clearing.** Disconnect, leaving the room, revocation (`revoked`, or 401/403/404 when reopening) clear the stored outbox. Signing out keeps the record linked; it reconnects after signing in again.
+Signed-in library records persist only room references and empty document placeholders;
+`verynize-v2` and the signed-in room's IndexedDB outbox are no longer document stores. Pending
+edits stay in memory, reconnect automatically, and must be acknowledged before switching
+files or signing out. Closing with pending changes raises the browser's unsaved-change guard.
+A failed file open leaves the current room connected. Loading an unopened room requires a
+connection. Legacy anonymous capability rooms retain their offline outbox behavior.
 
-`window.cloudWorkspace` also exposes `room()`, `openRoom({server,id})`, `pendingCount()`, `pages()` (`{unloaded, requested, deferred}`) and `storedOutbox(server,id)`; `window.fileLibrary` adds `findCloud(server,roomId)`, `cloudOf(id)` and `setCloud(id,cloud)`.
+`web/account-store.js` synchronizes private account records through:
+
+- `GET /api/me/state`: `{items: [{key, value, revision}], account}` for the authenticated account.
+- `PUT /api/me/state/:key`: `{value, revision}`; `value` is a JSON string or `null` (a tombstone),
+  and revision zero means create. A stale revision returns 409. Bodies are limited to 1 MiB.
+- Keys are `preference:*`, `agent-default:*`, `chat:*`, `draft:*`, `folder:*`, and `file:*`.
+  Transcripts use individual chat IDs; preferences use individual fields, so unrelated edits
+  never replace an entire account snapshot. Concurrent transcript edits preserve a conflict copy.
+
+Migration `0009_account_state.sql` adds the account-scoped table in the shared database
+(D1 on Workers, the existing SQLite/libSQL adapter on Node/Vercel). Legacy preferences,
+transcripts and drafts are removed from localStorage only after acknowledgement. The client
+polls while visible and refreshes on focus/reconnection. Session credentials and room references
+stay on the device. Provider process sessions, local repository paths, custom sound files and
+OS permissions remain device-specific; shared transcripts seed a new provider session when needed.
+
+Folders and archive state are private to the account, keyed by room ID. Account profile changes
+refresh with account data. Personal instructions and portable agent behavior preferences sync;
+the desktop main process applies the latter to its local runtime.
+
+Tests: `tests/cloud-account-state.mjs`, `tests/cloud-database-sync.mjs`, and
+`tests/cloud-files-desktop.mjs`. Production databases need migration 0009 before shipping the
+updated clients. This change does not deploy or migrate production automatically.
 
 ## Share panel: server and invite links (`web/cloud-panel.js`, `web/cloud-invite.js`)
 
