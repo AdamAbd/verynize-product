@@ -41,10 +41,12 @@ export function PreviewSetup({state}: {state: ChatState}) {
     window.addEventListener("bd:setup-preview", setup);
     return () => { alive = false; clearInterval(timer); window.removeEventListener("bd:setup-preview", setup); };
   }, [state.activeRoot, state.conversationId]);
-  // ⌘⌥P: Open in a tab (the tab itself belongs to window.previewTab).
+  // ⌘⌥P (Ctrl+Alt+P off macOS): Open in a tab (the tab itself belongs to window.previewTab).
   useEffect(() => {
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || !event.metaKey || !event.altKey || event.shiftKey || event.ctrlKey || event.code !== "KeyP") return;
+      const mod = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (event.defaultPrevented || !mod || !event.altKey || event.shiftKey || event.code !== "KeyP") return;
       const current = workspace()?.getState();
       if (!current?.activeRoot) return;
       event.preventDefault();

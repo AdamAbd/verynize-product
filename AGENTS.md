@@ -25,14 +25,18 @@ npm run check             # node --check on all .cjs/.mjs/.js + verifies web/ind
 npm run lint              # vp lint (oxlint + @shadcn/lint rules on web/src)
 npm run lint:ui && npm run typecheck:ui   # required to be clean for web/src changes
 npm run format / format:check
-npm test                  # full suite: build:ui + canvas, desktop, integrations, ux, cloud suites
-npm run test:canvas | test:desktop | test:integrations | test:ux | test:cloud
+npm run test:changed      # during development: only the tests covering your changes vs origin/staging
+npm run test:list-changed # what test:changed would run, and why (runs nothing)
+npm test                  # full suite (= test:full): builds UI/Worker once, runs lanes in parallel
+npm run test:canvas | test:desktop | test:integrations | test:ux | test:cloud | test:web   # one group
 npm run dev / build       # Cloudflare web dev server / Worker build (vite.config.ts)
 npm run deploy:check      # build + `cf deploy --prebuilt --dry-run` (never run `deploy` unprompted)
 npm run cli -- --root /abs/dir list   # headless document CLI
 npm run mcp -- --root /abs/dir        # stdio MCP server
 npm run package:mac       # dist/Verynize.app (ad-hoc signed)
 ```
+
+`scripts/run-tests.mjs` runs the suite listed in `scripts/test-manifest.mjs` (`--all`, `--changed [--base <ref>]`, `--group`, `--lane`, `--shard i/n`, `--explain`, `--report <dir>`; see its header). Electron tests run one at a time (`TEST_ELECTRON_JOBS` to raise), under `xvfb-run` on headless Linux.
 
 Run a single test directly. Tests are plain scripts, not a vitest suite:
 
@@ -41,7 +45,7 @@ Run a single test directly. Tests are plain scripts, not a vitest suite:
 - Cloud: `node tests/cloud-rooms.mjs` (Miniflare/workerd), `node tests/cloud-desktop.mjs` (two Electron clients).
 - Codec fidelity gate: `node eval/run-fidelity.mjs [--verbose]`. Fixtures in `eval/fidelity/fixtures`. Never loosen assertions to make them pass.
 
-Tests use real Electron, real git repos and local workerd. Nothing is mocked. No coverage threshold; add regression coverage for behavior changes. Name integration tests `integrations/*.test.mjs` and use feature-based names in `tests/`. When adding a test file, add it to the matching `test:*` script in `package.json`.
+Tests use real Electron, real git repos and local workerd. Nothing is mocked. No coverage threshold; add regression coverage for behavior changes. Name integration tests `integrations/*.test.mjs` and use feature-based names in `tests/`. When adding a test file, add it to `scripts/test-manifest.mjs` with its group, lane and the source globs it covers (the runner fails on test files missing from the manifest; `integrations/*.test.mjs` are picked up automatically).
 
 ## Versioning
 

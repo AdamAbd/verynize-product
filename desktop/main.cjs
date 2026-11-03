@@ -18,8 +18,17 @@ const agentBehavior=require('./agent-behavior.cjs'); // Settings › Agents: fol
 // origin-based, so client-side routes (app://verynize/editor) keep working.
 const appProtocol=require('./app-protocol.cjs');
 appProtocol.registerSchemes(protocol); // must run before app ready
+let editorOpened=false; // set once the first editor window exists (window-all-closed)
 let primaryRuntime=null,repositories=null,behaviorStore=null,agentStores=null;const liveRuntimes=new Set(); // agent runtime of the latest editor window (serves ask_agent)
 app.setName('Verynize');
+// Linux CI (xvfb, no desktop keyring): use Chromium's basic password store instead of probing D-Bus/libsecret, so
+// safeStorage reports encryption unavailable at once (generate.cjs keeps keys in memory, figma-oauth.cjs refuses to persist).
+if(process.platform==='linux'&&process.env.CI&&!app.commandLine.hasSwitch('password-store'))app.commandLine.appendSwitch('password-store','basic');
+// Linux CI renders like the macOS dev machines the tests were measured on: a 2x display (Retina) and overlay scrollbars
+// (no gutter eating panel width). xvfb has no GPU: compositing stays in software (--disable-gpu, as Chromium falls back
+// to anyway) and WebGL gets its SwiftShader fallback, or shaders never become ready. Compositing through SwiftShader GL
+// (use-angle=swiftshader) instead loses clicks into out-of-process iframes and delays frames (preview, mask pixels).
+if(process.platform==='linux'&&process.env.CI){const sw=app.commandLine;if(!sw.hasSwitch('force-device-scale-factor'))sw.appendSwitch('force-device-scale-factor','2');sw.appendSwitch('enable-features','OverlayScrollbar');sw.appendSwitch('disable-gpu');sw.appendSwitch('enable-unsafe-swiftshader');}
 require('./app-preferences.cjs').attachDeepLinks(app); // verynize:// design links (Settings › Preferences › Advanced)
 app.whenReady().then(async () => {
   appProtocol.registerHandler(protocol, net);
@@ -49,6 +58,9 @@ app.whenReady().then(async () => {
     const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
     const width = Math.min(1440, workArea.width), height = Math.min(950, workArea.height);
     const win = new BrowserWindow({...process.platform==='darwin'?{titleBarStyle:'hiddenInset',trafficLightPosition:{x:12,y:13}}:{},x: workArea.x + Math.round((workArea.width - width) / 2), y: workArea.y + Math.round((workArea.height - height) / 2), width, height, minWidth: Math.min(900, workArea.width), minHeight: Math.min(600, workArea.height), backgroundColor: '#141416', webPreferences: {preload:path.join(__dirname,'preload.cjs'),nodeIntegration: false, contextIsolation: true, sandbox: true}});
+    // Off macOS the default Electron menu would be a window menu bar: the shell draws its own (AppMenu), and the bar's
+    // Alt focus/mnemonics and Ctrl accelerators (Ctrl+Shift+I, Ctrl+R, Ctrl+0/±) would compete with editor shortcuts.
+    if(process.platform!=='darwin')win.removeMenu();
     let project=null,agentRuntime=null;const agentsBusy=()=>agentRuntime?.active()>0;
     const current=()=>{if(!project)throw Error('Open a project folder first');return project;};
     const handle=(name,fn)=>win.webContents.ipc.handle('desktop:'+name,(event,...args)=>{
@@ -132,11 +144,13 @@ app.whenReady().then(async () => {
     win.webContents.on('will-navigate', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
     win.webContents.on('will-redirect', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
     win.loadURL(appProtocol.ENTRY_URL);
-    editorWindows.add(win); win.on('closed', () => editorWindows.delete(win));
+    editorWindows.add(win); editorOpened=true; win.on('closed', () => editorWindows.delete(win));
     return win;
   };
   storageMigration.probeAfterLaunch({app,BrowserWindow,editor:createWindow(),startup:migration}); // background check for old-build (file://) edits, staged for the next launch
   app.on('activate', () => { if (!editorWindows.size) createWindow(); });
 });
 app.on('will-quit',()=>mcpBridge.stopBridge()); // agent-bridge hook
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+// Before the first editor opens, the only windows are storage-migration.cjs's hidden copy pages: destroying the last of
+// them is not the user closing the app (on Linux/Windows that used to quit before the editor ever opened).
+app.on('window-all-closed', () => { if (process.platform !== 'darwin' && editorOpened) app.quit(); });
