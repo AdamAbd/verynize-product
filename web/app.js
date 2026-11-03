@@ -9,7 +9,7 @@ function validate(d){return window.VerynizeDocument.prepareDocument(d,defaults)}
 
 const subscribers=new Set();let shaderCleanup=[];
 const page=()=>design.pages.find(p=>p.id===design.activePage),nodes=()=>page().nodes,chosen=()=>nodes().find(n=>selection.has(n.id));
-function save(){if(window.documentSafety.holdSave(past.length>0))return;if(window.cloudWorkspace?.isConnected()||window.cloudAccount?.get()){localStorage.removeItem('verynize-v2');return;}try{localStorage.setItem('verynize-v2',JSON.stringify(design))}catch{$('footer').textContent='Device storage full. Save design to preserve your changes.'}}
+function save(){if(window.documentSafety.holdSave(past.length>0))return;if(window.cloudAccount?.get()){localStorage.removeItem('verynize-v2');return;}try{localStorage.setItem('verynize-v2',JSON.stringify(design))}catch{$('footer').textContent='Device storage full. Save design to preserve your changes.'}}
 function checkpoint(){past.push(JSON.stringify(design));if(past.length>100)past.shift();future=[]}
 function descendants(id){const found=new Set([id]);let size;do{size=found.size;nodes().forEach(n=>{if(found.has(n.parentId))found.add(n.id)})}while(size!==found.size);return found}
 function options(select,values,current){select.replaceChildren();for(const [value,label] of values){const o=document.createElement('option');o.value=value;o.textContent=label;select.append(o)}select.value=current??''}

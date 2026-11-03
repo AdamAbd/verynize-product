@@ -193,6 +193,10 @@ try {
   const invitationMenu = '[data-row-menu="Actions for the invitation to budi@example.test"]';
   // A row menu opens on click; a click while the list refetches can be lost, so retry.
   const openMenu = async (trigger) => {
+    // The success toast can precede the previous menu's exit animation.
+    // Do not mistake that closing menu for the newly requested one.
+    if ((await page.locator(trigger).getAttribute("aria-expanded")) !== "true")
+      await page.locator("[role=menu]").waitFor({ state: "hidden" });
     for (let i = 0; i < 10; i++) {
       if ((await page.locator(trigger).getAttribute("aria-expanded")) !== "true")
         await page.locator(trigger).click();

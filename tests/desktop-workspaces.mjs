@@ -85,12 +85,16 @@ try {
   assert.ok(studio);
   assert.equal(await page.evaluate(() => window.cloudAccount.activeOrganization()), studio.id);
 
-  // Sharing a design creates the room in the active workspace.
-  await page.evaluate(() => window.fileLibrary.showEditor());
+  // New designs are stored immediately in the active workspace.
+  await page.locator("#library-new-file").click();
+  await page.locator("#text-prompt-input").fill("Studio design");
+  await page.locator("#text-prompt-ok").click();
+  await page.waitForFunction(() => window.design.getDocument().name === "Studio design");
   await openSharedDesign(page);
-  await page.locator("#cloud-create").click();
-  await page.waitForFunction(() =>
-    document.getElementById("cloud-invite").value.includes("token="),
+  await page.waitForFunction(
+    () =>
+      window.cloudWorkspace.isConnected() &&
+      document.getElementById("cloud-invite").value.includes("room="),
   );
   const roomId = new URLSearchParams(
     new URL(await page.locator("#cloud-invite").inputValue()).hash.slice(1),
