@@ -132,7 +132,7 @@ function claudeAccountFrom(status, config) {
   return { email, organization: /'s Organization$/.test(organization) ? '' : organization, plan: claudePlan({ subscriptionType: status?.subscriptionType, authMethod: method }), method };
 }
 
-async function providerAccounts({ home = os.homedir(), discover, lookup = findExecutable, spawnProcess } = {}) {
+async function providerAccounts({ home = os.homedir(), discover, lookup = findExecutable, spawnProcess, siwc = null } = {}) {
   const exec = { claude: await lookup('claude', home), codex: await lookup('codex', home), opencode: await lookup('opencode', home), cursor: await lookup('cursor-agent', home) };
   if (discover) for (const item of await discover().catch(() => [])) if (item?.available && item.path && Object.hasOwn(exec, item.id)) exec[item.id] = item.path;
   const claude = (async () => {
@@ -151,6 +151,7 @@ async function providerAccounts({ home = os.homedir(), discover, lookup = findEx
   const codex = (async () => {
     const entry = { id: 'codex', name: 'Codex', installed: !!exec.codex, loggedIn: false, accounts: [], hint: "This computer's Codex login. Your terminal and the Codex app use it too." };
     if (!exec.codex) return entry;
+    if (siwc) { const status = await siwc.status(); entry.loggedIn = status.loggedIn; entry.hint = 'Your ChatGPT connection for Verynize. Tokens stay on this Mac; your terminal login is separate.'; if (status.loggedIn) entry.accounts.push({ email: status.email, plan: status.plan, method: status.method, default: true }); return entry; }
     const result = await runCli(exec.codex, ['login', 'status'], { timeout: 15000, home, spawnProcess });
     entry.loggedIn = result.code === 0 && !/not logged in/i.test(result.stdout + result.stderr);
     if (entry.loggedIn) {
@@ -306,7 +307,8 @@ async function commandExists(command, home) {
 }
 
 class AgentTools {
-  constructor({ home = os.homedir(), discover = null, lookup = findExecutable, spawnProcess = spawn, userData, getRuntime = () => null } = {}) {
+  constructor({ home = os.homedir(), discover = null, lookup = findExecutable, spawnProcess = spawn, userData, getRuntime = () => null, siwc = null } = {}) {
+    this.siwc = siwc;
     Object.assign(this, { home, discover, lookup, spawnProcess, userData, getRuntime });
     this.logins = new Map();
   }
@@ -316,7 +318,7 @@ class AgentTools {
   }
   cli(agent, executable, args, options = {}) { return runCli(executable, args, { home: this.home === os.homedir() ? undefined : this.home, spawnProcess: this.spawnProcess, ...options }); }
 
-  accounts() { return providerAccounts({ home: this.home, discover: this.discover, lookup: this.lookup, spawnProcess: this.spawnProcess }); }
+  accounts() { return providerAccounts({ home: this.home, discover: this.discover, lookup: this.lookup, spawnProcess: this.spawnProcess, siwc: this.siwc }); }
 
   /** {agent, installed, servers, checked, error?}. `check` asks the CLI for live status (slower). */
   async listServers({ agent, check = false } = {}) {
@@ -457,8 +459,9 @@ class AgentTools {
   }
 
   // --- access -------------------------------------------------------------------------------------
-  getAccess() { return agentAccess.loadAccessSettings(this.userData); }
+  async getAccess() { const settings = await agentAccess.loadAccessSettings(this.userData); return this.siwc ? { ...settings, codexApps: false, codexComputerUse: false } : settings; }
   async setAccess(changes) {
+    if (this.siwc) changes = { ...changes, codexApps: false, codexComputerUse: false };
     const { previous, settings } = await agentAccess.saveAccessSettings(this.userData, changes);
     let stopped = [];
     if (previous.codexComputerUse && !settings.codexComputerUse) stopped = this.getRuntime()?.stopComputerUse?.() || [];
@@ -466,8 +469,8 @@ class AgentTools {
   }
 }
 
-function registerAgentTools(handle, win, { userData, getRuntime = () => null } = {}) {
-  const tools = new AgentTools({ userData, getRuntime });
+function registerAgentTools(handle, win, { userData, getRuntime = () => null, siwc = null } = {}) {
+  const tools = new AgentTools({ userData, getRuntime, siwc });
   handle('agentProviderAccounts', () => tools.accounts());
   handle('agentMcpList', options => tools.listServers(options || {}));
   handle('agentMcpAdd', options => tools.addServer(options || {}));

@@ -1,3 +1,4 @@
+import { useCodexConnection } from "./codex-connection";
 // Settings › Memory (ref 75): design preferences, what each agent remembers (desktop/agent-memory.cjs),
 // the home-folder instruction files chats load, personal instructions and VERYNIZE.md.
 // Element ids #settings-memory, #settings-save-memory and #settings-design-preference-* are test contracts.
@@ -108,6 +109,7 @@ function MemoryBlock({
 }
 
 export function MemoryView({ api }: { api: SettingsApi }) {
+  const { connected: codexConnected } = useCodexConnection();
   const ipc = memoryIpc();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [text, setText] = useState(agentWorkspace()?.getDefaults?.().instructions ?? "");
@@ -226,7 +228,7 @@ export function MemoryView({ api }: { api: SettingsApi }) {
               description="What your agents remember about you in every repository."
             >
               <div className="flex flex-col gap-4">
-                <Card data-memory-card="about-codex">
+                {codexConnected && <Card data-memory-card="about-codex">
                   <div className="py-3 text-sm text-foreground-3">
                     <AgentLabel agent="codex">Codex</AgentLabel>
                   </div>
@@ -261,7 +263,7 @@ export function MemoryView({ api }: { api: SettingsApi }) {
                       {plural(codex.skills, "skill")}
                     </p>
                   )}
-                </Card>
+                </Card>}
 
                 <Card data-memory-card="about-claude">
                   <div className="py-3 text-sm text-foreground-3">
@@ -337,7 +339,7 @@ export function MemoryView({ api }: { api: SettingsApi }) {
               description="Files in your home folder that agents read when a chat starts. Edit them in your editor."
             >
               <Card>
-                {(overview?.instructions ?? []).map((file) => (
+                {(overview?.instructions ?? []).filter((file) => file.agent !== "codex" || codexConnected).map((file) => (
                   <Row
                     key={file.id}
                     icon={
@@ -356,7 +358,7 @@ export function MemoryView({ api }: { api: SettingsApi }) {
                     }
                     description={[
                       `Read by ${file.readBy}`,
-                      file.sharedWith && `Verynize gives it to ${file.sharedWith} chats`,
+                      file.sharedWith && (codexConnected || !file.sharedWith.includes("Codex")) && `Verynize gives it to ${file.sharedWith} chats`,
                       !file.exists && "Not created yet",
                     ]
                       .filter(Boolean)

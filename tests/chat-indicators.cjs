@@ -16,6 +16,7 @@ const path = require('node:path');
   await fs.writeFile(path.join(home, '.codex/config.toml'), '[mcp_servers.rea]\ncommand = "rea"\n');
   const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, HOME: home, VERYNIZE_AGENT_HOME: home, VERYNIZE_DISABLE_AGENT_USAGE: '1', FAKE_CODEX_LOG: path.join(root, 'codex.log') };
   delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1'; delete env.CODEX_HOME;
+  await require('./helpers/chatgpt-provider.cjs').seedChatGPTAccount(path.join(root, 'profile'));
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });

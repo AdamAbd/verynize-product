@@ -1,6 +1,6 @@
 // Settings › Accounts: several Claude Code and Codex accounts side by side. "This Mac" is the computer's own
-// CLI login; every named account keeps its own private config folder (desktop/agent-profiles.cjs), signs in
-// through the installed CLI's browser flow, and can be the default or picked per chat in the chat's Autonomy panel.
+// Claude CLI login; Codex uses a separate SIWC connection. Every named account keeps its own private config folder (desktop/agent-profiles.cjs), signs in
+// through its browser flow, and can be the default or picked per chat in the chat's Autonomy panel.
 import { useCallback, useEffect, useState } from "react";
 import {
   CheckIcon,
@@ -51,8 +51,10 @@ function AccountRow({
   const profile = system ? undefined : id;
   const run = async (task: () => Promise<unknown> | undefined, done?: string) => {
     try {
-      await task();
-      if (done) toast(done);
+      const result = await task();
+      if (result && typeof result === "object" && "message" in result && typeof result.message === "string") toast(result.message);
+      else if (done) toast(done);
+      window.dispatchEvent(new Event("bd:agent-accounts-changed"));
       onChanged();
     } catch (error) {
       toast(errorText(error));
@@ -139,12 +141,13 @@ function AccountRow({
         ) : (
           <SettingsButton
             data-action="signin"
+            data-oai-siwc-button={agent === "codex" ? "" : undefined}
             variant="tint"
             disabled={status?.installed === false}
             onClick={() => void run(() => api?.startAgentLogin?.({ agent, profile }))}
           >
             <LogInIcon />
-            Sign in
+            {agent === "codex" ? "Continue with ChatGPT" : "Sign in"}
           </SettingsButton>
         )}
         {!isDefault && (
@@ -260,7 +263,7 @@ export function AccountsPage() {
     <>
       <PageHeader
         title="Accounts"
-        description="Keep several Claude Code and Codex accounts. Each named account signs in separately in its own private folder; pick one per chat from the chat's Autonomy panel."
+        description="Connect ChatGPT to Verynize or use Claude Code. Each account stays private on this Mac; pick one per chat from the Autonomy panel. Codex terminal sign-ins are separate."
         action={
           <SettingsButton id="accounts-refresh" onClick={reload}>
             <RotateCwIcon />
