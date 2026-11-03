@@ -49,7 +49,7 @@ try {
           created: 1,
           messages: [
             { role: "user", text: "Make a landing page", at: 1 },
-            { role: "assistant", text: "The design is ready", at: 2 },
+            { role: "assistant", text: "The design is ready " + "🌴".repeat(300000), at: 2 },
           ],
         },
       ]),
@@ -110,7 +110,7 @@ try {
     await page.evaluate(() =>
       window.agentWorkspace.getState().messages.map((message) => message.text),
     ),
-    ["Make a landing page", "The design is ready"],
+    ["Make a landing page", "The design is ready " + "🌴".repeat(300000)],
   );
   const fileId = await desktop.evaluate(async () => {
     const document = {
