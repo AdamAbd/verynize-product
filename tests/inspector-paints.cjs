@@ -139,6 +139,8 @@ const LOGO = svg(
         layout: "free",
       },
     ]);
+    // count() does not wait: let the inspector render the selection first (slow on software-rendered CI).
+    await fill.locator("[data-paint]").first().waitFor();
     assert.equal(
       await fill.locator("[data-paint]").count(),
       1,
