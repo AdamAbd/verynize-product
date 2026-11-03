@@ -2,6 +2,7 @@
 // a .fig file dropped on the canvas opens as a new document with its embedded image; a .pen drop is refused
 // with an explanation; the Figma dialog saves the OAuth client ID (Settings › Connections › Figma).
 const { _electron } = require(process.cwd() + "/node_modules/@playwright/test");
+const { mod } = require("./helpers/keys.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -11,7 +12,7 @@ const path = require("node:path");
   const profile = await fs.mkdtemp(os.tmpdir() + "/bd-figma-"),
     env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  env.VERYNIZE_SKIP_ONBOARDING = '1';
+  env.VERYNIZE_SKIP_ONBOARDING = "1";
   const app = await _electron.launch({
     timeout: 20000,
     env,
@@ -40,7 +41,7 @@ const path = require("node:path");
     );
     await p.evaluate(() => window.design.setSelection([]));
     await p.locator("#workspace").click({ position: { x: 40, y: 300 } });
-    await p.keyboard.press("Meta+V");
+    await p.keyboard.press(mod("V"));
     await p.waitForFunction(
       (n) => {
         const d = window.design.getDocument();
@@ -91,7 +92,7 @@ const path = require("node:path");
     assert.match(await footer(), /Pasted 15 Figma layers/);
     // One undo removes the whole paste.
     await p.evaluate(() => window.design.setSelection([]));
-    await p.keyboard.press("Meta+Z");
+    await p.keyboard.press(mod("Z"));
     await p.waitForFunction((n) => {
       const d = window.design.getDocument();
       return d.pages.find((x) => x.id === d.activePage).nodes.length === n;
@@ -102,7 +103,7 @@ const path = require("node:path");
       clipboard.write({ html: "<span>(figma)AAAA(/figma)</span>" });
     });
     await p.locator("#workspace").click({ position: { x: 40, y: 300 } });
-    await p.keyboard.press("Meta+V");
+    await p.keyboard.press(mod("V"));
     await p.waitForFunction(() => window.figmaPaste.lastError !== "");
     assert.match(
       await p.evaluate(() => window.figmaPaste.lastError),

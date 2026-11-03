@@ -2,6 +2,7 @@
 // flip in the third tool group (distribute only for 3+ layers), the constraint menu, the diagram and Z "Auto".
 const {_electron} = require('@playwright/test');
 const { moveOffCursor } = require("./helpers/off-cursor.cjs");
+const { mod } = require("./helpers/keys.cjs");
 const {waitForUiReady} = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
@@ -103,7 +104,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     near((await box('b')).y, (200 - 30) / 2, 'align middle centres it vertically');
     await section.locator('#precision-left').click();
     near((await box('b')).x, 2, 'align left puts it inside the left border');
-    await page.keyboard.press('Meta+z');
+    await page.keyboard.press(mod('z'));
     near((await box('b')).x, 300 - 2 - 60, 'one undo step per align');
 
     // Flip toggles flipX / flipY on the selection.
@@ -154,7 +155,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.mouse.move(5, 5);
     await page.locator('#canvas-wrap').focus().catch(() => {});
     await page.evaluate(() => document.activeElement?.blur?.());
-    await page.keyboard.press('Meta+Shift+Alt+KeyF');
+    await page.keyboard.press(mod('Shift+Alt+KeyF'));
     const p2 = await node('p');
     assert.deepEqual([p2.x, p2.y, p2.w, p2.h], [30, 40, 80, 60], '⌘⇧⌥F resizes the frame to fill around its child');
     assert.equal((await page.evaluate(() => window.design.getDocument().pages[0].nodes.find(n => n.id === 'c'))).x, 0);

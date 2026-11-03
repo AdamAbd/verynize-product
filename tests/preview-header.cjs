@@ -7,7 +7,9 @@
 // review card in edit access.
 // PREVIEW_HEADER_SHOTS=/dir saves 1440×870 screenshots of the states.
 const { _electron } = require('@playwright/test');
+const { mod } = require("./helpers/keys.cjs");
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
+const { seedChatGPTAccount } = require('./helpers/chatgpt-provider.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -35,6 +37,8 @@ process.on('SIGTERM',()=>process.exit(0));
   await fs.chmod(path.join(bin, 'codex'), 0o755);
   const env = { ...process.env, ...identity, PATH: bin + path.delimiter + process.env.PATH, VERYNIZE_WORKSPACES_DIR: workspaces, VERYNIZE_BRANCH_PREFIX: 'verynize', VERYNIZE_SKIP_ONBOARDING: '1' };
   delete env.ELECTRON_RUN_AS_NODE;
+  // Chat turns check the Codex sign-in first: a preauthorized local SIWC account, never the developer's login.
+  await seedChatGPTAccount(path.join(root, 'profile'));
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`, '--force-device-scale-factor=2', '--force-color-profile=srgb'], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
@@ -181,7 +185,7 @@ process.on('SIGTERM',()=>process.exit(0));
     await page.waitForFunction(() => { const ids = window.design.getSelection(); return ids.length === 1 && window.design.getDocument().pages.some(p => p.nodes.some(n => n.id === ids[0] && n.preview)); });
     await page.evaluate(() => { window.previewTab = { open: id => { window.openedTab = id; } }; });
     await page.locator('#project-prompt').blur().catch(() => {});
-    await page.keyboard.press('Meta+Alt+KeyP');
+    await page.keyboard.press(mod('Alt+KeyP'));
     await page.waitForFunction(() => !!window.openedTab);
     assert.equal(await page.evaluate(() => window.design.getDocument().pages.flatMap(p => p.nodes).find(n => n.id === window.openedTab)?.preview?.root), chatRoot, '⌘⌥P opens this preview in a tab');
 

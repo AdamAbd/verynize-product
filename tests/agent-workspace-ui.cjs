@@ -4,6 +4,7 @@
 // tests/fixtures/fake-codex.cjs (auto-approve + transcript notice), and the template gallery / shared
 // component library. Provider CLIs are scripted fixtures; no account or model is used.
 const { _electron } = require("@playwright/test");
+const { mod } = require("./helpers/keys.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -238,7 +239,7 @@ else process.exit(0);
         );
         throw error;
       });
-    await page.keyboard.press("Meta+Shift+F");
+    await page.keyboard.press(mod("Shift+F"));
     await page.locator("#global-search").waitFor();
     await page.keyboard.press("Escape");
 

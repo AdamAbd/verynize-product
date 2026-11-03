@@ -1,6 +1,7 @@
 // Wonder canvas parity (design/wonder/canvas-audit): toolbar tool set (T1), zoom label menu (T6), `?` help menu (T5),
 // keyboard shortcuts drawer (K1), ⌘K command palette and the Text tool defaults (TX1).
 const {_electron} = require(process.cwd() + '/node_modules/@playwright/test');
+const { MOD_LABEL, mod } = require("./helpers/keys.cjs");
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const { moveOffCursor } = require("./helpers/off-cursor.cjs");
 const assert = require('node:assert/strict');
@@ -15,7 +16,7 @@ const nodes = [
 (async () => {
   const profile = await fs.mkdtemp(os.tmpdir() + '/bd-help-'), env = {...process.env};
   delete env.ELECTRON_RUN_AS_NODE; env.VERYNIZE_SKIP_ONBOARDING = '1';
-  const app = await _electron.launch({timeout: 20000, env, args: ['.', `--user-data-dir=${profile}`]});
+  const app = await _electron.launch({timeout: 20000, env, args: ['.', `--user-data-dir=${profile}`, '--force-device-scale-factor=2']}); // 2×, as on a Retina Mac: text metrics below are measured at 2×
   try {
     const p = await app.firstWindow({timeout: 15000}); await moveOffCursor(app);
     await waitForUiReady(p);
@@ -146,10 +147,10 @@ const nodes = [
     const sections = await p.locator('#shortcuts-drawer [data-shortcut-section]').evaluateAll(list => list.map(s => s.dataset.shortcutSection));
     assert.deepEqual(sections, ['APPLICATION', 'TOOLS', 'EDIT', 'SELECTION', 'VIEW', 'TRANSFORM', 'ALIGNMENT', 'MOVEMENT', 'TEXT EDITING']);
     const row = label => p.locator(`#shortcuts-drawer [data-shortcut-section] [data-shortcut="${label}"]`);
-    assert.equal((await row('Command palette').innerText()).replace(/\s+/g, ''), 'Commandpalette⌘K');
+    assert.equal((await row('Command palette').innerText()).replace(/\s+/g, ''), `Commandpalette${MOD_LABEL}K`);
     assert.equal((await row('Eye dropper (alt)').innerText()).replace(/\s+/g, ''), 'Eyedropper(alt)⌃C');
     assert.equal((await row('Zoom to 100%').innerText()).replace(/\s+/g, ''), 'Zoomto100%⇧0');
-    assert.equal((await row('Frame selection (alt)').innerText()).replace(/\s+/g, ''), 'Frameselection(alt)⌘⌥G');
+    assert.equal((await row('Frame selection (alt)').innerText()).replace(/\s+/g, ''), `Frameselection(alt)${MOD_LABEL}⌥G`);
     assert.equal(await p.locator('#shortcuts-drawer > div > [data-shortcut="Command palette"]').count(), 1, 'pinned palette row');
     await p.locator('#shortcuts-search').fill('zoom');
     const found = await p.locator('#shortcuts-drawer [data-shortcut-section] [data-shortcut]').evaluateAll(list => list.map(r => r.dataset.shortcut));
@@ -164,7 +165,7 @@ const nodes = [
 
     // ---- ⌘K: command palette over the registry (no longer the Files screen).
     await p.mouse.click(700, 600);
-    await p.keyboard.press('Meta+KeyK');
+    await p.keyboard.press(mod('KeyK'));
     await p.locator('[data-command-palette]').waitFor();
     assert.equal(await p.evaluate(() => document.body.classList.contains('files-view')), false, '⌘K does not open Files');
     await p.locator('[data-command-palette] [cmdk-input]').fill('select all');
@@ -172,7 +173,7 @@ const nodes = [
     await p.keyboard.press('Enter');
     await p.locator('[data-command-palette]').waitFor({state: 'detached'});
     await p.waitForFunction(() => window.design.getSelection().length === 2);
-    await p.keyboard.press('Meta+KeyK');
+    await p.keyboard.press(mod('KeyK'));
     await p.locator('[data-command-palette] [cmdk-input]').fill('keyboard shortcuts');
     await p.locator('[data-command-id="app.shortcuts"]').click();
     await p.locator('#shortcuts-drawer').waitFor();
@@ -181,7 +182,7 @@ const nodes = [
 
     // ---- P2: Wonder's palette geometry, empty state (Recent, Application), sections, highlight, ↓, Esc.
     await p.evaluate(() => window.design.setSelection(['dark']));
-    await p.keyboard.press('Meta+KeyK');
+    await p.keyboard.press(mod('KeyK'));
     const palette = p.locator('[data-command-palette]');
     await palette.waitFor();
     const paletteInput = p.locator('[data-command-palette] [cmdk-input]');
@@ -210,7 +211,7 @@ const nodes = [
     assert.ok(listed.some(([title, ids]) => title === 'Workspace' && ids.includes('layout.details')), 'toolbar views match "select"');
     assert.equal(await activeRow(), 'select.all');
     assert.equal(await p.locator('[data-command-id="select.all"] .text-foreground-2').first().innerText(), 'Select', 'the match is highlighted');
-    assert.equal((await p.locator('[data-command-id="select.all"] kbd').allInnerTexts()).join(''), '⌘A', 'keycaps');
+    assert.equal((await p.locator('[data-command-id="select.all"] kbd').allInnerTexts()).join(''), `${MOD_LABEL}A`, 'keycaps');
     await p.keyboard.press('ArrowDown');
     assert.equal(await activeRow(), 'clipboard.pasteOverSelection', 'Wonder P2-keyboard-focused');
     await paletteInput.fill('dark');
@@ -221,7 +222,7 @@ const nodes = [
     await p.keyboard.press('Escape');
     await palette.waitFor({state: 'detached'});
     assert.deepEqual(await p.evaluate(() => window.design.getSelection()), ['dark'], 'Esc keeps the selection');
-    await p.keyboard.press('Meta+KeyK');
+    await p.keyboard.press(mod('KeyK'));
     await paletteInput.fill('light');
     await p.keyboard.press('Enter');
     await palette.waitFor({state: 'detached'});
@@ -266,7 +267,7 @@ const nodes = [
     assert.equal(t.text, 'Hello');
     assert.ok(t.w > 10 && t.h > 10 && t.h < 20, `hug size measured (${t.w} × ${t.h})`);
     await p.evaluate(() => { document.activeElement?.blur?.(); });
-    await p.keyboard.press('Meta+KeyZ');
+    await p.keyboard.press(mod('KeyZ'));
     assert.equal((await created()).length, 0, 'one undo removes the new text');
     // Drag: a fixed box of the gesture size (zoom-independent world units).
     const zoom = await p.evaluate(() => window.design.getCamera().zoom);
@@ -283,9 +284,9 @@ const nodes = [
     await p.evaluate(() => window.design.addNode('text', {text: 'Bye', x: 40, y: 40, parentId: 'dark'}));
     await p.keyboard.press('Enter');
     await p.locator('#canvas [data-text-editing]').waitFor();
-    await p.keyboard.press('Meta+KeyA'); await p.keyboard.press('Backspace'); await p.keyboard.press('Escape');
+    await p.keyboard.press(mod('KeyA')); await p.keyboard.press('Backspace'); await p.keyboard.press('Escape');
     await p.waitForFunction(() => !window.design.getDocument().pages[0].nodes.some(n => n.type === 'text'));
-    await p.keyboard.press('Meta+KeyZ');
+    await p.keyboard.press(mod('KeyZ'));
     assert.equal((await created())[0]?.text, 'Bye', 'undo restores the emptied layer');
 
     assert.deepEqual(errors, []);

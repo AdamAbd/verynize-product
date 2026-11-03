@@ -1,4 +1,5 @@
 const { waitForUiReady } = require("./helpers/ui-ready.cjs");
+const { mod } = require("./helpers/keys.cjs");
 const { _electron: electron } = require("@playwright/test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
@@ -76,7 +77,7 @@ const os = require("node:os");
     assert.equal(at.index, start.index);
     assert.equal(at.length, start.length + 1, "only the settings entry was ever added");
     // ⌘, opens; Escape closes.
-    await page.keyboard.press("Meta+Comma");
+    await page.keyboard.press(mod("Comma"));
     at = await expectShell("/settings/preferences");
     assert.equal(at.index, start.index + 1);
     await page.keyboard.press("Escape");

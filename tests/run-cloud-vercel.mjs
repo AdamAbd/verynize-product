@@ -1,17 +1,14 @@
-// `npm run test:cloud:vercel`: the scenarios of `npm run test:cloud`, read from package.json so the
-// lists cannot drift, run against the Vercel runtime (CLOUD_RUNTIME=vercel, tests/cloud-harness.mjs):
+// The scenarios of `npm run test:cloud`, read from scripts/test-manifest.mjs so the lists cannot
+// drift, run against the Vercel runtime (CLOUD_RUNTIME=vercel, tests/cloud-harness.mjs):
 // three function instances, a local redis-server and a libSQL file, requests spread over the
 // instances. Then the multi-instance guarantees (tests/cloud-vercel-instances.mjs).
+// `npm run test:cloud:vercel` runs the same entries through scripts/run-tests.mjs --group cloud-vercel.
 // Any other cloud test runs the same way: CLOUD_RUNTIME=vercel node tests/<file>.mjs
 import { spawnSync } from "node:child_process";
-import fs from "node:fs";
+import { CLOUD_SCENARIOS } from "../scripts/test-manifest.mjs";
 
 const root = new URL("../", import.meta.url);
-const scripts = JSON.parse(fs.readFileSync(new URL("package.json", root), "utf8")).scripts;
-const files = [...scripts["test:cloud"].matchAll(/node (tests\/[\w-]+\.mjs)/g)].map(
-  (match) => match[1],
-);
-if (!files.length) throw new Error("No cloud tests found in the test:cloud script");
+const files = [...CLOUD_SCENARIOS];
 files.push("tests/cloud-vercel-instances.mjs");
 for (const file of files) {
   console.log(`[vercel] ${file}`);

@@ -3,6 +3,7 @@
 // a 40 px gap) and the next free name for duplicates and Alt-drag copies (web/clipboard-commands.js).
 const {_electron} = require('@playwright/test');
 const { moveOffCursor } = require("./helpers/off-cursor.cjs");
+const { mod } = require("./helpers/keys.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
@@ -56,7 +57,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
 
     // ---- K2 ⌘D: to the right of the original with a 40 px gap, Y unchanged, next free name, stacked above ----
     await seed([frame('big', 'Frame', 0, 0, 420, 390), frame('a', 'Frame', 515, -133), rect('top', 900, 0)], ['a']);
-    await page.keyboard.press('Meta+KeyD');
+    await page.keyboard.press(mod('KeyD'));
     let list = await nodesOf();
     let copy = list[2];
     assert.equal(list.length, 4);
@@ -64,10 +65,10 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal(copy.x, 675, 'Wonder: 120 wide at X515 → X675'); assert.equal(copy.y, -133, 'Y unchanged');
     assert.equal(copy.name, 'Frame 2', 'next free name');
     assert.deepEqual(await selection(), [copy.id], 'the copy is selected');
-    await page.keyboard.press('Meta+KeyD');
+    await page.keyboard.press(mod('KeyD'));
     list = await nodesOf();
     assert.equal(list[3].x, 835); assert.equal(list[3].name, 'Frame 3');
-    await page.keyboard.press('Meta+KeyZ');
+    await page.keyboard.press(mod('KeyZ'));
     assert.equal((await nodesOf()).length, 4, 'one undo step per duplicate');
     // Children: same parent, offset inside it; auto-layout children slot in after the original.
     await seed([frame('box', 'Box', 0, 0, 600, 400), rect('kid', 20, 30, 100, 50, {parentId: 'box'}), frame('stack', 'Stack', 0, 500, 400, 120, {layout: 'flex', gap: 10, padding: 10}), rect('s1', 0, 0, 60, 60, {parentId: 'stack'}), rect('s2', 0, 0, 60, 60, {parentId: 'stack'})], ['kid']);
@@ -96,21 +97,21 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
 
     // ---- Paste here: top-left of the pasted bounds at the given document point, top level ----
     await seed([frame('host', 'Host', 0, 0, 600, 400), rect('p1', 20, 40, 100, 80, {parentId: 'host'}), rect('p2', 160, 60, 50, 50, {parentId: 'host'})], ['p1', 'p2']);
-    await page.keyboard.press('Meta+KeyC');
+    await page.keyboard.press(mod('KeyC'));
     assert.equal(await run('clipboard.pasteHere', {x: 1000, y: 700}), true);
     list = await nodesOf();
     const here = list.slice(-2);
     assert.deepEqual(here.map(n => [n.x, n.y, n.parentId]), [[1000, 700, null], [1140, 720, null]], 'bounds top-left at the point, offsets kept');
     assert.deepEqual((await selection()).toSorted(), here.map(n => n.id).toSorted());
-    await page.keyboard.press('Meta+KeyZ');
+    await page.keyboard.press(mod('KeyZ'));
     assert.equal((await nodesOf()).length, 3, 'paste here is one undo step');
     console.log('PASS Paste here pastes at the point');
 
     // ---- ⌘⇧V Paste over selection: same parent, on top of the selection, centred on it ----
     await seed([rect('src', 2000, 0, 100, 80, {color: '#ff0000'}), frame('host', 'Host', 0, 0, 600, 400), rect('t', 100, 100, 200, 120, {parentId: 'host'}), rect('above', 400, 300, 50, 50, {parentId: 'host'})], ['src']);
-    await page.keyboard.press('Meta+KeyC');
+    await page.keyboard.press(mod('KeyC'));
     await page.evaluate(() => window.design.setSelection(['t']));
-    await page.keyboard.press('Meta+Shift+KeyV');
+    await page.keyboard.press(mod('Shift+KeyV'));
     list = await nodesOf();
     assert.equal(list.length, 5);
     const over = list[3];
@@ -120,16 +121,16 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.deepEqual(await selection(), [over.id]);
     // Nothing selected: paste in place.
     await page.evaluate(() => window.design.setSelection([]));
-    await page.keyboard.press('Meta+Shift+KeyV');
+    await page.keyboard.press(mod('Shift+KeyV'));
     await page.waitForFunction(() => window.design.getDocument().pages[0].nodes.length === 6);
     const inPlace = (await nodesOf()).at(-1); assert.deepEqual([inPlace.x, inPlace.y, inPlace.parentId], [2000, 0, null]);
     console.log('PASS ⌘⇧V pastes over the selection');
 
     // ---- ⌘⇧R Paste to replace: each selected layer becomes the clipboard, same parent, position and slot ----
     await seed([rect('src', 2000, 0, 90, 90, {color: '#00ff00'}), frame('host', 'Host', 0, 0, 600, 400), rect('r1', 30, 40, 200, 120, {parentId: 'host'}), rect('keep', 300, 40, 50, 50, {parentId: 'host'}), rect('r2', 700, 500, 60, 60)], ['src']);
-    await page.keyboard.press('Meta+KeyC');
+    await page.keyboard.press(mod('KeyC'));
     await page.evaluate(() => window.design.setSelection(['r1', 'r2']));
-    await page.keyboard.press('Meta+Shift+KeyR');
+    await page.keyboard.press(mod('Shift+KeyR'));
     list = await nodesOf();
     assert.ok(!list.some(n => n.id === 'r1' || n.id === 'r2'), 'replaced layers are gone');
     const inHost = list.filter(n => n.parentId === 'host');
@@ -138,13 +139,13 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     const topCopy = list.find(n => !n.parentId && n.id !== 'src' && n.id !== 'host');
     assert.deepEqual([topCopy.x, topCopy.y], [700, 500]);
     assert.deepEqual((await selection()).toSorted(), [inHost[0].id, topCopy.id].toSorted());
-    await page.keyboard.press('Meta+KeyZ');
+    await page.keyboard.press(mod('KeyZ'));
     assert.deepEqual((await nodesOf()).map(n => n.id), ['src', 'host', 'r1', 'keep', 'r2'], 'one undo step restores');
     console.log('PASS ⌘⇧R replaces each selected layer');
 
     // ---- Menu Paste (layer context menu): into the selected frame, centred (Wonder P3-context-paste-result) ----
     await seed([rect('src', 2000, 0, 100, 100, {color: '#ffffff'}), frame('target', 'Target', 0, 0, 300, 300), rect('inside', 10, 10, 20, 20, {parentId: 'target'})], ['src']);
-    await page.keyboard.press('Meta+KeyC');
+    await page.keyboard.press(mod('KeyC'));
     await page.evaluate(() => window.design.setSelection(['target']));
     const targetAt = await screen(250, 250);
     await page.mouse.click(targetAt.x, targetAt.y, {button: 'right'});
@@ -157,7 +158,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.deepEqual([child.x, child.y, child.w, child.h], [100, 100, 100, 100], 'Wonder: W100 H100 X100 Y100 in a 300 × 300 frame');
     assert.deepEqual(list.filter(n => n.parentId === 'target').map(n => n.id), ['inside', child.id], 'on top of the frame\'s children');
     assert.deepEqual(await selection(), [child.id]);
-    await page.keyboard.press('Meta+KeyZ');
+    await page.keyboard.press(mod('KeyZ'));
     assert.equal((await nodesOf()).length, 3, 'menu Paste is one undo step');
     // Not a frame: the canvas paste (same parent rules as ⌘V).
     await page.evaluate(() => window.design.setSelection(['inside']));
@@ -185,7 +186,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     async function copiedPrompt(ids, blocks) {
       await page.evaluate(ids => window.design.setSelection(ids), ids);
       await clearClipboard();
-      await page.keyboard.press('Meta+Shift+Alt+KeyC');
+      await page.keyboard.press(mod('Shift+Alt+KeyC'));
       let text = '';
       for (let i = 0; i < 80 && (text.match(/```tsx/g) || []).length < blocks; i++) { await page.waitForTimeout(100); text = await readClipboard(); }
       return text;
@@ -228,15 +229,15 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     // ---- Copy as code ⌘⇧C (Wonder P1-copy-code.txt) and Copy styles / Paste styles shortcuts ----
     await seed([rect('s', 0, 0, 100, 80, {color: '#123456', radius: 7}), rect('d', 200, 0)], ['s']);
     await clearClipboard();
-    await page.keyboard.press('Meta+Shift+KeyC');
+    await page.keyboard.press(mod('Shift+KeyC'));
     let code = '';
     for (let i = 0; i < 50 && !code; i++) { code = await readClipboard(); await page.waitForTimeout(100); }
     assert.match(code, /^\/\*\*\n \* Made with Verynize\n \* verynize:\/\/node\/\S+\n \* [A-Z][a-z]{2} \d{1,2}, \d{4}\n \*\/\n/, 'Made with Verynize header');
     assert.match(code, /export default function S\(\) \{\n {2}return \(\n {4}<>\n {6}<style>\{"\* \{ box-sizing: border-box; \}"\}<\/style>\n {6}<div [^\n]*className="[^"]*bg-\[#123456\]/, 'fragment, reset, Tailwind classes');
     assert.match(code, /<\/>\n {2}\);\n\}$/, 'ends with the component, no trailing newline');
-    await page.keyboard.press('Meta+Alt+KeyC');
+    await page.keyboard.press(mod('Alt+KeyC'));
     await page.evaluate(() => window.design.setSelection(['d']));
-    await page.keyboard.press('Meta+Alt+KeyV');
+    await page.keyboard.press(mod('Alt+KeyV'));
     const styled = await node('d'); assert.equal(styled.color, '#123456'); assert.equal(styled.radius, 7);
     console.log('PASS ⌘⇧C, ⌘⌥C and ⌘⌥V');
 
