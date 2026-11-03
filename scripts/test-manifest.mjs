@@ -6,7 +6,7 @@
 //   file       test file, relative to the repo root (also the entry id unless `id` is set)
 //   cmd        command line (default: "node --test <file>" for node:test files, else "node <file>")
 //   group      canvas | desktop | integrations | ux | cloud | cloud-node | web | e2e-cloud
-//              (and the manual groups cloud-vercel | package, run only when named with --group)
+//              (and the manual groups cloud-vercel | web-nitro | package, run only when named with --group)
 //   lane       node | electron (needs a display, xvfb on headless Linux) | cloud (Miniflare/workerd
 //              or a Node cloud server) | serial (runs alone)
 //   covers     globs of source files the test exercises, on top of the files it imports (the runner
@@ -271,6 +271,7 @@ const canvas = [
   electron("tests/canvas-transform.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-interactions.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-clipboard.cjs", "canvas", AREA.canvas, CLIP),
+  electron("tests/canvas-image-drop.cjs", "canvas", [...AREA.canvas, "web/image-drop.js"], CLIP),
   electron("tests/canvas-context-menu.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/file-thumbnail.cjs", "canvas", [
     ...isl("home"),
@@ -369,10 +370,12 @@ const desktop = [
     "agent-commands",
     "agent-live-status",
     "agent-accounts-tools",
+    "codex-sign-in",
     "workspace-search-moves",
     "template-packs",
   ].map((name) => unit(`tests/${name}.cjs`, "desktop")),
   electron("tests/agent-chat.cjs", "desktop", AREA.chat),
+  electron("tests/codex-sign-in-ui.cjs", "desktop", AREA.chat),
   electron("tests/agent-workspace-ui.cjs", "desktop", [...AREA.chat, ...AREA.code]),
   electron("tests/chat-composer-menu.cjs", "desktop", AREA.chat),
   electron("tests/chat-indicators.cjs", "desktop", AREA.chat),
@@ -448,19 +451,35 @@ const ux = [
   electron("tests/settings-route.cjs", "ux", [...AREA.settings, ...AREA.shell]),
   electron("tests/shell-routes.cjs", "ux", AREA.shell),
   electron("tests/ui-ready.cjs", "ux", AREA.shell),
+  electron("tests/panel-resize.cjs", "ux", AREA.shell),
   electron("tests/web-platform.cjs", "ux", [
     ...AREA.shell,
     "web/platform.js",
     "web/src/lib/platform.ts",
   ]),
+  electron("tests/storage-limits-ux.mjs", "ux", [
+    ...AREA.cloudRenderer,
+    ...AREA.document,
+    ...isl("storage"),
+    "web/storage-limits.js",
+  ]),
+  electron(
+    "tests/share-popover.cjs",
+    "ux",
+    [...AREA.cloudRenderer, ...isl("share"), ...isl("chrome")],
+    CLIP,
+  ),
 ];
 
 /** The cloud scenarios; run on workerd (group cloud), on Node (cloud-node) and on Vercel (cloud-vercel). */
 export const CLOUD_SCENARIOS = [
   "tests/cloud-rooms.mjs",
+  "tests/cloud-room-pages.mjs",
   "tests/cloud-auth.mjs",
+  "tests/cloud-web-access.mjs",
   "tests/cloud-auth-bridge.mjs",
   "tests/cloud-orgs.mjs",
+  "tests/cloud-share.mjs",
   "tests/cloud-directory-migration.mjs",
   "tests/cloud-merge.mjs",
   "tests/cloud-accounts.mjs",
@@ -468,7 +487,11 @@ export const CLOUD_SCENARIOS = [
   "tests/cloud-apps.mjs",
   "tests/cloud-email.mjs",
   "tests/cloud-mcp.mjs",
+  "tests/cloud-ai.mjs",
+  "tests/cloud-ai-cancel.mjs",
+  "tests/cloud-ai-durable.mjs",
   "tests/cloud-assets.mjs",
+  "tests/cloud-pages-assets.mjs",
 ];
 const cloud = CLOUD_SCENARIOS.map((file) => ({
   file,
@@ -494,29 +517,42 @@ const cloudVercel = [...CLOUD_SCENARIOS, "tests/cloud-vercel-instances.mjs"].map
   manual: "needs redis-server; run with --group cloud-vercel (npm run test:cloud:vercel)",
 }));
 
+// Each builds the web app (vp build writes .cloudflare/output, dist/ and web-start/src/routeTree.gen.ts;
+// web-ai-chat also rebuilds web/dist), so they hold one lock.
+const webBuild = (file, covers, extra = {}) => ({
+  file,
+  group: "web",
+  lane: "node",
+  covers: [...AREA.web, ...covers],
+  locks: ["vp-build"],
+  timeoutMs: 15 * 60_000,
+  ...extra,
+});
+const AI = ["cloud/ai*.js", "web-start/**", "server/node.mjs", "tests/helpers/fake-openrouter.mjs"];
 const web = [
-  // Both build the web app (vp build writes .cloudflare/output, dist/ and web-start/src/routeTree.gen.ts).
-  {
-    file: "tests/web-cloudflare.mjs",
-    group: "web",
-    lane: "node",
-    covers: AREA.web,
-    locks: ["vp-build"],
-    timeoutMs: 15 * 60_000,
-  },
-  {
-    file: "tests/web-node.mjs",
-    group: "web",
-    lane: "node",
-    covers: AREA.web,
-    locks: ["vp-build"],
-    timeoutMs: 15 * 60_000,
-  },
+  webBuild("tests/web-cloudflare.mjs", []),
+  webBuild("tests/web-node.mjs", []),
+  webBuild("tests/ai-routing.mjs", [...AI, "api/**", "vercel.json", "cloud/platform/**"]),
+  webBuild("tests/web-ai-chat.mjs", [...AI, "web/src/lib/agent-service.ts", ...isl("chat")]),
+  webBuild("tests/web-nitro.mjs", ["vite.nitro.config.ts", "web-start/nitro/**"], {
+    group: "web-nitro",
+    manual: "opt-in Nitro build; run with --group web-nitro (npm run test:web:nitro)",
+  }),
 ];
 
 const e2eCloud = [
   electron("tests/cloud-desktop.mjs", "e2e-cloud", AREA.cloudRenderer),
+  electron("tests/cloud-pages-desktop.mjs", "e2e-cloud", [
+    ...AREA.cloudRenderer,
+    "web/page-loader.js",
+  ]),
   electron("tests/cloud-files-desktop.mjs", "e2e-cloud", [...AREA.cloudRenderer, ...isl("home")]),
+  electron(
+    "tests/share-collab.mjs",
+    "e2e-cloud",
+    [...AREA.cloudRenderer, ...isl("share"), ...isl("collab")],
+    CLIP,
+  ),
   electron("tests/cloud-assets-desktop.mjs", "e2e-cloud", [
     ...AREA.cloudRenderer,
     "integrations/assets.mjs",

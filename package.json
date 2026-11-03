@@ -35,7 +35,7 @@
     "test:canvas": "node scripts/run-tests.mjs --all --group canvas",
     "test:desktop": "node scripts/run-tests.mjs --all --group desktop",
     "test:web": "node scripts/run-tests.mjs --all --group web",
-    "test:web:nitro": "node tests/web-nitro.mjs",
+    "test:web:nitro": "node scripts/run-tests.mjs --all --group web-nitro",
     "test:integrations": "node scripts/run-tests.mjs --all --group integrations",
     "test:cloud": "node scripts/run-tests.mjs --all --group cloud",
     "test:cloud:node": "node scripts/run-tests.mjs --all --group cloud-node",
