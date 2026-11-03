@@ -321,7 +321,7 @@ function canvasShortcut(event: KeyboardEvent): boolean {
   const mod = mac ? event.metaKey : event.ctrlKey;
   // Plain keys (tools, nudges, Delete, opacity digits) only ever mean something to the canvas here.
   if (!mod && !event.altKey) return true;
-  if (event.metaKey && event.altKey && event.code === "KeyP") return false;
+  if (mod && event.altKey && event.code === "KeyP") return false;
   const key = /^Key[A-Z]$/.test(event.code)
     ? event.code.slice(3).toLowerCase()
     : /^(Digit|Numpad)\d$/.test(event.code)

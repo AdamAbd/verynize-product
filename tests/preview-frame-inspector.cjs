@@ -125,7 +125,14 @@ const http = require('node:http');
 
     // Clear preview data keeps cookies; the "including logins" variant clears them too. Both reload the frame.
     const live = () => page.frames().find(f => f.name() === 'verynize-live-preview');
-    const read = () => live().evaluate(() => ({local: localStorage.getItem('kept'), session: sessionStorage.getItem('tab'), cookie: document.cookie}));
+    // The reload can still be committing when `load` resolves on the old document (slow software rendering on
+    // Linux CI), so a read that lands mid-navigation retries on the new document.
+    const read = async () => {
+      for (let i = 0; ; i++) {
+        try { return await live().evaluate(() => ({local: localStorage.getItem('kept'), session: sessionStorage.getItem('tab'), cookie: document.cookie})); }
+        catch (e) { if (i >= 20 || !/context was destroyed|detached/i.test(e.message)) throw e; await new Promise(r => setTimeout(r, 100)); }
+      }
+    };
     await live().evaluate(() => window.seed());
     assert.deepEqual(await read(), {local: 'local', session: 'session', cookie: 'login=yes'});
     const clear = async label => {

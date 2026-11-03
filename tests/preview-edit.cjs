@@ -3,6 +3,7 @@
 // the discard-before-stop dialog, and element capture as native layers 100 px right of the preview.
 const { _electron } = require("@playwright/test");
 const { moveOffCursor } = require("./helpers/off-cursor.cjs");
+const { mod } = require("./helpers/keys.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -61,7 +62,7 @@ const HTML =
       .waitFor();
     // ⌘⇧I toggles Edit mode; the frame gets the blue mode outline.
     await page.mouse.move(700, 300);
-    await page.keyboard.press("Meta+Shift+I");
+    await page.keyboard.press(mod("Shift+I"));
     await page.waitForFunction(() => window.livePreview.getSelectionState()?.mode === "edit");
     await page.waitForSelector("#preview-edit[aria-pressed=true]");
     await page.waitForSelector("#live-preview[data-preview-mode=edit]");
@@ -245,12 +246,12 @@ const HTML =
     await popover.waitFor({ state: "hidden" });
     // Undo / redo (⌘Z / ⌘⇧Z) walk the staged history.
     await page.mouse.move(700, 820);
-    await page.keyboard.press("Meta+Z");
+    await page.keyboard.press(mod("Z"));
     await frame.waitForFunction(
       () => document.getElementById("title").textContent === "Sunbird preview sandbox",
     );
     assert.equal(await fontSize(), "40px");
-    await page.keyboard.press("Meta+Shift+Z");
+    await page.keyboard.press(mod("Shift+Z"));
     await frame.waitForFunction(
       () => document.getElementById("title").textContent === "Sunbird edited sandbox",
     );
@@ -261,7 +262,7 @@ const HTML =
       await page.evaluate((id) => (window.agentWorkspace.getState().mentions || []).some((m) => m.id === id), frameId),
       "the selected preview frame starts as a selection chip",
     );
-    await page.keyboard.press("Meta+L");
+    await page.keyboard.press(mod("L"));
     await page.waitForFunction(() =>
       (window.agentWorkspace.getState().mentions || []).some((m) => m.type === "element"),
     );
@@ -386,7 +387,7 @@ const HTML =
     await page.evaluate((id) => window.design.setSelection([id]), frameId);
     await page.locator("#live-capture").click();
     await page.waitForFunction(() => window.livePreview.getSelectionState()?.mode === "capture");
-    await page.keyboard.press("Meta+Enter");
+    await page.keyboard.press(mod("Enter"));
     await page.waitForFunction(() =>
       window.design
         .getDocument()

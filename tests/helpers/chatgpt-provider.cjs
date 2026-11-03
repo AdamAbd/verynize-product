@@ -171,7 +171,18 @@ async function seedChatGPTAccount(userData) {
 
 // Install the local provider's HTTP transport in the Electron main process.
 // Sign-in still uses the real loopback callback, PKCE, JWT verification and store.
-async function connectElectronProvider(app, provider) {
+// The patch is idempotent: one retry covers a result promise lost while the main process is busy
+// starting up ("Resulting promise was garbage collected").
+async function connectElectronProvider(app, provider, retries = 1) {
+  try {
+    await patchElectronProvider(app, provider);
+  } catch (error) {
+    if (retries < 1 || !/garbage collected/.test(String(error?.message))) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await connectElectronProvider(app, provider, retries - 1);
+  }
+}
+async function patchElectronProvider(app, provider) {
   await app.evaluate(({ shell, dialog }, base) => {
     const require = process
       .getBuiltinModule("module")
