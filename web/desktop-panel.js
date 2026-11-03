@@ -28,24 +28,25 @@
   const ACCESS=['ask','edit','auto','full'],ACCESS_LABEL={ask:'Ask',edit:'Edit',auto:'Auto',full:'Full access'},LEGACY_ACCESS={'read-only':'ask','workspace-write':'edit'};
   const normalizeAccess=value=>LEGACY_ACCESS[value]||(ACCESS.includes(value)?value:'edit');
   let defaults={agent:'codex',model:'',access:'edit',effort:'',instructions:''};
-  try{defaults={...defaults,...JSON.parse(localStorage.getItem('better-agent-defaults')||'{}')}}catch{}
+  try{defaults={...defaults,...JSON.parse((window.accountStore||localStorage).getItem('better-agent-defaults')||'{}')}}catch{}
   defaults.access=normalizeAccess(defaults.access);
   if(!api)defaults.agent='openrouter';
   const stats={runs:0,completed:0,failed:0};try{Object.assign(stats,JSON.parse(localStorage.getItem('better-agent-usage')||'{}'))}catch{}
+  const storage=window.accountStore||localStorage;
   const chatsKey=key=>'better-agent-chats:'+key;
-  const persist=()=>{try{localStorage.setItem(chatsKey(projectKey),JSON.stringify(conversations.slice(-30)));localStorage.setItem('better-agent-usage',JSON.stringify(stats));}catch{status('Chat storage full; export or clear older conversations.')}window.dispatchEvent(new Event('agent-usage-changed'));};
+  const persist=()=>{try{storage.setItem(chatsKey(projectKey),JSON.stringify(conversations.slice(-30)));localStorage.setItem('better-agent-usage',JSON.stringify(stats));}catch{status('Chat storage full; export or clear older conversations.')}window.dispatchEvent(new Event('agent-usage-changed'));};
   // A run can outlive a project switch: its conversation is then written into the other project's saved list.
-  const persistChat=entry=>{if(!entry||entry.key===projectKey){persist();return;}try{const saved=JSON.parse(localStorage.getItem(chatsKey(entry.key))||'[]'),list=Array.isArray(saved)?saved:[],i=list.findIndex(c=>c?.id===entry.chat.id);if(i>=0)list[i]=entry.chat;else list.push(entry.chat);localStorage.setItem(chatsKey(entry.key),JSON.stringify(list.slice(-30)));localStorage.setItem('better-agent-usage',JSON.stringify(stats));}catch{}window.dispatchEvent(new Event('agent-usage-changed'));};
+  const persistChat=entry=>{if(!entry||entry.key===projectKey){persist();return;}try{const saved=JSON.parse(storage.getItem(chatsKey(entry.key))||'[]'),list=Array.isArray(saved)?saved:[],i=list.findIndex(c=>c?.id===entry.chat.id);if(i>=0)list[i]=entry.chat;else list.push(entry.chat);storage.setItem(chatsKey(entry.key),JSON.stringify(list.slice(-30)));localStorage.setItem('better-agent-usage',JSON.stringify(stats));}catch{}window.dispatchEvent(new Event('agent-usage-changed'));};
   // Composer drafts, per conversation and project.
-  const loadDrafts=()=>{try{const saved=JSON.parse(localStorage.getItem('better-agent-drafts:'+projectKey)||'{}');drafts=saved&&typeof saved==='object'?saved:{};}catch{drafts={}}};
-  const setDraft=(text,chat=conversation)=>{if(!chat)return;text=String(text||'');if(text.trim())drafts[chat.id]=text.slice(0,20000);else delete drafts[chat.id];try{localStorage.setItem('better-agent-drafts:'+projectKey,JSON.stringify(drafts))}catch{}};
+  const loadDrafts=()=>{try{const saved=JSON.parse(storage.getItem('better-agent-drafts:'+projectKey)||'{}');drafts=saved&&typeof saved==='object'?saved:{};}catch{drafts={}}};
+  const setDraft=(text,chat=conversation)=>{if(!chat)return;text=String(text||'');if(text.trim())drafts[chat.id]=text.slice(0,20000);else{delete drafts[chat.id];if(window.accountStore?.signedIn())window.accountStore.put('draft:'+chat.id,null);}try{storage.setItem('better-agent-drafts:'+projectKey,JSON.stringify(drafts))}catch{}};
   const currentDefaults=()=>({agent:$('project-agent').value,model:$('agent-model').value.trim(),access:$('agent-access').value,effort:$('agent-effort').value,instructions:defaults.instructions||''});
   // Mode for new chats (Settings › Agents): a chat started in a repository with its own mode keeps it in chat.access;
   // the composer's mode picker then changes that chat, while Settings (Default row / Default Models) change the default.
   const behavior=()=>window.agentBehavior?.get?.()||{};
   const effectiveAccess=()=>conversation?.access&&ACCESS.includes(conversation.access)?conversation.access:defaults.access;
   const showAccess=()=>{$('agent-access').value=effectiveAccess();$('agent-config-label').textContent=(defaults.model||defaults.agent+' default')+' · '+ACCESS_LABEL[effectiveAccess()];};
-  const setDefaults=value=>{if(conversation?.access&&value&&value.access&&!document.body.classList.contains('settings-open')){conversation.access=normalizeAccess(value.access);persist();value={...value,access:defaults.access};}defaults={...defaults,...value};defaults.access=normalizeAccess(defaults.access);$('project-agent').value=defaults.agent;$('agent-model').value=defaults.model;$('agent-access').value=effectiveAccess();$('agent-effort').value=defaults.effort;$('agent-config-label').textContent=(defaults.model||defaults.agent+' default')+' · '+ACCESS_LABEL[effectiveAccess()];try{localStorage.setItem('better-agent-defaults',JSON.stringify(defaults))}catch{}notify();};
+  const setDefaults=(value,remote=false)=>{if(!remote&&conversation?.access&&value&&value.access&&!document.body.classList.contains('settings-open')){conversation.access=normalizeAccess(value.access);persist();value={...value,access:defaults.access};}defaults={...defaults,...value};defaults.access=normalizeAccess(defaults.access);$('project-agent').value=defaults.agent;$('agent-model').value=defaults.model;$('agent-access').value=effectiveAccess();$('agent-effort').value=defaults.effort;$('agent-config-label').textContent=(defaults.model||defaults.agent+' default')+' · '+ACCESS_LABEL[effectiveAccess()];try{if(!remote)storage.setItem('better-agent-defaults',JSON.stringify(defaults))}catch{}notify();};
   const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
   const pretty=value=>{if(typeof value==='string')return value;try{return JSON.stringify(value,null,2)}catch{return String(value)}};
   const clip=(text,n)=>{text=String(text??'');return text.length>n?text.slice(0,n)+'…':text;};
@@ -206,15 +207,22 @@
   const loadChats=(root,options={})=>{
     if(conversation)setDraft($('project-prompt').value,conversation);
     projectKey=root;loadDrafts();
-    try{const saved=JSON.parse(localStorage.getItem(chatsKey(root))||'[]');conversations=Array.isArray(saved)?saved.filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string'&&Array.isArray(c.messages)).slice(-30).map(c=>({...c,sessionId:typeof c.sessionId==='string'?c.sessionId:null,messages:c.messages.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.text==='string').map(restoreMessage)})):[]}catch{conversations=[]}
+    try{const saved=JSON.parse(storage.getItem(chatsKey(root))||'[]');conversations=Array.isArray(saved)?saved.filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string'&&Array.isArray(c.messages)).slice(-30).map(c=>({...c,sessionId:typeof c.sessionId==='string'?c.sessionId:null,messages:c.messages.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.text==='string').map(restoreMessage)})):[]}catch{conversations=[]}
     // Conversations still running keep their live objects.
     for(const entry of active.values())if(entry.key===root){const i=conversations.findIndex(c=>c.id===entry.chat.id);if(i>=0)conversations[i]=entry.chat;else conversations.push(entry.chat);}
     conversation=null;const pick=conversations.find(c=>c.id===options.select)||conversations.at(-1);if(pick)switchTo(pick);else if(options.create!==false)newChat();else{renderHistory();activate();}
   };
+  window.addEventListener('account-store-changed',()=>{
+    const selected=conversation?.id,prompt=$('project-prompt'),typing=document.activeElement===prompt,typed=prompt.value,start=prompt.selectionStart,end=prompt.selectionEnd;
+    if(!window.accountStore?.ready()){conversations=[];conversation=null;drafts={};attachments=[];prompt.value='';setDefaults({model:'',effort:'',access:'edit',instructions:''},true);renderAttachments();renderHistory();return;}
+    conversation=null;loadChats(projectKey,{select:selected,create:false});
+    if(typing&&conversation?.id===selected){prompt.value=typed;prompt.setSelectionRange(start,end);setDraft(typed);}
+    const saved=JSON.parse(storage.getItem('better-agent-defaults')||'{}');setDefaults(saved,true);
+  });
   // Chat summaries of any project key (the open one live, others from storage) for the Code workspace sidebar.
   const summaryOf=c=>({id:c.id,title:c.title,created:c.created,count:c.messages?.length||0,...(c.worktree?.branch?{branch:c.worktree.branch}:{}),...(c.worktree?.path?{root:c.worktree.path}:{}),...(active.has(c.id)?{busy:true}:{})});
-  const chatSummaries=key=>{if(key===projectKey)return conversations.map(summaryOf).reverse();try{const saved=JSON.parse(localStorage.getItem(chatsKey(key))||'[]');return (Array.isArray(saved)?saved:[]).filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string').map(c=>{const live=[...active.values()].find(e=>e.chat.id===c.id);return summaryOf(live?live.chat:c);}).reverse();}catch{return [];}};
-  const removeChat=id=>{const i=conversations.findIndex(c=>c.id===id);if(i<0)return false;if(active.has(id))throw Error('Stop the chat before archiving it');const [chat]=conversations.splice(i,1);queues.delete(id);setDraft('',chat);persist();if(conversation===chat){conversation=null;const last=conversations.at(-1);if(last)switchTo(last);else{renderHistory();activate();}}else renderHistory();return true;};
+  const chatSummaries=key=>{if(key===projectKey)return conversations.map(summaryOf).reverse();try{const saved=JSON.parse(storage.getItem(chatsKey(key))||'[]');return (Array.isArray(saved)?saved:[]).filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string').map(c=>{const live=[...active.values()].find(e=>e.chat.id===c.id);return summaryOf(live?live.chat:c);}).reverse();}catch{return [];}};
+  const removeChat=id=>{const i=conversations.findIndex(c=>c.id===id);if(i<0)return false;if(active.has(id))throw Error('Stop the chat before archiving it');const [chat]=conversations.splice(i,1);if(window.accountStore?.signedIn())window.accountStore.put('chat:'+id,null);queues.delete(id);setDraft('',chat);persist();if(conversation===chat){conversation=null;const last=conversations.at(-1);if(last)switchTo(last);else{renderHistory();activate();}}else renderHistory();return true;};
   const agentSection=host.querySelector('.project-agent');
   const dock=document.createElement('aside');dock.id='agent-chat-dock';dock.innerHTML='<div class="chat-dock-bar"><strong>Chat</strong><button id="chat-project-files">Project files</button><button id="chat-hide">×</button></div>';document.body.append(dock);
   const openChat=()=>{setCodeMode(false);dock.append(agentSection);document.body.classList.add('agent-chat-open');requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));};
@@ -312,7 +320,7 @@
   };
   const attachFigma=url=>{url=String(url||'').trim();if(!/^https:\/\/([\w-]+\.)?figma\.com\/(file|design|proto|board)\//.test(url))throw Error('Paste a figma.com file or design link');const title=decodeURIComponent(/\/(?:file|design|proto|board)\/[^/]+\/([^/?#]+)/.exec(url)?.[1]||'Figma file').replace(/-/g,' ');attachments.push({kind:'figma',name:'Figma · '+title.slice(0,60),url});renderAttachments();};
   // Link a chat (any repository): its transcript is attached to the next message and its worktree becomes a working directory.
-  const storedChat=(id,key)=>{if(!key||key===projectKey)return conversations.find(c=>c.id===id);try{const saved=JSON.parse(localStorage.getItem(chatsKey(key))||'[]');return (Array.isArray(saved)?saved:[]).find(c=>c&&c.id===id&&Array.isArray(c.messages));}catch{return null;}};
+  const storedChat=(id,key)=>{if(!key||key===projectKey)return conversations.find(c=>c.id===id);try{const saved=JSON.parse(storage.getItem(chatsKey(key))||'[]');return (Array.isArray(saved)?saved:[]).find(c=>c&&c.id===id&&Array.isArray(c.messages));}catch{return null;}};
   const linkChat=(id,key)=>{const other=storedChat(id,key);if(!other||other===conversation)throw Error('Choose another chat');const text=buildSeed(other.messages);const dir=other.worktree?.path||(key&&key!=='unattached'&&key!==projectKey?key:null);if(!text&&!dir)throw Error('That chat is empty');if(!conversation)newChat();if(text)attachments.push({kind:'chat',name:'Chat · '+other.title.slice(0,60),text,chatId:id});if(dir&&dir!==rootOf(conversation))addDirectory(dir);renderAttachments();status(`Linked “${other.title.slice(0,60)}”`);};
   // Extra working directories of the current chat (composer /add-dir, linked worktrees): sent as runAgent `directories`.
   const addDirectory=dir=>{dir=String(dir||'');if(!dir.startsWith('/'))throw Error('Choose a folder');if(!conversation)newChat();const dirs=conversation.dirs||(conversation.dirs=[]);if(!dirs.includes(dir)){if(dirs.length>=10)throw Error('A chat can have up to 10 working directories');dirs.push(dir);persist();}notify();};

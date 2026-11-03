@@ -2,6 +2,7 @@
 // shared with the account directly (`/api/me/rooms`), merged with this device's cloud-backed
 // library records so each room appears once. Opening a listed room joins it through
 // `window.cloudWorkspace.openRoom`, which creates the library record on first open.
+import "@/lib/account-store";
 import { useMemo } from "react";
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -88,6 +89,8 @@ export function useCloudRooms(active: boolean) {
   const query = useQuery({
     ...cloudRoomsQuery(scope ?? SIGNED_OUT, organization),
     enabled,
+    refetchInterval: 3000,
+    refetchOnWindowFocus: true,
   });
   const { data, error } = query;
   const server = scope?.server ?? "";
@@ -109,7 +112,13 @@ export function mergeCloudFiles(files: LibraryFile[], rooms: CloudRoom[]): Libra
     const room = file.cloud && byKey.get(`${file.cloud.server}|${file.cloud.roomId}`);
     if (!room) return file;
     byKey.delete(`${room.server}|${room.id}`);
-    return { ...file, cloud: { ...file.cloud!, role: room.role }, room };
+    return {
+      ...file,
+      name: room.title,
+      updated: room.updatedAt,
+      cloud: { ...file.cloud!, role: room.role },
+      room,
+    };
   });
   for (const room of byKey.values())
     merged.push({
@@ -122,7 +131,11 @@ export function mergeCloudFiles(files: LibraryFile[], rooms: CloudRoom[]): Libra
       cloud: { server: room.server, roomId: room.id, role: room.role },
       room,
     });
-  return merged;
+  const metadata = Object.fromEntries(window.accountStore?.entries("file:") ?? []);
+  return merged.map((file) => {
+    const meta = file.cloud && metadata[file.cloud.roomId];
+    return meta ? { ...file, folder: meta.folder ?? null, archived: !!meta.archived } : file;
+  });
 }
 
 /** True for a listed room that has no library record on this device. */
@@ -130,7 +143,10 @@ export const isRemoteRoom = (file: LibraryFile) => !!file.room && file.id.starts
 
 /** Open a file, or join a listed room (its file is created on first open). */
 export function openEntry(file: LibraryFile, open: (id: string) => unknown) {
-  if (!isRemoteRoom(file)) return void open(file.id);
+  if (!isRemoteRoom(file))
+    return void Promise.resolve(open(file.id)).catch((e: unknown) =>
+      toast(e instanceof Error ? e.message : String(e)),
+    );
   const workspace = (window as unknown as { cloudWorkspace?: CloudWorkspaceApi }).cloudWorkspace;
   void workspace
     ?.openRoom({ server: file.room!.server, id: file.room!.id })

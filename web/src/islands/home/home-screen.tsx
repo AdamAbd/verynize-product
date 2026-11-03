@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   ArchiveIcon,
   FileIcon,
@@ -127,7 +128,7 @@ export function HomeScreen({ routed = false }: { routed?: boolean } = {}) {
           id="library-new-file"
           variant="primary"
           className="-ml-0.5"
-          onClick={() => void lib.create()}
+          onClick={() => void lib.create().catch((error) => toast(error.message))}
         >
           <PlusIcon />
           New file
