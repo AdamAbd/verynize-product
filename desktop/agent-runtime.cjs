@@ -664,12 +664,14 @@ class AgentRuntime {
     home = agentMemory.resolveHome(),
     getBehavior = null,
     profiles = null,
+    siwc = null,
     tools = null,
     autonomy = null,
   } = {}) {
     if (!userData) throw Error('userData directory required');
     Object.assign(this, { userData, getProject, resolveProject, emitRaw: emit, discover, loadClaudeSdk, spawnProcess, getBridge, startFallback, loadPreferences, loadAccess, home, getBehavior });
     // Shared with the Settings IPC handlers in main.cjs so both see the same cached store.
+    this.siwc = siwc;
     this.profiles = profiles || new AgentProfiles({ userData });
     this.toolConfig = tools || new toolConfig.AgentToolConfig({ userData });
     this.autonomy = autonomy || new agentAutonomy.AgentAutonomy({ userData });
@@ -680,7 +682,7 @@ class AgentRuntime {
     // `codex exec` fallback sign-in cache: slot -> {at} (the app-server path caches on its server object instead).
     this.codexExecAuth = new Map();
     // Sign-in or sign-out (Settings, onboarding, the chat's sign-in card): check that Codex account again next turn.
-    this.offAccountChange = agentAuth.onAccountChange(({ agent, profile }) => { if (agent === 'codex') this.invalidateCodexAuth(profile || 'system'); });
+    this.offAccountChange = agentAuth.onAccountChange(({ agent, profile }) => { if (agent === 'codex') { this.invalidateCodexAuth(profile || 'system'); this.modelCache.delete('codex'); if (this.siwc) { const server = this.codexPool.get(profile || 'system'); for (const run of server?.threads.values() || []) { this.requireAuth(run); this.finish(run, { code: 1 }); } server?.rpc.close(); this.codexPool.delete(profile || 'system'); } } });
   }
   get codex() { return this.codexPool.get('system') || null; }
   set codex(server) { if (server) this.codexPool.set('system', server); else this.codexPool?.delete('system'); }
@@ -737,6 +739,7 @@ class AgentRuntime {
       const bridge = await this.getBridge().catch(() => null);
       const preferences = await Promise.resolve().then(() => this.loadPreferences()).catch(() => []);
       const agentSettings = await Promise.resolve().then(() => this.loadAccess(this.userData)).then(agentAccess.normalizeAccessSettings).catch(() => ({ ...agentAccess.ACCESS_DEFAULTS }));
+      if (this.siwc && options.agent === 'codex') { agentSettings.codexApps = false; agentSettings.codexComputerUse = false; }
       const shared = agentSettings.shareMemory ? await agentAccess.sharedMemoryBlock(options.agent, { cwd, ...(this.home ? { home: this.home } : {}) }).catch(() => '') : '';
       const homeText = agentSettings.shareMemory ? '' : await agentMemory.homeInstructions(options.agent, { home: this.home }).catch(() => '');
       const memoryDir = quickChat && options.agent === 'claude' ? await agentMemory.repoLessMemoryDir(this.userData).catch(() => null) : null;
@@ -812,7 +815,7 @@ class AgentRuntime {
     if (run.authRequired || run.done) return;
     run.authRequired = true; run.failed = true;
     const account = run.account || { id: 'system', name: 'This Mac' };
-    this.emit(run, { type: 'auth-required', agent: run.agent, text: CODEX_SIGNED_OUT, account: { id: account.id, name: account.name, system: (run.codexSlot || 'system') === 'system' } });
+    this.emit(run, { type: 'auth-required', agent: run.agent, text: this.siwc ? 'Codex is signed out of Verynize. Continue with ChatGPT, then retry your message.' : CODEX_SIGNED_OUT, account: { id: account.id, name: account.name, system: (run.codexSlot || 'system') === 'system' } });
     this.invalidateCodexAuth(run.codexSlot || 'system');
     Promise.resolve().then(() => run.interruptTurn?.()).catch(() => {});
   }
@@ -825,6 +828,7 @@ class AgentRuntime {
 
   /** `account/read` on the account's app-server, a positive answer cached for CODEX_AUTH_TTL. Unknown (old CLI, timeout) = ok. */
   async codexAuth(server) {
+    if (this.siwc) return { ok: true }; // SIWC is checked before spawning; the CLI login is unrelated.
     if (server.auth && Date.now() - server.auth.at < CODEX_AUTH_TTL) return server.auth.state;
     let result;
     try { result = await server.rpc.request('account/read', { refreshToken: false }, 10000); }
@@ -1116,6 +1120,7 @@ class AgentRuntime {
 
   /** `slot`: account the server runs as ('system' or a named account id); `extraEnv`: its CODEX_HOME and MCP server env values. */
   async codexServer(executable, bridge, extraArgs = [], { slot = 'system', extraEnv = {} } = {}) {
+    if (this.siwc) { const auth = await this.siwc.runtime(slot); extraArgs = extraArgs.map((arg, index) => arg === '--enable' && ['apps', 'computer_use'].includes(extraArgs[index + 1]) ? '--disable' : arg); extraArgs = [...extraArgs, ...auth.args]; extraEnv = { ...extraEnv, ...auth.env }; }
     const key = executable + '|' + (bridge?.url || '') + '|' + extraArgs.join(' ') + '|' + createHash('sha256').update(JSON.stringify(extraEnv)).digest('hex').slice(0, 16);
     const current = this.codexPool.get(slot);
     if (current && !current.rpc.closed && current.key === key && !current.stale) return current;
@@ -1158,7 +1163,7 @@ class AgentRuntime {
       }
     });
     this.codexPool.set(slot, server);
-    await rpc.request('initialize', { clientInfo: { name: 'verynize', title: 'Verynize', version: VERSION }, capabilities: { experimentalApi: true } }, 20000);
+    await rpc.request('initialize', { clientInfo: { name: this.siwc ? 'Verynize' : 'verynize', title: 'Verynize', version: VERSION }, capabilities: { experimentalApi: true } }, 20000);
     rpc.notify('initialized');
     return server;
   }
@@ -1192,10 +1197,12 @@ class AgentRuntime {
     if (extra.skipped.length) this.emit(run, { type: 'status', text: `Skipped MCP server ${extra.skipped.join(', ')}: an environment variable name clashes with another server.` });
     // Server-wide args stay the same for every chat on this account (one app-server serves them all); the per-chat
     // preference write block goes into the thread's config instead (codexPreferenceConfig).
+    if (this.siwc) { try { await this.siwc.credentials(run.codexSlot || 'system'); } catch (error) { if (error.code !== 'SIWC_AUTH_REQUIRED') throw error; this.requireAuth(run); this.finish(run, { code: 1 }); return 'codex-app-server'; } }
     const server = await this.codexServer(params.executable, params.bridge, [...(params.agentSettings ? agentAccess.codexAccessArgs(params.agentSettings, { mcpServerName: settings.MCP_SERVER_NAME, bridge: !!params.bridge?.url }) : []), ...extra.args], { slot: run.codexSlot || 'system', extraEnv: { ...(params.account?.env || {}), ...extra.env } });
     // Sign-in gate: a signed-out account gets the sign-in card instead of a turn that retries for ~17 s and fails with 401.
     if (!(await this.codexAuth(server)).ok) { this.requireAuth(run); this.finish(run, { code: 1 }); return 'codex-app-server'; }
     const threadParams = codexPreferenceConfig(applyCodexPlanFirst(codexThreadParams(params), params.autonomy), params);
+    if (this.siwc) threadParams.modelProvider = 'openai_chatgpt_plan';
     let thread;
     if (params.fork) {
       try { thread = (await server.rpc.request('thread/fork', { threadId: params.fork.sessionId, lastTurnId: params.fork.at, ...threadParams, excludeTurns: true })).thread; }
@@ -1205,7 +1212,15 @@ class AgentRuntime {
     }
     if (!thread && params.sessionId) {
       try { thread = (await server.rpc.request('thread/resume', { threadId: params.sessionId, ...threadParams })).thread; }
-      catch { this.emit(run, { type: 'status', text: 'Could not resume the previous Codex thread; starting a new one.' }); }
+      catch {
+        if (this.siwc && !params.seed) {
+          try {
+            const history = await server.rpc.request('thread/read', { threadId: params.sessionId, includeTurns: true }, 10000);
+            params.seed = (history?.thread?.turns || []).flatMap(turn => (turn.items || []).flatMap(item => item.type === 'userMessage' ? ['User: ' + (item.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n')] : item.type === 'agentMessage' ? ['Assistant: ' + (item.text || '')] : [])).join('\n\n').slice(-SEED_LIMIT);
+          } catch {}
+        }
+        this.emit(run, { type: 'status', text: params.seed ? 'Started a new Codex thread with the previous conversation after switching connections.' : 'Could not resume the previous Codex thread; starting a new one.' });
+      }
     }
     if (!thread) thread = (await server.rpc.request('thread/start', params.codexPersonality ? { ...threadParams, personality: params.codexPersonality } : threadParams)).thread;
     run.threadId = thread.id; run.map = createCodexMapper();
@@ -1242,6 +1257,7 @@ class AgentRuntime {
 
   async startCodexExec(params) {
     const { run } = params;
+    if (this.siwc) throw Error('Update Codex CLI to use Sign in with ChatGPT through app-server.');
     if (!(await this.codexExecSignedIn(params.executable, run.codexSlot || 'system', params.account?.env || {}))) { this.requireAuth(run); this.finish(run, { code: 1 }); return 'codex-exec'; }
     const prompt = [params.persona, composePrompt(params.prompt, params.context, params.seed)].join('\n\n');
     const handle = this.startFallback(params.executable, 'codex', prompt, params.cwd, event => {
@@ -1403,7 +1419,8 @@ class AgentRuntime {
   async codexOneShot({ found, prompt, system, model, effort, cwd, bridge, timeout, purpose }) {
     if (!(await this.supportsAppServer(found.path))) throw Error('This Codex CLI does not support app-server');
     // One app-server serves every Codex thread; keep it configured with the canvas bridge.
-    const server = await this.codexServer(found.path, bridge || await this.getBridge().catch(() => null));
+    const account = await this.profiles.resolve('codex');
+    const server = await this.codexServer(found.path, bridge || await this.getBridge().catch(() => null), [], { slot: account.id, extraEnv: account.env });
     if (!(await this.codexAuth(server)).ok) throw Error(CODEX_SIGNED_OUT);
     const base = { cwd, approvalPolicy: 'never', sandbox: 'read-only', ephemeral: true, developerInstructions: system, ...(model ? { model } : {}) };
     let thread, resolvedModel = model || '';
@@ -1454,7 +1471,8 @@ class AgentRuntime {
         list = models.map(m => ({ id: m.value, name: m.displayName || m.value, description: m.description || '', efforts: m.supportedEffortLevels || [] }));
       } finally { release(); try { q.close?.(); } catch {} abort.abort(); }
     } else if (await this.supportsAppServer(found.path)) {
-      const server = await this.codexServer(found.path, await this.getBridge().catch(() => null));
+      const account = await this.profiles.resolve('codex');
+      const server = await this.codexServer(found.path, await this.getBridge().catch(() => null), [], { slot: account.id, extraEnv: account.env });
       const result = await server.rpc.request('model/list', {}, 20000);
       list = (result?.data || []).filter(m => !m.hidden).map(m => ({ id: m.model || m.id, name: m.displayName || m.id, description: m.description || '', efforts: (m.supportedReasoningEfforts || []).map(e => e.reasoningEffort) }));
     }
@@ -1511,8 +1529,8 @@ class AgentRuntime {
 }
 
 // IPC surface (all `desktop:<name>`, exposed by desktop/preload.cjs).
-function registerAgentRuntime(handle, win, { userData, getProject, resolveProject, getBehavior = null, profiles = null, tools = null, autonomy = null }) {
-  const runtime = new AgentRuntime({ userData, getProject, resolveProject, getBehavior, profiles, tools, autonomy, emit: event => { if (!win.isDestroyed()) win.webContents.send('desktop:agent-event', event); } });
+function registerAgentRuntime(handle, win, { userData, getProject, resolveProject, getBehavior = null, profiles = null, tools = null, autonomy = null, siwc = null }) {
+  const runtime = new AgentRuntime({ userData, getProject, resolveProject, getBehavior, profiles, tools, autonomy, siwc, emit: event => { if (!win.isDestroyed()) win.webContents.send('desktop:agent-event', event); } });
   handle('runAgent', options => runtime.run(options));
   handle('cancelAgent', id => runtime.cancel(id));
   handle('listAgentRuns', () => runtime.list());

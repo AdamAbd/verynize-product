@@ -1,18 +1,20 @@
 // First-run onboarding of the desktop app (web/src/islands/onboarding): create a Verynize account
 // against local workerd (verification through the outbox), sign in, then "Bring your own agent"
-// with scripted Claude/Codex CLIs on an isolated PATH and HOME: Claude already signed in, Codex
-// connected from the page, Cursor coming soon. Completion is remembered; skipping works too.
+// with a scripted Claude CLI and local SIWC provider: Claude already signed in, Codex
+// connects through PKCE/OIDC from the page, Cursor coming soon. Completion is remembered; skipping works too.
 import { Miniflare } from "miniflare";
 import { _electron as electron } from "@playwright/test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createChatGPTProvider, connectElectronProvider } from "./helpers/chatgpt-provider.cjs";
 import { cloudOptions } from "./cloud-harness.mjs";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "verynize-onboarding-"));
 const mf = new Miniflare(await cloudOptions(path.join(dir, "state")));
 const apps = [];
+const provider = await createChatGPTProvider();
 try {
   const server = (await mf.ready).origin;
   const home = path.join(dir, "home");
@@ -28,13 +30,8 @@ try {
     `if [ "$1" = auth ] && [ "$2" = status ]; then echo '{"loggedIn":true,"authMethod":"claude.ai","email":"ana@claude.test","subscriptionType":"pro"}'; exit 0; fi
 exit 0`,
   );
-  const marker = path.join(dir, "codex-signed-in");
-  await script(
-    "codex",
-    `if [ "$1" = login ] && [ "$2" = status ]; then if [ -f "${marker}" ]; then echo "Logged in using ChatGPT"; exit 0; fi; echo "Not logged in"; exit 1; fi
-if [ "$1" = login ]; then sleep 1; touch "${marker}"; echo "Successfully logged in"; exit 0; fi
-exit 0`,
-  );
+  // Codex login is owned by SIWC; this fixture only advertises an installed CLI.
+  await script("codex", "exit 0");
   const launch = async (profile, extra = {}) => {
     const env = { ...process.env, HOME: home, PATH: `${bin}:/usr/bin:/bin` };
     delete env.ELECTRON_RUN_AS_NODE;
@@ -51,6 +48,21 @@ exit 0`,
     });
     apps.push(app);
     const page = await app.firstWindow({ timeout: 20000 });
+    // Restrict discovery to fixture binaries; a host Homebrew install must not
+    // turn the missing-agent case into a real CLI account lookup.
+    await app.evaluate((_electron, bin) => {
+      const require = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json');
+      const { AgentTools, providerAccounts } = require('./desktop/agent-tools.cjs');
+      const fs = require('node:fs/promises'), path = require('node:path');
+      AgentTools.prototype.accounts = function() {
+        return providerAccounts({ home: this.home, siwc: this.siwc, lookup: async name => {
+          const file = path.join(bin, name);
+          try { await fs.access(file, 1); return file; } catch { return null; }
+        }});
+      };
+    }, bin);
+
+    if (profile === "first") await connectElectronProvider(app, provider);
     await page.waitForFunction(() => !!window.cloudAccount);
     return { app, page };
   };
@@ -114,7 +126,6 @@ exit 0`,
 
   // A second profile skips the account and finds no agents connected.
   await fs.rm(path.join(bin, "claude"));
-  await fs.rm(marker);
   const second = (await launch("second")).page;
   await second.waitForSelector("#onboarding[data-step=account]");
   await second.locator("#onboarding-skip").click();
@@ -139,6 +150,7 @@ exit 0`,
     "PASS desktop onboarding: account creation with verification, sign-in, server choice, agents (signed in, connect from the page, missing CLI, coming soon), completion remembered, skip account, opt-out",
   );
 } finally {
+  await provider.close();
   for (const app of apps) await app.close().catch(() => {});
   await mf.dispose();
   await fs.rm(dir, { recursive: true, force: true });

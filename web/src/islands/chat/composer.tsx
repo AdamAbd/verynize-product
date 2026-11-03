@@ -513,6 +513,12 @@ export function Composer({ state }: { state: ChatState }) {
           </div>
         )}
       </div>
+      {!WEB && state.defaults.agent === "codex" && (
+        <div data-chat-plan="chatgpt" className="flex items-center justify-between gap-2 px-2.5 pb-1 text-xs text-muted-foreground">
+          <span>Using ChatGPT plan</span>
+          <button type="button" className="hover:text-foreground" onClick={() => void platform.desktop?.openExternal("https://chatgpt.com/settings/usage")}>Manage usage</button>
+        </div>
+      )}
       <div className="flex h-7.5 items-center gap-0.5 px-1.5 pb-1.5">
         {/* Desktop-only: attachments from disk, agent tools/MCP status, account usage, autonomy (own capability). */}
         {!WEB && <AttachMenu state={state} />}

@@ -19,6 +19,7 @@ const path = require('node:path');
   env.VERYNIZE_SKIP_ONBOARDING = '1';
   // Auto-title helper threads (agent-workdirs/titles) are excluded so assertions see chat turns only.
   const rpc = async method => (await fs.readFile(log, 'utf8')).trim().split('\n').map(JSON.parse).filter(c => c.rpc === method && !/agent-workdirs[\/\\]titles|word title for a design chat/.test(JSON.stringify(c.params || {})));
+  await require('./helpers/chatgpt-provider.cjs').seedChatGPTAccount(path.join(root, 'profile'));
   const app = await _electron.launch({ env, args: ['.', `--user-data-dir=${path.join(root, 'profile')}`], timeout: 20000 });
   try {
     const page = await app.firstWindow({ timeout: 20000 });
