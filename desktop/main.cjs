@@ -18,6 +18,7 @@ const agentBehavior=require('./agent-behavior.cjs'); // Settings › Agents: fol
 // origin-based, so client-side routes (app://verynize/editor) keep working.
 const appProtocol=require('./app-protocol.cjs');
 appProtocol.registerSchemes(protocol); // must run before app ready
+let editorOpened=false; // set once the first editor window exists (window-all-closed)
 let primaryRuntime=null,repositories=null,behaviorStore=null,agentStores=null;const liveRuntimes=new Set(); // agent runtime of the latest editor window (serves ask_agent)
 app.setName('Verynize');
 // Linux CI (xvfb, no desktop keyring): use Chromium's basic password store instead of probing D-Bus/libsecret, so
@@ -141,11 +142,13 @@ app.whenReady().then(async () => {
     win.webContents.on('will-navigate', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
     win.webContents.on('will-redirect', (event, url) => { if(!appProtocol.isAppURL(url)) event.preventDefault(); });
     win.loadURL(appProtocol.ENTRY_URL);
-    editorWindows.add(win); win.on('closed', () => editorWindows.delete(win));
+    editorWindows.add(win); editorOpened=true; win.on('closed', () => editorWindows.delete(win));
     return win;
   };
   storageMigration.probeAfterLaunch({app,BrowserWindow,editor:createWindow(),startup:migration}); // background check for old-build (file://) edits, staged for the next launch
   app.on('activate', () => { if (!editorWindows.size) createWindow(); });
 });
 app.on('will-quit',()=>mcpBridge.stopBridge()); // agent-bridge hook
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+// Before the first editor opens, the only windows are storage-migration.cjs's hidden copy pages: destroying the last of
+// them is not the user closing the app (on Linux/Windows that used to quit before the editor ever opened).
+app.on('window-all-closed', () => { if (process.platform !== 'darwin' && editorOpened) app.quit(); });

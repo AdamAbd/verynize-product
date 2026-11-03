@@ -200,7 +200,20 @@ jobs:
           # to build from source (it ships a linux-x64 prebuild).
           sudo apt-get install -y --no-install-recommends xvfb xauth libnss3 libatk-bridge2.0-0t64 \
             libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxkbcommon0 libdrm2 libcups2t64 fonts-liberation \
-            libgl1 libegl1 libgl1-mesa-dri mesa-utils zsh poppler-utils build-essential python3
+            libgl1 libegl1 libgl1-mesa-dri mesa-utils zsh poppler-utils build-essential python3 fonts-inter
+          # The system UI font (CSS system-ui; documents' default font-sans) is SF Pro on macOS, where the
+          # text-layout tests were measured, and fontconfig's "Sans" (DejaVu Sans, much wider) here. Inter has
+          # close to SF metrics, so headings wrap as on macOS. Arial/Helvetica keep Liberation Sans.
+          sudo tee /etc/fonts/local.conf > /dev/null <<'XML'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+          <fontconfig>
+            <alias binding="strong"><family>Sans</family><prefer><family>Inter</family><family>Inter Variable</family></prefer></alias>
+            <alias binding="strong"><family>system-ui</family><prefer><family>Inter</family><family>Inter Variable</family></prefer></alias>
+          </fontconfig>
+          XML
+          fc-cache -f > /dev/null
+          echo "system-ui -> $(fc-match system-ui), Sans -> $(fc-match Sans)"
       - name: Allow the Chromium sandbox
         # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor, so Electron's Chromium
         # sandbox aborts ("No usable sandbox") unless chrome-sandbox is setuid root, which npm cannot
@@ -269,7 +282,20 @@ jobs:
           # to build from source (it ships a linux-x64 prebuild).
           sudo apt-get install -y --no-install-recommends xvfb xauth libnss3 libatk-bridge2.0-0t64 \
             libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxkbcommon0 libdrm2 libcups2t64 fonts-liberation \
-            libgl1 libegl1 libgl1-mesa-dri mesa-utils zsh poppler-utils build-essential python3
+            libgl1 libegl1 libgl1-mesa-dri mesa-utils zsh poppler-utils build-essential python3 fonts-inter
+          # The system UI font (CSS system-ui; documents' default font-sans) is SF Pro on macOS, where the
+          # text-layout tests were measured, and fontconfig's "Sans" (DejaVu Sans, much wider) here. Inter has
+          # close to SF metrics, so headings wrap as on macOS. Arial/Helvetica keep Liberation Sans.
+          sudo tee /etc/fonts/local.conf > /dev/null <<'XML'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+          <fontconfig>
+            <alias binding="strong"><family>Sans</family><prefer><family>Inter</family><family>Inter Variable</family></prefer></alias>
+            <alias binding="strong"><family>system-ui</family><prefer><family>Inter</family><family>Inter Variable</family></prefer></alias>
+          </fontconfig>
+          XML
+          fc-cache -f > /dev/null
+          echo "system-ui -> $(fc-match system-ui), Sans -> $(fc-match Sans)"
       - name: Allow the Chromium sandbox
         # See the electron job.
         run: |
