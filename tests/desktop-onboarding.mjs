@@ -114,7 +114,12 @@ exit 0`,
   assert.equal(await page.locator("#onboarding-continue").textContent(), "Continue");
   await page.locator("#onboarding-continue").click();
   await page.waitForSelector("#onboarding", { state: "detached" });
-  // Completion is remembered across reloads; the Share panel shares the session.
+  // Completion is remembered across reloads; wait for the new account writes first.
+  await page.evaluate(async () => {
+    await window.cloudWorkspace.storeFile(window.fileLibrary.currentId);
+    await window.cloudWorkspace.flush();
+    await window.accountStore.flush();
+  });
   await page.reload();
   await page.waitForFunction(() => !!window.cloudAccount && !!window.design);
   await page.waitForTimeout(500);
