@@ -1,3 +1,4 @@
+import { useCodexConnection } from "./codex-connection";
 // One component per settings section. Element ids and data attributes are test contracts (tests/settings.cjs).
 import { useEffect, useState, type ReactNode } from "react";
 import {
@@ -270,6 +271,7 @@ export function PreferencesPage({ preferences, setPreference }: PageProps) {
 
 /* ---------- Agents (71) ---------- */
 export function AgentsPage({ api, accounts }: PageProps) {
+  const { connected: codexConnected } = useCodexConnection();
   const tools = useToolsInfo();
   const [agents, setAgents] = useState<AgentInfo[] | null | undefined>(undefined);
   const [error, setError] = useState("");
@@ -306,12 +308,12 @@ export function AgentsPage({ api, accounts }: PageProps) {
         <Section
           id="settings-agent-runtime"
           title="How agents run"
-          description="Claude runs through the Claude Agent SDK on your Claude Code install; Codex runs through codex app-server (or codex exec on older versions)."
+          description={codexConnected ? "Claude runs through your Claude Code install. Codex runs locally through app-server using your ChatGPT connection." : "Claude runs through the Claude Agent SDK on your Claude Code install."}
         >
           <Card>
             <Row
               title="Agent workspace"
-              description="Both agents get the live canvas tools while the Verynize MCP bridge is running."
+              description="Connected agents get the live canvas tools while the Verynize MCP bridge is running."
             >
               <SettingsButton id="settings-open-agent" onClick={api.actions.openAgent}>
                 Open agent workspace
@@ -349,11 +351,22 @@ export function UsagePage() {
 
 /* ---------- Default Models (73) ---------- */
 export function ModelsPage({ api }: PageProps) {
+  const { ready, connected: codexConnected } = useCodexConnection();
   const initial = agentWorkspace()?.getDefaults?.() ?? {};
   const legacyAccess: Record<string, string> = { "read-only": "ask", "workspace-write": "edit" };
   const [agent, setAgent] = useState(initial.agent || "codex");
   const [model, setModel] = useState(initial.model || "");
   const [effort, setEffort] = useState(initial.effort || "");
+  useEffect(() => {
+    if (ready && !codexConnected && agent === "codex") {
+      setAgent("claude");
+      setModel("");
+      setEffort("");
+    }
+  }, [ready, codexConnected, agent]);
+  const effectiveAgent = agent === "codex" && !codexConnected ? "claude" : agent;
+  const effectiveModel = effectiveAgent === agent ? model : "";
+  const effectiveEffort = effectiveAgent === agent ? effort : "";
   const [access, setAccess] = useState(legacyAccess[initial.access ?? ""] || initial.access || "edit");
   return (
     <>
@@ -369,10 +382,10 @@ export function ModelsPage({ api }: PageProps) {
               <NativeSelect
                 id="settings-default-agent"
                 className="w-44"
-                value={agent}
+                value={effectiveAgent}
                 onChange={(event) => setAgent(event.target.value)}
               >
-                <option value="codex">Codex</option>
+                {codexConnected && <option value="codex">Codex</option>}
                 <option value="claude">Claude</option>
               </NativeSelect>
             </Row>
@@ -381,7 +394,7 @@ export function ModelsPage({ api }: PageProps) {
                 id="settings-default-model"
                 className="w-44"
                 placeholder="CLI default"
-                value={model}
+                value={effectiveModel}
                 onChange={(event) => setModel(event.target.value)}
               />
             </Row>
@@ -393,7 +406,7 @@ export function ModelsPage({ api }: PageProps) {
               <NativeSelect
                 id="settings-default-effort"
                 className="w-44"
-                value={effort}
+                value={effectiveEffort}
                 onChange={(event) => setEffort(event.target.value)}
               >
                 {["", "low", "medium", "high", "xhigh", "max"].map((value) => (
@@ -425,7 +438,7 @@ export function ModelsPage({ api }: PageProps) {
             <SettingsButton
               id="settings-save-models"
               variant="primary"
-              onClick={() => api.actions.saveModels({ agent, model: model.trim(), effort, access })}
+              onClick={() => api.actions.saveModels({ agent: effectiveAgent, model: effectiveModel.trim(), effort: effectiveEffort, access })}
             >
               Save defaults
             </SettingsButton>

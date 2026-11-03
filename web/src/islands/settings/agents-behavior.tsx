@@ -1,3 +1,4 @@
+import { useCodexConnection } from "./codex-connection";
 // Settings › Agents, lower half: Chat, Response preferences, Code attribution, Projects and worktrees, Mode for new
 // chats and Allowed without asking. Values live in desktop/agent-behavior.cjs (window.desktop.agentBehavior); the
 // Default mode is the chat defaults' access (same value as Default Models › Access). Ids are test contracts
@@ -120,6 +121,7 @@ function ChatSection({ behavior }: { behavior: AgentBehavior }) {
 
 /* ---------- Response preferences ---------- */
 function ResponseSection({ behavior }: { behavior: AgentBehavior }) {
+  const { connected: codexConnected } = useCodexConnection();
   const [styles, setStyles] = useState<{ styles: OutputStyle[]; current: string | null } | null>(null);
   useEffect(() => {
     let live = true;
@@ -152,7 +154,7 @@ function ResponseSection({ behavior }: { behavior: AgentBehavior }) {
             {chosen && !list.some((style) => style.id === chosen) && <option value={chosen}>{chosen}</option>}
           </NativeSelect>
         </Row>
-        <Row title="Codex personality" description="None turns personality off. Applies to new chats.">
+        {codexConnected && <Row title="Codex personality" description="None turns personality off. Applies to new chats.">
           <div id="settings-codex-personality">
             <Segmented
               label="Codex personality"
@@ -165,7 +167,7 @@ function ResponseSection({ behavior }: { behavior: AgentBehavior }) {
               onChange={(codexPersonality) => void save({ codexPersonality })}
             />
           </div>
-        </Row>
+        </Row>}
       </Card>
     </Section>
   );
@@ -181,6 +183,7 @@ const initials = (name: string) =>
     .join("") || "?";
 
 function AttributionSection({ behavior, author }: { behavior: AgentBehavior; author: CommitAuthor | null }) {
+  const { connected: codexConnected } = useCodexConnection();
   const missing = author !== null && !author.name && !author.email;
   const warn = author?.linked === false && author.login;
   return (
@@ -229,7 +232,7 @@ function AttributionSection({ behavior, author }: { behavior: AgentBehavior; aut
             </div>
           )}
         </div>
-        <Row title="Credit the agent on commits and pull requests" description="Adds Claude credit. Codex follows your ChatGPT setting.">
+        <Row title="Credit the agent on commits and pull requests" description={codexConnected ? "Adds Claude credit. Codex follows your ChatGPT setting." : "Adds Claude credit."}>
           <Toggle
             id="settings-credit-agent"
             aria-label="Credit the agent on commits and pull requests"
@@ -389,6 +392,7 @@ function AgentGlyph({ agent, className }: { agent: AllowGroup["agent"]; classNam
 }
 
 function AllowedSection() {
+  const { connected: codexConnected } = useCodexConnection();
   const ipc = behaviorIpc();
   const [groups, setGroups] = useState<AllowGroup[] | null>(null);
   const [busy, setBusy] = useState("");
@@ -421,7 +425,7 @@ function AllowedSection() {
     <Section
       id="settings-allowed-without-asking"
       title="Allowed without asking"
-      description="Rules saved with “don’t ask again” in Verynize, Claude Code or Codex. Remove one and the agent asks again."
+      description="Rules saved with “don’t ask again” in Verynize and your connected agents. Remove one and the agent asks again."
     >
       <div id="settings-allow-groups" className="flex flex-col gap-4">
         {!ipc && (
@@ -429,12 +433,12 @@ function AllowedSection() {
             <Row title="Available in the desktop app" description="Saved rules are read from this computer." />
           </Card>
         )}
-        {ipc && groups?.length === 0 && (
+        {ipc && groups?.filter((group) => group.agent !== "codex" || codexConnected).length === 0 && (
           <Card>
             <Row title="No saved rules" description="When an agent asks for permission, choose “don’t ask again” to skip the question next time." />
           </Card>
         )}
-        {(groups ?? []).map((group) => (
+        {(groups ?? []).filter((group) => group.agent !== "codex" || codexConnected).map((group) => (
           <Card key={group.id} data-allow-group={group.agent} data-allow-scope={group.scope} className="px-0">
             <div className="flex items-center gap-3 rounded-t-2xl bg-background px-4 py-3">
               <IconTile>

@@ -246,8 +246,8 @@ function recordGeneratedLayers(count) { return layerLog ? layerLog.record(count)
 // --- IPC -----------------------------------------------------------------------------------------
 class AgentUsage {
   // `profileEnv(agent, id)`: CLAUDE_CONFIG_DIR / CODEX_HOME of a named account (desktop/agent-profiles.cjs).
-  constructor({ userData, discover = agents.discover, claude = fetchClaudeUsage, codex = fetchCodexUsage, disabled = process.env.VERYNIZE_DISABLE_AGENT_USAGE === '1', profileEnv = null } = {}) {
-    Object.assign(this, { userData, discover, claude, codex, disabled, profileEnv });
+  constructor({ userData, discover = agents.discover, claude = fetchClaudeUsage, codex = fetchCodexUsage, disabled = process.env.VERYNIZE_DISABLE_AGENT_USAGE === '1', profileEnv = null, siwc = null } = {}) {
+    Object.assign(this, { userData, discover, claude, codex, disabled, profileEnv, siwc });
     this.cache = new Map();
   }
   /** Forget cached limits of a removed account. */
@@ -258,6 +258,10 @@ class AgentUsage {
     const env = named ? (this.profileEnv ? await this.profileEnv(agent, named) : null) : {};
     if (!env) throw Error('Named accounts are not available');
     const cacheKey = named ? `${agent}:${named}` : agent;
+    if (agent === 'codex' && this.siwc) {
+      const account = await this.siwc.status(named || 'system');
+      return { agent, status: account.loggedIn ? 'unavailable' : 'signed-out', email: account.email, plan: account.plan, limits: [], updatedAt: Date.now(), message: account.loggedIn ? 'Using your ChatGPT plan. View limits and manage Verynize access in ChatGPT Settings → Usage.' : 'Continue with ChatGPT in Verynize to use your plan.' };
+    }
     const cached = this.cache.get(cacheKey);
     if (!refresh && cached && Date.now() - cached.at < CACHE_MS) return cached.value;
     if (cached?.pending) return cached.pending;
@@ -280,9 +284,9 @@ class AgentUsage {
   }
 }
 
-function registerAgentUsage(handle, { userData, profiles = null }) {
+function registerAgentUsage(handle, { userData, profiles = null, siwc = null }) {
   layerLog = new LayerLog(path.join(userData, 'agent-usage.json'));
-  const usage = new AgentUsage({ userData, ...(profiles ? { profileEnv: (agent, id) => profiles.envFor(agent, id) } : {}) });
+  const usage = new AgentUsage({ userData, siwc, ...(profiles ? { profileEnv: (agent, id) => profiles.envFor(agent, id) } : {}) });
   handle('agentUsage', options => usage.provider(options?.agent, { refresh: !!options?.refresh, profile: typeof options?.profile === 'string' ? options.profile : null }));
   handle('agentLayerUsage', () => layerLog.summary());
   return usage;
