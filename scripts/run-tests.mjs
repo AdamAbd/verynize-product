@@ -507,7 +507,7 @@ function argv(entry) {
   const parts = entry.cmd.split(/\s+/).filter(Boolean);
   if (parts[0] === "node") parts[0] = process.execPath;
   if (entry.lane === "electron" && needsXvfb())
-    return ["xvfb-run", "-a", "-s", "-screen 0 1920x1080x24", ...parts];
+    return ["xvfb-run", "-a", "-s", "-screen 0 3840x2160x24", ...parts];
   return parts;
 }
 
