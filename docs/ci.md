@@ -14,6 +14,16 @@ At setup, the Instabox free workspace has one machine slot: quality and Node/clo
 
 Runner references: [Instabox CI](https://instabox.sh/docs/ci), [Blacksmith runners](https://docs.blacksmith.sh/blacksmith-runners/overview). Validate the first CI run on both providers before merging; image compatibility alone does not establish that every Electron or cloud test passes.
 
+## Setup performance
+
+Test jobs use a depth-one sparse checkout that excludes `design/` reference screenshots (about 423 MiB at the time of setup). Source, hidden files, docs, eval and test fixtures remain available. PR jobs run `scripts/ci-fetch-history.mjs` to fetch the exact base/head commits with filtered blobs, deepen ancestry until a merge base is available, and fall back to filtered full history for long-lived branches. Quality fetches only the base commit for its format diff. Fetch credentials are scoped to those git subprocesses and are not stored in repository config. Non-PR full suites need no extra history. The identity workflow retains its full checkout because it inspects historical blobs and images.
+
+The local `setup-node-deps` action restores npm's download cache, including a fallback to compatible caches from previous lockfiles, and installs with `npm ci --prefer-offline --no-audit --no-fund`. Lockfile verification and lifecycle scripts remain enabled; `node_modules` is rebuilt rather than cached. Each job records cache status, versions, elapsed install time and a timing-only artifact, so a slow cold install can be diagnosed without uploading debug logs.
+
+The local `setup-electron-linux` action checks installed system packages and installs only missing ones. It reuses cached package downloads, refreshes Ubuntu package indexes only after an install fails, and retains Inter font aliases and Chromium sandbox setup. Blacksmith Machine Images is still marked **Coming soon** in its dashboard: no custom image is configured. The same setup script supports a future image-bake mode; see [Electron Linux setup](../.github/actions/setup-electron-linux/README.md).
+
+Changes to the test workflow or local setup actions select the full suite. New regression coverage checks sparse checkout contents, PR merge-base correctness and the deep-history fallback with real git repositories.
+
 ## Branch flow
 
 ```

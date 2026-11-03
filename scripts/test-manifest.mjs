@@ -50,6 +50,8 @@ export const CORE_ELECTRON = [
 
 /** Changes here run the whole suite. */
 export const FULL_SUITE = [
+  ".github/actions/**",
+  ".github/workflows/tests.yml",
   "package.json",
   "package-lock.json",
   "vite*.config.ts",
