@@ -107,6 +107,31 @@ const APP = `require('http').createServer((q,r)=>{r.setHeader('content-type','te
     assert.equal(await page.evaluate(() => document.body.classList.contains('files-view')), false, 'preview tab replaces the Files home');
     assert.equal(await tabFrame().inputValue('input'), 'kept in the tab', 'page state survives switching tabs');
 
+    // The document tab shows the file name only; right-click opens its tab menu, Close Other Tabs closes the preview.
+    assert.equal(await page.locator('[data-document-tab]').innerText().then(t => t.trim()), '', 'no " - Page" suffix (the name is the input value)');
+    assert.equal(await page.locator('[data-document-tab] [data-file-tab-close]').isVisible(), false, 'close button only on hover');
+    // Arrow cursor on the tab; the name is renamed only after a double-click.
+    const name = page.locator('#document-name');
+    assert.deepEqual(await name.evaluate(el => [el.readOnly, getComputedStyle(el).pointerEvents, getComputedStyle(el.closest('[data-document-tab]')).cursor]), [true, 'none', 'auto']);
+    const before = await name.inputValue();
+    await page.locator('[data-document-tab]').dblclick();
+    await page.waitForFunction(() => document.activeElement?.id === 'document-name' && !document.activeElement.readOnly);
+    await page.keyboard.type('Renamed tab');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => window.design.getDocument().name === 'Renamed tab');
+    assert.equal(await name.evaluate(el => el.readOnly), true, 'rename ends on Enter');
+    await page.locator('[data-document-tab]').dblclick();
+    await page.keyboard.type(before);
+    await page.keyboard.press('Enter');
+    await tab.locator('button[aria-current], button:not([aria-label])').first().click();
+    await view.waitFor();
+    await page.locator('[data-document-tab]').click({button: 'right'});
+    const menu = page.locator('[data-file-tab-menu]');
+    await menu.waitFor();
+    assert.deepEqual(await menu.getByRole('menuitem').allInnerTexts(), ['New Tab', 'Close Tab', 'Close Other Tabs', 'Reload']);
+    await page.keyboard.press('Escape');
+    await menu.waitFor({state: 'detached'});
+
     // Show on canvas: back to the design file with the frame selected; the tab stays open.
     await view.getByRole('button', {name: 'Show on canvas'}).first().click();
     await view.waitFor({state: 'hidden'});
@@ -134,7 +159,14 @@ const APP = `require('http').createServer((q,r)=>{r.setHeader('content-type','te
     await page.waitForFunction(id => document.querySelector(`[data-preview-tab="${id}"]`)?.dataset.status === 'running', frameId, {timeout: 10000});
     await page.waitForFunction(() => document.querySelector('iframe[name=verynize-preview-tab]')?.src.startsWith('http'));
     assert.match((await tab.innerText()).replace(/\s+/g, ' '), /Sunbird · Preview/);
-    console.log('PASS preview tab: ⌘⌥P/expand open, separate page state, browser bar, tab switching, show on canvas, close keeps server, stopped state');
+    await page.locator('[data-document-tab]').click({button: 'right'});
+    await page.locator('[data-file-tab-menu]').getByRole('menuitem', {name: 'Close Other Tabs'}).click();
+    await tab.waitFor({state: 'detached'});
+    assert.equal(await page.locator('[data-document-tab]').getAttribute('aria-current'), 'page', 'Close Other Tabs keeps the file');
+    await page.locator('[data-document-tab]').hover();
+    await page.locator('[data-document-tab] [data-file-tab-close]').click();
+    await page.waitForFunction(() => document.body.classList.contains('files-view'));
+    console.log('PASS preview tab: document tab menu (Close Tab, Close Other Tabs), ⌘⌥P/expand open, separate page state, browser bar, tab switching, show on canvas, close keeps server, stopped state');
   } finally {
     if (root) await page.evaluate(root => window.desktop.devServer.stop({root}), root).catch(() => {});
     await app.close();

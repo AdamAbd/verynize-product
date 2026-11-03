@@ -183,6 +183,24 @@ function leaveOtherViews() {
   if (document.body.classList.contains("files-view")) fileLibrary()?.showEditor?.();
 }
 
+/** Preview frames of the open design file, with the tab title and status (the file switcher's Previews). */
+export function previewFrames(): { frameId: string; title: string; name: string; status: PreviewTabStatus }[] {
+  const doc = window.design?.getDocument();
+  const frames: { frameId: string; title: string; name: string; status: PreviewTabStatus }[] = [];
+  for (const page of doc?.pages ?? [])
+    for (const node of page.nodes as PreviewNode[]) {
+      if (!node.preview) continue;
+      const tab = state.tabs.find((candidate) => candidate.frameId === node.id);
+      frames.push({
+        frameId: node.id,
+        title: node.name.replace(/ · Preview$/, "") || "Preview",
+        name: tab?.name ?? tabName(node),
+        status: tab?.status ?? canvasStatus(node.id) ?? "stopped",
+      });
+    }
+  return frames;
+}
+
 /** Open (or focus) the tab for a canvas preview frame. Returns false when the frame is unknown. */
 export function open(frameId: string): boolean {
   if (typeof frameId !== "string" || !frameId) return false;

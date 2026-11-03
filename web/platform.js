@@ -102,6 +102,9 @@
     CAPABILITY_METHODS: Object.freeze(CAPABILITY_METHODS),
     agents,
   });
+  // html[data-platform=desktop|web]: CSS that differs per runtime (the macOS traffic-light inset, globals.css).
+  if (root.document && root.document.documentElement)
+    root.document.documentElement.dataset.platform = platform.kind;
   Object.defineProperty(root, "verynizePlatform", {
     value: platform,
     enumerable: false,
