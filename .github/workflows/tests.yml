@@ -103,12 +103,13 @@ jobs:
           all=$(count < "$RUNNER_TEMP/all.txt")
           electron=$(count < "$RUNNER_TEMP/electron.txt")
           if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "$GITHUB_BASE_REF" = staging ]; then
-            mode=affected; shards=1
+            mode=affected
           else
-            mode=full; shards=4
+            mode=full
           fi
-          # Never start more shards than there are tests to spread across them.
-          if [ "$electron" -lt "$shards" ]; then shards=$(( electron > 0 ? electron : 1 )); fi
+          # About 20 Electron tests per shard (~4 min), at most 4 shards. An affected run that touches core
+          # files selects the full suite, so size by count rather than by event.
+          shards=$(( (electron + 19) / 20 )); [ "$shards" -lt 1 ] && shards=1; [ "$shards" -gt 4 ] && shards=4
           matrix=$(node -e 'const n=+process.argv[1];console.log(JSON.stringify(Array.from({length:n},(_,i)=>(i+1)+"/"+n)))' "$shards")
           {
             echo "mode=$mode"
@@ -222,7 +223,7 @@ jobs:
         # use otherwise (inside a timed test). install.js is a no-op when it is already there.
         run: node node_modules/electron/install.js
       - name: Run electron lane
-        # No DISPLAY on the VM: the runner wraps each Electron test in `xvfb-run -a -s "-screen 0 1920x1080x24"`.
+        # No DISPLAY on the VM: the runner wraps each Electron test in `xvfb-run -a -s "-screen 0 3840x2160x24"`.
         run: node scripts/run-tests.mjs --ci-event --lane electron --shard "$SHARD" --report "$RUNNER_TEMP/report"
         env:
           SHARD: ${{ matrix.shard }}

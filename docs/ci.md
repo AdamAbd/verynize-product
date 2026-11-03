@@ -25,9 +25,9 @@ feature/*  --PR-->  staging  --PR-->  main
 `tests.yml` jobs:
 
 - `quality`: `npm ci`, `build:ui`, `check`, `lint`, `typecheck:ui`, format check of files the PR adds (the existing tree predates the formatter).
-- `plan`: `node scripts/run-tests.mjs --ci-event --list` per lane. It counts the selected tests and builds the Electron shard matrix: 4 shards for the full suite, 1 for affected. The runner imports only Node built-ins, so this job skips `npm ci`.
+- `plan`: `node scripts/run-tests.mjs --ci-event --list` per lane. It counts the selected tests and builds the Electron shard matrix: about 20 Electron tests per shard, at most 4. The runner imports only Node built-ins, so this job skips `npm ci`.
 - `node + cloud`: `--lane node --lane cloud`. No display is needed. Playwright Chromium is installed only when `tests/web-*` is selected.
-- `electron (i/n)` (matrix): `--lane electron --shard i/n`. The job installs the Electron system libraries, `xvfb`, Mesa (software WebGL), `zsh` (terminal tests), `poppler-utils` (`pdftoppm`, PDF export check) and a build toolchain for `node-pty`, then downloads the Electron binary (`node node_modules/electron/install.js`). The runner wraps each test in `xvfb-run -a -s "-screen 0 1920x1080x24"` when `DISPLAY` is unset.
+- `electron (i/n)` (matrix): `--lane electron --shard i/n`. The job installs the Electron system libraries, `xvfb`, Mesa (software WebGL), `zsh` (terminal tests), `poppler-utils` (`pdftoppm`, PDF export check) and a build toolchain for `node-pty`, then downloads the Electron binary (`node node_modules/electron/install.js`). The runner wraps each test in `xvfb-run -a -s "-screen 0 3840x2160x24"` when `DISPLAY` is unset.
 - `serial`: `--lane serial`, for tests that must run alone (today `integrations/design-files.test.mjs`, whose `fs.watch` wait misses under parallel load). Same system setup as the Electron jobs.
 - `tests`: an aggregate job that always runs. It fails if `plan` failed or any lane failed or was cancelled. It passes when lanes were skipped because nothing was affected. Use this stable name as the required check.
 
