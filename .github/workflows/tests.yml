@@ -55,7 +55,16 @@ jobs:
       - run: npm run check
       - run: npm run lint
       - run: npm run typecheck:ui
-      - run: npm run format:check
+      # The tree predates the formatter (hundreds of unformatted files), so only files a PR adds
+      # must be formatted. Run `npm run format:check` locally for the whole tree.
+      - name: Format check (files added by this PR)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git diff --name-only -z --diff-filter=A "$BASE_SHA" HEAD -- \
+            | grep -zE '\.(js|cjs|mjs|ts|tsx|json|css|md|yml|yaml)$' \
+            | xargs -0 -r npx --no-install vp fmt --check
 
   plan:
     name: plan

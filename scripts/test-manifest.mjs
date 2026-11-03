@@ -71,7 +71,6 @@ export const NO_TESTS = [
   "components.json",
   "tests/.durations.json",
   "scripts/check.cjs",
-  "scripts/check-identity.mjs",
   "integrations/assets-live-smoke.mjs", // manual smoke script against a live bucket
   ".vite-hooks/**",
 ];
@@ -329,6 +328,10 @@ const canvas = [
 ];
 
 const desktop = [
+  unit("tests/identity-check.mjs", "integrations", [
+    "scripts/check-identity.mjs",
+    ".identity-allow",
+  ]),
   unit("tests/window-cleanup.cjs", "desktop"),
   unit(
     "tests/platform-contract.cjs",

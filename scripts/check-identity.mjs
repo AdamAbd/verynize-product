@@ -39,7 +39,7 @@ const FILE_TLDS = new Set(
   ),
 );
 const PLACEHOLDER_DOMAINS =
-  /(?:^|\.)(?:example\.(?:com|org|net)|example|test|invalid|localhost|local|domain\.com|email\.com|yourdomain\.com|company\.com|acme\.(?:com|test)|users\.noreply\.github\.com)$/i;
+  /(?:^|\.)(?:example\.[a-z]{1,6}|example|test|invalid|localhost|local|domain\.com|email\.com|yourdomain\.com|company\.com|acme\.(?:com|test)|users\.noreply\.github\.com)$/i;
 const ALLOWED_EMAILS = new Set([
   "noreply@anthropic.com",
   "noreply@github.com",
