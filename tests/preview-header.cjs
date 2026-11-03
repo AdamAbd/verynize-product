@@ -7,6 +7,7 @@
 // review card in edit access.
 // PREVIEW_HEADER_SHOTS=/dir saves 1440×870 screenshots of the states.
 const { _electron } = require('@playwright/test');
+const { mod } = require("./helpers/keys.cjs");
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -181,7 +182,7 @@ process.on('SIGTERM',()=>process.exit(0));
     await page.waitForFunction(() => { const ids = window.design.getSelection(); return ids.length === 1 && window.design.getDocument().pages.some(p => p.nodes.some(n => n.id === ids[0] && n.preview)); });
     await page.evaluate(() => { window.previewTab = { open: id => { window.openedTab = id; } }; });
     await page.locator('#project-prompt').blur().catch(() => {});
-    await page.keyboard.press('Meta+Alt+KeyP');
+    await page.keyboard.press(mod('Alt+KeyP'));
     await page.waitForFunction(() => !!window.openedTab);
     assert.equal(await page.evaluate(() => window.design.getDocument().pages.flatMap(p => p.nodes).find(n => n.id === window.openedTab)?.preview?.root), chatRoot, '⌘⌥P opens this preview in a tab');
 

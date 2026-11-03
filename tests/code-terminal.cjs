@@ -217,10 +217,12 @@ export default {
       await waitUntil(async () => (await surface()) === 'rgb(247, 247, 247)', 5000, 'light terminal theme');
       await page.evaluate(() => document.documentElement.removeAttribute('data-ui-theme'));
       await waitUntil(async () => (await surface()) === 'rgb(28, 28, 28)', 5000, 'dark terminal theme again');
-      // ⌘K clears the buffer.
+      // ⌘K clears the buffer (Terminal.app; macOS only: elsewhere Ctrl+K stays the shell's kill-line).
       await panel.locator('[role=tabpanel]:not([hidden]) .xterm').click();
-      await page.keyboard.press('Meta+k');
-      await page.waitForFunction(() => !/PANEL_OK/.test(document.querySelector('#panel-a [role=tabpanel]:not([hidden]) .xterm-rows')?.textContent || ''), null, { timeout: 5000 });
+      if (process.platform === 'darwin') {
+        await page.keyboard.press('Meta+k');
+        await page.waitForFunction(() => !/PANEL_OK/.test(document.querySelector('#panel-a [role=tabpanel]:not([hidden]) .xterm-rows')?.textContent || ''), null, { timeout: 5000 });
+      }
       // "+" adds a focused tab; the first tab keeps its shell while hidden.
       await panel.getByRole('button', { name: 'New terminal' }).click();
       await waitUntil(async () => (await panel.getByRole('tab', { name: 'zsh' }).count()) === 2, 10000, 'second tab');

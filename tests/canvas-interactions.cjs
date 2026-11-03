@@ -1,6 +1,7 @@
 // Canvas parity: camera, tools, selection, smart guides, clipboard, structure commands, sizing modes.
 const {_electron} = require('@playwright/test');
 const { moveOffCursor } = require("./helpers/off-cursor.cjs");
+const { MOD, mod } = require("./helpers/keys.cjs");
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
@@ -62,13 +63,13 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     const panned = await page.evaluate(() => window.design.getCamera());
     near(panned.x, 60, 0.5, 'wheel pans x'); near(panned.y, 40, 0.5, 'wheel pans y');
     await page.evaluate(() => window.design.setCamera(100, 100, 0.8));
-    await page.keyboard.press('Meta+Equal');
+    await page.keyboard.press(mod('Equal'));
     assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 1, '⌘+ steps to the next zoom stop');
-    await page.keyboard.press('Meta+Equal');
+    await page.keyboard.press(mod('Equal'));
     assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 2);
-    await page.keyboard.press('Meta+Minus'); await page.keyboard.press('Meta+Minus');
+    await page.keyboard.press(mod('Minus')); await page.keyboard.press(mod('Minus'));
     assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 0.5);
-    await page.keyboard.press('Meta+Digit0');
+    await page.keyboard.press(mod('Digit0'));
     assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 1);
     await page.keyboard.press('Shift+Digit1');
     const fitted = await page.evaluate(() => ({far: document.querySelector('#canvas [data-id=far]').getBoundingClientRect().toJSON(), a: document.querySelector('#canvas [data-id=a]').getBoundingClientRect().toJSON(), wrap: document.querySelector('#canvas-wrap').getBoundingClientRect().toJSON()}));
@@ -172,7 +173,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.evaluate(() => window.design.setSelection(['c1']));
     await page.keyboard.press('Tab'); assert.deepEqual(await selection(), ['c2'], 'tab cycles siblings');
     await page.keyboard.press('Escape'); assert.deepEqual(await selection(), [], 'escape deselects');
-    await click(130, 230, {modifiers: ['Meta']}); assert.deepEqual(await selection(), ['c2'], 'cmd-click deep-selects the leaf');
+    await click(130, 230, {modifiers: [MOD]}); assert.deepEqual(await selection(), ['c2'], 'cmd-click deep-selects the leaf');
     await click(600, 600);
     await click(350, 380); assert.deepEqual(await selection(), ['board'], 'clicking an artboard background selects the artboard');
     await click(600, 600);
@@ -198,8 +199,8 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.deepEqual(await order(), ['s-b', 's-c', 's-a'], 'releasing a stack child reorders it to the slot under the pointer');
     assert.equal(await page.locator('#canvas [data-id=s-a]').evaluate(e => e.style.translate), '', 'the drag offset clears on drop');
     await page.keyboard.press('ArrowUp'); assert.deepEqual(await order(), ['s-b', 's-a', 's-c'], 'arrow keys step a stack child through the stack');
-    await page.keyboard.press('Meta+z'); assert.deepEqual(await order(), ['s-b', 's-c', 's-a']);
-    await page.keyboard.press('Meta+z'); assert.deepEqual(await order(), ['s-a', 's-b', 's-c'], 'a drag is one undo step');
+    await page.keyboard.press(mod('z')); assert.deepEqual(await order(), ['s-b', 's-c', 's-a']);
+    await page.keyboard.press(mod('z')); assert.deepEqual(await order(), ['s-a', 's-b', 's-c'], 'a drag is one undo step');
     await click(50, 80); assert.deepEqual(await selection(), ['s-b']);
     const landing = await drag([50, 80], [470, 90], {steps: 10, during: () => page.evaluate(() => {
       const r = document.querySelector('#canvas [data-id=s-b]').getBoundingClientRect(), w = document.querySelector('#canvas-wrap').getBoundingClientRect(), c = window.design.getCamera();
@@ -226,7 +227,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     const se = await page.locator('#canvas-overlay .selection-ring > .handle[data-corner=se]').boundingBox(), to = await screen(400, 250);
     await page.mouse.move(se.x + se.width / 2, se.y + se.height / 2); await page.mouse.down(); await page.mouse.move(to.x, to.y, {steps: 6}); await page.mouse.up();
     near((await node('R')).w, 200, 1, 'the overlay handle resizes'); near((await node('R')).h, 150, 1);
-    for (let i = 0; i < 3; i++) await page.keyboard.press('Meta+z'); // resize, snap drag, nesting drag
+    for (let i = 0; i < 3; i++) await page.keyboard.press(mod('z')); // resize, snap drag, nesting drag
     nested = await node('R'); assert.equal(nested.parentId, null, 'the nesting drag is one undo step'); near(nested.x, 500);
 
     // ---- 4. Smart guides, equal spacing and Alt distances ----
@@ -252,28 +253,28 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     // ---- 5. Clipboard ----
     await seed([rect('p1', 0, 0, 100, 80, {color: '#ff0000', radius: 9}), rect('p2', 200, 0, 100, 80, {color: '#00ff00'})]);
     await page.evaluate(() => window.design.setSelection(['p1']));
-    await page.keyboard.press('Meta+KeyC'); await page.keyboard.press('Meta+KeyV');
+    await page.keyboard.press(mod('KeyC')); await page.keyboard.press(mod('KeyV'));
     await page.waitForFunction(() => window.design.getDocument().pages[0].nodes.length === 3);
     let pasted = (await nodesOf()).at(-1);
     assert.notEqual(pasted.id, 'p1'); assert.equal(pasted.x, 0); assert.equal(pasted.color, '#ff0000');
     assert.deepEqual(await selection(), [pasted.id], 'pasted layer is selected');
-    await page.keyboard.press('Meta+KeyX');
+    await page.keyboard.press(mod('KeyX'));
     assert.equal((await nodesOf()).length, 2, 'cut removes');
-    await page.keyboard.press('Meta+Shift+KeyV');
+    await page.keyboard.press(mod('Shift+KeyV'));
     await page.waitForFunction(() => window.design.getDocument().pages[0].nodes.length === 3);
     pasted = (await nodesOf()).at(-1); assert.equal(pasted.x, 0); assert.equal(pasted.y, 0, 'paste in place keeps position');
     await page.evaluate(() => window.design.setSelection(['p1']));
-    await page.keyboard.press('Meta+Alt+KeyC');
+    await page.keyboard.press(mod('Alt+KeyC'));
     await page.evaluate(() => window.design.setSelection(['p2']));
-    await page.keyboard.press('Meta+Alt+KeyV');
+    await page.keyboard.press(mod('Alt+KeyV'));
     const styled = await node('p2'); assert.equal(styled.color, '#ff0000'); assert.equal(styled.radius, 9); assert.equal(styled.x, 200, 'paste style leaves geometry');
-    await page.keyboard.press('Meta+KeyD'); assert.equal((await nodesOf()).length, 4, '⌘D duplicates');
-    await page.keyboard.press('Meta+KeyZ'); assert.equal((await nodesOf()).length, 3, 'undo reverts duplicate');
+    await page.keyboard.press(mod('KeyD')); assert.equal((await nodesOf()).length, 4, '⌘D duplicates');
+    await page.keyboard.press(mod('KeyZ')); assert.equal((await nodesOf()).length, 3, 'undo reverts duplicate');
 
     // ---- 6. Frame/unframe, auto layout, lock/hide, z-order ----
     await seed([rect('f1', 100, 100, 100, 50), rect('f2', 260, 100, 100, 50), rect('f3', 420, 100, 100, 50)]);
     await page.evaluate(() => window.design.setSelection(['f1', 'f2']));
-    await page.keyboard.press('Meta+KeyG');
+    await page.keyboard.press(mod('KeyG'));
     list = await nodesOf();
     const frame = list.find(n => n.type === 'frame');
     assert.deepEqual([frame.x, frame.y, frame.w, frame.h], [100, 100, 260, 50]);
@@ -286,22 +287,22 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal(auto.w, 260, 'hugging frame measures its content');
     const autoBox = await page.locator('#canvas [data-id=f1]').boundingBox();
     near(autoBox.x, f1Box.x, 1, 'auto layout keeps children in place');
-    await page.keyboard.press('Meta+Shift+KeyG');
+    await page.keyboard.press(mod('Shift+KeyG'));
     list = await nodesOf();
     assert.equal(list.some(n => n.type === 'frame'), false, 'unframe removes the frame');
     assert.equal((await node('f2')).parentId, null); assert.equal((await node('f2')).x, 260, 'unframe restores page coordinates');
     await page.evaluate(() => window.design.setSelection(['f1']));
-    await page.keyboard.press('Meta+BracketRight');
+    await page.keyboard.press(mod('BracketRight'));
     assert.deepEqual((await nodesOf()).map(n => n.id), ['f2', 'f1', 'f3'], 'bring forward');
-    await page.keyboard.press('Meta+Alt+BracketRight');
+    await page.keyboard.press(mod('Alt+BracketRight'));
     assert.deepEqual((await nodesOf()).map(n => n.id), ['f2', 'f3', 'f1'], 'bring to front');
-    await page.keyboard.press('Meta+Alt+BracketLeft');
+    await page.keyboard.press(mod('Alt+BracketLeft'));
     assert.deepEqual((await nodesOf()).map(n => n.id), ['f1', 'f2', 'f3'], 'send to back');
-    await page.keyboard.press('Meta+Shift+KeyL'); assert.equal((await node('f1')).locked, true);
+    await page.keyboard.press(mod('Shift+KeyL')); assert.equal((await node('f1')).locked, true);
     await drag([150, 125], [150, 300]); assert.equal((await node('f1')).y, 100, 'locked layers do not move on canvas');
     await page.evaluate(() => window.design.setSelection(['f1']));
-    await page.keyboard.press('Meta+Shift+KeyL'); assert.equal((await node('f1')).locked, undefined);
-    await page.keyboard.press('Meta+Shift+KeyH'); assert.equal((await node('f1')).hidden, true);
+    await page.keyboard.press(mod('Shift+KeyL')); assert.equal((await node('f1')).locked, undefined);
+    await page.keyboard.press(mod('Shift+KeyH')); assert.equal((await node('f1')).hidden, true);
     assert.equal(await page.locator('#canvas [data-id=f1]').evaluate(e => getComputedStyle(e).display), 'none');
     assert.equal(await page.locator('.layer-row.is-hidden').count(), 1, 'hidden layer is dimmed in the layer list');
     await page.locator('.layer-row.is-hidden [data-toggle=hidden]').click();

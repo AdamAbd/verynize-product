@@ -23,10 +23,12 @@ const path = require('node:path');
       window.setBounds({...work,height:Math.max(600,work.height-120)});
       window.setBounds(work);
     }, initial.work);
-    const resized = await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].getBounds());
+    // X11 applies geometry requests asynchronously (through the window manager); macOS already has them here.
+    const bottom = async () => {let bounds;for (let i = 0; i < 40; i++) {bounds = await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].getBounds());if (bounds.y + bounds.height === initial.work.y + initial.work.height) break;await new Promise(r => setTimeout(r, 50));}return bounds;};
+    const resized = await bottom();
     assert.equal(resized.y + resized.height,initial.work.y + initial.work.height,'resizing reaches the bottom of the work area');
     await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].maximize());
-    const maximized = await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].getBounds());
+    const maximized = await bottom();
     assert.equal(maximized.y + maximized.height,initial.work.y + initial.work.height,'maximizing fills the usable screen height');
     await page.waitForFunction(() => Math.abs(document.querySelector('body > main').getBoundingClientRect().bottom-innerHeight)<2);
     console.log('PASS window layout: normal bounds on-screen, vertical resize, maximize and full-height renderer');

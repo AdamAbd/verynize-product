@@ -2,6 +2,7 @@
 // tab with a separate page state; the tab survives tab switches, "Show on canvas" returns to the selected frame and
 // keeps the tab, closing it never stops the dev server, and a stopped server shows "<worktree> · Stopped".
 const {_electron} = require('@playwright/test');
+const { mod } = require("./helpers/keys.cjs");
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -44,7 +45,7 @@ const APP = `require('http').createServer((q,r)=>{r.setHeader('content-type','te
     await page.evaluate(id => window.design.setSelection([id]), frameId);
     await page.locator('#canvas-wrap').hover();
     await page.evaluate(() => document.activeElement?.blur());
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Alt+KeyP' : 'Control+Alt+KeyP');
+    await page.keyboard.press(mod('Alt+KeyP'));
     const tab = page.locator(`[data-preview-tab="${frameId}"]`);
     await tab.waitFor();
     await page.waitForFunction(id => document.querySelector(`[data-preview-tab="${id}"]`)?.dataset.status === 'running', frameId);

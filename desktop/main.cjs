@@ -20,6 +20,9 @@ const appProtocol=require('./app-protocol.cjs');
 appProtocol.registerSchemes(protocol); // must run before app ready
 let primaryRuntime=null,repositories=null,behaviorStore=null,agentStores=null;const liveRuntimes=new Set(); // agent runtime of the latest editor window (serves ask_agent)
 app.setName('Verynize');
+// Linux CI (xvfb, no desktop keyring): use Chromium's basic password store instead of probing D-Bus/libsecret, so
+// safeStorage reports encryption unavailable at once (generate.cjs keeps keys in memory, figma-oauth.cjs refuses to persist).
+if(process.platform==='linux'&&process.env.CI&&!app.commandLine.hasSwitch('password-store'))app.commandLine.appendSwitch('password-store','basic');
 require('./app-preferences.cjs').attachDeepLinks(app); // verynize:// design links (Settings › Preferences › Advanced)
 app.whenReady().then(async () => {
   appProtocol.registerHandler(protocol, net);
@@ -44,6 +47,9 @@ app.whenReady().then(async () => {
     const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
     const width = Math.min(1440, workArea.width), height = Math.min(950, workArea.height);
     const win = new BrowserWindow({...process.platform==='darwin'?{titleBarStyle:'hiddenInset',trafficLightPosition:{x:12,y:13}}:{},x: workArea.x + Math.round((workArea.width - width) / 2), y: workArea.y + Math.round((workArea.height - height) / 2), width, height, minWidth: Math.min(900, workArea.width), minHeight: Math.min(600, workArea.height), backgroundColor: '#141416', webPreferences: {preload:path.join(__dirname,'preload.cjs'),nodeIntegration: false, contextIsolation: true, sandbox: true}});
+    // Off macOS the default Electron menu would be a window menu bar: the shell draws its own (AppMenu), and the bar's
+    // Alt focus/mnemonics and Ctrl accelerators (Ctrl+Shift+I, Ctrl+R, Ctrl+0/±) would compete with editor shortcuts.
+    if(process.platform!=='darwin')win.removeMenu();
     let project=null,agentRuntime=null;const agentsBusy=()=>agentRuntime?.active()>0;
     const current=()=>{if(!project)throw Error('Open a project folder first');return project;};
     const handle=(name,fn)=>win.webContents.ipc.handle('desktop:'+name,(event,...args)=>{
