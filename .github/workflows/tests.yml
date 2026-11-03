@@ -204,16 +204,23 @@ jobs:
           # The system UI font (CSS system-ui; documents' default font-sans) is SF Pro on macOS, where the
           # text-layout tests were measured, and fontconfig's "Sans" (DejaVu Sans, much wider) here. Inter has
           # close to SF metrics, so headings wrap as on macOS. Arial/Helvetica keep Liberation Sans.
-          sudo tee /etc/fonts/local.conf > /dev/null <<'XML'
+          # The aliases go straight into conf.d (52, after 51-local.conf, before 60-latin's DejaVu
+          # preferences). A run with them in /etc/fonts/local.conf still matched DejaVu Sans, so the
+          # step prints what fontconfig sees. fc-match parses "-" as a size: system-ui is written system\-ui.
+          sudo tee /etc/fonts/conf.d/52-ci-system-font.conf > /dev/null <<'XML'
           <?xml version="1.0"?>
           <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
           <fontconfig>
-            <alias binding="strong"><family>Sans</family><prefer><family>Inter</family><family>Inter Variable</family></prefer></alias>
-            <alias binding="strong"><family>system-ui</family><prefer><family>Inter</family><family>Inter Variable</family></prefer></alias>
+            <alias binding="strong"><family>Sans</family><prefer><family>Inter</family></prefer></alias>
+            <alias binding="strong"><family>system-ui</family><prefer><family>Inter</family></prefer></alias>
           </fontconfig>
           XML
-          fc-cache -f > /dev/null
-          echo "system-ui -> $(fc-match system-ui), Sans -> $(fc-match Sans)"
+          sudo fc-cache -f > /dev/null
+          echo "Inter files: $(fc-list :family=Inter file | wc -l); conf.d: $(ls /etc/fonts/conf.d | tr '\n' ' ')"
+          for family in 'system\-ui' Sans Sans:semibold Arial; do
+            match=$(fc-match "$family"); echo "$family -> $match"
+            case "$family:$match" in Arial:*|*'"Inter"'*) ;; *) echo "::warning::fontconfig maps $family to $match, not Inter; text-layout tests will wrap differently" ;; esac
+          done
       - name: Allow the Chromium sandbox
         # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor, so Electron's Chromium
         # sandbox aborts ("No usable sandbox") unless chrome-sandbox is setuid root, which npm cannot
@@ -286,16 +293,23 @@ jobs:
           # The system UI font (CSS system-ui; documents' default font-sans) is SF Pro on macOS, where the
           # text-layout tests were measured, and fontconfig's "Sans" (DejaVu Sans, much wider) here. Inter has
           # close to SF metrics, so headings wrap as on macOS. Arial/Helvetica keep Liberation Sans.
-          sudo tee /etc/fonts/local.conf > /dev/null <<'XML'
+          # The aliases go straight into conf.d (52, after 51-local.conf, before 60-latin's DejaVu
+          # preferences). A run with them in /etc/fonts/local.conf still matched DejaVu Sans, so the
+          # step prints what fontconfig sees. fc-match parses "-" as a size: system-ui is written system\-ui.
+          sudo tee /etc/fonts/conf.d/52-ci-system-font.conf > /dev/null <<'XML'
           <?xml version="1.0"?>
           <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
           <fontconfig>
-            <alias binding="strong"><family>Sans</family><prefer><family>Inter</family><family>Inter Variable</family></prefer></alias>
-            <alias binding="strong"><family>system-ui</family><prefer><family>Inter</family><family>Inter Variable</family></prefer></alias>
+            <alias binding="strong"><family>Sans</family><prefer><family>Inter</family></prefer></alias>
+            <alias binding="strong"><family>system-ui</family><prefer><family>Inter</family></prefer></alias>
           </fontconfig>
           XML
-          fc-cache -f > /dev/null
-          echo "system-ui -> $(fc-match system-ui), Sans -> $(fc-match Sans)"
+          sudo fc-cache -f > /dev/null
+          echo "Inter files: $(fc-list :family=Inter file | wc -l); conf.d: $(ls /etc/fonts/conf.d | tr '\n' ' ')"
+          for family in 'system\-ui' Sans Sans:semibold Arial; do
+            match=$(fc-match "$family"); echo "$family -> $match"
+            case "$family:$match" in Arial:*|*'"Inter"'*) ;; *) echo "::warning::fontconfig maps $family to $match, not Inter; text-layout tests will wrap differently" ;; esac
+          done
       - name: Allow the Chromium sandbox
         # See the electron job.
         run: |
