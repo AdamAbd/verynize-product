@@ -1,0 +1,29 @@
+name: Identity
+on:
+  pull_request:
+    branches: [staging, main]
+# Runs PR code with a read-only token. Never switch this workflow to pull_request_target.
+permissions:
+  contents: read
+jobs:
+  identity:
+    name: identity
+    runs-on: boat-small
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Install tesseract
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+      # base..head of the PR head SHA (not GitHub's synthetic merge commit): every PR commit's
+      # author/committer, its message, and every blob it adds or modifies; images are OCR'd.
+      - name: Check commits, files and images for personal identity data
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-identity.mjs --range "$BASE_SHA..$HEAD_SHA" --author --ocr=required

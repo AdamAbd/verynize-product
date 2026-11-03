@@ -1,0 +1,14 @@
+# Allowlist for scripts/check-identity.mjs (see docs/identity-guard.md).
+# Format: path-glob[:substring]  - a hit is ignored when its path matches the glob and, if given,
+# the raw match contains the substring. Every entry needs a comment saying why it is not personal
+# data. Keep this file minimal; redact real leaks instead of listing them here.
+
+# Product transactional sender (Cloudflare Email Sending) on the gayaloo.app service domain; a role
+# mailbox used by deployment config, its docs and the email tests, not a personal address.
+**:@gayaloo.app
+
+# Fictional company contact in the Pinecone landing-page eval reference.
+eval/references/08-start.*:hello@pinecone.app
+
+# Fake account email inside a synthetic Figma OAuth token fixture.
+tests/figma-import.cjs:secret@figma.com
