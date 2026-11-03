@@ -1,6 +1,7 @@
 // Constraints: CSS anchoring of positioned layers. Changing one never moves the layer; parent resizes follow it.
 const {_electron} = require('@playwright/test');
 const { moveOffCursor } = require("./helpers/off-cursor.cjs");
+const { mod } = require("./helpers/keys.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
@@ -79,7 +80,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.keyboard.press('ArrowRight');
     c = await node('c'); assert.equal(window_c(c), 'scale', 'nudging keeps Scale');
     near((await box('c')).x, scaled.x + 1, 'and moves by one pixel', 0.8);
-    await page.keyboard.press('Meta+z');
+    await page.keyboard.press(mod('z'));
     near((await box('c')).x, scaled.x, 'undo restores the position', 0.8);
 
     // Widget: click the left tick, shift-click the right tick → Left & Right.

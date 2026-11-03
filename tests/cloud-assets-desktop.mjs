@@ -216,6 +216,13 @@ try {
     null,
     { timeout: 30000 },
   );
+  // The owner's invite field holds a token-free link until the role-limited invite token arrives.
+  await a.waitForFunction((first) => {
+    const hash = new URLSearchParams(
+      new URL(document.getElementById("cloud-invite").value || "about:blank").hash.slice(1),
+    );
+    return hash.get("token") && hash.get("room") && hash.get("room") !== first;
+  }, room.get("room"));
   const created = new URLSearchParams(
     new URL(await a.locator("#cloud-invite").inputValue()).hash.slice(1),
   );
@@ -237,15 +244,28 @@ try {
     (request) => request.url.includes("/assets/") && request.url.includes("signature="),
   );
   assert.equal(uploads.length, 3);
-  const roomDoc = (
-    await (
-      await fetch(`${server}/api/rooms/${created.get("room")}`, {
-        headers: { authorization: `Bearer ${created.get("token")}` },
-      })
-    ).json()
-  ).document;
   const assetPattern = new RegExp(
     `/api/rooms/${created.get("room")}/assets/[0-9a-f-]{36}\\?sig=[0-9a-f]{64}$`,
+  );
+  // The room document may still be settling right after "Connected" (the asset swap lands as a
+  // server batch): poll until it holds the photo, and report the last response otherwise.
+  let roomDoc, last;
+  for (let i = 0; i < 100 && !roomDoc; i++) {
+    const res = await fetch(`${server}/api/rooms/${created.get("room")}`, {
+      headers: { authorization: `Bearer ${created.get("token")}` },
+    });
+    last = { status: res.status, body: await res.text() };
+    let doc = null;
+    try {
+      doc = res.ok ? JSON.parse(last.body).document : null;
+    } catch {}
+    if (doc?.pages?.some((p) => p.nodes.some((n) => n.id === "photo" && assetPattern.test(n.src))))
+      roomDoc = doc;
+    else await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(
+    roomDoc,
+    `room document with the uploaded photo: ${last.status} ${last.body.slice(0, 500)}`,
   );
   const [photoNode, cardNode] = roomDoc.pages.find((p) =>
     p.nodes.some((n) => n.id === "photo"),

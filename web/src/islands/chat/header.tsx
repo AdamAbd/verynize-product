@@ -176,10 +176,10 @@ export function DockHeader({ state }: { state: ChatState }) {
         className={cn(
           hook.drag,
           "flex h-10 shrink-0 items-center gap-1 border-b border-border bg-settings pr-1.5",
-          sidebarOpen ? "pl-1.5" : "pl-20",
+          sidebarOpen ? "pl-1.5" : "pl-traffic",
         )}
       >
-        {!sidebarOpen && (
+        {!sidebarOpen && can("projects") && (
           <ChatTip label="Show sidebar" side="bottom">
             <ChatIconButton aria-label="Show sidebar" onClick={() => document.body.classList.add("chat-sidebar-open")}>
               <PanelLeftIcon className="size-4" />
