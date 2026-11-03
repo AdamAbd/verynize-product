@@ -304,11 +304,9 @@ try {
   fake.keys.add(PASTED);
   await page.locator("#chat-web-openrouter-key").fill(PASTED);
   await page.locator("#chat-web-save-key").click();
-  await gateState("no-room");
-  assert.match(
-    await gate(page).innerText(),
-    /^Open or share a cloud room to chat with the model API/,
-  );
+  await page.waitForFunction(
+    () => window.cloudWorkspace?.isConnected() && !document.getElementById("chat-web-gate"),
+  ); // Signed-in designs already have a database room, so chat is ready.
   const credentials = async () => (await (await api("/api/ai/credentials")).json()).openrouter;
   assert.deepEqual(
     (({ connected, source, last4 }) => ({ connected, source, last4 }))(await credentials()),

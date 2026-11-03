@@ -226,7 +226,11 @@ try {
   await b.locator("#room-invitation-later").click();
   await invitation(b).waitFor({ state: "detached" });
   await b.waitForFunction(() => document.body.classList.contains("files-view"));
-  assert.equal(await b.evaluate(() => window.cloudWorkspace.room()), null);
+  assert.notEqual(
+    await b.evaluate(() => window.cloudWorkspace.room()?.id),
+    room.id,
+    "Maybe later does not join the invited room; the personal design stays synced",
+  );
   await openLink(b, link);
   await expectInvitation(b, "Editor");
   await b.locator("#room-invitation-join").click();
