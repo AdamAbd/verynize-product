@@ -1,6 +1,6 @@
 # CI
 
-GitHub Actions runs on [Boat](https://docs.boat.dev/ci.md) VMs (`runs-on: boat*`): a fresh Ubuntu 24.04 VM per job, with sudo, Docker and `actions/cache`. Boat has no macOS runners, so CI covers the Linux build, lint and tests. macOS packaging (`npm run package:mac`) and live agent tests stay local.
+GitHub Actions runs on GitHub-hosted runners (`runs-on: ubuntu-24.04`): a fresh Ubuntu 24.04 VM per job, with sudo. Electron tests are Linux-portable (`tests/helpers/keys.cjs`) so CI covers the Linux build, lint and tests; macOS runners bill at 10× on private repos. macOS packaging (`npm run package:mac`) and live agent tests stay local.
 
 ## Branch flow
 
@@ -24,12 +24,12 @@ feature/*  --PR-->  staging  --PR-->  main
 
 `tests.yml` jobs:
 
-- `quality` (`boat`): `npm ci`, `build:ui`, `check`, `lint`, `typecheck:ui`, `format:check`.
-- `plan` (`boat-small`): `node scripts/run-tests.mjs --ci-event --list` per lane. It counts the selected tests and builds the Electron shard matrix: 4 shards for the full suite, 1 for affected. The runner imports only Node built-ins, so this job skips `npm ci`.
-- `node + cloud` (`boat`): `--lane node --lane cloud`. No display is needed. Playwright Chromium is installed only when `tests/web-*` is selected.
-- `electron (i/n)` (`boat-large`, matrix): `--lane electron --shard i/n`. The job installs the Electron system libraries, `xvfb`, Mesa (software WebGL), `zsh` (terminal tests), `poppler-utils` (`pdftoppm`, PDF export check) and a build toolchain for `node-pty`, then downloads the Electron binary (`node node_modules/electron/install.js`). The runner wraps each test in `xvfb-run -a -s "-screen 0 1920x1080x24"` when `DISPLAY` is unset.
-- `serial` (`boat-large`): `--lane serial`, for tests that must run alone (today `integrations/design-files.test.mjs`, whose `fs.watch` wait misses under parallel load). Same system setup as the Electron jobs.
-- `tests` (`boat-small`): an aggregate job that always runs. It fails if `plan` failed or any lane failed or was cancelled. It passes when lanes were skipped because nothing was affected. Use this stable name as the required check.
+- `quality`: `npm ci`, `build:ui`, `check`, `lint`, `typecheck:ui`, format check of files the PR adds (the existing tree predates the formatter).
+- `plan`: `node scripts/run-tests.mjs --ci-event --list` per lane. It counts the selected tests and builds the Electron shard matrix: 4 shards for the full suite, 1 for affected. The runner imports only Node built-ins, so this job skips `npm ci`.
+- `node + cloud`: `--lane node --lane cloud`. No display is needed. Playwright Chromium is installed only when `tests/web-*` is selected.
+- `electron (i/n)` (matrix): `--lane electron --shard i/n`. The job installs the Electron system libraries, `xvfb`, Mesa (software WebGL), `zsh` (terminal tests), `poppler-utils` (`pdftoppm`, PDF export check) and a build toolchain for `node-pty`, then downloads the Electron binary (`node node_modules/electron/install.js`). The runner wraps each test in `xvfb-run -a -s "-screen 0 1920x1080x24"` when `DISPLAY` is unset.
+- `serial`: `--lane serial`, for tests that must run alone (today `integrations/design-files.test.mjs`, whose `fs.watch` wait misses under parallel load). Same system setup as the Electron jobs.
+- `tests`: an aggregate job that always runs. It fails if `plan` failed or any lane failed or was cancelled. It passes when lanes were skipped because nothing was affected. Use this stable name as the required check.
 
 Each lane writes `--report $RUNNER_TEMP/report` (`results.json`, `junit.xml`, `summary.md`, plus the job summary). The report is uploaded as a `test-report-*` artifact, kept for 14 days.
 
@@ -73,24 +73,11 @@ gh api "repos/$REPO/branches/main/protection/required_status_checks"
 
 To change only the checks and keep the other settings, use `PATCH repos/$REPO/branches/<branch>/protection/required_status_checks` with `{"strict": true, "contexts": [...]}`.
 
-## Boat setup (one time)
+## Setup (one time)
 
-1. Install the Boat CI GitHub App for the account that owns the repo: `boat ci connect` (or `boat ci connect --org <org>`). Select `verynize-product`.
-2. Make sure the Boat account has the **$20/month plan or higher**. Without a plan, or on the free trial, Boat refuses each job and gives the reason. The free trial also has no `large` size, which the Electron jobs use.
-3. Add the Cloudflare secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) as GitHub Actions secrets in the `production` environment. Boat jobs read GitHub secrets, not Boat environments.
+Add the Cloudflare secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) as GitHub Actions secrets in the `production` environment.
 
-Inspect jobs:
-
-```sh
-boat ci                                   # setup problems, 7-day stats, last jobs
-boat ci --repo AdamAbd/verynize-product --state failed
-boat ci job <job id>                      # wait, run time, cost, error
-boat ci logs <job id> --follow
-```
-
-Debug a failure: run **Tests** manually (Actions → Tests → Run workflow) with `debug: true`. Lanes then use `boat/debug` and `boat-large/debug`, so a failed VM is kept for 30 minutes. Find its id in `boat ci`, then run `boat ssh <id>`.
-
-A job stopped by a plan start limit shows as "Paused by plan limit" and does not restart by itself. Re-run it with `gh run rerun <run-id> --failed`.
+Debug a failure: download the `test-report-*` artifact, or reproduce the shard locally (below). Re-run only failed jobs with `gh run rerun <run-id> --failed`.
 
 ## Local commands
 
@@ -105,9 +92,8 @@ Before you push, run `npm run lint:ui && npm run typecheck:ui && npm run format:
 
 ## Cost
 
-Boat bills per second: `boat-small` $0.018/h, `boat` $0.036/h, `boat-large` $0.072/h. VM time is cheap. Starts are the real limit: the $20 plan includes 12 starts per minute, 60 per hour and 200 per day. Each job is one start.
+Private repositories get a monthly allowance of GitHub-hosted Linux minutes (2,000 on Free, 3,000 on Pro/Team); beyond that Linux minutes are billed per minute. Standard Linux runners for private repos have 2 vCPU / 7 GB.
 
-- PR into `staging`: about 4 to 6 starts (quality, plan, the lanes that have tests, the aggregate).
-- PR into `main`, push to `staging`, nightly: about 9 starts (quality, plan, node + cloud, 4 Electron shards, serial, aggregate).
+- PR into `staging`: quality plus only the affected lanes, usually a few minutes.
+- PR into `main`, push to `staging`, nightly: quality, node + cloud, 4 Electron shards and serial run in parallel. Expect the most minutes here; lower the shard count in the `plan` job or drop the push trigger if minutes run short.
 - `cancel-in-progress` cancels superseded PR runs, so a burst of pushes does not stack runs.
-- With these numbers, about 20 full runs a day fit in the plan's starts. Past that, extra starts cost $0.03 to $0.07 each from the wallet. If starts become the bottleneck, lower the full-suite shard count in the `plan` job.
