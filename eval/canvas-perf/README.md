@@ -28,3 +28,17 @@ node eval/canvas-perf/profile-verynize.cjs --output eval/canvas-perf/results/ver
 ```
 
 This appends `supplementalProfiles` and writes separate `profile-detail-*` artifacts. It uses the same selection state as the timed gestures and enables additional compositor/GPU trace categories.
+
+## Budget report
+
+The advisory acceptance table is [budgets.json](budgets.json), sourced from the [research synthesis](../../docs/canvas-performance/README.md#acceptance-criteria-to-use-from-now-on). The [GPU deferral ADR](../../docs/canvas-performance/adr-001-defer-gpu-renderer.md) records the saved-baseline output and revisit thresholds.
+
+```sh
+node eval/canvas-perf/check-budgets.mjs eval/canvas-perf/results/verynize-2026-11-04-sequential.json
+```
+
+Pass a `bench-verynize.cjs` schemaVersion 1 JSON, not a prototype-results JSON. Budgets use strict `<` for latency and exact `= 0` for export diff. Each entry names the node count, metric path under `summary[n]`, unit, comparison and source. The checker reads existing summary percentiles without recomputing/rounding them for comparison. Missing, null, negative or non-finite values print FAIL, including sizes stopped by the harness ceiling. It never substitutes zero or prototype results for missing product measurements.
+
+Fit-all and incomplete visible area have no numeric limits in the source; measured values print REPORT, missing values FAIL. They cannot be counted as numeric passes. The current baseline does not collect these or export fidelity. Future instrumented summaries may add `fitAll.fullyDrawnMs` (validated complete pixels after fit-all), `zoom.incompleteVisibleAreaPct` (0–100 area-weighted mean across the timed zoom trajectory, with separate blank/stale/coarse durations retained in raw data), and `fidelity.export100Pct` (percent differing pixels against matched export at 100%). These are extension paths, not claims that the current harness measures them. Do not map `paintFenceMs`, tile-count `incompleteFrac`, or painter-reference diffs onto those fields.
+
+This is an opt-in report, **not a failing CI gate**: budget/missing-data failures exit 0; invalid JSON/schema or incorrect usage exits nonzero. See the ADR for presentation/completeness instrumentation still required. Run on the same idle M1 environment, sequentially; retain fresh raw artifacts and compare provenance before interpreting changes.

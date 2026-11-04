@@ -2,6 +2,10 @@
 
 Updated 2026-10-31. This records actual implementation and tests, not a claim that every Wonder feature is equivalent. The original vendor checklist remains in wonder-roadmap.md.
 
+## Renderer status — 2026-11-05
+
+DOM remains the canvas renderer and CSS layout/paint source of truth. Performance work is in progress; GPU renderer migration is deferred under [ADR-001](canvas-performance/adr-001-defer-gpu-renderer.md). The research prototypes do not establish product performance acceptance or additional Wonder parity. PixiJS is isolated to `eval/canvas-perf/prototypes/package.json`; the product manifest has no PixiJS/WebGPU renderer dependency. Existing per-node WebGL shader effects remain implemented as recorded below.
+
 ## Implemented and exercised
 
 - Shell/library: Wonder-reference dark chrome, floating tools, docked chat, local Inter typography and Lucide-based icons, responsive 1440/1000px layouts, persistent local files/folders, grid/list/search, rename/duplicate/archive/restore and publication-aware Public/Private filters. File switches detach previous native-save and cloud-room state; native opens have separate library records, and each shared room has one library record (a cloud file) that later joins reuse. Delayed native Save completion is canceled after a document switch; responses from superseded cloud operations are discarded.
