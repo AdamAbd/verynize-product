@@ -55,6 +55,8 @@ feature/*  --PR-->  staging  --PR-->  main
 
 Each lane writes `--report $RUNNER_TEMP/report` (`results.json`, `junit.xml`, `summary.md`, plus the job summary). The report is uploaded as a `test-report-*` artifact, kept for 14 days.
 
+The runner builds the Node web bundle once when `web-node`, `web-ai-chat` or `ai-routing` is selected, then shares it across those tests. Direct test invocations still build their own bundle. `--skip-build` skips the UI build only; Node and Worker bundles are still prepared. This removes duplicate builds without skipping browser assertions or increasing browser concurrency.
+
 Install scripts: npm 11 can skip dependency install scripts that `allowScripts` in `package.json` does not list. `workerd`, `node-pty` and `fsevents` are allowed there; Electron has no install script and is downloaded by the explicit step above.
 
 Electron on Ubuntu 24.04: AppArmor blocks unprivileged user namespaces, and npm cannot make `chrome-sandbox` setuid root. Without a fix, the Chromium sandbox aborts. The Electron jobs turn namespaces back on with `sysctl kernel.apparmor_restrict_unprivileged_userns=0` (the VM is thrown away after the job), so tests keep the real sandbox. Only if that fails do they set `ELECTRON_DISABLE_SANDBOX=1`, with a warning.

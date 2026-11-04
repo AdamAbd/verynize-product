@@ -57,6 +57,7 @@ export const FULL_SUITE = [
   "vite*.config.ts",
   "tsconfig*.json",
   "scripts/run-tests.mjs",
+  "scripts/test-build-plan.mjs",
   "scripts/test-manifest.mjs",
 ];
 
