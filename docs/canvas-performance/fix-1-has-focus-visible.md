@@ -32,3 +32,21 @@ After-run one-minute load average ranged from **14.1 to 36.0** across launches (
 Both baseline and after commands hit the existing 60-second `selectAll` ceiling at 2,000 nodes on the first run. The harness stops remaining runs at that ceiling. The 2,000-node cells above are **one partial run**, with pan/zoom/edit captured before selection timed out; they are not three-run medians. All smaller after sizes completed three runs. No timing assertions or harness ceilings were changed.
 
 The raw after-report `commit` records the research parent because the benchmark ran before committing the fix; the working tree already contained the selector replacements and source-scan exclusion. This report measures this fix only, with the original canvas implementation.
+
+## Validation
+
+- `npm install` and lockfile-only resynchronization completed; lockfile unchanged.
+- `npm run build:ui`, `npm run lint:ui`, `npm run typecheck:ui`, and `npm run check`: pass.
+- `npm run lint`: pass, with existing warnings in research/capture code.
+- `node tests/canvas-css-invalidation.cjs`: pass independently and in the changed-test run (500 real canvas nodes, production CSSOM, focused layer actions).
+- `npm run test:changed`: **207 passed, 3 failed, 0 skipped**, 1,202 seconds. Changing the lint command in `package.json` selected the full suite. This run shared the Mac with benchmarks and other agents.
+
+The three failures were investigated without weakening tests:
+
+| Test | Initial failure | Follow-up |
+| --- | --- | --- |
+| `tests/share-collab.mjs` | Electron installation incomplete while the local binary download was pending | Reused the already installed identical Electron 42.11.18 binary; standalone head rerun passed. |
+| `tests/inspector-parity.cjs` | Timeout waiting for a Sonner toast to detach | Standalone reruns passed on both head and unchanged `origin/docs/perf-research`. |
+| `tests/web-cloudflare.mjs` | Preview navigation destroyed the execution context | Unchanged research base also failed on navigation (`page.waitForNavigation` timeout). A standalone head rerun instead hit the dev-server startup deadline under load. WebKit link checks were skipped because that browser is not installed. |
+
+The benchmark command completed with its recorded 2,000-node selection ceiling; it did not complete three runs at that size. No product changes were made to `web/app.js`, `web/canvas-interactions.js`, or `web/selection-chrome.js`.
