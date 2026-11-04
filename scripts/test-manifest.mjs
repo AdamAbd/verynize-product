@@ -23,6 +23,7 @@ const root = new URL("../", import.meta.url);
 /** Changes here run every Electron-lane test: the shell every window boots through. */
 export const CORE_ELECTRON = [
   "web/app.js",
+  "web/canvas-render.js",
   "web/document-core.js",
   "web/document-safety.js",
   "web/index.html",
