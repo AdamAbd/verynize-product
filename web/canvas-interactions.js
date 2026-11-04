@@ -46,7 +46,7 @@
     const wrap = $('#canvas-wrap'), workspace = $('#workspace');
     let tool = 'move', space = false, autoFit = true, lastPage = null, clipboard = null, styleClipboard = null, pasteTimer = null, pendingInPlace = false, suppressPasteUntil = 0, menu = null;
     const drilled = new Set(), cameras = new Map();
-    const find = id => ed.nodes().find(n => n.id === id);
+    const find = id => window.VerynizeNodeIndex.find(ed.nodes(), id);
     const sel = () => ed.getSelection();
     const selectedNodes = () => ed.nodes().filter(n => sel().has(n.id));
     const isFlow = n => !!n && n.type === 'frame' && n.layout !== 'free';
@@ -59,6 +59,9 @@
     overlay.innerHTML = '<svg class="guide-layer" xmlns="http://www.w3.org/2000/svg"></svg><div class="guide-labels"></div><div class="frame-labels"></div><div class="marquee" hidden></div>';
     wrap.append(overlay);
     const guideSvg = overlay.querySelector('.guide-layer'), guideLabels = overlay.querySelector('.guide-labels'), frameLabels = overlay.querySelector('.frame-labels'), marqueeBox = overlay.querySelector('.marquee');
+    // Frame labels by frame id (drawFrameLabels), and the viewport size they are culled against (set on resize).
+    const frameLabelOf = new Map();
+    let labelView = null;
 
 
     // ---------- Hover: outline what a click would select and tint its name label (Wonder S1-hover-final) ----------
@@ -73,12 +76,16 @@
     clippedSelection.className = 'clipped-selection';
     overlay.append(clippedSelection);
     function drawClippedSelection() {
-      clippedSelection.replaceChildren();
+      // Measure every ring first, then write once: a read after each append would force a style recalc per ring.
+      const boxes = [];
       for (const id of sel()) {
         const n = find(id); if (!n || n.hidden || n.rotation) continue;
         let p = n.parentId && find(n.parentId), clipped = !!n.clipContent;
         while (p && !clipped) { clipped = !!p.clipContent; p = p.parentId && find(p.parentId); }
-        const b = clipped && screenBox(id); if (!b) continue;
+        const b = clipped && screenBox(id); if (b) boxes.push([id, n, b]);
+      }
+      clippedSelection.replaceChildren();
+      for (const [id, n, b] of boxes) {
         const ring = document.createElement('div'); ring.className = 'selection-ring'; placeBox(ring, b);
         if (!n.locked) for (const corner of ['nw', 'ne', 'sw', 'se']) {
           const h = document.createElement('div'); h.className = 'handle'; h.dataset.id = id; h.dataset.corner = corner; ring.append(h);
@@ -360,6 +367,7 @@
       const moved = viewportLeft !== null && (reflow ? left !== viewportLeft : Math.abs(left - viewportLeft) >= 100 && performance.now() - panelToggledAt < 1000);
       if (moved) { cam.x -= left - viewportLeft; autoFit = false; }
       viewportLeft = left;
+      const size = viewport(); labelView = {w: size.width, h: size.height};
       if (autoFit) fit(true); else applyCamera();
     }).observe(wrap);
     // Bring a layer into view by moving the camera (scrolling cannot reach negative world space).
@@ -488,8 +496,7 @@
     const inStack = n => !!n && isFlow(find(n.parentId)) && n.position !== 'absolute';
     // Selected nodes without any selected ancestor.
     function topSelected() {
-      const list = selectedNodes();
-      return list.filter(n => !list.some(o => o.id !== n.id && ed.descendants(o.id).has(n.id)));
+      return window.VerynizeNodeIndex.of(ed.nodes()).topmost(selectedNodes());
     }
     function select(ids) { ed.setSelection(new Set(ids)); ed.render(); }
     function clearSelection() { drilled.clear(); select([]); }
@@ -1126,15 +1133,53 @@
     }
 
     // Name labels above top-level frames (artboards); drag a label to move its frame.
+    // Placed from document geometry, not layout: a top-level frame's box is its x/y/w/h (border-box), turned about its
+    // centre by its rotation, and the label sits on the top-left of that box's axis-aligned bounds. Only a rotated frame
+    // whose size layout can change (hug/fill, min/max, aspect ratio) reads its laid-out size, and all reads come before
+    // any write. Labels are keyed by frame id and reused, so a camera move only repositions them; labels outside the
+    // viewport are detached.
+    const LABEL_MAX_W = 240, LABEL_H = 16, LABEL_GAP = 18; // canvas.css .frame-label: max-width, line-height; offset above
+    const laidOut = n => ['wMode', 'hMode'].some(k => n[k] && n[k] !== 'fixed') || ['minW', 'maxW', 'minH', 'maxH'].some(k => n[k] !== undefined && n[k] !== null) || n.wPct !== undefined || n.hPct !== undefined || Number(n.aspectRatio) > 0;
+    function frameCorner(n) {
+      let x = Number(n.x) || 0, y = Number(n.y) || 0, w = Number(n.w) || 0, h = Number(n.h) || 0;
+      const a = (Number(n.rotation) || 0) * Math.PI / 180;
+      if (!a) return {x, y, w, h};
+      const el = laidOut(n) && elementOf(n.id); if (el) { w = el.offsetWidth; h = el.offsetHeight; }
+      const c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a)), bw = w * c + h * s, bh = w * s + h * c;
+      return {x: x + (w - bw) / 2, y: y + (h - bh) / 2, w: bw, h: bh};
+    }
+    function frameLabelDown(e) {
+      if (e.button !== 0 || space || tool === 'hand') return;
+      e.stopPropagation(); const id = e.currentTarget.dataset.id;
+      select(e.shiftKey ? [...sel(), id] : [id]); if (!e.shiftKey && !readOnly()) startMove(e);
+    }
     function drawFrameLabels() {
-      frameLabels.replaceChildren();
-      for (const n of ed.nodes().filter(n => !n.parentId && n.type === 'frame' && !n.hidden && !n.preview && !n.labelHidden)) {
-        const r = worldRect(n.id); if (!r || (sel().has(n.id) && sel().size === 1)) continue;
-        const label = document.createElement('span'); label.className = 'frame-label' + (sel().has(n.id) ? ' selected' : '') + (n.id === hoverId ? ' hovered' : ''); label.textContent = n.name; label.dataset.id = n.id;
-        label.style.left = toScreenX(r.x) + 'px'; label.style.top = toScreenY(r.y) - 18 + 'px';
-        label.onpointerdown = e => { if (e.button !== 0 || space || tool === 'hand') return; e.stopPropagation(); select(e.shiftKey ? [...sel(), n.id] : [n.id]); if (!e.shiftKey && !readOnly()) startMove(e); };
-        frameLabels.append(label);
+      const selection = sel(), single = selection.size === 1;
+      const visible = [];
+      for (const n of ed.nodes()) {
+        if (n.parentId || n.type !== 'frame' || n.hidden || n.preview || n.labelHidden || (single && selection.has(n.id))) continue;
+        const r = frameCorner(n); if (!r.w && !r.h) continue;
+        const left = toScreenX(r.x), top = toScreenY(r.y) - LABEL_GAP;
+        if (labelView && (left >= labelView.w || left + LABEL_MAX_W <= 0 || top >= labelView.h || top + LABEL_H <= 0)) continue;
+        visible.push({n, left, top});
       }
+      let shown = 0;
+      for (const {n, left, top} of visible) {
+        let entry = frameLabelOf.get(n.id);
+        if (!entry) {
+          const el = document.createElement('span'); el.dataset.id = n.id; el.onpointerdown = frameLabelDown;
+          frameLabelOf.set(n.id, entry = {el});
+        }
+        const el = entry.el, className = 'frame-label' + (selection.has(n.id) ? ' selected' : '') + (n.id === hoverId ? ' hovered' : '');
+        if (el.className !== className) el.className = className;
+        if (entry.name !== n.name) { el.textContent = n.name; entry.name = n.name; }
+        if (entry.left !== left) { el.style.left = left + 'px'; entry.left = left; }
+        if (entry.top !== top) { el.style.top = top + 'px'; entry.top = top; }
+        if (frameLabels.children[shown] !== el) frameLabels.insertBefore(el, frameLabels.children[shown] || null);
+        shown++;
+      }
+      while (frameLabels.children.length > shown) frameLabels.lastElementChild.remove();
+      if (frameLabelOf.size > shown) for (const [id, entry] of frameLabelOf) if (!entry.el.isConnected && !find(id)) frameLabelOf.delete(id);
     }
 
     // ---------- Structure commands ----------
@@ -1285,7 +1330,7 @@
       if (!['above', 'below', 'inside'].includes(position) || (targetId && !target)) return null;
       const wanted = new Set(ids);
       let roots = all.filter(n => wanted.has(n.id) && !n.locked);
-      roots = roots.filter(n => !roots.some(o => o !== n && ed.descendants(o.id).has(n.id)));
+      roots = window.VerynizeNodeIndex.of(all).topmost(roots);
       if (!roots.length) return null;
       const parentId = position === 'inside' ? (target ? target.id : null) : (target?.parentId || null), parent = find(parentId);
       if (position === 'inside' && target && target.type !== 'frame') return null;
