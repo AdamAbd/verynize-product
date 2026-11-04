@@ -17,14 +17,15 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const dist = fileURLToPath(new URL("../dist/web-node", import.meta.url));
 if (!fs.existsSync(new URL("../web/dist/ui.js", import.meta.url)))
   execFileSync(process.execPath, ["scripts/build-ui.cjs"], { cwd: root, stdio: "pipe" });
-execFileSync(
-  process.execPath,
-  ["node_modules/vite-plus/bin/vp", "build", "-c", "vite.node.config.ts"],
-  {
-    cwd: root,
-    stdio: "pipe",
-  },
-);
+if (!process.env.TEST_WEB_NODE_BUILT)
+  execFileSync(
+    process.execPath,
+    ["node_modules/vite-plus/bin/vp", "build", "-c", "vite.node.config.ts"],
+    {
+      cwd: root,
+      stdio: "pipe",
+    },
+  );
 
 // The signed-in account (the web app needs one) and the account reads the editor makes, answered
 // like the real backend with an empty workspace.

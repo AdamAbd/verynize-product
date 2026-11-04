@@ -36,8 +36,7 @@ const APP = `require('http').createServer((q,r)=>{r.setHeader('content-type','te
     const tabFrame = () => page.frames().find(frame => frame.name() === 'verynize-preview-tab');
     await page.waitForFunction(() => !!document.querySelector('#live-preview[data-preview-state=running]'));
     await page.waitForFunction(() => [...document.querySelectorAll('iframe')].some(f => f.name === 'verynize-live-preview' && f.src));
-    await (async () => { for (let i = 0; i < 50 && !canvasFrame()?.url().startsWith('http'); i++) await page.waitForTimeout(100); })();
-    await canvasFrame().waitForSelector('h1');
+    await page.frameLocator('iframe[name=verynize-live-preview]').locator('h1').waitFor();
     await canvasFrame().evaluate(() => { window.canvasMarker = 'canvas'; });
 
     // ⌘⌥P on the selected preview frame (canvas command registry) opens the internal tab.
@@ -60,8 +59,7 @@ const APP = `require('http').createServer((q,r)=>{r.setHeader('content-type','te
 
     // Fresh, separate page state; the canvas frame keeps its own name and state.
     await page.waitForFunction(() => document.querySelector('iframe[name=verynize-preview-tab]'));
-    await (async () => { for (let i = 0; i < 50 && !tabFrame()?.url().startsWith('http'); i++) await page.waitForTimeout(100); })();
-    await tabFrame().waitForSelector('h1');
+    await page.frameLocator('iframe[name=verynize-preview-tab]').locator('h1').waitFor();
     assert.notEqual(tabFrame(), canvasFrame());
     assert.equal(await tabFrame().evaluate(() => window.canvasMarker), undefined, 'tab loads the app fresh');
     assert.equal(await canvasFrame().evaluate(() => window.canvasMarker), 'canvas', 'canvas page state untouched');
@@ -80,9 +78,15 @@ const APP = `require('http').createServer((q,r)=>{r.setHeader('content-type','te
     await pathField.fill('/about');
     await pathField.press('Enter');
     await page.waitForFunction(() => /\/about$/.test([...document.querySelectorAll('iframe')].find(f => f.name === 'verynize-preview-tab')?.src || ''));
-    await (async () => { for (let i = 0; i < 50 && !/\/about$/.test(tabFrame()?.url() || ''); i++) await page.waitForTimeout(100); })();
-    await tabFrame().waitForSelector('text=About page');
-    await tabFrame().click('text=Home');
+    const preview = page.frameLocator('iframe[name=verynize-preview-tab]');
+    await preview.getByRole('heading', {name: 'About page'}).waitFor();
+    await tabFrame().waitForURL(new URL('/about', base).href);
+    // Enter replaces the cross-origin iframe. Its DOM can be ready before Chromium has
+    // committed the new surface for hit testing (also covered by preview-interaction).
+    // Wait for painted frames, not an arbitrary delay, before the first pointer action.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await preview.getByRole('link', {name: 'Home', exact: true}).click();
+    await tabFrame().waitForURL(base);
     await page.waitForFunction(() => document.querySelector('#preview-tab-view [aria-label="Preview path"]').value === '/');
     await view.getByRole('button', {name: 'Back'}).click();
     await page.waitForFunction(() => document.querySelector('#preview-tab-view [aria-label="Preview path"]').value === '/about');

@@ -20,6 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as manifest from "./test-manifest.mjs";
+import { testBuildPlan } from "./test-build-plan.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const DURATIONS = path.join(ROOT, "tests/.durations.json");
@@ -568,8 +569,9 @@ function tail(text, lines) {
 }
 
 async function prepare(selected, opts, env, results) {
-  const needsUi = selected.some((e) => e.lane === "electron" || e.group === "web");
-  const needsWorker = selected.some((e) => e.usesWorker);
+  const plan = testBuildPlan(selected, opts);
+  // This flag is valid only after this invocation has built the selected source.
+  delete env.TEST_WEB_NODE_BUILT;
   const step = async (name, args) => {
     process.stdout.write(`build ${name} ... `);
     const run = await runProcess(process.execPath, args, { env, timeoutMs: DEFAULT_TIMEOUT });
@@ -581,10 +583,10 @@ async function prepare(selected, opts, env, results) {
       throw new Error(`build ${name} failed`);
     }
   };
-  if (needsUi && !opts.skipBuild) await step("ui", ["scripts/build-ui.cjs"]);
+  if (plan.ui) await step("ui", ["scripts/build-ui.cjs"]);
   // One Worker build for every cloud test (tests/cloud-harness.mjs reads CLOUD_WORKER_BUNDLE),
   // copied out of .cloudflare/output because tests/web-cloudflare.mjs and `vp dev` rewrite it.
-  if (needsWorker && !env.CLOUD_WORKER_BUNDLE) {
+  if (plan.worker && !env.CLOUD_WORKER_BUNDLE) {
     if (!fs.existsSync(path.join(ROOT, "web/dist/ui.js")))
       await step("ui", ["scripts/build-ui.cjs"]);
     await step("worker", ["node_modules/vite-plus/bin/vp", "build"]);
@@ -593,6 +595,12 @@ async function prepare(selected, opts, env, results) {
     fs.cpSync(bundle, copy, { recursive: true });
     env.CLOUD_WORKER_BUNDLE = copy;
     process.on("exit", () => fs.rmSync(copy, { recursive: true, force: true }));
+  }
+  if (plan.node) {
+    if (!fs.existsSync(path.join(ROOT, "web/dist/ui.js")))
+      await step("ui", ["scripts/build-ui.cjs"]);
+    await step("web-node", ["node_modules/vite-plus/bin/vp", "build", "-c", "vite.node.config.ts"]);
+    env.TEST_WEB_NODE_BUILT = "1";
   }
 }
 
