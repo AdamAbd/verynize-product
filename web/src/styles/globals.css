@@ -10,6 +10,9 @@
 @import "tailwindcss/utilities.css" layer(utilities) important;
 @import "tw-animate-css";
 
+/* Research quotes old utility names; never emit executable CSS from documentation. */
+@source not "../../../docs";
+
 @custom-variant dark (&:where(html:not([data-ui-theme="light"]) *));
 @custom-variant light (&:where(html[data-ui-theme="light"] *));
 

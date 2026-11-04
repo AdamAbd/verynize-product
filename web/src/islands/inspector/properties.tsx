@@ -430,7 +430,7 @@ function PositionSection({ doc, node, selection }: Props) {
           name="zIndex"
           label="Stack order"
           numeric
-          className="col-span-2 has-disabled:bg-field-disabled"
+          className={cn("col-span-2", inFlow && !many && "bg-field-disabled")}
           inputClassName="placeholder:text-foreground disabled:placeholder:text-field-disabled-foreground"
           disabled={inFlow && !many}
           value={node.zIndex ? fmt(node.zIndex) : ""}

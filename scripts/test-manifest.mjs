@@ -461,6 +461,12 @@ const ux = [
   electron("tests/shell-router.cjs", "ux", [...AREA.shell, ...AREA.cloudRenderer]),
   electron("tests/settings-route.cjs", "ux", [...AREA.settings, ...AREA.shell]),
   electron("tests/shell-routes.cjs", "ux", AREA.shell),
+  electron("tests/canvas-css-invalidation.cjs", "canvas", [
+    "web/src/**",
+    "web/*.css",
+    "scripts/check-css-has.cjs",
+    "eval/canvas-perf/renderer.cjs",
+  ]),
   electron("tests/ui-ready.cjs", "ux", AREA.shell),
   electron("tests/panel-resize.cjs", "ux", AREA.shell),
   electron("tests/web-platform.cjs", "ux", [

@@ -101,7 +101,7 @@ const LayerRow = memo(function LayerRow({
 }: RowProps) {
   const { node, depth, hasChildren, expanded } = row;
   const action = cn(
-    "hidden size-6 shrink-0 items-center justify-center rounded-md bg-transparent group-hover:flex group-has-focus-visible:flex hover:bg-foreground/10 hover:text-foreground",
+    "hidden size-6 shrink-0 items-center justify-center rounded-md bg-transparent group-hover:flex group-focus-within:flex hover:bg-foreground/10 hover:text-foreground",
     selected ? "text-foreground-2/85" : "text-foreground-3",
   );
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
