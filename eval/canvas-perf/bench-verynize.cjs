@@ -16,6 +16,9 @@ const arg = (name, fallback) => {
 const sizes = arg("--sizes", "100,500,1000,2000,5000,13000,50000").split(",").map(Number);
 const runs = Number(arg("--runs", "5"));
 const ceilingMs = Number(arg("--ceiling-ms", "60000"));
+// --skip selectAll (comma list of render,edit,pan,zoom,drag,selectAll): leave operations out, e.g. one that hits the
+// ceiling at a size whose other operations should still be measured.
+const skip = new Set(arg("--skip", "").split(",").filter(Boolean));
 const date = new Date().toISOString().slice(0, 10);
 const output = path.resolve(arg("--output", path.join(__dirname, `results/verynize-${date}.json`)));
 const quantile = (a, p) => {
@@ -161,6 +164,7 @@ async function main() {
     sizes,
     runs,
     ceilingMs,
+    skipped: [...skip],
     machine: machine(),
     samples: [],
     summary: [],
@@ -210,15 +214,17 @@ async function main() {
           }),
           "camera",
         );
-        row.render = await bounded(
-          page.evaluate(() => __perf.action("render")),
-          "render",
-        );
-        row.edit = await bounded(
-          page.evaluate(() => __perf.action("edit")),
-          "edit",
-        );
-        for (const kind of ["pan", "zoom", "drag"]) {
+        if (!skip.has("render"))
+          row.render = await bounded(
+            page.evaluate(() => __perf.action("render")),
+            "render",
+          );
+        if (!skip.has("edit"))
+          row.edit = await bounded(
+            page.evaluate(() => __perf.action("edit")),
+            "edit",
+          );
+        for (const kind of ["pan", "zoom", "drag"].filter((k) => !skip.has(k))) {
           await bounded(
             page.evaluate(async () => {
               window.design.setCamera(40, 60, 1);
@@ -233,10 +239,11 @@ async function main() {
           );
           if (!row[kind].changed) throw Error(`${kind} did not change state`);
         }
-        row.selectAll = await bounded(
-          page.evaluate(() => __perf.action("selectAll")),
-          "selectAll",
-        );
+        if (!skip.has("selectAll"))
+          row.selectAll = await bounded(
+            page.evaluate(() => __perf.action("selectAll")),
+            "selectAll",
+          );
         row.memory = await cdp.send("Runtime.getHeapUsage");
         row.dom = await cdp.send("Memory.getDOMCounters");
         row.connected = await page.evaluate(() => ({
@@ -252,7 +259,7 @@ async function main() {
             }),
             "clear selection",
           );
-          for (const kind of ["edit", "pan", "zoom", "selectAll"])
+          for (const kind of ["edit", "pan", "zoom", "selectAll"].filter((k) => !skip.has(k)))
             report.profiles.push({ n, ...(await profile(page, cdp, kind, n)) });
         }
         rows.push(row);
@@ -261,8 +268,8 @@ async function main() {
             n,
             run,
             loadMs: row.load.paintFenceMs,
-            editMs: row.edit.paintFenceMs,
-            selectAllMs: row.selectAll.paintFenceMs,
+            editMs: row.edit?.paintFenceMs,
+            selectAllMs: row.selectAll?.paintFenceMs,
           }),
         );
       } catch (error) {
@@ -282,12 +289,12 @@ async function main() {
     }
     if (rows.length) {
       const summary = { n, completedRuns: rows.length };
-      for (const kind of ["load", "render", "edit", "selectAll"])
+      for (const kind of ["load", "render", "edit", "selectAll"].filter((k) => !skip.has(k)))
         summary[kind] = {
           syncMs: stats(rows.map((r) => r[kind].syncMs)),
           paintFenceMs: stats(rows.map((r) => r[kind].paintFenceMs)),
         };
-      for (const kind of ["pan", "zoom", "drag"])
+      for (const kind of ["pan", "zoom", "drag"].filter((k) => !skip.has(k)))
         summary[kind] = {
           frameP50Ms: quantile(
             rows.map((r) => quantile(r[kind].intervals, 0.5)),
