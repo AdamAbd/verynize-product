@@ -20,12 +20,12 @@ node eval/canvas-perf/bench-verynize.cjs --sizes 100,500,1000,2000 --runs 3 --no
 
 Comparison: `eval/canvas-perf/results/verynize-2026-11-04-sequential.json` (five baseline runs) versus `verynize-after-has-fix.json` (three requested runs). The machine is shared with other benchmark agents and this checkout's validation run; results are provisional. The lead must rerun sequentially before treating these as final performance claims. Raw samples record load averages at each launch.
 
-| Nodes | Runs before / after | Pan handler ms before → after | Pan frame ms before → after | Zoom handler ms before → after | Edit sync ms before → after |
-| ---: | :---: | ---: | ---: | ---: | ---: |
-| 100 | 5 / 3 | 5.6 → 2.0 | 16.7 → 16.7 | 5.6 → 2.1 | 15.7 → 18.4 |
-| 500 | 5 / 3 | 46.7 → 6.7 | 50.0 → 16.7 | 47.9 → 7.6 | 93.4 → 94.4 |
-| 1,000 | 5 / 3 | 166.9 → 22.5 | 166.7 → 32.3 | 166.0 → 29.3 | 281.6 → 284.1 |
-| 2,000 | 0 (1 partial) / 0 (1 partial) | 671.0 → 64.4 | 666.6 → 67.0 | 675.7 → 82.5 | 968.0 → 891.4 |
+| Nodes |      Runs before / after      | Pan handler ms before → after | Pan frame ms before → after | Zoom handler ms before → after | Edit sync ms before → after |
+| ----: | :---------------------------: | ----------------------------: | --------------------------: | -----------------------------: | --------------------------: |
+|   100 |             5 / 3             |                     5.6 → 2.0 |                 16.7 → 16.7 |                      5.6 → 2.1 |                 15.7 → 18.4 |
+|   500 |             5 / 3             |                    46.7 → 6.7 |                 50.0 → 16.7 |                     47.9 → 7.6 |                 93.4 → 94.4 |
+| 1,000 |             5 / 3             |                  166.9 → 22.5 |                166.7 → 32.3 |                   166.0 → 29.3 |               281.6 → 284.1 |
+| 2,000 | 0 (1 partial) / 0 (1 partial) |                  671.0 → 64.4 |                666.6 → 67.0 |                   675.7 → 82.5 |               968.0 → 891.4 |
 
 After-run one-minute load average ranged from **14.1 to 36.0** across launches (8 logical CPUs). Initial 1/5/15-minute averages: 14.1, 5.9, 5.9.
 
@@ -43,10 +43,10 @@ The raw after-report `commit` records the research parent because the benchmark 
 
 The three failures were investigated without weakening tests:
 
-| Test | Initial failure | Follow-up |
-| --- | --- | --- |
-| `tests/share-collab.mjs` | Electron installation incomplete while the local binary download was pending | Reused the already installed identical Electron 42.11.18 binary; standalone head rerun passed. |
-| `tests/inspector-parity.cjs` | Timeout waiting for a Sonner toast to detach | Standalone reruns passed on both head and unchanged `origin/docs/perf-research`. |
-| `tests/web-cloudflare.mjs` | Preview navigation destroyed the execution context | Unchanged research base also failed on navigation (`page.waitForNavigation` timeout). A standalone head rerun instead hit the dev-server startup deadline under load. WebKit link checks were skipped because that browser is not installed. |
+| Test                         | Initial failure                                                              | Follow-up                                                                                                                                                                                                                                    |
+| ---------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/share-collab.mjs`     | Electron installation incomplete while the local binary download was pending | Reused the already installed identical Electron 42.11.18 binary; standalone head rerun passed.                                                                                                                                               |
+| `tests/inspector-parity.cjs` | Timeout waiting for a Sonner toast to detach                                 | Standalone reruns passed on both head and unchanged `origin/docs/perf-research`.                                                                                                                                                             |
+| `tests/web-cloudflare.mjs`   | Preview navigation destroyed the execution context                           | Unchanged research base also failed on navigation (`page.waitForNavigation` timeout). A standalone head rerun instead hit the dev-server startup deadline under load. WebKit link checks were skipped because that browser is not installed. |
 
 The benchmark command completed with its recorded 2,000-node selection ceiling; it did not complete three runs at that size. No product changes were made to `web/app.js`, `web/canvas-interactions.js`, or `web/selection-chrome.js`.
