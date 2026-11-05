@@ -107,3 +107,10 @@ Version 0.3.0 of `dist/Verynize.app` was rebuilt from the current source, locall
 `npm run check`, `npm test`, and `npm run deploy:check`.
 
 Relevant suites: tests/wonder-shell.cjs, tests/settings.cjs, tests/views-templates.cjs, tests/agent-auth.cjs, tests/capture-fidelity.cjs, tests/capture-live-state.cjs, tests/canvas*.cjs, tests/desktop*.cjs, integrations/*.test.mjs, tests/cloud-rooms.mjs, tests/cloud-desktop.mjs. Reference UI screenshots and intentional visual differences are recorded in ../design-qa.md. Final validation passed: canvas (including four-corner resizing and raster pixels), desktop/auth/live capture, MCP/CLI integrations, UX/lifecycle/cloud async isolation, cloud rooms/two-client integration, packaged launch/save, code signature verification, and Vite+/cf deployment dry run. No production deployment was performed.
+
+Image providers (WP-2): desktop BYOK catalog includes verified Google Nano Banana Lite / 2.1 and
+OpenAI Image 2 / 2.5 Flare / 2.5 Sunburst, plus a custom OpenAI-compatible or HTTP endpoint.
+Google Lite is the fresh-profile default. V2 settings store separate encrypted vendor keys and migrate
+legacy endpoint settings. MCP `generate_image` shares the desktop generator and can replace a
+frame/rectangle fill or insert an image. Headless/cloud generation is unavailable. Settings UI and
+selection-based dialog insertion are tracked separately in WP-3.
