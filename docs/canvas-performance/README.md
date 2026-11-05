@@ -4,6 +4,8 @@ Question: is Verynize's DOM-based canvas "the brutal mistake" described on X, an
 
 All numbers are from one Apple M1 (8 GiB, DPR 2), Electron 42 / Chromium 148, unless marked otherwise. "Measured" means a run in this worktree; everything else is labelled.
 
+> **Implemented (2026-11-05).** Fixes 1–5 are merged on `perf/canvas-integration`; measured sequentially, 1,000-node pan handler 166.9 → 1.2 ms, drag frame p95 585 → 17.8 ms, edit 282 → 45 ms, all-node selection 9.7 s → 1.0 s, and 5,000-node documents now pan, zoom and drag at 60 Hz. See [integration-results-2026-11-05.md](integration-results-2026-11-05.md).
+
 ## Documents
 
 | File                                                   | Content                                                                                                                       | Author / validator                    |
