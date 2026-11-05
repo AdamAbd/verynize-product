@@ -93,6 +93,7 @@ const ENTRIES: Record<(typeof SECTION_ORDER)[number], Entry[]> = {
     { command: "tool.ellipse", label: "Ellipse tool" },
   ],
   EDIT: [
+    { id: "app.findLayers", label: "Find layers", chips: [mod, "F"] },
     { command: "edit.copy", label: "Copy" },
     { command: "edit.copyCode", label: "Copy as code" },
     { command: "edit.copyStyle", label: "Copy styles" },
@@ -241,8 +242,13 @@ export function registryCommands(): RegistryCommand[] {
 }
 
 /* ---------- Open state for the drawer and the palette (shared by the help menu, ⌘K and the palette) ---------- */
-type Panel = "shortcuts" | "palette" | "files";
-const state: Record<Panel, boolean> = { shortcuts: false, palette: false, files: false };
+type Panel = "shortcuts" | "palette" | "files" | "find";
+const state: Record<Panel, boolean> = {
+  shortcuts: false,
+  palette: false,
+  files: false,
+  find: false,
+};
 const listeners = new Set<() => void>();
 export function setPanelOpen(panel: Panel, open: boolean) {
   if (state[panel] === open) return;
