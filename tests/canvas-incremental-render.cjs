@@ -254,12 +254,73 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.ok(await page.locator('#canvas .layer', {hasText: 'Edited live'}).count() > 0, 'the live edit is drawn');
     await matchesFullRender('MCP update');
 
+    // ---- 6. Offscreen artboards are culled (layout queries still answer) and come back when the camera reaches them ----
+    const boardNodes = [];
+    for (let i = 0; i < 8; i++) boardNodes.push({id: 'A' + i, name: 'Board ' + i, type: 'frame', x: i * 1500, y: 0, w: 1200, h: 800, color: '#ffffff', layout: 'free', clipContent: true},
+      rect('A' + i + 'r', 100, 100, 200, 120, {parentId: 'A' + i}), {id: 'A' + i + 't', name: 't', type: 'text', parentId: 'A' + i, x: 100, y: 300, w: 10, h: 40, color: '#202030', text: 'Board text ' + i, fontSize: 24, wMode: 'hug', hMode: 'hug'});
+    boardNodes.push({id: 'U', name: 'Unclipped', type: 'frame', x: 9000, y: 0, w: 400, h: 300, color: '#eeeeee', layout: 'free'},
+      {id: 'I', name: 'Icon', type: 'image', x: 0, y: 1000, w: 40, h: 40, color: 'transparent', src: svg});
+    await seed(boardNodes, [100, 100, 1]);
+    const frame = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => r())));
+    const culledNow = () => page.locator('#canvas > .layer[data-culled]').evaluateAll(els => els.map(e => e.dataset.id).sort());
+    // Clipping boards entirely outside the view plus half a viewport on each side.
+    const offscreen = () => page.evaluate(() => {
+      const r = document.querySelector('#canvas-wrap').getBoundingClientRect(), c = window.design.getCamera(), z = c.zoom, mx = r.width / z / 2, my = r.height / z / 2;
+      const x0 = -c.x / z - mx, x1 = (r.width - c.x) / z + mx, y0 = -c.y / z - my, y1 = (r.height - c.y) / z + my;
+      return window.design.getDocument().pages[0].nodes.filter(n => !n.parentId && n.clipContent && !(n.x + n.w >= x0 && n.x <= x1 && n.y + n.h >= y0 && n.y <= y1)).map(n => n.id).sort();
+    });
+    await frame();
+    let expected = await offscreen();
+    assert.ok(expected.length >= 4 && !expected.includes('A0'), 'the fixture has boards outside the view');
+    assert.deepEqual(await culledNow(), expected, 'boards outside the view are culled, the rest are not');
+    assert.equal(await page.locator('#canvas [data-id=U]').evaluate(e => e.hasAttribute('data-culled')), false, 'a frame that does not clip is never culled');
+    assert.equal(await page.locator('#canvas [data-id=A7]').evaluate(e => getComputedStyle(e).contentVisibility), 'hidden');
+    // Geometry inside a culled board is still measured exactly (export, agents, snapping read it).
+    const inside = await page.evaluate(() => {
+      const w = document.querySelector('#canvas-wrap').getBoundingClientRect(), c = window.design.getCamera(), r = document.querySelector('#canvas [data-id=A7r]').getBoundingClientRect();
+      return {x: (r.left - w.left - c.x) / c.zoom, y: (r.top - w.top - c.y) / c.zoom, w: r.width / c.zoom, h: r.height / c.zoom, hug: document.querySelector('#canvas [data-id=A7t]').offsetWidth};
+    });
+    assert.deepEqual([inside.x, inside.y, inside.w, inside.h], [7 * 1500 + 100, 100, 200, 120], 'a layer in a culled board keeps its exact box');
+    assert.ok(inside.hug > 10, 'hugging text in a culled board measures its content');
+    const exported = await page.evaluate(async () => { window.design.setSelection(['A7r']); const r = await window.design.exportArtwork({format: 'HTML', selectionOnly: true}); return [r.width, r.height]; });
+    assert.deepEqual(exported, [200, 120], 'a layer in a culled board exports at its size');
+    assert.ok((await culledNow()).includes('A7'), 'selecting it does not reveal the board');
+    await matchesFullRender('culled boards');
+    // A camera jump reveals the board it lands on and culls the ones it leaves.
+    await page.evaluate(() => window.design.setCamera(-7 * 1500 + 100, 100, 1)); await frame();
+    expected = await offscreen();
+    assert.ok(!expected.includes('A7') && expected.includes('A0'));
+    assert.deepEqual(await culledNow(), expected, 'after a camera jump the culled set follows the view');
+    const hit = await page.evaluate(() => { const r = document.querySelector('#canvas [data-id=A7r]').getBoundingClientRect(); return document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2).some(e => e.dataset?.id === 'A7r'); });
+    assert.ok(hit, 'layers of a revealed board are hit-tested');
+    await matchesFullRender('after a camera jump');
+    // A wheel pan reveals boards as they come near (a few per step while it runs), every one once it settles.
+    const wrapBox = await page.locator('#canvas-wrap').boundingBox();
+    await page.mouse.move(wrapBox.x + wrapBox.width / 2, wrapBox.y + wrapBox.height / 2);
+    for (let i = 0; i < 30; i++) await page.mouse.wheel(-200, 0);
+    await page.waitForTimeout(400);
+    assert.deepEqual(await culledNow(), await offscreen(), 'after a wheel pan settles, exactly the boards outside the view are culled');
+    // Zoomed out to everything, nothing is culled; the setting turns culling off.
+    await page.evaluate(() => window.design.zoomToFit()); await page.waitForTimeout(300);
+    assert.deepEqual([await culledNow(), await offscreen()], [[], []], 'fit shows every board');
+    await page.evaluate(() => window.design.setCamera(100, 100, 1)); await frame();
+    assert.ok((await culledNow()).length >= 4);
+    await page.evaluate(() => { localStorage.setItem('verynize.canvas-cull', 'off'); window.render(); });
+    assert.deepEqual(await culledNow(), [], 'verynize.canvas-cull = off draws every board');
+    await page.evaluate(() => { localStorage.removeItem('verynize.canvas-cull'); window.render(); });
+    assert.deepEqual(await culledNow(), await offscreen(), 'and culling resumes when it is removed');
+    // Edits to a culled board are drawn (and measured) while it stays culled.
+    await page.evaluate(() => window.design.updateNodes(['A7t'], {text: 'A much longer board text that hugs wider'}));
+    const longer = await page.evaluate(() => [window.design.getDocument().pages[0].nodes.find(n => n.id === 'A7t').w, document.querySelector('#canvas [data-id=A7t]').offsetWidth]);
+    assert.ok(Math.abs(longer[0] - longer[1]) <= 1 && longer[0] > inside.hug, 'a hugging layer edited inside a culled board stores its new size');
+    await matchesFullRender('edit inside a culled board');
+
     // ---- 5. Cheaper commits: subscribers, image preflight, idle persistence ----
     const notified = await page.evaluate(() => {
       let bare = 0, seen = null;
       const offBare = window.design.subscribe(() => { bare++; });
       const offDoc = window.design.subscribe(doc => { seen = doc; doc.name = 'mutated by a subscriber'; });
-      window.design.updateNodes(['r1'], {color: '#445566'});
+      window.design.updateNodes(['A0r'], {color: '#445566'});
       offBare(); offDoc();
       return {bare, gotCopy: !!seen?.pages, name: window.design.getDocument().name};
     });
@@ -274,15 +335,15 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await page.keyboard.press('Escape').catch(() => {});
     // The document is written once the editor is idle, without another render, and an edit right before a reload
     // is flushed when the page hides.
-    await page.evaluate(() => window.design.updateNodes(['r1'], {name: 'saved when idle'}));
+    await page.evaluate(() => window.design.updateNodes(['A0r'], {name: 'saved when idle'}));
     await page.waitForFunction(() => (localStorage.getItem('verynize-v2') || '').includes('saved when idle'), null, {timeout: 2000});
     const reloaded = page.waitForEvent('load');
-    await page.evaluate(() => { window.design.updateNodes(['r1'], {name: 'flushed on reload'}); location.reload(); });
+    await page.evaluate(() => { window.design.updateNodes(['A0r'], {name: 'flushed on reload'}); location.reload(); });
     await reloaded; await waitForUiReady(page);
-    assert.equal((await node('r1'))?.name, 'flushed on reload', 'the last edit survives a reload');
+    assert.equal((await node('A0r'))?.name, 'flushed on reload', 'the last edit survives a reload');
 
     assert.deepEqual(errors, []);
-    console.log('PASS canvas incremental render: live drag without renders (one render + one undo step at release, rotated layers, nesting, Alt copy); keyed render (only edited elements written, identity kept, equal to a full rebuild for edits, selection, layout cascades, shaders, variables, order, re-parent, delete, type changes, undo/redo, foreign writes, text editing, cloud operations, MCP live edits); cheaper commits (private subscriber copies, image limits on edits, idle save flushed on reload)');
+    console.log('PASS canvas incremental render: live drag without renders (one render + one undo step at release, rotated layers, nesting, Alt copy); keyed render (only edited elements written, identity kept, equal to a full rebuild for edits, selection, layout cascades, shaders, variables, order, re-parent, delete, type changes, undo/redo, foreign writes, text editing, cloud operations, MCP live edits); cheaper commits (private subscriber copies, image limits on edits, idle save flushed on reload); offscreen boards culled with exact geometry, export and hit testing, revealed by camera jumps and wheel pans, off switch');
   } finally {
     await client?.close().catch(() => {});
     await app.close().catch(() => {});

@@ -8,12 +8,15 @@
 // Other code that writes into a layer element (the text editor, drag offsets, inspector colour previews, a shader
 // fallback) is seen by a MutationObserver: that element is redrawn from its node on the next render, which is what the
 // old full rebuild did for it. localStorage 'verynize.canvas-render' = 'full' rebuilds every element on every render.
+// Offscreen artboards are culled: see "Culling" below.
 (() => {
   const CORNERS = ['nw', 'ne', 'sw', 'se'];
   // Fields that move or rename a node without changing how its children are styled.
   const PLACEMENT = new Set(['x', 'y', 'name']);
   // Attributes other scripts maintain on layer elements themselves (shader status, the clip-proof selection ring).
-  const KEPT_ATTRIBUTES = new Set(['data-shader-status', 'data-shader-kind', 'data-clip-ring']);
+  const KEPT_ATTRIBUTES = new Set(['data-shader-status', 'data-shader-kind', 'data-clip-ring', 'data-culled']);
+  // Culling: grid cell size (world px), boards revealed per camera step during a gesture, settle delay (ms).
+  const CELL = 2048, REVEAL = 6, SETTLE_MS = 150;
   const PREVIEW = Symbol('preview');
 
   // Deep equality for the JSON-like values a node holds.
@@ -49,9 +52,11 @@
   }
 
   function install(ed) {
-    const {canvas} = ed, NS = () => window.BetterNodeStyle;
+    const {canvas, camera: cam} = ed, NS = () => window.BetterNodeStyle;
     const els = new Map(), memos = new Map(), owner = new WeakMap(), stops = new Map(), dirty = new Set();
     let byId = new Map(), tokensKey = null, version = 0, starting = [];
+    let boards = new Map(), grid = new Map(), wide = [], shown = new Set(), boardOf = new Map(), redrawn = new Set();
+    let view = null, lastMove = 0, settleTimer = 0, cameraMoved = false;
 
     // ---------- One layer (shared with export) ----------
     function draw(el, n, editing, parent, ctx) {
@@ -125,8 +130,8 @@
         ref = c;
       }
     }
-    function visit(n, parent, lastInFlow, kids, seen, selection) {
-      seen.add(n.id);
+    function visit(n, parent, lastInFlow, kids, seen, selection, top = n.id) {
+      seen.add(n.id); boardOf.set(n.id, top);
       const old = els.get(n.id), drawnAs = memos.get(n.id);
       if (n.preview) {
         const el = layerElement(n, true, parent, {lastInFlow});
@@ -145,11 +150,11 @@
         draw(el, n, true, parent, {lastInFlow});
         if (n.locked) lock(el);
         memos.set(n.id, {drawn: snapshot(n), selected, lastInFlow, parentId, parentVer, layoutVer: change === 2 ? ++version : memo.layoutVer});
-        dirty.delete(n.id);
+        dirty.delete(n.id); redrawn.add(top);
       }
       if (n.type === 'frame') {
         const list = kids.get(n.id) || [], last = NS().lastInFlowId(list);
-        place(el, list.map(c => visit(c, n, c.id === last, kids, seen, selection)));
+        place(el, list.map(c => visit(c, n, c.id === last, kids, seen, selection, top)));
       }
       if (drawn) { if (selected) handles(el); start(el); }
       return el;
@@ -158,7 +163,7 @@
       absorb(observer.takeRecords());
       if (mode() === 'full') { for (const el of els.values()) stop(el); els.clear(); memos.clear(); dirty.clear(); }
       const list = ed.nodes(), kids = new Map(), seen = new Set(), selection = ed.getSelection();
-      byId = new Map();
+      byId = new Map(); boardOf = new Map(); redrawn = new Set();
       for (const n of list) {
         byId.set(n.id, n);
         const p = n.parentId || null, siblings = kids.get(p);
@@ -166,24 +171,83 @@
       }
       const key = JSON.stringify(ed.design.tokens || {});
       if (key !== tokensKey) { tokensKey = key; for (const id of memos.keys()) dirty.add(id); }
-      const tops = (kids.get(null) || []).map(n => visit(n, null, false, kids, seen, selection));
+      const topNodes = kids.get(null) || [], tops = topNodes.map(n => visit(n, null, false, kids, seen, selection));
       place(canvas, tops);
       if (canvas.childElementCount !== tops.length) { const keep = new Set(tops); for (const c of Array.from(canvas.children)) if (!keep.has(c)) c.remove(); }
       for (const [id, el] of els) if (!seen.has(id)) { stop(el); el.remove(); els.delete(id); memos.delete(id); dirty.delete(id); }
+      index(topNodes); cull();
       for (const el of starting) if (el.isConnected) stops.set(el, window.BetterShaders.mount(el));
       starting = [];
       observer.takeRecords(); // this render's own writes
     }
 
+    // ---------- Culling: offscreen artboards skip style, layout and paint ----------
+    // A top-level frame with a fixed size that clips its content, more than half a viewport outside the view, gets
+    // data-culled (content-visibility: hidden, web/canvas.css). Its own box stays laid out and painted (frame labels,
+    // fit, marquee); its subtree costs nothing, and layout queries inside it still answer (laid out on demand).
+    // Boards are hidden at once. During a camera gesture at most REVEAL boards come back per camera step, nearest
+    // first (the board's own fill shows meanwhile), and all of them once the camera settles or the document renders.
+    // localStorage 'verynize.canvas-cull' = 'off' turns culling off.
+    function culling() { try { return localStorage.getItem('verynize.canvas-cull') !== 'off'; } catch { return true; } }
+    function cullable(n) {
+      const S = NS();
+      return n.type === 'frame' && n.clipContent === true && !n.preview && !n.hidden && S.sizingMode(n, 'w', null) === 'fixed' && S.sizingMode(n, 'h', null) === 'fixed'
+        && n.wPct === undefined && n.hPct === undefined && n.minW == null && n.minH == null && !(Number(n.aspectRatio) > 0);
+    }
+    // World bounds of a top-level box (rotated about its centre).
+    function bounds(n) {
+      const w = Number(n.w) || 0, h = Number(n.h) || 0, a = (Number(n.rotation) || 0) * Math.PI / 180, c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+      const rw = w * c + h * s, rh = w * s + h * c, cx = (Number(n.x) || 0) + w / 2, cy = (Number(n.y) || 0) + h / 2;
+      return {x0: cx - rw / 2, y0: cy - rh / 2, x1: cx + rw / 2, y1: cy + rh / 2};
+    }
+    const cells = (b, fn) => { for (let gx = Math.floor(b.x0 / CELL); gx <= Math.floor(b.x1 / CELL); gx++) for (let gy = Math.floor(b.y0 / CELL); gy <= Math.floor(b.y1 / CELL); gy++) fn(gx + ',' + gy); };
+    function index(topNodes) {
+      boards = new Map(); grid = new Map(); wide = [];
+      for (const n of topNodes) {
+        const el = els.get(n.id); if (!el) continue;
+        if (!cullable(n)) { if (el.hasAttribute('data-culled')) el.removeAttribute('data-culled'); continue; }
+        const b = {el, ...bounds(n)};
+        boards.set(n.id, b);
+        if ((b.x1 - b.x0) * (b.y1 - b.y0) > 64 * CELL * CELL) wide.push(n.id);
+        else cells(b, key => { const list = grid.get(key); if (list) list.push(n.id); else grid.set(key, [n.id]); });
+      }
+      shown = new Set([...boards].filter(([, b]) => !b.el.hasAttribute('data-culled')).map(([id]) => id));
+    }
+    function cull(budget = Infinity) {
+      clearTimeout(settleTimer); cameraMoved = false;
+      if (!view) { const r = canvas.parentElement?.getBoundingClientRect(); view = {w: r?.width || 0, h: r?.height || 0}; }
+      const near = new Set(), z = cam.zoom || 1;
+      if (!culling() || !view.w || !view.h) for (const id of boards.keys()) near.add(id); // off, or no viewport: all show
+      else {
+        const mx = view.w / z / 2, my = view.h / z / 2;
+        const v = {x0: -cam.x / z - mx, y0: -cam.y / z - my, x1: (view.w - cam.x) / z + mx, y1: (view.h - cam.y) / z + my};
+        const test = id => { const b = boards.get(id); if (b.x1 >= v.x0 && b.x0 <= v.x1 && b.y1 >= v.y0 && b.y0 <= v.y1) near.add(id); };
+        cells(v, key => grid.get(key)?.forEach(test)); wide.forEach(test);
+      }
+      for (const id of shown) if (!near.has(id)) { boards.get(id).el.setAttribute('data-culled', ''); shown.delete(id); }
+      let reveal = [...near].filter(id => !shown.has(id));
+      if (reveal.length > budget) {
+        const cx = -cam.x / z + view.w / z / 2, cy = -cam.y / z + view.h / z / 2;
+        const d = id => { const b = boards.get(id); return Math.hypot((b.x0 + b.x1) / 2 - cx, (b.y0 + b.y1) / 2 - cy); };
+        reveal = reveal.sort((a, b) => d(a) - d(b)).slice(0, budget);
+        settleTimer = setTimeout(() => cull(), SETTLE_MS);
+      }
+      for (const id of reveal) { boards.get(id).el.removeAttribute('data-culled'); shown.add(id); }
+    }
+    // A camera step (the transform written on #canvas): steps closer than 100 ms apart are a gesture.
+    function moved() { const now = performance.now(), gesture = now - lastMove < 100; lastMove = now; cull(gesture ? REVEAL : Infinity); }
+    if (typeof ResizeObserver === 'function' && canvas.parentElement) new ResizeObserver(([entry]) => { view = {w: entry.contentRect.width, h: entry.contentRect.height}; cull(); }).observe(canvas.parentElement);
+
     // ---------- Writes from elsewhere ----------
     function layerOf(node) { for (let x = node; x && x !== canvas; x = x.parentNode) { const id = owner.get(x); if (id !== undefined) return id; } }
     function absorb(records) {
       for (const r of records) {
-        if (r.target === canvas || (r.type === 'attributes' && (KEPT_ATTRIBUTES.has(r.attributeName) || r.target.classList.contains('shader-surface')))) continue;
+        if (r.target === canvas) { if (r.attributeName === 'style') cameraMoved = true; continue; }
+        if (r.type === 'attributes' && (KEPT_ATTRIBUTES.has(r.attributeName) || r.target.classList.contains('shader-surface'))) continue;
         const id = layerOf(r.target); if (id !== undefined) dirty.add(id);
       }
     }
-    const observer = new MutationObserver(absorb);
+    const observer = new MutationObserver(records => { absorb(records); if (cameraMoved) moved(); });
     observer.observe(canvas, {subtree: true, childList: true, attributes: true, characterData: true});
     function mode() { try { return localStorage.getItem('verynize.canvas-render'); } catch { return null; } }
     // Shaders read preferences (reduced motion) when they start: redraw every layer on the render that follows.
@@ -191,10 +255,11 @@
 
     return {
       render, layerElement,
-      elementOf: id => { const el = els.get(id); return el?.isConnected ? el : null; },
+      // For measuring right after render(): null inside a culled board this render did not redraw (nothing changed there).
+      elementOf: id => { const el = els.get(id), top = boardOf.get(id); return el?.isConnected && !(boards.has(top) && !shown.has(top) && !redrawn.has(top)) ? el : null; },
       node: id => byId.get(id),
       invalidate: id => { if (id === undefined) for (const key of memos.keys()) dirty.add(key); else dirty.add(id); },
-      stats: () => ({elements: els.size, shaders: stops.size}),
+      stats: () => ({elements: els.size, shaders: stops.size, boards: boards.size, culled: boards.size - shown.size}),
     };
   }
   window.VerynizeCanvasRender = {install};
