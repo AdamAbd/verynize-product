@@ -91,7 +91,7 @@ Gains at 1,000 nodes are measured in the real app unless noted. Gains at 13K/100
 4. **Only if zoom at 50K+ still misses budget:** build B + C (tiles for zoom and overview) and measure the handoff.
 5. **Defer GPU.** Revisit only for in-scene shader effects at scale, or if a GPU prototype wins at matched visual quality, bounded memory and presented-frame latency.
 
-`docs/canvas-renderer-migration-plan.md` (PixiJS first) should be revised accordingly; [renderer-options.md](renderer-options.md#what-docscanvas-renderer-migration-planmd-should-change) lists the changes.
+The [revised migration plan](../canvas-renderer-migration-plan.md) follows this order. [ADR-001](adr-001-defer-gpu-renderer.md) records the GPU deferral and measurable revisit triggers; the [budget checker](../../eval/canvas-perf/README.md#budget-report) reports acceptance gaps without gating CI.
 
 ### Acceptance criteria to use from now on
 
