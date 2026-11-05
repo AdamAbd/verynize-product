@@ -52,11 +52,14 @@ export const CORE_ELECTRON = [
 
 /** Changes here run the whole suite. */
 export const FULL_SUITE = [
+  ".github/actions/**",
+  ".github/workflows/tests.yml",
   "package.json",
   "package-lock.json",
   "vite*.config.ts",
   "tsconfig*.json",
   "scripts/run-tests.mjs",
+  "scripts/test-build-plan.mjs",
   "scripts/test-manifest.mjs",
 ];
 
