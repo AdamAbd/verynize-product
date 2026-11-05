@@ -169,7 +169,7 @@ export function inspectImage(bytes) {
 /** Replace every occurrence of the secret (and its Bearer form) in provider-supplied text. */
 export function redact(text, secret) {
   let out = String(text ?? "");
-  if (secret && secret.length >= 4) out = out.split(secret).join("[redacted]");
+  if (secret) out = out.split(secret).join("[redacted]");
   return out
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/g, "Bearer [redacted]")
     .replace(/\bAIza[A-Za-z0-9_-]{8,}/g, "[redacted]")

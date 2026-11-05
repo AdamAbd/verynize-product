@@ -275,6 +275,7 @@ test("catalog, fresh default, migration and vendor routing", () => {
   assert.deepEqual(migrateSettings(migrated), migrated);
   assert.throws(() => providerSettings(fresh, "missing"), /Unknown/);
   assert.equal(redact("bad AIza123456789abcdefghijk"), "bad [redacted]");
+  assert.equal(redact("key: xyz", "xyz"), "key: [redacted]");
 });
 test("Gemini uses header key, generateContent and inline image parts", async () => {
   const saved = migrateSettings();
