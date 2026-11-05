@@ -13,7 +13,7 @@ export const IMAGE_PROVIDERS = Object.freeze(
   [
     {
       id: "nano_banana_lite",
-      label: "Nano Banana Lite",
+      label: "Nano Banana 2 Lite",
       vendor: "google",
       model: "gemini-3.1-flash-lite-image",
       adapter: "gemini",
@@ -52,23 +52,37 @@ export const IMAGE_PROVIDERS = Object.freeze(
 export const DEFAULT_IMAGE_PROVIDER = "nano_banana_lite";
 export const PROVIDERS = ["openai", "http", "gemini"];
 export function migrateSettings(input = {}) {
+  if (!input || typeof input !== "object") input = {};
   const legacy = input.version !== 2 && !!(input.baseURL || input.provider || input.key);
-  const custom = normalizeSettings(input.version === 2 ? input.custom : input);
-  if (!["openai", "http"].includes(custom.provider))
-    throw new Error("Custom adapter must be openai or http");
+  let custom;
+  try {
+    custom = normalizeSettings(input.version === 2 ? input.custom : input);
+    if (!["openai", "http"].includes(custom.provider)) throw new Error("Invalid custom adapter");
+  } catch {
+    custom = normalizeSettings();
+  }
   const keys = {};
   for (const vendor of ["openai", "google", "custom"]) {
     if (typeof input.keys?.[vendor] === "string") keys[vendor] = input.keys[vendor];
   }
-  if (legacy && input.key) {
+  if (legacy && typeof input.key === "string" && input.key) {
     keys.custom = input.key;
-    if (custom.provider === "openai" && custom.baseURL === "https://api.openai.com/v1")
+    if (
+      input.provider === "openai" &&
+      String(input.baseURL || "").replace(/\/+$/, "") === "https://api.openai.com/v1"
+    )
       keys.openai = input.key;
   }
-  const defaultProvider =
+  let defaultProvider =
     input.version === 2 ? input.defaultProvider : legacy ? "custom" : DEFAULT_IMAGE_PROVIDER;
   if (!IMAGE_PROVIDERS.some((p) => p.id === defaultProvider))
-    throw new Error("Unknown image provider");
+    defaultProvider = DEFAULT_IMAGE_PROVIDER;
+  if (
+    legacy &&
+    String(input.baseURL || "").replace(/\/+$/, "") === "https://api.openai.com/v1" &&
+    /^(gpt-image-1|dall-e-.*)$/.test(input.model || "")
+  )
+    defaultProvider = "openai_gpt_image_2";
   return { version: 2, defaultProvider, keys, custom };
 }
 export function providerSettings(saved, id = saved.defaultProvider, baseURLs = {}) {
@@ -81,12 +95,12 @@ export function providerSettings(saved, id = saved.defaultProvider, baseURLs = {
     baseURL:
       baseURLs[entry.vendor] ||
       (entry.vendor === "google"
-        ? "https://generativelanguage.googleapis.com/v1"
+        ? "https://generativelanguage.googleapis.com/v1beta"
         : "https://api.openai.com/v1"),
   });
 }
-export const SIZES = ["1024x1024", "1536x1024", "1024x1536", "512x512", "256x256"];
-const MAX_IMAGE = 15 * 1024 * 1024;
+export const SIZES = ["1024x1024", "1536x1024", "1024x1536"];
+const MAX_IMAGE = 8_000_000;
 const TIMEOUT_MS = 120000;
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -109,7 +123,7 @@ export function normalizeSettings(input = {}) {
   // Keys never travel in clear text to another machine: plain http is only for loopback servers.
   if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK.has(url.hostname)))
     throw new Error("Use an https base URL (plain http is allowed for localhost only)");
-  const model = String(input.model ?? (provider === "openai" ? "gpt-image-1" : "")).trim();
+  const model = String(input.model ?? (provider === "openai" ? "gpt-image-2" : "")).trim();
   if (model.length > 200 || /[\s"'<>]/.test(model)) throw new Error("Invalid model name");
   const size = String(input.size ?? "1024x1024");
   if (!SIZES.includes(size)) throw new Error("Unsupported image size");
@@ -178,14 +192,14 @@ export function redact(text, secret) {
 
 async function readBody(response, limit = MAX_IMAGE) {
   const declared = Number(response.headers.get("content-length"));
-  if (declared > limit) throw new Error("Provider response exceeds 15 MB");
+  if (declared > limit) throw new Error("Provider response exceeds 8 MB");
   const chunks = [];
   let size = 0;
   for await (const chunk of response.body) {
     size += chunk.byteLength;
     if (size > limit) {
       await response.body.cancel?.().catch(() => {});
-      throw new Error("Provider response exceeds 15 MB");
+      throw new Error("Provider response exceeds 8 MB");
     }
     chunks.push(Buffer.from(chunk));
   }
@@ -302,13 +316,16 @@ export async function generateImage({
   else {
     let json;
     try {
-      json = JSON.parse((await readBody(response)).toString("utf8"));
+      json = JSON.parse(
+        (await readBody(response, Math.ceil((MAX_IMAGE * 4) / 3) + 65536)).toString("utf8"),
+      );
     } catch {
       throw new Error("Image provider returned an unreadable response");
     }
     const inline = json?.candidates?.[0]?.content?.parts
-      ?.map((p) => p.inlineData || p.inline_data)
-      .find((p) => p?.data);
+      ?.filter((p) => p.thought !== true)
+      .map((p) => p.inlineData || p.inline_data)
+      .findLast((p) => p?.data);
     const payload =
       s.provider === "gemini" ? (inline ? { b64: inline.data } : null) : pickPayload(json);
     if (!payload) throw new Error("Image provider response did not contain an image");
@@ -328,7 +345,7 @@ export async function generateImage({
       bytes = await readBody(download);
     }
   }
-  if (bytes.length > MAX_IMAGE) throw new Error("Generated image exceeds 15 MB");
+  if (bytes.length > MAX_IMAGE) throw new Error("Generated image exceeds 8 MB");
   const info = inspectImage(bytes);
   if (!info || !info.width || !info.height)
     throw new Error("Image provider did not return a PNG, JPEG or WebP image");

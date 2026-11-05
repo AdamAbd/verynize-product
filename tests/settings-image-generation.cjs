@@ -30,13 +30,20 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     app = await _electron.launch({ env, args: [".", `--user-data-dir=${dir}`] });
     page = await app.firstWindow();
     await waitForUiReady(page);
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].setContentSize(1440, 870),
+    );
+    await page.evaluate(() => (document.documentElement.dataset.uiTheme = "dark"));
     await page.evaluate(() => window.appSettings.open("preferences"));
     await page.locator("#settings-image-provider:not([disabled])").waitFor();
   };
   const capture = async (name) => {
     if (!process.env.WP3_SCREENSHOTS) return;
     await fs.mkdir(process.env.WP3_SCREENSHOTS, { recursive: true });
-    await page.screenshot({ path: path.join(process.env.WP3_SCREENSHOTS, name) });
+    await page.screenshot({
+      path: path.join(process.env.WP3_SCREENSHOTS, name),
+      animations: "disabled",
+    });
   };
   try {
     await launch();
@@ -59,7 +66,8 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
       1,
       "current provider has a dot",
     );
-    await capture("gen-settings-dropdown.png");
+    await page.waitForTimeout(250);
+    await capture("settings-provider-open.png");
     const custom = catalog.find((p) => p.vendor === "custom");
     await page.getByRole("option", { name: custom.label, exact: true }).click();
     if (initial.providers)
@@ -73,7 +81,7 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
       const key = `fixture-image-${vendor}-secret`;
       const input = page.locator(`#settings-image-key-${vendor}`);
       const row = input.locator("../..");
-      await input.fill(key);
+      await input.fill("  " + key + "  ");
       await row.getByRole("button", { name: "Save", exact: true }).click();
       await row.getByText(/Saved securely|Saved for this session/).waitFor();
       assert.equal(await input.inputValue(), "");
@@ -96,6 +104,10 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
       await row.getByRole("button", { name: "Remove", exact: true }).click();
       await row.getByText("No key saved").waitFor();
     }
+    const badKey = page.locator("#settings-image-key-google");
+    await badKey.fill("invalid key");
+    await badKey.locator("../..").getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "Invalid API key" }).waitFor();
     await app.close();
     await launch();
     assert.equal(await page.locator("#settings-image-provider").textContent(), custom.label);
@@ -124,7 +136,7 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     await page.waitForFunction(() => document.getElementById("image-model").value === "fixture");
     assert.equal(await page.locator("#generate-image-provider").inputValue(), custom.id);
     await page.locator("#generate-prompt").fill("A blue ceramic tile");
-    await capture("gen-dialog.png");
+    await capture("generate-dialog.png");
     const generate = async () => {
       await page.locator("#generate-run").click();
       await page.waitForFunction(() =>

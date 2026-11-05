@@ -1,3 +1,4 @@
+import { IMAGE_FILL_TYPES } from "./document-core.mjs";
 // Image provider adapters against local HTTP fixture servers that return real PNG/JPEG bytes.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -119,7 +120,7 @@ test("settings: https anywhere, plain http only on loopback, no credentials in U
   assert.deepEqual(normalizeSettings({}), {
     provider: "openai",
     baseURL: "https://api.openai.com/v1",
-    model: "gpt-image-1",
+    model: "gpt-image-2",
     size: "1024x1024",
   });
   assert.equal(
@@ -139,7 +140,7 @@ test("OpenAI-compatible provider: request shape, bearer key and decoded PNG", as
       provider: "openai",
       baseURL: base + "/v1",
       model: "fixture-image-model",
-      size: "512x512",
+      size: "1024x1024",
     },
     apiKey: KEY,
     prompt: "A misty pine forest at dawn",
@@ -151,7 +152,7 @@ test("OpenAI-compatible provider: request shape, bearer key and decoded PNG", as
     model: "fixture-image-model",
     prompt: "A misty pine forest at dawn",
     n: 1,
-    size: "512x512",
+    size: "1024x1024",
   });
   assert.equal(result.mime, "image/png");
   assert.equal(result.width, 64);
@@ -257,6 +258,8 @@ test("catalog, fresh default, migration and vendor routing", () => {
     assert.ok(["google", "openai", "custom"].includes(p.vendor));
     if (p.vendor !== "custom") assert.ok(p.model);
   }
+  assert.deepEqual(IMAGE_FILL_TYPES, ["frame", "rectangle"]);
+  assert.equal(IMAGE_PROVIDERS[0].label, "Nano Banana 2 Lite");
   const fresh = migrateSettings();
   assert.equal(fresh.defaultProvider, DEFAULT_IMAGE_PROVIDER);
   assert.equal(providerSettings(fresh).model, "gemini-3.1-flash-lite-image");
@@ -264,7 +267,7 @@ test("catalog, fresh default, migration and vendor routing", () => {
     provider: "openai",
     baseURL: "https://api.openai.com/v1",
     model: "old-model",
-    size: "512x512",
+    size: "1024x1024",
     key: "ciphertext",
   };
   const migrated = migrateSettings(old);
@@ -295,4 +298,75 @@ test("Gemini uses header key, generateContent and inline image parts", async () 
   });
   assert.equal(result.width, 64);
   assert.equal(result.height, 40);
+});
+
+test("settings recover unknown providers and invalid custom blocks", () => {
+  for (const value of [
+    null,
+    { version: 2, defaultProvider: "retired", custom: { baseURL: "bad" } },
+    { version: 2, custom: null },
+  ]) {
+    const settings = migrateSettings(value);
+    assert.equal(settings.defaultProvider, DEFAULT_IMAGE_PROVIDER);
+    assert.equal(settings.custom.model, "gpt-image-2");
+  }
+  for (const model of ["gpt-image-1", "dall-e-2", "dall-e-3"]) {
+    assert.equal(
+      migrateSettings({
+        provider: "openai",
+        baseURL: "https://api.openai.com/v1",
+        model,
+        key: "cipher",
+      }).defaultProvider,
+      "openai_gpt_image_2",
+    );
+  }
+  assert.throws(() => normalizeSettings({ size: "512x512" }), /Unsupported/);
+  assert.match(providerSettings(migrateSettings()).baseURL, /v1beta$/);
+});
+test("Gemini skips thoughts and takes the last output image", async () => {
+  const result = await generateImage({
+    settings: providerSettings(migrateSettings()),
+    apiKey: "fixture",
+    prompt: "Landscape",
+    fetch: async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { inlineData: { data: png(12, 12, [0, 0, 0]).toString("base64") } },
+                  { text: "Final" },
+                  { inlineData: { data: photo.toString("base64") } },
+                  { thought: true, inlineData: { data: png(8, 8, [0, 0, 0]).toString("base64") } },
+                ],
+              },
+            },
+          ],
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+  });
+  assert.equal(result.width, 64);
+  assert.equal(result.height, 40);
+});
+test("provider output respects the renderer's 8 MB limit", async () => {
+  await assert.rejects(
+    generateImage({
+      settings: { provider: "http", baseURL: "http://localhost/image" },
+      prompt: "Large fixture",
+      fetch: async () =>
+        new Response(new Uint8Array(8_000_001), { headers: { "content-type": "image/png" } }),
+    }),
+    /8 MB/,
+  );
+  const saved = migrateSettings({
+    provider: "openai",
+    baseURL: "https://custom.example/v1",
+    size: "bad",
+    key: "custom-cipher",
+  });
+  assert.equal(saved.keys.custom, "custom-cipher");
+  assert.equal(saved.keys.openai, undefined);
 });

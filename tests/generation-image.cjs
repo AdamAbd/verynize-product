@@ -58,6 +58,13 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
         res.end(JSON.stringify({ created: 1, data: [{ b64_json: photo.toString("base64") }] }));
         return;
       }
+      if (req.url === "/slow") {
+        setTimeout(() => {
+          res.setHeader("content-type", "image/png");
+          res.end(generic);
+        }, 300);
+        return;
+      }
       if (req.url === "/generate") {
         res.setHeader("content-type", "image/png");
         res.end(generic);
@@ -115,6 +122,10 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
     );
   let { app, page } = await launch();
   try {
+    await fs.writeFile(path.join(dir, "image-provider.json"), "{broken");
+    const recovered = await page.evaluate(() => window.desktop.imageProvider.get());
+    assert.equal(recovered.defaultProvider, "nano_banana_lite");
+    assert.equal(await fs.readFile(path.join(dir, "image-provider.json.bak"), "utf8"), "{broken");
     // Engine switch shows provider settings, hides agent-only fields.
     await openDialog(page);
     assert.equal(await page.locator("#generate-image-settings").isVisible(), true);
@@ -128,11 +139,12 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
     );
     assert.match(refused, /https/);
 
+    await page.locator("#generate-image-provider").selectOption("custom");
     await page.locator("#image-provider").selectOption("openai");
     await page.locator("#image-base-url").fill(base + "/v1");
     await page.locator("#image-model").fill("fixture-photo-model");
-    await page.locator("#image-size").selectOption("512x512");
-    await page.locator("#image-api-key").fill(KEY);
+    await page.locator("#image-size").selectOption("1024x1024");
+    await page.locator("#image-api-key").fill("  " + KEY + "  ");
     await page.locator("#generate-prompt").fill("A foggy harbour at sunrise, 35mm photo");
     await page.locator("#generate-run").click();
     await page.waitForFunction(
@@ -151,7 +163,7 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
       model: "fixture-photo-model",
       prompt: "A foggy harbour at sunrise, 35mm photo",
       n: 1,
-      size: "512x512",
+      size: "1024x1024",
     });
     let images = await imageNodes(page);
     assert.equal(images.length, 1);
@@ -299,6 +311,49 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
           n.h === 30,
       ),
     );
+    const service = await app.evaluate(async ({ app }, modulePath) => {
+      const { imageGenerator } = process.mainModule.require(modulePath);
+      const saved = await imageGenerator.get();
+      await imageGenerator.set({
+        custom: { ...saved.custom, baseURL: saved.custom.baseURL.replace("/generate", "/slow") },
+      });
+      const first = imageGenerator.generate({ prompt: "Cancel caller A" }, "caller-a").then(
+        () => "ok",
+        (e) => e.message,
+      );
+      const second = imageGenerator.generate({ prompt: "Keep caller B" }, "caller-b");
+      setTimeout(() => imageGenerator.cancel("caller-a"), 100);
+      const cancelled = await first;
+      const kept = await second;
+      await imageGenerator.set({ custom: saved.custom });
+      for (let i = 0; i < 5; i++) await imageGenerator.generate({ prompt: "Rate limit fixture" });
+      const limited = await imageGenerator.generate({ prompt: "Must not spend" }).then(
+        () => "ok",
+        (e) => e.message,
+      );
+      await imageGenerator.set({ vendor: "google", clearKey: true });
+      const descriptor = Object.getOwnPropertyDescriptor(app, "isPackaged");
+      const override = process.env.VERYNIZE_TEST_IMAGE_GOOGLE_URL;
+      let packaged;
+      try {
+        Object.defineProperty(app, "isPackaged", { value: true, configurable: true });
+        process.env.VERYNIZE_TEST_IMAGE_GOOGLE_URL = "invalid-test-override";
+        packaged = await imageGenerator
+          .generate({ provider: "nano_banana_lite", prompt: "No key" }, "packaged-test")
+          .then(
+            () => "ok",
+            (e) => e.message,
+          );
+      } finally {
+        Object.defineProperty(app, "isPackaged", descriptor);
+        process.env.VERYNIZE_TEST_IMAGE_GOOGLE_URL = override;
+      }
+      return { cancelled, width: kept.width, limited, packaged };
+    }, path.resolve("desktop/generate.cjs"));
+    assert.match(service.cancelled, /canceled/);
+    assert.equal(service.width, 40);
+    assert.match(service.limited, /5 attempts per hour/);
+    assert.match(service.packaged, /Add an API key for Google/);
     assert.doesNotMatch(logs, new RegExp(KEY + "|" + WRONG), "API keys never logged");
     console.log(
       `PASS image model providers: OpenAI-compatible + generic HTTP fixtures, real PNG inserted as layers, key in ${secure ? "keychain (safeStorage) across relaunch" : "session memory"}, never returned/logged/plain-stored, redacted errors`,

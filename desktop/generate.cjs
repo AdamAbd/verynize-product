@@ -9,7 +9,10 @@ const exec = require("node:util").promisify(execFile);
 const agents = require("./agents.cjs");
 function registerGeneration(handle, parent) {
   let active = null;
-  onWindowClosed(parent, () => active?.cancel());
+  onWindowClosed(parent, () => {
+    active?.cancel();
+    imageGenerator.cancel(parent);
+  });
   handle("generateVector", async (options) => {
     if (active) throw Error("A vector is already being generated");
     if (
@@ -75,19 +78,20 @@ function registerGeneration(handle, parent) {
   });
   handle("cancelGeneration", () => {
     active?.cancel();
-    imageGenerator.cancel();
+    imageGenerator.cancel(parent);
     return true;
   });
   handle("imageProviderGet", () => imageGenerator.get());
   handle("imageProviderSet", (options) => imageGenerator.set(options));
-  handle("generateImage", (options) => imageGenerator.generate(options));
+  handle("generateImage", (options) => imageGenerator.generate(options, parent));
 }
 
 // One service shared by all windows and MCP. Only ciphertext is persisted.
 function createImageGenerator() {
   const settingsFile = () => path.join(app.getPath("userData"), "image-provider.json");
   const sessionKeys = {};
-  let imageAbort = null;
+  const imageAborts = new Map();
+  const mcpAttempts = [];
   let queue = Promise.resolve();
   const load = () =>
     import(pathToFileURL(path.join(__dirname, "../integrations/image-provider.mjs")).href);
@@ -105,11 +109,13 @@ function createImageGenerator() {
     try {
       raw = JSON.parse(await fs.readFile(settingsFile(), "utf8"));
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (error.code !== "ENOENT") {
+        await fs.copyFile(settingsFile(), settingsFile() + ".bak");
+      }
     }
     const engine = await load();
     const saved = engine.migrateSettings(raw);
-    if (raw.version !== 2) await save(saved);
+    if (raw?.version !== 2) await save(saved);
     return saved;
   }
   function key(saved, vendor) {
@@ -173,6 +179,19 @@ function createImageGenerator() {
         );
         const vendor = options.vendor || "custom";
         if (!["openai", "google", "custom"].includes(vendor)) throw Error("Unknown key vendor");
+        if (
+          options.defaultProvider &&
+          !engine.IMAGE_PROVIDERS.some((p) => p.id === options.defaultProvider)
+        )
+          throw Error("Unknown image provider");
+        if (options.custom || Object.keys(legacy).length) {
+          const custom = engine.normalizeSettings({
+            ...saved.custom,
+            ...options.custom,
+            ...legacy,
+          });
+          if (!["openai", "http"].includes(custom.provider)) throw Error("Invalid custom adapter");
+        }
         const next = engine.migrateSettings({
           ...saved,
           defaultProvider:
@@ -203,10 +222,18 @@ function createImageGenerator() {
         await save(next);
         return publicSettings(next);
       }),
-    cancel: () => imageAbort?.abort(),
-    generate: async (options = {}) => {
-      if (imageAbort) throw Error("An image is already being generated");
-      imageAbort = new AbortController();
+    cancel: (caller = "mcp") => imageAborts.get(caller)?.abort(),
+    generate: async (options = {}, caller = "mcp") => {
+      if (imageAborts.has(caller)) throw Error("An image is already being generated");
+      if (caller === "mcp") {
+        const now = Date.now();
+        while (mcpAttempts.length && mcpAttempts[0] <= now - 3600000) mcpAttempts.shift();
+        if (mcpAttempts.length >= 5)
+          throw Error("Paid image generation limit reached (5 attempts per hour)");
+        mcpAttempts.push(now);
+      }
+      const imageAbort = new AbortController();
+      imageAborts.set(caller, imageAbort);
       const signal = imageAbort.signal;
       try {
         const saved = await locked(read),
@@ -218,7 +245,7 @@ function createImageGenerator() {
         const overrides = {};
         for (const vendor of ["google", "openai"]) {
           const raw = process.env["VERYNIZE_TEST_IMAGE_" + vendor.toUpperCase() + "_URL"];
-          if (raw) {
+          if (raw && !app.isPackaged) {
             const url = new URL(raw);
             if (
               url.protocol !== "http:" ||
@@ -238,7 +265,7 @@ function createImageGenerator() {
           signal,
         });
       } finally {
-        imageAbort = null;
+        imageAborts.delete(caller);
       }
     },
   };

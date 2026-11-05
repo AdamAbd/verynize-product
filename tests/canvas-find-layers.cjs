@@ -111,6 +111,19 @@ const path = require("node:path");
     await expect(count).toHaveText("3 of 4");
     assert.notDeepEqual(await camera(), before);
     assert.deepEqual(await selection(), []);
+    await p.evaluate(() =>
+      window.design.updateNodes(["text"], { text: "A ripe mango [literal]. Updated" }),
+    );
+    await expect(count).toHaveText("3 of 4");
+    await expect(p.locator('#canvas [data-id="text"]')).toHaveAttribute("data-find-focus", "");
+    await p.keyboard.press("Escape");
+    assert.deepEqual(await selection(), ["child"]);
+    await p.locator("#find-layers-button").click();
+    await expect(count).toHaveText("3 of 4");
+    await panel.getByRole("button", { name: "Close", exact: true }).click();
+    assert.deepEqual(await selection(), ["child"]);
+    await p.locator("#find-layers-button").click();
+    await expect(count).toHaveText("3 of 4");
     await shot("results");
     await p.evaluate(() => (document.documentElement.dataset.uiTheme = "light"));
     await shot("light");
@@ -141,6 +154,7 @@ const path = require("node:path");
       await expect(rows).toHaveCount(1);
       await expect(rows).toHaveAttribute("data-find-result", id);
     }
+    await shot("id");
     await p.keyboard.press("Enter");
     await expect(panel).toHaveCount(0);
     assert.deepEqual(await selection(), ["child"]);
@@ -173,9 +187,68 @@ const path = require("node:path");
     await input.dispatchEvent("keydown", { key: "Escape", isComposing: true });
     await expect(panel).toBeVisible();
     await p.keyboard.press("Escape");
-    await p.locator("#find-layers-button").click();
+    await p.evaluate(() => {
+      document.activeElement?.blur();
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ф",
+          code: "KeyF",
+          metaKey: /Mac/.test(navigator.platform),
+          ctrlKey: !/Mac/.test(navigator.platform),
+          bubbles: true,
+        }),
+      );
+    });
+    await expect(panel).toBeVisible();
     await p.locator("#zoom-menu-button").focus();
     await expect(panel).toHaveCount(0);
+    if (process.env.FIND_SCREENSHOT_DIR) {
+      await p.keyboard.press("Escape");
+      await p.evaluate(() => {
+        document.documentElement.dataset.uiTheme = "dark";
+        const d = window.design.getDocument();
+        d.name = "Layer finder";
+        d.pages = [
+          {
+            id: "proof",
+            name: "Design",
+            nodes: [0, 1, 2].map((i) => ({
+              id: "proof-" + i,
+              shortId: ["one", "two", "tri"][i],
+              type: "rectangle",
+              name: ["Card — Ocean", "Card — Forest", "Card — Sunset"][i],
+              x: i * 240,
+              y: 80,
+              w: 200,
+              h: 240,
+              radius: 16,
+              color: ["#4b7ca3", "#537f6b", "#b78162"][i],
+              parentId: null,
+            })),
+          },
+        ];
+        d.activePage = "proof";
+        window.design.setDocument(d);
+        window.design.setSelection([]);
+        window.design.zoomToFit();
+      });
+      await p.locator("#find-layers-button").click();
+      await input.fill("");
+      await shot("empty");
+      await input.fill("Card");
+      await p.keyboard.press("ArrowDown");
+      await expect(count).toHaveText("2 of 3");
+      await expect(p.locator('#canvas [data-id="proof-1"]')).toHaveAttribute("data-find-focus", "");
+      await shot("results");
+      await p.evaluate(() => (document.documentElement.dataset.uiTheme = "light"));
+      await shot("light");
+      await p.evaluate(() => (document.documentElement.dataset.uiTheme = "dark"));
+      await input.fill("missing");
+      await shot("no-results");
+      await input.fill("two");
+      await expect(rows).toHaveCount(1);
+      await shot("id");
+    }
     console.log("Find layers: all assertions passed");
   } finally {
     await app.close();

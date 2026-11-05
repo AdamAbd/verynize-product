@@ -17,6 +17,7 @@ export const {
   isRoomAssetUrl,
   checkVariableValue,
   variableKind,
+  IMAGE_FILL_TYPES,
   NODE_TYPES,
   LAYOUTS,
   VARIABLE_TYPES,

@@ -25,7 +25,7 @@ function KeyRow({
   const [key, setKey] = useState("");
   const label = vendor === "google" ? "Google" : vendor === "openai" ? "OpenAI" : "Custom endpoint";
   const submit = async (remove: boolean) => {
-    const value = key;
+    const value = key.trim();
     setKey("");
     await save(vendor, value, remove);
   };
@@ -89,8 +89,10 @@ export function ImportGenerationSection() {
     try {
       setSettings(await imageProviderApi.set(patch));
       setMessage("Image settings saved.");
-    } catch {
-      setMessage("Unable to save image settings. Try again.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Unable to save image settings. Try again.",
+      );
     } finally {
       setBusy(false);
     }

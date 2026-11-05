@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, SearchX, X, Type, Square, Frame, Image, Sparkles } from "lucide-react";
-import { activePage, design, type DesignDocument } from "@/lib/bridge";
+import { activePage, design, useDesign, type DesignDocument } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { paletteKeyAllowed } from "../CommandPalette";
 import { setPanelOpen, usePanelOpen } from "../shortcuts";
-import { buildIndex, search, type SearchNode } from "./search";
+import { buildIndex, search } from "./search";
 
 let lastQuery = "";
+let lastActiveId: string | null = null;
 const close = () => setPanelOpen("find", false);
 function slice(doc: DesignDocument) {
   return {
@@ -23,28 +24,12 @@ function slice(doc: DesignDocument) {
     })),
   };
 }
-// Only read the cloned document at subscription startup, never for a query change.
 function useIndex() {
-  const keyRef = useRef<string | null>(null);
-  const subscribe = useCallback(
-    (notify: () => void) =>
-      design().subscribe((doc) => {
-        const next = JSON.stringify(slice(doc));
-        if (next !== keyRef.current) {
-          keyRef.current = next;
-          notify();
-        }
-      }),
-    [],
-  );
-  const key = useSyncExternalStore(
-    subscribe,
-    () => (keyRef.current ??= JSON.stringify(slice(design().getDocument()))),
-  );
+  const doc = useDesign();
   return useMemo(() => {
-    const value = JSON.parse(key) as { page: string; nodes: SearchNode[] };
+    const value = slice(doc);
     return { page: value.page, entries: buildIndex(value.nodes) };
-  }, [key]);
+  }, [doc]);
 }
 export function FindLayersPanel() {
   const open = usePanelOpen("find");
@@ -56,7 +41,7 @@ export function FindLayersPanel() {
         e.shiftKey ||
         e.altKey ||
         e.isComposing ||
-        e.key.toLowerCase() !== "f" ||
+        (e.key.toLowerCase() !== "f" && e.code !== "KeyF") ||
         !paletteKeyAllowed(e.target)
       )
         return;
@@ -88,7 +73,20 @@ function Finder() {
   const index = useIndex();
   const [query, setQuery] = useState(lastQuery);
   const results = useMemo(() => search(index.entries, query), [index, query]);
-  const [position, setPosition] = useState(0);
+  const [activeId, setActiveId] = useState(lastActiveId);
+  const position = Math.max(
+    0,
+    results.findIndex((r) => r.id === activeId),
+  );
+  const setPosition = (next: number) => {
+    lastActiveId = results[next]?.id ?? null;
+    setActiveId(lastActiveId);
+  };
+  const previousSelection = useRef(design().getSelection());
+  const cancel = () => {
+    design().setSelection(previousSelection.current);
+    close();
+  };
   const input = useRef<HTMLInputElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const current = results[Math.min(position, results.length - 1)];
@@ -97,9 +95,7 @@ function Finder() {
     input.current?.focus();
     input.current?.select();
   }, []);
-  useEffect(() => {
-    setPosition(0);
-  }, [results]);
+
   useEffect(() => {
     const dismiss = (e: PointerEvent) => {
       if (
@@ -116,9 +112,19 @@ function Finder() {
     if (!current) return;
     const node = document.querySelector(`#canvas [data-id="${CSS.escape(current.id)}"]`);
     node?.scrollIntoView();
-    node?.setAttribute("data-find-focus", "");
+    const highlight = () =>
+      document
+        .querySelector(`#canvas [data-id="${CSS.escape(current.id)}"]`)
+        ?.setAttribute("data-find-focus", "");
+    highlight();
+    const unsubscribe = design().subscribe(() => highlight());
     document.getElementById(`find-option-${current.id}`)?.scrollIntoView({ block: "nearest" });
-    return () => node?.removeAttribute("data-find-focus");
+    return () => {
+      unsubscribe();
+      document
+        .querySelectorAll("[data-find-focus]")
+        .forEach((n) => n.removeAttribute("data-find-focus"));
+    };
   }, [current]);
   // Window the result set in batches; every result remains reachable with the arrow keys.
   const start = Math.floor(position / 200) * 200;
@@ -138,7 +144,7 @@ function Finder() {
         if (e.nativeEvent.isComposing) return;
         if (e.key === "Escape") {
           e.preventDefault();
-          close();
+          cancel();
         }
         if (e.key === "Enter" && current) {
           e.preventDefault();
@@ -148,7 +154,7 @@ function Finder() {
         if ((e.key === "ArrowDown" || e.key === "ArrowUp") && results.length) {
           e.preventDefault();
           setPosition(
-            (p) => (p + (e.key === "ArrowDown" ? 1 : -1) + results.length) % results.length,
+            (position + (e.key === "ArrowDown" ? 1 : -1) + results.length) % results.length,
           );
         }
       }}
@@ -168,7 +174,8 @@ function Finder() {
           onChange={(e) => {
             lastQuery = e.target.value;
             setQuery(lastQuery);
-            setPosition(0);
+            lastActiveId = null;
+            setActiveId(null);
           }}
         />
         {current && (
@@ -180,7 +187,7 @@ function Finder() {
           type="button"
           aria-label="Close"
           className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring"
-          onClick={close}
+          onClick={cancel}
         >
           <X className="size-4" />
         </button>

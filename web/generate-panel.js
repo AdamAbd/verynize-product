@@ -11,8 +11,8 @@
 <div id="generate-custom-settings">
 <label>Provider<select id="image-provider"><option value="openai">OpenAI-compatible images API</option><option value="http">Generic HTTP endpoint</option></select></label>
 <label>Base URL<input id="image-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false"></label>
-<label>Model<input id="image-model" placeholder="gpt-image-1" autocomplete="off" spellcheck="false"></label>
-<label>Size<select id="image-size"><option value="1024x1024">1024 × 1024</option><option value="1536x1024">1536 × 1024 landscape</option><option value="1024x1536">1024 × 1536 portrait</option><option value="512x512">512 × 512</option><option value="256x256">256 × 256</option></select></label>
+<label>Model<input id="image-model" placeholder="gpt-image-2" autocomplete="off" spellcheck="false"></label>
+<label>Size<select id="image-size"><option value="1024x1024">1024 × 1024</option><option value="1536x1024">1536 × 1024 landscape</option><option value="1024x1536">1024 × 1536 portrait</option></select></label>
 <label>API key<input id="image-api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Not set"></label>
 <p id="image-key-state"></p>
 <div><button id="image-save" type="button">Save provider</button><button id="image-clear-key" type="button">Remove key</button></div>
@@ -90,7 +90,7 @@
     }
   }
   async function saveSettings() {
-    const key = $("image-api-key").value;
+    const key = $("image-api-key").value.trim();
     const custom = {
       provider: $("image-provider").value,
       baseURL: $("image-base-url").value,
@@ -186,7 +186,7 @@
     parsed.documentElement.setAttribute("height", "512");
     return new XMLSerializer().serializeToString(parsed.documentElement);
   }
-  async function insertImage(name, src) {
+  async function insertImage(name, src, fillTarget = false) {
     const blob = await (await fetch(src)).blob();
     const image = await window.imageUpload.prepare(blob);
     const design = window.design;
@@ -195,7 +195,7 @@
     const target =
       selection.length === 1 &&
       doc.pages.find((p) => p.id === doc.activePage).nodes.find((n) => n.id === selection[0]);
-    if (target && ["frame", "rectangle", "shape"].includes(target.type)) {
+    if (fillTarget && target && window.VerynizeDocument.IMAGE_FILL_TYPES.includes(target.type)) {
       design.updateNodes([target.id], {
         fills: [
           {
@@ -256,7 +256,7 @@
     });
     if (!/^data:image\/(png|jpeg|webp);base64,/.test(result.src))
       throw Error("Provider returned an unsupported image");
-    await insertImage(prompt, result.src);
+    await insertImage(prompt, result.src, true);
     return `Image inserted (${result.width}×${result.height}${result.model ? ", " + result.model : ""})`;
   }
   $("generate-run").onclick = async () => {
