@@ -157,12 +157,14 @@ const AREA = {
   generate: [
     "web/generate-panel.*",
     "desktop/generate.cjs",
+    "desktop/secure-storage.cjs",
     "integrations/image-provider.mjs",
     "integrations/images.mjs",
   ],
   figma: [
     "web/figma-panel.*",
     "desktop/figma*.cjs",
+    "desktop/secure-storage.cjs",
     "integrations/figma-*.mjs",
     "web/clipboard-commands.js",
   ],
@@ -303,6 +305,7 @@ const canvas = [
     "integrations/codec-*.mjs",
   ]),
   electron("tests/canvas-layers-dnd.cjs", "canvas", AREA.canvas, CLIP),
+  electron("tests/canvas-find-layers.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-help-shortcuts.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-wonder-marks.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-selection-marks.cjs", "canvas", AREA.canvas),
@@ -378,6 +381,18 @@ const desktop = [
   electron("tests/figma-paste.cjs", "desktop", AREA.figma, CLIP),
   electron("tests/generation.cjs", "desktop", AREA.generate),
   electron("tests/generation-image.cjs", "desktop", AREA.generate),
+  electron(
+    "tests/keychain-startup.cjs",
+    "desktop",
+    [
+      "desktop/secure-storage.cjs",
+      "desktop/generate.cjs",
+      "desktop/figma-oauth.cjs",
+      "desktop/main.cjs",
+      "web/src/islands/settings/**",
+    ],
+    { platforms: ["darwin"] },
+  ),
   electron("tests/generation-trace.cjs", "desktop", [...AREA.generate, "web/trace-bitmap.js"]),
   ...[
     "agent-options",
@@ -465,6 +480,7 @@ const ux = [
   electron("tests/wonder-shell.cjs", "ux", AREA.shell),
   electron("tests/file-tabs.cjs", "ux", [...AREA.shell, "web/cloud-share.js"]),
   electron("tests/settings.cjs", "ux", AREA.settings),
+  electron("tests/settings-image-generation.cjs", "ux", [...AREA.settings, ...AREA.generate]),
   electron("tests/views-templates.cjs", "ux", [
     "web/views-templates.*",
     "desktop/template-packs.cjs",

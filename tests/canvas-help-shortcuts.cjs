@@ -33,7 +33,7 @@ const nodes = [
 
     // ---- T1: Move, Scale, Hand | Frame, Shader, Text, then the view toggles and `+`.
     const labels = await p.locator('#canvas-toolbar button').evaluateAll(list => list.map(b => b.getAttribute('aria-label')));
-    assert.deepEqual(labels, ['Move', 'Scale', 'Hand', 'Frame', 'Shader', 'Text', 'Details layout', 'Design layout', 'Views']);
+    assert.deepEqual(labels, ['Move', 'Scale', 'Hand', 'Frame', 'Shader', 'Text', 'Find layers', 'Details layout', 'Design layout', 'Views']);
     assert.equal(await p.locator('#canvas-toolbar #eyedropper-tool, #eyedropper-tool:visible').count(), 0, 'no eyedropper button');
     assert.equal(await p.locator('#canvas-toolbar #add-ellipse, #add-ellipse:visible').count(), 0, 'no ellipse button');
     await p.keyboard.press('o');

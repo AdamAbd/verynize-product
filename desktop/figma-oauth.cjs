@@ -11,6 +11,7 @@
 // loopback port is a setting. Secrets never leave the main process: the renderer only sees status.
 // Endpoints default to Figma's; VERYNIZE_FIGMA_OAUTH_ORIGIN (loopback http only) points them at a local
 // fixture server for tests.
+const { isEncryptionAvailable } = require("./secure-storage.cjs");
 const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -69,20 +70,20 @@ function createFigmaOAuth({
       port: validPort(raw.port) ? raw.port : DEFAULT_PORT,
     };
     let secrets = {};
-    if (typeof raw.sealed === "string" && raw.sealed) {
+    if (typeof raw.sealed === "string" && raw.sealed && isEncryptionAvailable(safeStorage)) {
       try {
         secrets = JSON.parse(safeStorage.decryptString(Buffer.from(raw.sealed, "base64")));
       } catch {
         secrets = {};
       }
     }
-    return { config, secrets };
+    return { config, secrets, sealed: typeof raw.sealed === "string" && !!raw.sealed };
   }
   async function save(config, secrets) {
     const hasSecrets = Object.values(secrets).some(
       (v) => v !== undefined && v !== null && v !== "",
     );
-    if (hasSecrets && !safeStorage.isEncryptionAvailable())
+    if (hasSecrets && !isEncryptionAvailable(safeStorage))
       throw new Error("Secure storage is unavailable; the Figma account cannot be saved");
     const body = { clientId: config.clientId || "", port: config.port || DEFAULT_PORT };
     if (hasSecrets)
@@ -94,7 +95,7 @@ function createFigmaOAuth({
   }
 
   async function status() {
-    const { config, secrets } = await load();
+    const { config, secrets, sealed } = await load();
     return {
       clientId: config.clientId || "",
       port: config.port || DEFAULT_PORT,
@@ -104,7 +105,7 @@ function createFigmaOAuth({
       expiresAt: secrets.expiresAt || null,
       pending: !!pending,
       redirectUri: `http://127.0.0.1:${config.port || DEFAULT_PORT}${CALLBACK}`,
-      secureStorage: safeStorage.isEncryptionAvailable(),
+      secureStorage: sealed ? isEncryptionAvailable(safeStorage) : null,
     };
   }
 
@@ -184,7 +185,7 @@ function createFigmaOAuth({
     if (pending) throw new Error("A Figma sign-in is already in progress");
     const { config, secrets } = await load();
     if (!config.clientId) throw new Error("Add your Figma OAuth client ID first");
-    if (!safeStorage.isEncryptionAvailable())
+    if (!isEncryptionAvailable(safeStorage))
       throw new Error("Secure storage is unavailable; the Figma account cannot be saved");
     const verifier = base64url(crypto.randomBytes(32)),
       challenge = base64url(crypto.createHash("sha256").update(verifier).digest()),

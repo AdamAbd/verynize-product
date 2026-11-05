@@ -20,6 +20,7 @@
 // and stay with each store (integrations/design-store.mjs, cloud/http.js).
 (function (root) {
   "use strict";
+  const IMAGE_FILL_TYPES = Object.freeze(["frame", "rectangle"]);
   const NODE_TYPES = ["rectangle", "text", "frame", "image", "shader"];
   const LAYOUTS = ["free", "flex", "grid", "block", "inline"];
   const ANIMATED = ["", "aurora", "sunset", "ocean"];
@@ -264,7 +265,10 @@
       if (
         typeof f.src !== "string" ||
         f.src.length > 3e6 ||
-        !(/^data:font\/(woff2|woff|ttf|otf);base64,[A-Za-z0-9+/=]+$/.test(f.src) || isRoomAssetUrl(f.src))
+        !(
+          /^data:font\/(woff2|woff|ttf|otf);base64,[A-Za-z0-9+/=]+$/.test(f.src) ||
+          isRoomAssetUrl(f.src)
+        )
       )
         throw new Error("Embedded font source must be a base64 font data URL or a room asset URL");
       if (
@@ -702,6 +706,7 @@
     isRoomAssetUrl,
     checkVariableValue,
     variableKind,
+    IMAGE_FILL_TYPES,
     NODE_TYPES,
     LAYOUTS,
     VARIABLE_TYPES,

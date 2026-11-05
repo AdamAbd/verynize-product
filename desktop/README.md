@@ -14,7 +14,7 @@
   - `archive(id)` hides a repository from the list; files, worktrees and chats stay (re-adding restores it).
   - `createChatWorktree({repoId,chatId})` → `{path,branch,shared}`: `git worktree add -b <prefix>/<name> <workspaces>/<repo>/<name> HEAD`, where `<workspaces>` is `<Verynize folder>/workspaces` (default `~/Verynize/workspaces`; `VERYNIZE_WORKSPACES_DIR` overrides it, used by tests) and `<prefix>` is the Settings › Agents branch prefix, else `VERYNIZE_BRANCH_PREFIX`, else the `gh` GitHub username, else `verynize`. Existing worktrees keep their recorded path and branch. Idempotent per chat. A folder that is not the top level of a committed repository returns `{path:root,branch:null,shared:true}`: the chat works in the folder itself.
   - `removeChatWorktree({repoId,chatId,force?})` runs `git worktree remove` (refuses uncommitted work unless `force`); the branch is kept.
-  - `activate(root|null)` (main-side *setActiveRoot*) makes `root` the window's active project for `listFiles/readFile/writeFile`, memory, `gitStatus`, the Changes panel, the dev server and shell tools. Only registered repository roots and worktrees recorded by `createChatWorktree` are accepted (compared after realpath); `null` clears it (quick chats). It does not refuse while agents run: each run keeps its own cwd.
+  - `activate(root|null)` (main-side _setActiveRoot_) makes `root` the window's active project for `listFiles/readFile/writeFile`, memory, `gitStatus`, the Changes panel, the dev server and shell tools. Only registered repository roots and worktrees recorded by `createChatWorktree` are accepted (compared after realpath); `null` clears it (quick chats). It does not refuse while agents run: each run keeps its own cwd.
   - `runAgent({root})`: the chat's folder (worktree or repository root), validated the same way; `root:null` runs in the quick-chat scratch folder. Without `root` the active project is used, as before.
   - Git runs as `execFile` argument arrays with timeouts and `GIT_TERMINAL_PROMPT=0`; mutations are serialized.
 - **Agent behaviour** (`desktop/agent-behavior.cjs`, Settings › Agents lower half; stored in `userData/agent-behavior.json`). `window.desktop.agentBehavior`:
@@ -29,7 +29,7 @@
 - **Web page capture** (`desktop/capture-remote.cjs`, `desktop/capture-core.cjs`). `captureRemoteProbe({url,width?,height?})` → `{screenshot,boxes,width,height,title,url}` for the region picker; `captureRemote({url,width?,height?,region?,interactions?})` → `{document,html,warnings,region}`. Any http(s) URL without credentials; the page loads in a hidden window with a fresh in-memory session partition, sandbox, no Node and no preload (scripts run so the page renders); permissions, popups, downloads and non-http(s) navigation/requests are refused. Cross-origin images, CSS backgrounds (→ `fills` image paints) and the @font-face fonts used by captured text (→ document `fontFaces`, data URLs) are embedded (2 MB per asset, 8 MB images, 6 MB fonts). Every node gets `capture.source` `{url,selector,xpath}` plus `dev:{file,line,column,via}` on localhost pages (data-source*/inspector attributes, React dev fiber, Vue `__file`); interactive elements get `capture.states` (`hover`/`focus`/`focus-visible`/`active` computed-style deltas forced through the DevTools protocol, with child restyles), `capture.transitions` and readable `capture.notes`. `previewApp({capture:true})` records the same source and states for localhost apps; `captureLivePreview` adds source mapping (no state probing in the live iframe). `previewElementAt({x,y})` returns the element box under a point of the embedded preview for the live region picker.
 - **Running-app preview frames** (`desktop/preview.cjs`). `previewNavigate({direction,target?})`, `previewElementAt({x,y,target?})`, `captureLivePreview({url,region?,target?})`, `previewOpenBrowser({target?})` and `previewLocation({target?})` → `{url}` act on the canvas iframe named `verynize-live-preview` by default, or on the expanded preview tab's iframe `verynize-preview-tab` with `target:'tab'`. Both frames must show a localhost URL. Agent automation only ever drives the canvas frame.
 - **Preview Edit / Capture modes** (`desktop/preview-dom.cjs`, renderer `web/preview-edit.js`). `previewDom({op,…})` runs one fixed in-page function in the embedded preview: `at {x,y}` / `describe {path}` / `relative {path,dir}` return an element description (structural path, agent ref, tag, text, box, sizing, computed layout/typography); `apply {ops:[{path,kind:'text'|'style',prop?,value}]}` writes staged edits to the live DOM (allow-listed style properties, `CSS.supports`-checked values, no `url()`); `textStart {path,x,y}` / `textEnd` run direct `contenteditable=plaintext-only` text editing. Edits are transient and never written to source files.
-- **Image model providers** (`desktop/generate.cjs`, `integrations/image-provider.mjs`). `imageProvider.get()` → `{provider:'openai'|'http',baseURL,model,size,hasKey,keyStorage:'keychain'|'session'|'none',secureStorage,configured}` (never the key); `imageProvider.set({provider?,baseURL?,model?,size?,apiKey?,clearKey?})`; `imageProvider.generate({prompt,size?})` → `{src,mime,width,height,provider,model}` (PNG/JPEG/WebP verified by magic bytes). Settings are `userData/image-provider.json`; the key is stored only as `safeStorage` ciphertext (session memory when OS encryption is unavailable), sent only as the Bearer header, redacted from provider errors and never logged. Base URLs must be https (http only for loopback). `cancelGeneration()` also aborts an image request. Live providers need a live credential; tests use local fixture servers.
+- **Image model providers** (`desktop/generate.cjs`, `integrations/image-provider.mjs`). `imageProvider.get/set/generate` retain their preload names; the full v2 contract is below. Google Gemini, OpenAI Images and custom HTTP endpoints return verified PNG/JPEG/WebP images. `cancelGeneration()` aborts the shared image request. Keys use OS encryption or session memory, never renderer storage. Tests use local fixture servers.
 - **Publish app** (`desktop/app-publish.cjs`, Share › Publish app). `cloudAppDetect()` → `{root,name,title,hasBuild,command,packageManager,outputDir}` for the open project. `cloudAppPublish({server,session,name?,title?,outputDir?,build?,note?})` runs the project's own `build` script (argument array, no shell, 10 min timeout; Vite/Vite+ builds get `--base=./`), collects the output folder (needs `index.html`; ≤3000 files, ≤25 MB per file, ≤100 MB), uploads it to the cloud Worker with the account session and seals a new live version → `{version,files,bytes,url,versionUrl,app,outputDir,log,built}`.
 - **Passkeys** (`desktop/cloud-passkey.cjs`, Share › Account). `cloudPasskeyOpen({url})` opens `<server>/passkey#…` in a small window (no preload, in-memory `verynize-passkey` session, sandboxed, navigation locked to the server origin, popups denied) because the local `app://verynize` renderer is not on the server's origin and cannot be its WebAuthn relying party; `cloudPasskeyClose()` closes it. The renderer claims the resulting session through the Worker's handoff endpoint.
 - `listFiles()` returns up to 2,000 `{path,size}` entries, depth at most eight; excludes symlinks, .git, node_modules, and common build output.
@@ -98,6 +98,7 @@ Bridge-only MCP tools (`integrations/shell-tools.mjs`) let agents drive the user
 - **execute_action** runs entries of the editor's command registry (`window.verynize.commands()/runCommand`) through `web/agent-bridge.js`. Short element ids select the targets first. OS clipboard commands are not exposed.
 
 **Access and approval.** Tools fall into three classes: read (status, snapshot, screenshot, console, terminal output, action list), interact (preview open/click/type/scroll, capture, execute_action, stopping processes) and exec (`start_dev_server`, `configure_dev_server`, `run_terminal_command`).
+
 - A bridge request may send `x-verynize-access: readonly|ask|edit|auto|full`.
   - `readonly` allows read tools only.
   - `auto` and `full` run exec tools without asking.
@@ -130,3 +131,43 @@ Tests: `node --test tests/dev-server.cjs` (real child processes and a Node http 
 ### Codex desktop sign-in
 
 Codex chats use Verynize’s own **Sign in with ChatGPT** connection, separate from the terminal login. See [agent workflows](../docs/agent-workflows.md) for the public-client registration, local token paths, refresh/revocation behavior and SIWC feature limits. No client secret or partner API key is required for this local MIT-licensed app. Existing users must connect once from Settings › Accounts → Codex → Continue with ChatGPT.
+
+Image provider v2 IPC (same preload methods `imageProvider.get/set/generate`):
+
+```ts
+type KeyState = {hasKey: boolean, keyStorage: 'keychain' | 'session' | 'none'};
+type Custom = {provider: 'openai' | 'http', baseURL: string, model: string, size: string};
+// imageProviderGet()
+{defaultProvider: string, providers: Array<{id: string, label: string,
+ vendor: 'openai' | 'google' | 'custom', model: string, hasKey: boolean, available: boolean}>,
+ keys: {openai: KeyState, google: KeyState, custom: KeyState}, custom: Custom,
+ secureStorage: boolean | null, provider: string, baseURL: string, model: string, size: string,
+ hasKey: boolean, keyStorage: 'keychain' | 'session' | 'none', configured: boolean}
+// imageProviderSet(options) -> same public shape
+{defaultProvider?: string, vendor?: 'openai' | 'google' | 'custom', apiKey?: string,
+ clearKey?: boolean, custom?: Partial<Custom>, provider?: string, baseURL?: string,
+ model?: string, size?: string}
+// generateImage(options)
+{prompt: string, provider?: string, size?: string}
+// -> {src: string, mime: string, width: number, height: number, provider: string, model: string}
+```
+
+`secureStorage: null` means availability has not been probed because no key exists yet.
+Figma status uses the same lazy policy. On macOS with HOME redirected away from the OS user home,
+secure storage is unavailable: image keys stay in session memory and Figma refuses to persist secrets.
+
+Legacy public fields describe the custom endpoint; legacy writes select `custom` unless an explicit
+`defaultProvider` accompanies them. An omitted key vendor means `custom`. Empty keys leave the key
+unchanged; `clearKey` removes it. `configured` is true for a selected custom endpoint or a default
+vendor with a key. `available` means a key is present (or custom HTTP needs none), not vendor reachability.
+Fresh profiles default to `nano_banana_lite`. V1 records migrate to `custom`, preserving their model,
+size, URL and ciphertext; official OpenAI endpoint keys also populate the OpenAI slot. V2 disk records
+are `{version:2,defaultProvider,keys:{openai?,google?,custom?},custom}` with ciphertext only. Unavailable
+OS encryption (including Linux basic_text) uses session memory. Settings updates are serialized.
+
+Desktop IPC and MCP share one generator and concurrency guard. `generate_image` accepts
+`{document?,element?,prompt,provider?}`; a frame/rectangle target receives one cover image fill,
+otherwise a new image node is inserted. Missing targets fail before generation. The bridge prepares
+images through `imageUpload.prepare`; headless backends report that the desktop app is required.
+Test-only `VERYNIZE_TEST_IMAGE_GOOGLE_URL` / `VERYNIZE_TEST_IMAGE_OPENAI_URL` override vendor base URLs,
+accepting loopback HTTP only; they cannot be set through IPC.

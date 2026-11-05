@@ -1,3 +1,4 @@
+import { ImportGenerationSection } from "./import-generation";
 import { useCodexConnection } from "./codex-connection";
 // One component per settings section. Element ids and data attributes are test contracts (tests/settings.cjs).
 import { useEffect, useState, type ReactNode } from "react";
@@ -262,6 +263,8 @@ export function PreferencesPage({ preferences, setPreference }: PageProps) {
             </Row>
           </Card>
         </Section>
+
+        <ImportGenerationSection />
 
         <AdvancedSection preferences={preferences} setPreference={setPreference} />
       </Pages>

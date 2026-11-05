@@ -60,6 +60,7 @@ const windows = new Map(); // webContents.id -> {win, designFiles, trusted, pend
 let info = null, server = null, starting = null, lastFocused = null;
 const bridgeOptions = { askAgent: null, shellExec: true, confirmExec: null };
 function setBridgeOptions(options = {}) {
+  if (options && Object.hasOwn(options, "generateImage")) bridgeOptions.generateImage = typeof options.generateImage === "function" ? options.generateImage : null;
   if (options && Object.hasOwn(options, 'askAgent')) bridgeOptions.askAgent = typeof options.askAgent === 'function' ? options.askAgent : null;
   if (options && Object.hasOwn(options, 'shellExec')) bridgeOptions.shellExec = options.shellExec !== false;
   if (options && Object.hasOwn(options, 'confirmExec')) bridgeOptions.confirmExec = typeof options.confirmExec === 'function' ? options.confirmExec : null;
@@ -203,6 +204,16 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
       const target = await route(ref);
       if (!target.live) return { focused: false };
       return request(target.entry, 'focus', { pageId, nodeId }, 5000);
+    },
+    async generateImage(options) {
+      if (!bridgeOptions.generateImage)
+        throw new Error("Image generation needs the Verynize desktop app");
+      const entry = await editorReady();
+      if (!entry) throw new Error("Image generation needs an open Verynize desktop editor");
+      const image = await bridgeOptions.generateImage(options);
+      return entry.win.webContents.executeJavaScript(
+        `(async()=>{const blob=await (await fetch(${JSON.stringify(image.src)})).blob();return window.imageUpload.prepare(new File([blob], 'generated.png', {type:blob.type}));})()`,
+      );
     },
     async askAgent({ agent, task }) {
       if (typeof bridgeOptions.askAgent !== 'function') throw new Error('ask_agent is unavailable: this Verynize build has no reviewer agent configured');

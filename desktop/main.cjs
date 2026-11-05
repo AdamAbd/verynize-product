@@ -36,7 +36,7 @@ const {Project}=require('./projects.cjs');
 const agents=require('./agents.cjs');
 const {registerPreview}=require('./preview.cjs');
 const {registerDesignFiles}=require('./design-files.cjs');
-const {registerGeneration}=require('./generate.cjs');
+const {registerGeneration,imageGenerator}=require('./generate.cjs');
 const {registerFigma}=require('./figma.cjs');
 const {registerRendering}=require('./render.cjs');
 const {registerAgentAuth}=require('./agent-auth.cjs');
@@ -52,6 +52,9 @@ appProtocol.registerSchemes(protocol); // must run before app ready
 let editorOpened=false; // set once the first editor window exists (window-all-closed)
 let primaryRuntime=null,repositories=null,behaviorStore=null,agentStores=null;const liveRuntimes=new Set(); // agent runtime of the latest editor window (serves ask_agent)
 app.setName('Verynize');
+// Shared storage policy disables keychain access when HOME differs from the OS user home.
+// Image keys then remain in session memory; never enable a mock keychain for users.
+require('./secure-storage.cjs');
 // Linux CI (xvfb, no desktop keyring): use Chromium's basic password store instead of probing D-Bus/libsecret, so
 // safeStorage reports encryption unavailable at once (generate.cjs keeps keys in memory, figma-oauth.cjs refuses to persist).
 if(process.platform==='linux'&&process.env.CI&&!app.commandLine.hasSwitch('password-store'))app.commandLine.appendSwitch('password-store','basic');
@@ -80,7 +83,7 @@ app.whenReady().then(async () => {
     notice:async()=>{const result=await dialog.showMessageBox({type:'info',title:'Use your ChatGPT plan in Verynize',message:'Continue with ChatGPT',detail:'Verynize is an independent MIT-licensed app. OpenAI shares your account identity and tokens with this desktop app. Tokens stay in protected files on this Mac. Your prompts, attachments and tool results are sent to OpenAI to fulfill your requests; local Codex tools can access files according to your selected permissions. Eligible requests, including chat titles and helpers triggered by your activity, use your ChatGPT plan and its limits. This connection is free. Manage access and usage at chatgpt.com/settings/usage. Verynize does not upload these tokens to its servers.',buttons:['Continue with ChatGPT','Cancel'],defaultId:0,cancelId:1});return result.response===0;},
     welcome:()=>dialog.showMessageBox({type:'info',title:'Verynize',message:"You're using your ChatGPT plan",detail:'Eligible AI requests in Verynize use your ChatGPT plan. You can manage usage and disconnect Verynize in ChatGPT Settings → Usage.',buttons:['Got it']})
   });
-  mcpBridge.startBridge(app,{askAgent}).catch(error=>console.error('MCP bridge failed to start:',error)); // agent-bridge hook
+  mcpBridge.startBridge(app,{askAgent, generateImage: options => imageGenerator.generate(options)}).catch(error=>console.error('MCP bridge failed to start:',error)); // agent-bridge hook
   // Editor windows only: the storage probe's hidden window must not count as an open editor on macOS activate.
   const editorWindows = new Set();
   const createWindow = () => {

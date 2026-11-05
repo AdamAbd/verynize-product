@@ -11,7 +11,7 @@ DOM remains the canvas renderer and CSS layout/paint source of truth. Performanc
 - Shell/library: Wonder-reference dark chrome, floating tools, docked chat, local Inter typography and Lucide-based icons, responsive 1440/1000px layouts, persistent local files/folders, grid/list/search, rename/duplicate/archive/restore and publication-aware Public/Private filters. File switches detach previous native-save and cloud-room state; native opens have separate library records, and each shared room has one library record (a cloud file) that later joins reuse. Delayed native Save completion is canceled after a document switch; responses from superseded cloud operations are discarded.
 - Settings: local profile, light/dark/system theme, reduced motion, selection mode/nudge distances, task notification preferences, model/access defaults, personal instructions and local activity counts.
 - Templates/views: three original editable document templates; named page/zoom/position views stored in documents and shared rooms.
-- Canvas: text, rectangles, nested frames, images, four authored SVG icons, pages, layer search, multi-select, snapping, alignment, scaling, z-index, zoom/pan and keyboard nudges.
+- Canvas: text, rectangles, nested frames, images, four authored SVG icons, pages, layer search (⌘F / toolbar / palette finder for active-page names, text and exact IDs; arrow-key camera preview, Enter selection; hidden/locked layers included), multi-select, snapping, alignment, scaling, z-index, zoom/pan and keyboard nudges.
 - Layout/style: free/flex/grid/block/inline layout, typography, mixed text ranges, gradients, gradient masks, color variables and CSS color token import. Authored Aurora/Waves/Noise/Ribbon/Mesh/Swirl WebGL shader presets expose color/speed/intensity, with rendered GPU pixels and exported shader runtime tested. Shader mode (the Background Fill header toggle, `shaderFill`) paints any non-shader layer's fill with the same presets, under its content, on the canvas and in exports. Older animated CSS gradients (`animated`) still render and stay editable while set; Shader mode replaces them.
 - Precision/export: rotation, opacity, frame clipping, borders/shadows, color picker/hex input and selected-artwork PNG/JPG/SVG export. SVG uses foreignObject rather than pure vector paths.
 - Documents: undo/redo, local persistence, JSON round-trip, inline HTML import/export, responsive sandboxed preview, native PDF export. Native file open/save/watch shares the document format with MCP and rejects stale writes.
@@ -107,3 +107,10 @@ Version 0.3.0 of `dist/Verynize.app` was rebuilt from the current source, locall
 `npm run check`, `npm test`, and `npm run deploy:check`.
 
 Relevant suites: tests/wonder-shell.cjs, tests/settings.cjs, tests/views-templates.cjs, tests/agent-auth.cjs, tests/capture-fidelity.cjs, tests/capture-live-state.cjs, tests/canvas*.cjs, tests/desktop*.cjs, integrations/*.test.mjs, tests/cloud-rooms.mjs, tests/cloud-desktop.mjs. Reference UI screenshots and intentional visual differences are recorded in ../design-qa.md. Final validation passed: canvas (including four-corner resizing and raster pixels), desktop/auth/live capture, MCP/CLI integrations, UX/lifecycle/cloud async isolation, cloud rooms/two-client integration, packaged launch/save, code signature verification, and Vite+/cf deployment dry run. No production deployment was performed.
+
+Image providers (WP-2): desktop BYOK catalog includes verified Google Nano Banana Lite / 2.1 and
+OpenAI Image 2 / 2.5 Flare / 2.5 Sunburst, plus a custom OpenAI-compatible or HTTP endpoint.
+Google Lite is the fresh-profile default. V2 settings store separate encrypted vendor keys and migrate
+legacy endpoint settings. MCP `generate_image` shares the desktop generator and can replace a
+frame/rectangle fill or insert an image. Headless/cloud generation is unavailable. Settings UI and
+selection-based dialog insertion are tracked separately in WP-3.

@@ -1,3 +1,5 @@
+import { IMAGE_PROVIDERS } from "./image-provider.mjs";
+import { IMAGE_FILL_TYPES } from "./document-core.mjs";
 // One definition of the Verynize MCP tool set, shared by the stdio server
 // (integrations/mcp-server.mjs) and the desktop app's loopback HTTP bridge
 // (desktop/mcp-bridge.cjs), so both expose identical names, schemas and behavior.
@@ -49,7 +51,7 @@ import { shellToolTable, SHELL_INSTRUCTIONS } from './shell-tools.mjs'; // bridg
 import { presetIds as shaderPresetIds, COLOR_ROLES as SHADER_COLOR_ROLES, PARAM_KEYS as SHADER_PARAM_KEYS } from './shaders.mjs';
 
 export const SERVER_NAME = 'verynize';
-export const SERVER_VERSION = '0.7.0';
+export const SERVER_VERSION = '0.8.0';
 /**
  * Short fingerprint of the agent-facing tool layer: sha256 over the source of the tools, the
  * editing/codec modules and the design knowledge, first 12 hex chars. Changes whenever behavior an
@@ -791,6 +793,76 @@ export function toolTable(backend, context = {}) {
     inputSchema: { id: z.string().trim().min(1).max(64) }, annotations: { destructiveHint: true },
     run: async ({ id }) => preferencesFor(backend).remove(id),
   };
+  t.generate_image = {
+    description:
+      "Generate an image using the desktop image provider. Replace a frame or rectangle fill, or insert an image on the active page. Costs money on the user’s API key ; limited to five MCP attempts per hour. Requires a configured provider.",
+    inputSchema: {
+      document: documentArg,
+      element: z.string().optional(),
+      prompt: z.string().trim().min(1).max(4000),
+      provider: z.enum(IMAGE_PROVIDERS.map(p => p.id)).optional(),
+      x: z.number().finite().optional(),
+      y: z.number().finite().optional(),
+      parent: z.string().optional(),
+    },
+    annotations: { openWorldHint: true },
+    run: async ({ document: ref, element, prompt, provider, x, y, parent }) => {
+      if (typeof backend.generateImage !== "function")
+        throw new Error("Image generation needs the Verynize desktop app");
+      const state = await readPrepared(backend, ref);
+      const pageId = getPage(state.document).id;
+      const targetId = element
+        ? indexPage(getPage(state.document, pageId)).require(element).id
+        : null;
+      const pageBefore = getPage(state.document, pageId);
+      const targetBefore = targetId ? indexPage(pageBefore).require(targetId) : null;
+      if (targetBefore && targetBefore.type !== "image" && !IMAGE_FILL_TYPES.includes(targetBefore.type))
+        throw new Error("Target must be an image, frame or rectangle");
+      const parentNode = parent ? indexPage(pageBefore).require(parent) : null;
+      if (parentNode && parentNode.type !== "frame") throw new Error("Parent must be a frame");
+      const image = await backend.generateImage({ prompt, provider });
+      const out = await write(backend, ref, (document) => {
+        const page = getPage(document, pageId);
+        const target = targetId ? indexPage(page).require(targetId) : null;
+        let node;
+        if (target && IMAGE_FILL_TYPES.includes(target.type)) {
+          target.fills = [
+            {
+              type: "image",
+              src: image.src,
+              fit: "cover",
+              imageWidth: image.width,
+              imageHeight: image.height,
+            },
+          ];
+          node = target;
+        } else if (target?.type === "image") {
+          target.src = image.src;
+          node = target;
+        } else {
+          const scale = Math.min(1, 512 / Math.max(image.width, image.height));
+          node = {
+            id: randomUUID(),
+            type: "image",
+            name: "Generated image",
+            parentId: parentNode?.id ?? null,
+            x: x ?? (parentNode ? 0 : Math.max(0, ...page.nodes.filter(n => !n.parentId).map(n => (n.x || 0) + (n.w || 0))) + 40),
+            y: y ?? 0,
+            w: image.width * scale,
+            h: image.height * scale,
+            src: image.src,
+          };
+          page.nodes.push(node);
+        }
+        ensureShortIds(document);
+        return {
+          document,
+          result: { element: indexPage(page).shortId(node), pageId, filled: node === target },
+        };
+      });
+      return { ...out.result, revision: out.revision, live: out.live };
+    },
+  };
   t.ask_agent = {
     description: 'Get a second opinion or design review from another agent (Claude or Codex) running in the Verynize desktop app. Read-only: the other agent answers in text and cannot edit the canvas. Put everything it needs in task (the brief, what you built, element code or ids, the question). Use it sparingly, e.g. to critique a finished artboard before finish_artboard. Unavailable in headless mode.',
     inputSchema: { agent: z.enum(['claude', 'codex']).optional().describe('Which agent to ask; defaults to the other agent'), task: z.string().trim().min(1).max(20000).describe('The question or review request, with all needed context') },
@@ -906,7 +978,7 @@ export function createDesignServer(options, { instructions = INSTRUCTIONS } = {}
 // ---------------------------------------------------------------------------------------------
 // Store (on-disk) backend
 
-export function createStoreBackend(store, { screenshot, defaultName, fetchImage, searchImages, preferences, askAgent } = {}) {
+export function createStoreBackend(store, { screenshot, defaultName, fetchImage, searchImages, preferences, askAgent, generateImage } = {}) {
   const resolveName = async ref => {
     if (ref) return ref;
     if (defaultName) return defaultName;
@@ -932,5 +1004,6 @@ export function createStoreBackend(store, { screenshot, defaultName, fetchImage,
     screenshot: screenshot ? async (ref, pageId, nodeId, scale, state) => screenshot(state.document, pageId, nodeId, scale) : undefined,
     ...(fetchImage ? { fetchImage } : {}), ...(searchImages ? { searchImages } : {}),
     ...(preferences ? { preferences } : {}), ...(askAgent ? { askAgent } : {}),
+    ...(generateImage ? { generateImage } : {}),
   };
 }

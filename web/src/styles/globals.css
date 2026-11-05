@@ -239,6 +239,7 @@ html[data-platform="web"] {
  */
 @theme inline {
   /* <chrome-tokens> */
+  --color-find-active: #4e81ee;
   /* Measured from design/wonder 03/19/22/29 (dark values in comments; mixes follow the light theme too). */
   --color-tab-edge: color-mix(in srgb, var(--foreground) 3%, var(--input)); /* #313131 active tab ring */
   --color-toolbar-edge: color-mix(in srgb, var(--foreground) 11%, var(--background)); /* #333333 toolbar + pill outline */
