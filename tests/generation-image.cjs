@@ -3,7 +3,7 @@
 // through a local OpenAI-compatible fixture server and a generic HTTP fixture that return real PNG
 // bytes, insertion as an image layer, relaunch persistence and redacted provider errors.
 const { _electron } = require("@playwright/test");
-const { waitForUiReady } = require('./helpers/ui-ready.cjs');
+const { waitForUiReady } = require("./helpers/ui-ready.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -25,6 +25,25 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
     });
     req.on("end", () => {
       requests.push({ url: req.url, auth: req.headers.authorization || "", body });
+      if (req.url.startsWith("/models/")) {
+        assert.equal(req.headers["x-goog-api-key"], KEY);
+        assert.equal(req.headers.authorization, undefined);
+        res.setHeader("content-type", "application/json");
+        res.end(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    { inlineData: { mimeType: "image/png", data: photo.toString("base64") } },
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+        return;
+      }
       if (req.url === "/v1/images/generations") {
         res.setHeader("content-type", "application/json");
         if (req.headers.authorization !== "Bearer " + KEY) {
@@ -53,7 +72,8 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "generation-image-"));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  env.VERYNIZE_SKIP_ONBOARDING = '1';
+  env.VERYNIZE_TEST_IMAGE_GOOGLE_URL = base;
+  env.VERYNIZE_SKIP_ONBOARDING = "1";
   let logs = "";
   const launch = async () => {
     const app = await _electron.launch({
@@ -158,7 +178,7 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
     const secure = settings.secureStorage;
     if (secure) {
       assert.equal(settings.keyStorage, "keychain");
-      assert.ok(JSON.parse(file).key.length > 20, "ciphertext stored");
+      assert.ok(JSON.parse(file).keys.custom.length > 20, "ciphertext stored");
     } else assert.equal(settings.keyStorage, "session");
     const rendererState = await page.evaluate(
       () =>
@@ -183,6 +203,15 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
     await page.locator("#generate-close").click();
     await app.close();
 
+    // A legacy disk record migrates on relaunch, preserving its custom configuration.
+    const stored = JSON.parse(await fs.readFile(path.join(dir, "image-provider.json"), "utf8"));
+    await fs.writeFile(
+      path.join(dir, "image-provider.json"),
+      JSON.stringify({
+        ...stored.custom,
+        ...(stored.keys.custom ? { key: stored.keys.custom } : {}),
+      }),
+    );
     // Relaunch: the saved provider and (keychain) key are reused without re-entering them.
     ({ app, page } = await launch());
     if (secure) {
@@ -199,6 +228,37 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
       assert.equal(requests.at(-1).auth, "Bearer " + KEY);
       await page.locator("#generate-close").click();
     }
+    const migrated = await page.evaluate(() => window.desktop.imageProvider.get());
+    assert.equal(migrated.defaultProvider, "custom");
+    assert.equal(
+      JSON.parse(await fs.readFile(path.join(dir, "image-provider.json"), "utf8")).version,
+      2,
+    );
+    await page.evaluate(
+      (k) =>
+        window.desktop.imageProvider.set({
+          vendor: "google",
+          apiKey: k,
+          defaultProvider: "nano_banana_lite",
+        }),
+      KEY,
+    );
+    const generated = await page.evaluate(() =>
+      window.desktop.imageProvider.generate({ prompt: "Google default" }),
+    );
+    assert.equal(generated.model, "gemini-3.1-flash-lite-image");
+    assert.match(requests.at(-1).url, /gemini-3.1-flash-lite-image:generateContent/);
+    const override = await page.evaluate(() =>
+      window.desktop.imageProvider.generate({ prompt: "Override", provider: "nano_banana" }),
+    );
+    assert.equal(override.model, "gemini-nano-banana-2.1");
+    assert.equal(
+      (await page.evaluate(() => window.desktop.imageProvider.get())).defaultProvider,
+      "nano_banana_lite",
+    );
+    await page.evaluate(() =>
+      window.desktop.imageProvider.set({ vendor: "google", clearKey: true }),
+    );
     // Generic HTTP provider returning raw PNG bytes; removing the key stops sending it.
     await page.evaluate(
       (url) =>
