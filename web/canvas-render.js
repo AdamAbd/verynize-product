@@ -13,7 +13,7 @@
   const CORNERS = ['nw', 'ne', 'sw', 'se'];
   // Fields that move or rename a node without changing how its children are styled.
   const PLACEMENT = new Set(['x', 'y', 'name']);
-  // Attributes other scripts maintain on layer elements themselves (shader status, the clip-proof selection ring).
+  // Attributes maintained outside a redraw: shader status, the clip-proof selection ring, and culling (below).
   const KEPT_ATTRIBUTES = new Set(['data-shader-status', 'data-shader-kind', 'data-clip-ring', 'data-culled']);
   // Culling: grid cell size (world px), boards revealed per camera step during a gesture, settle delay (ms).
   const CELL = 2048, REVEAL = 6, SETTLE_MS = 150;
@@ -258,8 +258,7 @@
       // For measuring right after render(): null inside a culled board this render did not redraw (nothing changed there).
       elementOf: id => { const el = els.get(id), top = boardOf.get(id); return el?.isConnected && !(boards.has(top) && !shown.has(top) && !redrawn.has(top)) ? el : null; },
       node: id => byId.get(id),
-      invalidate: id => { if (id === undefined) for (const key of memos.keys()) dirty.add(key); else dirty.add(id); },
-      stats: () => ({elements: els.size, shaders: stops.size, boards: boards.size, culled: boards.size - shown.size}),
+      stats: () => ({elements: els.size, shaders: stops.size, boards: boards.size, culled: boards.size - shown.size}), // diagnostics
     };
   }
   window.VerynizeCanvasRender = {install};
