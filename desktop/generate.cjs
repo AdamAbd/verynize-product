@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { app, safeStorage } = require("electron");
+const { isEncryptionAvailable } = require("./secure-storage.cjs");
 const { pathToFileURL } = require("node:url");
 const exec = require("node:util").promisify(execFile);
 const agents = require("./agents.cjs");
@@ -95,9 +96,7 @@ function createImageGenerator() {
   let queue = Promise.resolve();
   const load = () =>
     import(pathToFileURL(path.join(__dirname, "../integrations/image-provider.mjs")).href);
-  const secure = () =>
-    safeStorage.isEncryptionAvailable() &&
-    safeStorage.getSelectedStorageBackend?.() !== "basic_text";
+  const secure = () => isEncryptionAvailable(safeStorage);
   async function save(settings) {
     await fs.mkdir(path.dirname(settingsFile()), { recursive: true });
     const temp = settingsFile() + "." + process.pid + ".tmp";
@@ -152,7 +151,8 @@ function createImageGenerator() {
       })),
       keys,
       custom: saved.custom,
-      secureStorage: secure(),
+      secureStorage:
+        Object.keys(saved.keys).length || Object.keys(sessionKeys).length ? secure() : null,
       ...saved.custom,
       ...keys.custom,
       configured:

@@ -17,7 +17,7 @@ export type ImageSettings = Custom &
     providers?: Provider[];
     keys?: Record<Vendor, KeyState>;
     custom?: Custom;
-    secureStorage: boolean;
+    secureStorage: boolean | null;
     configured: boolean;
   };
 export type ImageSettingsPatch = Partial<Custom> & {

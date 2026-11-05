@@ -21,6 +21,9 @@ appProtocol.registerSchemes(protocol); // must run before app ready
 let editorOpened=false; // set once the first editor window exists (window-all-closed)
 let primaryRuntime=null,repositories=null,behaviorStore=null,agentStores=null;const liveRuntimes=new Set(); // agent runtime of the latest editor window (serves ask_agent)
 app.setName('Verynize');
+// Shared storage policy disables keychain access when HOME differs from the OS user home.
+// Image keys then remain in session memory; never enable a mock keychain for users.
+require('./secure-storage.cjs');
 // Linux CI (xvfb, no desktop keyring): use Chromium's basic password store instead of probing D-Bus/libsecret, so
 // safeStorage reports encryption unavailable at once (generate.cjs keeps keys in memory, figma-oauth.cjs refuses to persist).
 if(process.platform==='linux'&&process.env.CI&&!app.commandLine.hasSwitch('password-store'))app.commandLine.appendSwitch('password-store','basic');

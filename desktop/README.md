@@ -141,7 +141,7 @@ type Custom = {provider: 'openai' | 'http', baseURL: string, model: string, size
 {defaultProvider: string, providers: Array<{id: string, label: string,
  vendor: 'openai' | 'google' | 'custom', model: string, hasKey: boolean, available: boolean}>,
  keys: {openai: KeyState, google: KeyState, custom: KeyState}, custom: Custom,
- secureStorage: boolean, provider: string, baseURL: string, model: string, size: string,
+ secureStorage: boolean | null, provider: string, baseURL: string, model: string, size: string,
  hasKey: boolean, keyStorage: 'keychain' | 'session' | 'none', configured: boolean}
 // imageProviderSet(options) -> same public shape
 {defaultProvider?: string, vendor?: 'openai' | 'google' | 'custom', apiKey?: string,
@@ -151,6 +151,10 @@ type Custom = {provider: 'openai' | 'http', baseURL: string, model: string, size
 {prompt: string, provider?: string, size?: string}
 // -> {src: string, mime: string, width: number, height: number, provider: string, model: string}
 ```
+
+`secureStorage: null` means availability has not been probed because no key exists yet.
+Figma status uses the same lazy policy. On macOS with HOME redirected away from the OS user home,
+secure storage is unavailable: image keys stay in session memory and Figma refuses to persist secrets.
 
 Legacy public fields describe the custom endpoint; legacy writes select `custom` unless an explicit
 `defaultProvider` accompanies them. An omitted key vendor means `custom`. Empty keys leave the key

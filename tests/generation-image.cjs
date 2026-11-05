@@ -122,6 +122,10 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
     );
   let { app, page } = await launch();
   try {
+    assert.equal(
+      (await page.evaluate(() => window.desktop.imageProvider.get())).secureStorage,
+      null,
+    );
     await fs.writeFile(path.join(dir, "image-provider.json"), "{broken");
     const recovered = await page.evaluate(() => window.desktop.imageProvider.get());
     assert.equal(recovered.defaultProvider, "nano_banana_lite");
@@ -224,7 +228,7 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
         ...(stored.keys.custom ? { key: stored.keys.custom } : {}),
       }),
     );
-    // Relaunch: the saved provider and (keychain) key are reused without re-entering them.
+    // Relaunch: the saved provider and (safeStorage) key are reused without re-entering them.
     ({ app, page } = await launch());
     if (secure) {
       await openDialog(page);
@@ -356,7 +360,7 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
     assert.match(service.packaged, /Add an API key for Google/);
     assert.doesNotMatch(logs, new RegExp(KEY + "|" + WRONG), "API keys never logged");
     console.log(
-      `PASS image model providers: OpenAI-compatible + generic HTTP fixtures, real PNG inserted as layers, key in ${secure ? "keychain (safeStorage) across relaunch" : "session memory"}, never returned/logged/plain-stored, redacted errors`,
+      `PASS image model providers: OpenAI-compatible + generic HTTP fixtures, real PNG inserted as layers, key in ${secure ? (process.platform === "darwin" ? "mock keychain (safeStorage) across relaunch" : "safeStorage across relaunch") : "session memory"}, never returned/logged/plain-stored, redacted errors`,
     );
   } finally {
     await app.close().catch(() => {});
