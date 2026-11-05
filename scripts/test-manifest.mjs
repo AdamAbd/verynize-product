@@ -23,8 +23,10 @@ const root = new URL("../", import.meta.url);
 /** Changes here run every Electron-lane test: the shell every window boots through. */
 export const CORE_ELECTRON = [
   "web/app.js",
+  "web/canvas-render.js",
   "web/document-core.js",
   "web/document-safety.js",
+  "web/node-index.js",
   "web/index.html",
   "web/platform.js",
   "web/account-store.js",
@@ -260,6 +262,7 @@ const unit = (file, group, covers = [], extra = {}) => ({
 const CLIP = { locks: ["clipboard"] };
 
 const canvas = [
+  electron("tests/canvas-tiles.cjs", "canvas", [...AREA.canvas, "web/canvas-tiles.js"]),
   electron("tests/canvas.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-advanced.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-roundtrip.cjs", "canvas", [...AREA.canvas, ...AREA.document]),
@@ -273,6 +276,7 @@ const canvas = [
   electron("tests/canvas-resize.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-transform.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-interactions.cjs", "canvas", AREA.canvas, CLIP),
+  electron("tests/canvas-incremental-render.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-clipboard.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-image-drop.cjs", "canvas", [...AREA.canvas, "web/image-drop.js"], CLIP),
   electron("tests/canvas-context-menu.cjs", "canvas", AREA.canvas, CLIP),
@@ -302,6 +306,8 @@ const canvas = [
   electron("tests/canvas-help-shortcuts.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-wonder-marks.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-selection-marks.cjs", "canvas", AREA.canvas),
+  electron("tests/canvas-frame-labels.cjs", "canvas", AREA.canvas),
+  unit("tests/node-index.cjs", "canvas", ["web/node-index.js"]),
   electron("tests/canvas-text-caret.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-page.cjs", "canvas", AREA.canvas),
   electron("tests/inspector-parity.cjs", "canvas", AREA.inspector, CLIP),
@@ -464,6 +470,12 @@ const ux = [
   electron("tests/shell-router.cjs", "ux", [...AREA.shell, ...AREA.cloudRenderer]),
   electron("tests/settings-route.cjs", "ux", [...AREA.settings, ...AREA.shell]),
   electron("tests/shell-routes.cjs", "ux", AREA.shell),
+  electron("tests/canvas-css-invalidation.cjs", "canvas", [
+    "web/src/**",
+    "web/*.css",
+    "scripts/check-css-has.cjs",
+    "eval/canvas-perf/renderer.cjs",
+  ]),
   electron("tests/ui-ready.cjs", "ux", AREA.shell),
   electron("tests/panel-resize.cjs", "ux", AREA.shell),
   electron("tests/web-platform.cjs", "ux", [

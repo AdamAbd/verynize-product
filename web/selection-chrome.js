@@ -122,8 +122,8 @@
     const screenFrame = n => frameOf(elementOf(n.id), n, find, cam.zoom, viewport());
     const place = (el, cx, cy, w, h, angle) => placeFrame(el, {cx, cy, w, h, angle});
     function topSelected() {
-      const list = ed.nodes().filter(n => sel().has(n.id));
-      return list.filter(n => !list.some(o => o.id !== n.id && ed.descendants(o.id).has(n.id)));
+      const list = ed.nodes();
+      return window.VerynizeNodeIndex.of(list).topmost(list.filter(n => sel().has(n.id)));
     }
 
     // A hidden layer renders as display:none: lay it out for one synchronous measurement (never painted).
