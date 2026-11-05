@@ -6,13 +6,14 @@ All numbers are from one Apple M1 (8 GiB, DPR 2), Electron 42 / Chromium 148, un
 
 ## Documents
 
-| File                                               | Content                                                                                                                       | Author / validator                    |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| [x-threads-2026-11-04.md](x-threads-2026-11-04.md) | The four X threads with replies (Jesse Vermeulen, Amichai Mantinband ×2, JuliaScript), captured from the logged-in T3 browser | lead                                  |
-| [verynize-baseline.md](verynize-baseline.md)       | Current Verynize canvas in the real app, 100–2,000 nodes, CDP attribution                                                     | sol (gpt-6.1-sol) → reviewed by opus  |
-| [renderer-options.md](renderer-options.md)         | Seven renderer strategies on identical scenes, 1K–100K nodes, fidelity diffs                                                  | opus (Opus 5.5) → reviewed by astra   |
-| [figcraft.md](figcraft.md)                         | FigCraft (storytold/figcraft, ArtCraft) architecture and published numbers                                                    | astra (gpt-6-astra) → reviewed by sol |
-| [reviews/](reviews/)                               | Three adversarial cross-reviews                                                                                               | astra, sol, opus                      |
+| File                                                   | Content                                                                                                                       | Author / validator                    |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| [x-threads-2026-11-04.md](x-threads-2026-11-04.md)     | The four X threads with replies (Jesse Vermeulen, Amichai Mantinband ×2, JuliaScript), captured from the logged-in T3 browser | lead                                  |
+| [verynize-baseline.md](verynize-baseline.md)           | Current Verynize canvas in the real app, 100–2,000 nodes, CDP attribution                                                     | sol (gpt-6.1-sol) → reviewed by opus  |
+| [renderer-options.md](renderer-options.md)             | Seven renderer strategies on identical scenes, 1K–100K nodes, fidelity diffs                                                  | opus (Opus 5.5) → reviewed by astra   |
+| [figcraft.md](figcraft.md)                             | FigCraft (storytold/figcraft, ArtCraft) architecture and published numbers                                                    | astra (gpt-6-astra) → reviewed by sol |
+| [fix-2-labels-selection.md](fix-2-labels-selection.md) | Fixes 2–3 implemented: keyed frame labels from geometry, indexed selection; before/after                                      | opus (Opus 5.5)                       |
+| [reviews/](reviews/)                                   | Three adversarial cross-reviews                                                                                               | astra, sol, opus                      |
 
 Validation done by the lead: every benchmark was rerun **sequentially on an idle machine** (the first runs overlapped). Baseline cells moved 1–7%, prototype headline cells 5–10%; no ranking changed. Raw files: `eval/canvas-perf/results/*-sequential*.json`. The lead also ran the `:has()` experiment below and built and benchmarked FigCraft locally.
 
