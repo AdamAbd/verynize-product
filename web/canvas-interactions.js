@@ -793,6 +793,24 @@
       layerPreview = next; window.dispatchEvent(new CustomEvent('bd:layer-preview', {detail: next}));
       return true;
     }
+    // Free layers follow the pointer without a render: x/y change live (snapping, drop targets and agents read them)
+    // and each layer's own element is offset by a CSS translate (parent space, so it composes with rotation and the
+    // translate of a centred constraint). A render on the way (nesting into a frame, a collaborator's edit) draws the
+    // layer at its current x/y; the offset is then measured again from there. `s.lx/ly` = x/y at the last follow.
+    function follow(list) {
+      const offset = (base, d) => (base ? `calc(${base} + ${d}px)` : d + 'px');
+      for (const s of list) {
+        if (!s.el?.isConnected || s.el.style.translate !== s.shown) {
+          s.el = elementOf(s.n.id); if (!s.el) continue;
+          s.base = s.el.style.translate === 'none' ? '' : s.el.style.translate; s.rx = s.lx ?? s.x; s.ry = s.ly ?? s.y;
+        }
+        const [bx = '', by = bx ? '0px' : ''] = s.base ? s.base.split(' ') : [];
+        s.el.style.translate = offset(bx, s.n.x - s.rx) + ' ' + offset(by, s.n.y - s.ry);
+        s.shown = s.el.style.translate; s.lx = s.n.x; s.ly = s.n.y;
+      }
+    }
+    // Back to the layer's own translate before the render that commits the drag.
+    function unfollow(list) { for (const s of list) if (s.el?.isConnected && s.el.style.translate === s.shown) s.el.style.translate = s.base; }
     function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
       const g = gesture(), start = {x: e.clientX, y: e.clientY};
@@ -808,7 +826,7 @@
         const picked = moving.map(find).filter(Boolean);
         deferred = !ev.altKey && picked.length > 0 && picked.every(inStack);
         if (deferred) window.addEventListener('keydown', onKey, true); else g.commit();
-        if (ev.altKey) moving = duplicateNodes(moving, 0);
+        if (ev.altKey) { moving = duplicateNodes(moving, 0); ed.render(); } // the copies are the layers that follow
         const nodes = moving.map(find).filter(Boolean);
         free = nodes.filter(n => !inStack(n)).map(n => ({n, x: n.x, y: n.y})); // anchored layers re-derive their insets from x/y (beforeRender)
         stacked = nodes.filter(inStack);
@@ -836,26 +854,29 @@
         for (const s of free) {
           s.n.x = r2(s.x + dx); s.n.y = r2(s.y + dy);
         }
-        if (free.length) ed.render();
+        follow(free);
         // Free layers move into a free frame (or back onto the page) as soon as the pointer crosses into it, so the
         // frame clips them and its edges and centre lines become snap targets for the rest of the drag.
         if (drop.parent && free.length && !stacked.length && drop.index === undefined) {
+          unfollow(free);
           relocate(free.map(s => s.n), drop.parent.id === '' ? null : drop.parent.id);
           ed.render();
           home = free[0].n.parentId || null;
-          for (const s of free) { s.x = s.n.x - dx; s.y = s.n.y - dy; }
+          for (const s of free) { s.x = s.n.x - dx; s.y = s.n.y - dy; s.el = null; s.lx = s.n.x; s.ly = s.n.y; }
           targets = guideTargets(free.map(s => s.n.id));
           drop = {};
         }
         const previewed = setLayerPreview(drop.parent ? {ids: [...moving], parentId: drop.parent.id || null, ...(drop.index === undefined ? {} : {index: drop.index})} : null);
         placeGhosts(stacked, grab, dx, dy);
-        if (stacked.length || previewed) ed.updateMeasurement(); // the name label follows the dragged copy
+        if (free.length || stacked.length || previewed) ed.updateMeasurement(); // the name label (and a multi-selection's box) follows the dragged layers
+        if (free.some(s => !s.n.parentId && s.n.type === 'frame')) drawFrameLabels(); // artboard labels ride with their frames
         drawGuides(guides); drawDrop(drop);
       }, () => {
         window.removeEventListener('keydown', onKey, true);
         if (cancelled) return;
         workspace.classList.remove('moving');
         if (!free) { onClick?.(); return; }
+        unfollow(free);
         drawGuides([]); drawDrop(null); setLayerPreview(null);
         if (deferred) g.commit();
         // Stack children leaving their stack land where the pointer put them (relocate measures the ghosts).

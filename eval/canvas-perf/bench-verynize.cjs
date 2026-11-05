@@ -16,6 +16,37 @@ const arg = (name, fallback) => {
 const sizes = arg("--sizes", "100,500,1000,2000,5000,13000,50000").split(",").map(Number);
 const runs = Number(arg("--runs", "5"));
 const ceilingMs = Number(arg("--ceiling-ms", "60000"));
+// --skip selectAll (comma list of render,edit,pan,zoom,drag,selectAll): leave operations out, e.g. one that hits the
+// ceiling at a size whose other operations should still be measured.
+const skip = new Set(arg("--skip", "").split(",").filter(Boolean));
+// --storage k=v[,k=v]: localStorage entries set before the document loads, e.g. verynize.canvas-render=full (full
+// rebuild on every render) or verynize.canvas-cull=off (web/canvas-render.js).
+const storage = arg("--storage", "")
+  .split(",")
+  .filter(Boolean)
+  .map((e) => e.split("="));
+// --strip-has: remove the five `:has(:focus-visible)` rules through CSSOM first (fix 1 simulated, as experiment-has.cjs).
+const stripHas = process.argv.includes("--strip-has");
+// --clip-boards: top-level frames clip their content (as frames drawn in the app do), so they can be culled.
+const clipBoards = process.argv.includes("--clip-boards");
+function stripFocusHas() {
+  let removed = 0;
+  const walk = (list) => {
+    for (let i = list.cssRules.length - 1; i >= 0; i--) {
+      const rule = list.cssRules[i];
+      if (rule.selectorText && /:has\(:focus-visible\)/.test(rule.selectorText)) {
+        list.deleteRule(i);
+        removed++;
+      } else if (rule.cssRules) walk(rule);
+    }
+  };
+  for (const sheet of document.styleSheets) {
+    try {
+      walk(sheet);
+    } catch {}
+  }
+  return removed;
+}
 const date = new Date().toISOString().slice(0, 10);
 const output = path.resolve(arg("--output", path.join(__dirname, `results/verynize-${date}.json`)));
 const quantile = (a, p) => {
@@ -31,7 +62,7 @@ const machine = () => ({
   freeBytes: os.freemem(),
   loadAverage: os.loadavg(),
 });
-function synthetic(n) {
+function synthetic(n, { clip = false } = {}) {
   let seed = 241104;
   const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32;
   const nodes = Array.from({ length: n }, (_, i) => {
@@ -57,6 +88,7 @@ function synthetic(n) {
       strokeWidth: 1,
       strokeColor: "#454552",
       layout: "free",
+      ...(clip && k === 0 ? { clipContent: true } : {}),
       text: type === "text" ? `Example label ${i}` : "",
       fontSize: 16,
       ...(type === "image"
@@ -161,6 +193,10 @@ async function main() {
     sizes,
     runs,
     ceilingMs,
+    skipped: [...skip],
+    storage,
+    stripHas,
+    clipBoards,
     machine: machine(),
     samples: [],
     summary: [],
@@ -176,7 +212,7 @@ async function main() {
   let stop = false;
   for (const n of sizes) {
     if (stop) break;
-    const doc = synthetic(n);
+    const doc = synthetic(n, { clip: clipBoards });
     validateDocument(doc);
     const rows = [];
     for (let run = 0; run < runs; run++) {
@@ -197,6 +233,11 @@ async function main() {
         await waitForUiReady(page);
         await page.evaluate(() => window.fileLibrary?.showEditor());
         await page.evaluate(install);
+        if (storage.length)
+          await page.evaluate((entries) => {
+            for (const [k, v] of entries) localStorage.setItem(k, v);
+          }, storage);
+        if (stripHas) row.strippedRules = await page.evaluate(stripFocusHas);
         const cdp = await page.context().newCDPSession(page);
         row.versions = await app.evaluate(() => process.versions);
         row.load = await bounded(
@@ -210,15 +251,17 @@ async function main() {
           }),
           "camera",
         );
-        row.render = await bounded(
-          page.evaluate(() => __perf.action("render")),
-          "render",
-        );
-        row.edit = await bounded(
-          page.evaluate(() => __perf.action("edit")),
-          "edit",
-        );
-        for (const kind of ["pan", "zoom", "drag"]) {
+        if (!skip.has("render"))
+          row.render = await bounded(
+            page.evaluate(() => __perf.action("render")),
+            "render",
+          );
+        if (!skip.has("edit"))
+          row.edit = await bounded(
+            page.evaluate(() => __perf.action("edit")),
+            "edit",
+          );
+        for (const kind of ["pan", "zoom", "drag"].filter((k) => !skip.has(k))) {
           await bounded(
             page.evaluate(async () => {
               window.design.setCamera(40, 60, 1);
@@ -233,10 +276,11 @@ async function main() {
           );
           if (!row[kind].changed) throw Error(`${kind} did not change state`);
         }
-        row.selectAll = await bounded(
-          page.evaluate(() => __perf.action("selectAll")),
-          "selectAll",
-        );
+        if (!skip.has("selectAll"))
+          row.selectAll = await bounded(
+            page.evaluate(() => __perf.action("selectAll")),
+            "selectAll",
+          );
         row.memory = await cdp.send("Runtime.getHeapUsage");
         row.dom = await cdp.send("Memory.getDOMCounters");
         row.connected = await page.evaluate(() => ({
@@ -252,7 +296,7 @@ async function main() {
             }),
             "clear selection",
           );
-          for (const kind of ["edit", "pan", "zoom", "selectAll"])
+          for (const kind of ["edit", "pan", "zoom", "selectAll"].filter((k) => !skip.has(k)))
             report.profiles.push({ n, ...(await profile(page, cdp, kind, n)) });
         }
         rows.push(row);
@@ -261,8 +305,8 @@ async function main() {
             n,
             run,
             loadMs: row.load.paintFenceMs,
-            editMs: row.edit.paintFenceMs,
-            selectAllMs: row.selectAll.paintFenceMs,
+            editMs: row.edit?.paintFenceMs,
+            selectAllMs: row.selectAll?.paintFenceMs,
           }),
         );
       } catch (error) {
@@ -282,12 +326,12 @@ async function main() {
     }
     if (rows.length) {
       const summary = { n, completedRuns: rows.length };
-      for (const kind of ["load", "render", "edit", "selectAll"])
+      for (const kind of ["load", "render", "edit", "selectAll"].filter((k) => !skip.has(k)))
         summary[kind] = {
           syncMs: stats(rows.map((r) => r[kind].syncMs)),
           paintFenceMs: stats(rows.map((r) => r[kind].paintFenceMs)),
         };
-      for (const kind of ["pan", "zoom", "drag"])
+      for (const kind of ["pan", "zoom", "drag"].filter((k) => !skip.has(k)))
         summary[kind] = {
           frameP50Ms: quantile(
             rows.map((r) => quantile(r[kind].intervals, 0.5)),

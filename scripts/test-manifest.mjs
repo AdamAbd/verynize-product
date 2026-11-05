@@ -23,6 +23,7 @@ const root = new URL("../", import.meta.url);
 /** Changes here run every Electron-lane test: the shell every window boots through. */
 export const CORE_ELECTRON = [
   "web/app.js",
+  "web/canvas-render.js",
   "web/document-core.js",
   "web/document-safety.js",
   "web/node-index.js",
@@ -271,6 +272,7 @@ const canvas = [
   electron("tests/canvas-resize.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-transform.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-interactions.cjs", "canvas", AREA.canvas, CLIP),
+  electron("tests/canvas-incremental-render.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-clipboard.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-image-drop.cjs", "canvas", [...AREA.canvas, "web/image-drop.js"], CLIP),
   electron("tests/canvas-context-menu.cjs", "canvas", AREA.canvas, CLIP),
