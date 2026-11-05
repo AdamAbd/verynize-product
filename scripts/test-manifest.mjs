@@ -355,7 +355,14 @@ const desktop = [
   electron("tests/code-workspace.cjs", "desktop", [...AREA.code, ...AREA.preview], {
     locks: ["port:5173"],
   }),
-  electron("tests/code-terminal.cjs", "desktop", AREA.code),
+  electron("tests/code-terminal.cjs", "desktop", [...AREA.code, "desktop/window-cleanup.cjs"]),
+  electron("tests/electron-orphan.cjs", "desktop", ["desktop/main.cjs", "scripts/run-tests.mjs"]),
+  electron(
+    "tests/runner-orphan.mjs",
+    "runner-orphan",
+    ["desktop/main.cjs", "scripts/run-tests.mjs"],
+    { manual: "intentional runner timeout; run with --group runner-orphan" },
+  ),
   electron("tests/changes-panel.cjs", "desktop", [...AREA.code, ...AREA.chat]),
   electron("tests/desktop-ipc.cjs", "desktop", AREA.desktopAll),
   electron("tests/app-protocol.cjs", "desktop", [
