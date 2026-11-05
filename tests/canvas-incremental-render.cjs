@@ -254,8 +254,35 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.ok(await page.locator('#canvas .layer', {hasText: 'Edited live'}).count() > 0, 'the live edit is drawn');
     await matchesFullRender('MCP update');
 
+    // ---- 5. Cheaper commits: subscribers, image preflight, idle persistence ----
+    const notified = await page.evaluate(() => {
+      let bare = 0, seen = null;
+      const offBare = window.design.subscribe(() => { bare++; });
+      const offDoc = window.design.subscribe(doc => { seen = doc; doc.name = 'mutated by a subscriber'; });
+      window.design.updateNodes(['r1'], {color: '#445566'});
+      offBare(); offDoc();
+      return {bare, gotCopy: !!seen?.pages, name: window.design.getDocument().name};
+    });
+    assert.deepEqual([notified.bare, notified.gotCopy], [1, true], 'subscribers are notified; one with a parameter receives the document');
+    assert.notEqual(notified.name, 'mutated by a subscriber', 'a subscriber copy stays private');
+    // Edits that add image bytes are still checked against the storage limits (and roll back); others are not.
+    const refused = await page.evaluate(() => {
+      const big = 'data:image/svg+xml;base64,' + btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><!--${'x'.repeat(16_000_000)}--><rect width="40" height="40"/></svg>`); // over the 20 MiB asset limit
+      try { window.design.updateNodes(['I'], {src: big}); return {code: null}; } catch (e) { return {code: e.code || e.message, rolledBack: window.design.getDocument().pages[0].nodes.find(n => n.id === 'I').src.length < 1e6}; }
+    });
+    assert.deepEqual(refused, {code: 'storage_limit', rolledBack: true}, 'an edit that adds an over-limit image is refused and rolled back');
+    await page.keyboard.press('Escape').catch(() => {});
+    // The document is written once the editor is idle, without another render, and an edit right before a reload
+    // is flushed when the page hides.
+    await page.evaluate(() => window.design.updateNodes(['r1'], {name: 'saved when idle'}));
+    await page.waitForFunction(() => (localStorage.getItem('verynize-v2') || '').includes('saved when idle'), null, {timeout: 2000});
+    const reloaded = page.waitForEvent('load');
+    await page.evaluate(() => { window.design.updateNodes(['r1'], {name: 'flushed on reload'}); location.reload(); });
+    await reloaded; await waitForUiReady(page);
+    assert.equal((await node('r1'))?.name, 'flushed on reload', 'the last edit survives a reload');
+
     assert.deepEqual(errors, []);
-    console.log('PASS canvas incremental render: live drag without renders (one render + one undo step at release, rotated layers, nesting, Alt copy); keyed render (only edited elements written, identity kept, equal to a full rebuild for edits, selection, layout cascades, shaders, variables, order, re-parent, delete, type changes, undo/redo, foreign writes, text editing, cloud operations, MCP live edits)');
+    console.log('PASS canvas incremental render: live drag without renders (one render + one undo step at release, rotated layers, nesting, Alt copy); keyed render (only edited elements written, identity kept, equal to a full rebuild for edits, selection, layout cascades, shaders, variables, order, re-parent, delete, type changes, undo/redo, foreign writes, text editing, cloud operations, MCP live edits); cheaper commits (private subscriber copies, image limits on edits, idle save flushed on reload)');
   } finally {
     await client?.close().catch(() => {});
     await app.close().catch(() => {});
