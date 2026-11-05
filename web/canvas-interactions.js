@@ -280,6 +280,7 @@
     let lastZoom = null, releaseTimer = 0;
     const releaseLayer = () => { clearTimeout(releaseTimer); canvas.classList.remove('camera-moving'); };
     function applyCamera() {
+      window.canvasTiles?.camera(cam);
       canvas.style.transform = `translate(${cam.x}px, ${cam.y}px) scale(${cam.zoom})`;
       if (lastZoom !== cam.zoom) releaseLayer();
       else { canvas.classList.add('camera-moving'); clearTimeout(releaseTimer); releaseTimer = setTimeout(releaseLayer, 160); }

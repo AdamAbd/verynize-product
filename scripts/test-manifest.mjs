@@ -259,6 +259,7 @@ const unit = (file, group, covers = [], extra = {}) => ({
 const CLIP = { locks: ["clipboard"] };
 
 const canvas = [
+  electron("tests/canvas-tiles.cjs", "canvas", [...AREA.canvas, "web/canvas-tiles.js"]),
   electron("tests/canvas.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-advanced.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-roundtrip.cjs", "canvas", [...AREA.canvas, ...AREA.document]),
