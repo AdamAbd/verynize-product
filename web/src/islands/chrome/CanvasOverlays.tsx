@@ -10,6 +10,7 @@ import {
   Pin,
   SquareArrowUpRight,
   Scan,
+  Search,
   Type,
 } from "lucide-react";
 import { activePage, legacySet, legacy, useBodyClass, useDesign } from "@/lib/bridge";
@@ -49,6 +50,8 @@ import {
   Shortcut,
 } from "./menu";
 import { Tip } from "./tip";
+import { FindLayersPanel } from "./find-layers/FindLayersPanel";
+import { setPanelOpen } from "./shortcuts";
 import { PreviewToolbar } from "./PreviewToolbar";
 
 type Icon = ComponentType<{ className?: string }>;
@@ -86,6 +89,7 @@ export function CanvasOverlays() {
   return (
     <>
       <Toolbar />
+      <FindLayersPanel />
       <PreviewToolbar />
       {leftCollapsed && <PagePill />}
       <HelpMenu />
@@ -136,6 +140,19 @@ function Toolbar() {
             </Tip>
           </ToolSlot>
         ))}
+        <ToolSlot separator>
+          <Tip label="Find layers" shortcut="⌘F">
+            <button
+              type="button"
+              id="find-layers-button"
+              aria-label="Find layers"
+              className={toolButton}
+              onClick={() => setPanelOpen("find", true)}
+            >
+              <Search />
+            </button>
+          </Tip>
+        </ToolSlot>
       </div>
       <span aria-hidden="true" className="w-px shrink-0 bg-toolbar-divider" />
       <div className="flex items-center pr-1.5 pl-2">

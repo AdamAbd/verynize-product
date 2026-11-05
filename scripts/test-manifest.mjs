@@ -303,6 +303,7 @@ const canvas = [
     "integrations/codec-*.mjs",
   ]),
   electron("tests/canvas-layers-dnd.cjs", "canvas", AREA.canvas, CLIP),
+  electron("tests/canvas-find-layers.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-help-shortcuts.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-wonder-marks.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-selection-marks.cjs", "canvas", AREA.canvas),

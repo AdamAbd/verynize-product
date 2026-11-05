@@ -161,3 +161,9 @@ body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) #file-home {
 :is(#bd-app-menu, #bd-zoom-menu) [role^="menuitem"][id] img {
   display: none;
 }
+
+/* Finder preview is independent of the canvas selection and survives camera changes. */
+#canvas [data-find-focus] {
+  outline: 2px solid var(--color-find-active);
+  outline-offset: 3px;
+}
