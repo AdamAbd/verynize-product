@@ -3,7 +3,16 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { createRequire } from "node:module";
-import { generateImage, normalizeSettings, inspectImage, redact } from "./image-provider.mjs";
+import {
+  generateImage,
+  normalizeSettings,
+  inspectImage,
+  redact,
+  IMAGE_PROVIDERS,
+  DEFAULT_IMAGE_PROVIDER,
+  migrateSettings,
+  providerSettings,
+} from "./image-provider.mjs";
 
 const { png } = createRequire(import.meta.url)("../tests/fixtures/png.cjs");
 const KEY = "sk-fixture-0123456789abcdef";
@@ -22,8 +31,27 @@ before(async () => {
         url: req.url,
         method: req.method,
         auth: req.headers.authorization || "",
+        googleKey: req.headers["x-goog-api-key"],
         body: body ? JSON.parse(body) : null,
       });
+      if (req.url.startsWith("/models/")) {
+        res.setHeader("content-type", "application/json");
+        res.end(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    { text: "Done" },
+                    { inlineData: { mimeType: "image/png", data: photo.toString("base64") } },
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+        return;
+      }
       if (req.url === "/v1/images/generations") {
         if (req.headers.authorization !== "Bearer " + KEY) {
           res.statusCode = 401;
@@ -220,4 +248,50 @@ test("image inspection and redaction helpers", () => {
     redact(`bad key ${KEY} and Bearer abcdefghijklmnop`, KEY),
     "bad key [redacted] and Bearer [redacted]",
   );
+});
+
+test("catalog, fresh default, migration and vendor routing", () => {
+  assert.equal(new Set(IMAGE_PROVIDERS.map((p) => p.id)).size, IMAGE_PROVIDERS.length);
+  for (const p of IMAGE_PROVIDERS) {
+    assert.ok(p.label);
+    assert.ok(["google", "openai", "custom"].includes(p.vendor));
+    if (p.vendor !== "custom") assert.ok(p.model);
+  }
+  const fresh = migrateSettings();
+  assert.equal(fresh.defaultProvider, DEFAULT_IMAGE_PROVIDER);
+  assert.equal(providerSettings(fresh).model, "gemini-3.1-flash-lite-image");
+  const old = {
+    provider: "openai",
+    baseURL: "https://api.openai.com/v1",
+    model: "old-model",
+    size: "512x512",
+    key: "ciphertext",
+  };
+  const migrated = migrateSettings(old);
+  assert.equal(migrated.defaultProvider, "custom");
+  assert.equal(migrated.keys.custom, "ciphertext");
+  assert.equal(migrated.keys.openai, "ciphertext");
+  assert.equal(migrated.custom.model, "old-model");
+  assert.deepEqual(migrateSettings(migrated), migrated);
+  assert.throws(() => providerSettings(fresh, "missing"), /Unknown/);
+  assert.equal(redact("bad AIza123456789abcdefghijk"), "bad [redacted]");
+});
+test("Gemini uses header key, generateContent and inline image parts", async () => {
+  const saved = migrateSettings();
+  const settings = providerSettings(saved, undefined, { google: base });
+  const result = await generateImage({
+    settings,
+    apiKey: "AIza-fixture123456789",
+    prompt: "A mountain",
+  });
+  const req = requests.at(-1);
+  assert.equal(req.url, "/models/gemini-3.1-flash-lite-image:generateContent");
+  assert.equal(req.auth, "");
+  assert.equal(req.googleKey, "AIza-fixture123456789");
+  assert.deepEqual(req.body, {
+    contents: [{ parts: [{ text: "A mountain" }] }],
+    generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+  });
+  assert.equal(result.width, 64);
+  assert.equal(result.height, 40);
 });

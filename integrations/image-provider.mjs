@@ -3,10 +3,88 @@
 //            {model, prompt, n: 1, size}; the response's data[0].b64_json (or data[0].url) is the image.
 //   http   — a generic endpoint: POST {baseURL} with {prompt, model, width, height}; it answers with
 //            raw image bytes (image/png|jpeg|webp) or JSON carrying b64_json / image / url.
-// The API key is only ever placed in the Authorization header. Error text from the provider is
+// API keys travel only in Authorization (OpenAI/HTTP) or x-goog-api-key (Gemini) headers. Error text from the provider is
 // stripped of the key before it is surfaced, and nothing here logs. The decoded output is checked to
 // be a real PNG/JPEG/WebP (magic bytes + dimensions) before it becomes an image layer.
-export const PROVIDERS = ["openai", "http"];
+// Verified 2026-11-05 via vendor documentation:
+// https://ai.google.dev/gemini-api/docs/image-generation
+// https://developers.openai.com/api/reference/resources/images/methods/generate
+export const IMAGE_PROVIDERS = Object.freeze(
+  [
+    {
+      id: "nano_banana_lite",
+      label: "Nano Banana Lite",
+      vendor: "google",
+      model: "gemini-3.1-flash-lite-image",
+      adapter: "gemini",
+    },
+    {
+      id: "nano_banana",
+      label: "Nano Banana 2.1",
+      vendor: "google",
+      model: "gemini-nano-banana-2.1",
+      adapter: "gemini",
+    },
+    {
+      id: "openai_gpt_image_2",
+      label: "OpenAI Image 2",
+      vendor: "openai",
+      model: "gpt-image-2",
+      adapter: "openai",
+    },
+    {
+      id: "openai_gpt_image_flare",
+      label: "OpenAI Image 2.5 Flare",
+      vendor: "openai",
+      model: "gpt-image-2.5-flare",
+      adapter: "openai",
+    },
+    {
+      id: "openai_gpt_image_sunburst",
+      label: "OpenAI Image 2.5 Sunburst",
+      vendor: "openai",
+      model: "gpt-image-2.5-sunburst",
+      adapter: "openai",
+    },
+    { id: "custom", label: "Custom endpoint", vendor: "custom", model: "", adapter: "custom" },
+  ].map(Object.freeze),
+);
+export const DEFAULT_IMAGE_PROVIDER = "nano_banana_lite";
+export const PROVIDERS = ["openai", "http", "gemini"];
+export function migrateSettings(input = {}) {
+  const legacy = input.version !== 2 && !!(input.baseURL || input.provider || input.key);
+  const custom = normalizeSettings(input.version === 2 ? input.custom : input);
+  if (!["openai", "http"].includes(custom.provider))
+    throw new Error("Custom adapter must be openai or http");
+  const keys = {};
+  for (const vendor of ["openai", "google", "custom"]) {
+    if (typeof input.keys?.[vendor] === "string") keys[vendor] = input.keys[vendor];
+  }
+  if (legacy && input.key) {
+    keys.custom = input.key;
+    if (custom.provider === "openai" && custom.baseURL === "https://api.openai.com/v1")
+      keys.openai = input.key;
+  }
+  const defaultProvider =
+    input.version === 2 ? input.defaultProvider : legacy ? "custom" : DEFAULT_IMAGE_PROVIDER;
+  if (!IMAGE_PROVIDERS.some((p) => p.id === defaultProvider))
+    throw new Error("Unknown image provider");
+  return { version: 2, defaultProvider, keys, custom };
+}
+export function providerSettings(saved, id = saved.defaultProvider, baseURLs = {}) {
+  const entry = IMAGE_PROVIDERS.find((p) => p.id === id);
+  if (!entry) throw new Error("Unknown image provider");
+  if (entry.vendor === "custom") return { ...saved.custom };
+  return normalizeSettings({
+    provider: entry.adapter,
+    model: entry.model,
+    baseURL:
+      baseURLs[entry.vendor] ||
+      (entry.vendor === "google"
+        ? "https://generativelanguage.googleapis.com/v1"
+        : "https://api.openai.com/v1"),
+  });
+}
 export const SIZES = ["1024x1024", "1536x1024", "1024x1536", "512x512", "256x256"];
 const MAX_IMAGE = 15 * 1024 * 1024;
 const TIMEOUT_MS = 120000;
@@ -94,6 +172,7 @@ export function redact(text, secret) {
   if (secret && secret.length >= 4) out = out.split(secret).join("[redacted]");
   return out
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/g, "Bearer [redacted]")
+    .replace(/\bAIza[A-Za-z0-9_-]{8,}/g, "[redacted]")
     .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "[redacted]");
 }
 
@@ -121,12 +200,9 @@ function providerError(status, body, secret) {
   } catch {
     detail = body;
   }
-  detail = redact(
-    String(typeof detail === "string" ? detail : JSON.stringify(detail))
-      .replace(/\s+/g, " ")
-      .slice(0, 300),
-    secret,
-  );
+  detail = redact(String(typeof detail === "string" ? detail : JSON.stringify(detail)), secret)
+    .replace(/\s+/g, " ")
+    .slice(0, 300);
   const hint =
     status === 401 || status === 403
       ? "check the API key"
@@ -166,19 +242,36 @@ export async function generateImage({
   const s = normalizeSettings(settings);
   if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 4000)
     throw new Error("Describe the image in under 4000 characters");
-  if (s.provider === "openai" && !apiKey)
-    throw new Error("Add an API key for the OpenAI-compatible provider");
+  if (["openai", "gemini"].includes(s.provider) && !apiKey)
+    throw new Error(
+      s.provider === "gemini"
+        ? "Add an API key for Google"
+        : "Add an API key for the OpenAI-compatible provider",
+    );
   const [width, height] = s.size.split("x").map(Number);
-  const endpoint = s.provider === "openai" ? s.baseURL + "/images/generations" : s.baseURL;
+  const endpoint =
+    s.provider === "gemini"
+      ? s.baseURL + "/models/" + encodeURIComponent(s.model) + ":generateContent"
+      : s.provider === "openai"
+        ? s.baseURL + "/images/generations"
+        : s.baseURL;
   const body =
-    s.provider === "openai"
-      ? { model: s.model, prompt: prompt.trim(), n: 1, size: s.size }
-      : { prompt: prompt.trim(), model: s.model, width, height };
+    s.provider === "gemini"
+      ? {
+          contents: [{ parts: [{ text: prompt.trim() }] }],
+          generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+        }
+      : s.provider === "openai"
+        ? { model: s.model, prompt: prompt.trim(), n: 1, size: s.size }
+        : { prompt: prompt.trim(), model: s.model, width, height };
   const headers = {
     "content-type": "application/json",
     accept: "application/json, image/png, image/jpeg, image/webp",
   };
-  if (apiKey) headers.authorization = "Bearer " + apiKey;
+  if (apiKey) {
+    if (s.provider === "gemini") headers["x-goog-api-key"] = apiKey;
+    else headers.authorization = "Bearer " + apiKey;
+  }
   const timeout = AbortSignal.timeout(TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let response;
@@ -213,7 +306,11 @@ export async function generateImage({
     } catch {
       throw new Error("Image provider returned an unreadable response");
     }
-    const payload = pickPayload(json);
+    const inline = json?.candidates?.[0]?.content?.parts
+      ?.map((p) => p.inlineData || p.inline_data)
+      .find((p) => p?.data);
+    const payload =
+      s.provider === "gemini" ? (inline ? { b64: inline.data } : null) : pickPayload(json);
     if (!payload) throw new Error("Image provider response did not contain an image");
     if (payload.b64) bytes = Buffer.from(payload.b64, "base64");
     else {
