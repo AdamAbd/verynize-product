@@ -512,12 +512,28 @@ function argv(entry) {
   return parts;
 }
 
-function runProcess(command, args, { env, timeoutMs, cwd = ROOT }) {
+export function runProcess(command, args, { env, timeoutMs, cwd = ROOT }) {
   return new Promise((resolve) => {
     const started = Date.now();
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "verynize-test-"));
+    const sweep = () => {
+      if (process.platform !== "win32") {
+        const found = spawnSync("pgrep", ["-f", tmpdir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")], {
+          encoding: "utf8",
+        });
+        for (const pid of (found.stdout || "").trim().split(/\s+/).map(Number)) {
+          if (pid > 1 && pid !== process.pid) {
+            try {
+              process.kill(pid, "SIGKILL");
+            } catch {}
+          }
+        }
+      }
+      fs.rmSync(tmpdir, { recursive: true, force: true });
+    };
     const child = spawn(command, args, {
       cwd,
-      env,
+      env: { ...env, TMPDIR: tmpdir, TMP: tmpdir, TEMP: tmpdir, VERYNIZE_EXIT_WITH_PARENT: "1" },
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -530,16 +546,20 @@ function runProcess(command, args, { env, timeoutMs, cwd = ROOT }) {
         if (process.platform === "win32") child.kill(signal);
         else process.kill(-child.pid, signal);
       } catch {}
+      if (signal === "SIGKILL") sweep();
     };
+    let escalation;
     const timer = setTimeout(() => {
       timedOut = true;
       kill("SIGTERM");
-      setTimeout(() => kill("SIGKILL"), 5000).unref();
+      escalation = setTimeout(() => kill("SIGKILL"), 5000);
+      escalation.unref();
     }, timeoutMs);
     running.add(kill);
     child.on("error", (error) => chunks.push(Buffer.from(`\n${error.message}\n`)));
     child.on("close", (code, signal) => {
       clearTimeout(timer);
+      clearTimeout(escalation);
       running.delete(kill);
       // Leftover children in the group (Electron helpers, servers) must not outlive the test.
       kill("SIGKILL");
@@ -604,6 +624,32 @@ async function prepare(selected, opts, env, results) {
   }
 }
 
+// Serialize Electron across runner instances on small development machines.
+async function runElectron(command, args, options) {
+  const lock = process.env.TEST_ELECTRON_LOCK || path.join(os.tmpdir(), "verynize-electron-lock");
+  while (true) {
+    try {
+      fs.mkdirSync(lock);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  const release = () => {
+    try {
+      fs.rmdirSync(lock);
+    } catch {}
+  };
+  process.once("exit", release);
+  try {
+    return await runProcess(command, args, options);
+  } finally {
+    release();
+    process.removeListener("exit", release);
+  }
+}
+
 async function runAll(selected, opts, env) {
   const cpus = os.availableParallelism?.() ?? os.cpus().length;
   const limits = {
@@ -639,7 +685,7 @@ async function runAll(selected, opts, env) {
         active.set(entry.id, entry);
         entry.locks.forEach((lock) => locks.add(lock));
         const [command, ...args] = argv(entry);
-        runProcess(command, args, {
+        (entry.lane === "electron" ? runElectron : runProcess)(command, args, {
           env: { ...env, ...entry.env },
           timeoutMs: entry.timeoutMs,
         }).then((run) => {
@@ -939,10 +985,11 @@ async function main() {
   return buildError || bad.length ? 1 : 0;
 }
 
-main().then(
-  (code) => process.exit(code),
-  (error) => {
-    console.error(error);
-    process.exit(1);
-  },
-);
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+  main().then(
+    (code) => process.exit(code),
+    (error) => {
+      console.error(error);
+      process.exit(1);
+    },
+  );

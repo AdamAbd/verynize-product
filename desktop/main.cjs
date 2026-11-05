@@ -1,6 +1,37 @@
+// Keep asynchronous broken-pipe errors from becoming Electron error dialogs.
+let exitWithParent = () => {};
+for (const stream of [process.stdout, process.stderr]) {
+  stream?.on?.("error", (error) => {
+    if (error?.code === "EPIPE") exitWithParent();
+    else if (error?.code !== "ERR_STREAM_DESTROYED") process.emitWarning(error);
+  });
+}
 const {onWindowClosed}=require('./window-cleanup.cjs');
 const { app, BrowserWindow, session, dialog, Notification, shell, screen, protocol, net } = require('electron');
 const path = require('node:path');
+if (
+  process.env.VERYNIZE_EXIT_WITH_PARENT === "1" ||
+  app.commandLine.hasSwitch("remote-debugging-port")
+) {
+  let exiting = false;
+  exitWithParent = () => {
+    if (exiting) return;
+    exiting = true;
+    // Drain native PTY callbacks before app.exit bypasses the normal quit hooks.
+    require("./terminal.cjs")
+      .drainTerminals()
+      .finally(() => app.exit(0));
+  };
+  const parent = process.ppid;
+  setInterval(() => {
+    try {
+      process.kill(parent, 0);
+    } catch (error) {
+      if (error.code === "ESRCH") exitWithParent();
+    }
+  }, 1000).unref();
+}
+
 const {Project}=require('./projects.cjs');
 const agents=require('./agents.cjs');
 const {registerPreview}=require('./preview.cjs');
