@@ -86,11 +86,14 @@ const LOGO = svg(
     // The Export section starts closed for every newly selected layer.
     // Like Wonder (ref 50), the "Exported …" toast sits over the bottom of the inspector, where the Export section
     // ends up; wait for the previous export's toast to leave before clicking under it.
+    const toastsGone = async () => {
+      // Sonner pauses its timers while the pointer is over a toast.
+      await page.mouse.move(400, 300);
+      await page.waitForSelector("[data-sonner-toast]", { state: "detached", timeout: 15000 });
+    };
     const openExport = async () => {
       if (!(await page.locator("#artwork-scale").isVisible())) {
-        // Sonner pauses its timers while the pointer is over a toast.
-        await page.mouse.move(400, 300);
-        await page.waitForSelector("[data-sonner-toast]", { state: "detached", timeout: 15000 });
+        await toastsGone();
         await page.locator("#export-section .insp-add").click();
       }
     };
@@ -846,6 +849,8 @@ const LOGO = svg(
       near(corner.px[1], [255, 0, 0, 255], `${preset}: artwork fills the output height`);
     }
     // The suffix lives in the Export options popover (the name field is full width, as in Wonder A7).
+    // The last export's toast sits over this button.
+    await toastsGone();
     await page.getByRole("button", { name: "Export options" }).click();
     const suffix = page.getByRole("textbox", { name: "Export file suffix" });
     await suffix.fill("-hero");
