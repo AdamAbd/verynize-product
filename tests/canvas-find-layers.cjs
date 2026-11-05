@@ -173,6 +173,9 @@ const path = require("node:path");
     await input.dispatchEvent("keydown", { key: "Escape", isComposing: true });
     await expect(panel).toBeVisible();
     await p.keyboard.press("Escape");
+    await p.locator("#find-layers-button").click();
+    await p.locator("#zoom-menu-button").focus();
+    await expect(panel).toHaveCount(0);
     console.log("Find layers: all assertions passed");
   } finally {
     await app.close();

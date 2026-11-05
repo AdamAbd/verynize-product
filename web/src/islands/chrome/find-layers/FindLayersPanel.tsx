@@ -130,6 +130,9 @@ function Finder() {
       aria-label="Find layers"
       className="absolute top-2 right-2 z-30 w-70 overflow-hidden rounded-xl border border-toolbar-edge bg-background text-xs text-foreground shadow-toolbar"
       onWheel={(e) => e.stopPropagation()}
+      onBlur={(e) => {
+        if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) close();
+      }}
       onKeyDown={(e) => {
         e.stopPropagation();
         if (e.nativeEvent.isComposing) return;
