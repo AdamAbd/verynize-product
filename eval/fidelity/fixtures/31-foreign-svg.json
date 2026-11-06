@@ -1,0 +1,1 @@
+{"title": "Foreign SVG becomes one image", "covers": ["svg", "data-name"], "expect": [{"node": "Foreign icon", "prop": "type", "eq": "image"}, {"node": "Foreign icon", "prop": "w", "eq": 24}, {"node": "Foreign icon", "prop": "src", "matches": "^data:image/svg\\+xml;base64,"}, {"node": "Foreign icon", "prop": "svgMarkup", "matches": "M0 0 L24 24"}]}

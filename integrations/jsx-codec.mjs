@@ -467,9 +467,9 @@ export function serializeNode(node, index, { depth = Infinity, tokens = {}, inde
 export class JsxSyntaxError extends Error {}
 
 /** Parse JSX source into an array of element ASTs. Leading import lines are ignored. */
-export function parseJsx(source, { maxLength = 2_000_000, maxElements = 5000 } = {}) {
+export function parseJsx(source, { maxLength = 5_000_000, maxElements = 5000 } = {}) {
   if (typeof source !== 'string') throw new JsxSyntaxError('Code must be a string');
-  if (source.length > maxLength) throw new JsxSyntaxError(`Code exceeds ${maxLength} characters`);
+  if (source.length > maxLength) throw new JsxSyntaxError(`JSX parse stage exceeds ${maxLength} characters`);
   let src = source.replace(/^﻿/, '');
   const imports = [];
   src = src.replace(/^\s*import\s[^;\n]*?from\s*['"][^'"]+['"]\s*;?[ \t]*$/gm, line => { imports.push(line.trim()); return ''; });

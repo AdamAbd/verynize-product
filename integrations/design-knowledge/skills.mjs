@@ -126,6 +126,7 @@ Supporting skills: **code-to-design-library** when the job is a whole component 
 ## 2. Bring in tokens first
 - Read get_design_tokens. Reuse a token that matches by value and role. Create the missing ones with create_design_tokens using the repo's names and exact values (\`rem\` converted at the repo's root size).
 - Where the repo layers semantic names over a raw palette, keep both: create the raw token, then the semantic one, then point it at the raw token with update_design_tokens \`aliasOf\`. Never flatten an alias to its value.
+- Import HTML/JSX with optional \`name\` and \`placement\`: \`auto\` places roots beside existing artboards; \`preserve\` keeps source coordinates. Inline SVG becomes a sanitized image; arbitrary border, radius, outline and embedded URL backgrounds are supported. For local HTTP images, use HTML import with explicit \`allowRemote: true\`. Read returned warnings for missing assets.
 - Static HTML or exported pages can come in through import_html, which turns :root custom properties into tokens. A running app the user asks to capture can come in through capture_preview_to_canvas.
 
 ## 3. Translate, do not re-imagine
