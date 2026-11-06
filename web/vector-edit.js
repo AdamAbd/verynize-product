@@ -570,7 +570,7 @@
           penDown(e);
           return;
         }
-        if (edit && editDown(e)) {
+        if (edit && (tool() === "move" || tool() === "scale") && editDown(e)) {
           e.preventDefault();
           e.stopImmediatePropagation();
         }
