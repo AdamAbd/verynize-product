@@ -2,14 +2,7 @@
 // web-start/src/telemetry.ts). The scrubber itself is web/telemetry-scrub.js, shared with the main process and the
 // servers; see its header for what an event may contain.
 import "../../../telemetry-scrub.js";
-import type {
-  Breadcrumb,
-  DataCollection,
-  ErrorEvent,
-  Event,
-  StreamedSpanJSON,
-  TransactionEvent,
-} from "@sentry/core";
+import type { Breadcrumb, DataCollection, ErrorEvent, Event, StreamedSpanJSON } from "@sentry/core";
 
 export type TelemetryScrub = {
   scrubString(value: unknown): string;
@@ -38,10 +31,8 @@ export function privacyOptions(allowed: () => boolean) {
     maxBreadcrumbs: 50,
     beforeBreadcrumb: (breadcrumb: Breadcrumb) => scrub.scrubBreadcrumb(breadcrumb),
     beforeSend: (event: ErrorEvent) => (allowed() ? scrub.scrubEvent(event) : null),
-    beforeSendTransaction: (event: TransactionEvent) =>
-      allowed() ? scrub.scrubEvent(event) : null,
-    // Streamed spans (the SDK's default trace lifecycle) skip beforeSendTransaction; they cannot be dropped here,
-    // so consent is enforced by not starting the SDK, and by closing it on opt-out.
+    // Traces are streamed spans (the SDK's default lifecycle; beforeSendTransaction is ignored). A span cannot be
+    // dropped here, so consent is enforced by not starting the SDK, and by closing it on opt-out.
     beforeSendSpan: (span: StreamedSpanJSON) => scrub.scrubStreamedSpan(span),
   };
 }

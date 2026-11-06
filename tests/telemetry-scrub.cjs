@@ -54,14 +54,14 @@ test("URLs keep scheme, host and path only", () => {
     scrub.scrubUrl(
       "https://alice:pw@verynize.example.dev/api/rooms/r0om1d2345678901234/socket?token=abc#room=xyz",
     ),
-    "https://verynize.example.dev/api/rooms/<id>/socket",
+    "https://verynize.example.dev/api/rooms/:id/socket",
   );
   assert.equal(
     scrub.scrubUrl("app://verynize/editor?file=/Users/alice/a.json#x"),
     "app://verynize/editor",
   );
   const once = scrub.scrubUrl("app://verynize/editor/f1le2id3456789abcdef");
-  assert.equal(once, "app://verynize/editor/<id>");
+  assert.equal(once, "app://verynize/editor/:id");
   assert.equal(scrub.scrubUrl(once), once, "scrubbing a scrubbed URL changes nothing");
   assert.equal(
     scrub.scrubUrl("file:///Users/alice/site/index.html"),
@@ -200,6 +200,12 @@ test("scrubEvent rebuilds the event from allowed fields only", () => {
     assert.ok(!text.includes(banned), banned);
   for (const key of ["user", "server_name", "extra", "modules"])
     assert.equal(out[key], undefined, key);
+  assert.deepEqual(
+    out.sdk.settings,
+    { infer_ip: "never" },
+    "Sentry must not fill in the IP at ingest",
+  );
+  assert.deepEqual(scrub.scrubEvent({ message: "x" }).sdk, { settings: { infer_ip: "never" } });
   // Identifiers and the build's release stay verbatim: Sentry rejects or cannot match scrubbed ones.
   assert.equal(out.event_id, event.event_id);
   assert.equal(out.release, event.release);

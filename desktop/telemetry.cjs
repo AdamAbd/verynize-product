@@ -150,8 +150,7 @@ function initSdk(app, settings) {
       defaults.filter((integration) => !DROPPED_INTEGRATIONS.has(integration.name)),
     beforeBreadcrumb: (breadcrumb) => scrub.scrubBreadcrumb(breadcrumb),
     beforeSend: (event) => (keep(event) ? scrub.scrubEvent(event) : null),
-    beforeSendTransaction: (event) => (keep(event) ? scrub.scrubEvent(event) : null),
-    // Streamed spans skip beforeSendTransaction and cannot be dropped: scrubbed here, gated by the transport.
+    // Traces are streamed spans (beforeSendTransaction is ignored) and cannot be dropped here: gated by the transport.
     beforeSendSpan: (span) => scrub.scrubStreamedSpan(span),
     transportOptions: { shouldSend: () => sendable(), shouldStore: () => sendable() },
   });

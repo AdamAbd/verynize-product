@@ -41,7 +41,6 @@ export async function startServerTelemetry(target, env = process.env) {
     initialScope: { tags: { surface: "server", runtime_target: target } },
     beforeBreadcrumb: (breadcrumb) => scrub.scrubBreadcrumb(breadcrumb),
     beforeSend: (event) => scrub.scrubEvent(event),
-    beforeSendTransaction: (event) => scrub.scrubEvent(event),
     beforeSendSpan: (span) => scrub.scrubStreamedSpan(span),
   });
   return true;

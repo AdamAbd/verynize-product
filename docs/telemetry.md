@@ -30,7 +30,7 @@ Org `adamabdrrahman` (US region). The server project tells deployments apart by 
 ## Privacy design
 
 There is one scrubber, `web/telemetry-scrub.js`. Like `web/document-core.js` it is a classic script, used by main,
-renderer, web client and servers. It runs in `beforeSend`, `beforeSendTransaction`, `beforeSendSpan` and
+renderer, web client and servers. It runs in `beforeSend`, `beforeSendSpan` and
 `beforeBreadcrumb` everywhere. On the desktop it runs twice: once in the renderer, and again in main, because main
 re-captures renderer events.
 
@@ -47,7 +47,7 @@ re-captures renderer events.
   - emails become `<email>`
   - `/Users/<name>`, `/home/<name>` and `C:\Users\<name>` become `<user>`
   - URL credentials, query strings and fragments are dropped (room invitations, capability links)
-  - id-like path segments become `<id>`
+  - id-like path segments become `:id`
   - bearer/basic tokens, JWTs, `sk-`/`ghp_`-style keys, `token=`/`password=`-style assignments and long random
     strings are replaced
   - main also replaces this machine's home directory (`~`) and account name (`<user>`) as literals

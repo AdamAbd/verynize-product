@@ -12,7 +12,7 @@
 // so document contents, prompts and agent output cannot leave through them.
 //
 //   scrubString(text)         -> text with secrets and personal data replaced
-//   scrubUrl(url)             -> scheme://host/path only (no credentials, query or fragment; id-like segments → <id>)
+//   scrubUrl(url)             -> scheme://host/path only (no credentials, query or fragment; id-like segments → :id)
 //   scrubEvent(event)         -> a new event built from allowed fields (errors and transactions)
 //   scrubBreadcrumb(crumb)    -> a new breadcrumb, or null for categories that are not allowed
 //   scrubStreamedSpan(span)   -> a span (beforeSendSpan, streamed traces) with allowed attributes only
@@ -70,7 +70,7 @@
   function scrubPathname(pathname) {
     return pathname
       .split("/")
-      .map((segment) => (ID_SEGMENT.test(segment) ? "<id>" : decode(segment)))
+      .map((segment) => (ID_SEGMENT.test(segment) ? ":id" : decode(segment)))
       .join("/");
   }
 
@@ -463,8 +463,10 @@
     if (tags) out.tags = tags;
     const contexts = scrubContexts(event.contexts);
     if (contexts) out.contexts = contexts;
+    // infer_ip "never": without it Sentry fills user.ip_address (and geo) from the connection at ingest.
+    out.sdk = { settings: { infer_ip: "never" } };
     if (isObject(event.sdk)) {
-      out.sdk = pick(event.sdk, ["name", "version"]);
+      out.sdk = { ...pick(event.sdk, ["name", "version"]), settings: { infer_ip: "never" } };
       if (Array.isArray(event.sdk.integrations))
         out.sdk.integrations = event.sdk.integrations
           .filter((name) => typeof name === "string")
