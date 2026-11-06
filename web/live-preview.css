@@ -15,7 +15,7 @@
 .preview-edit{position:absolute;top:48px;right:12px;width:280px;background:var(--background,#202020);border:1px solid var(--border,#444);border-radius:8px;padding:12px;z-index:3;box-shadow:0 8px 24px #0005}
 .preview-edit label{display:block;margin-bottom:8px}.preview-edit input{display:block;width:100%;margin-top:4px;background:var(--input,#292929);color:inherit}.preview-edit [role=status]{font-size:11px;white-space:normal}
 .canvas-preview button:focus-visible,.canvas-preview input:focus-visible{outline:2px solid var(--ring,#ad46e6);outline-offset:2px}
-#workspace:has(.canvas-preview.selected) #selection-name{display:none}
+#canvas-overlay[data-preview-selected] #selection-name{display:none}
 .canvas-preview .preview-breadcrumb{color:var(--shell-muted,#999)}
 /* Capture region picker (web/live-preview.js pickRegion) over the live iframe or a page screenshot. */
 .capture-picker{position:absolute;inset:0;z-index:4;cursor:crosshair;outline:none;background:rgb(0 0 0 / .08)}

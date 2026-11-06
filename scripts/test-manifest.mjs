@@ -528,6 +528,7 @@ const ux = [
   electron("tests/canvas-css-invalidation.cjs", "canvas", [
     "web/src/**",
     "web/*.css",
+    "web/selection-chrome.js",
     "scripts/check-css-has.cjs",
     "eval/canvas-perf/renderer.cjs",
   ]),

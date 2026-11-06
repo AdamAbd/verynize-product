@@ -685,7 +685,7 @@
       fillEditor(el, String(n.text || ''), charStylesOf(n));
       try { el.contentEditable = 'plaintext-only'; } catch {}
       if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
-      el.spellcheck = false; el.dataset.textEditing = '';
+      el.spellcheck = false; el.dataset.textEditing = ''; clippedSelection.dataset.textEditing = ''; // selection-chrome.js hides it
       el.style.setProperty('user-select', 'text'); el.style.setProperty('-webkit-user-select', 'text'); el.style.setProperty('cursor', 'text');
       const onKey = e => {
         if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) { e.preventDefault(); e.stopPropagation(); finishText(true); return; }
@@ -711,7 +711,7 @@
       const s = textEdit; if (!s) return;
       textEdit = null; s.cleanup();
       const {text, styles} = readEditor(s.el);
-      s.el.removeAttribute('contenteditable'); delete s.el.dataset.textEditing;
+      s.el.removeAttribute('contenteditable'); delete s.el.dataset.textEditing; delete clippedSelection.dataset.textEditing;
       for (const k of ['user-select', '-webkit-user-select', 'cursor']) s.el.style.removeProperty(k);
       if (document.activeElement === s.el) s.el.blur();
       const n = find(s.id), draft = draftText?.id === s.id ? draftText : null;
@@ -765,7 +765,7 @@
       if (!textEdit || textEdit.el.isConnected) return;
       const fresh = elementOf(textEdit.id);
       if (fresh && find(textEdit.id)) { fresh.replaceWith(textEdit.el); textEdit.el.focus({preventScroll: true}); }
-      else { textEdit.cleanup(); textEdit = null; }
+      else { textEdit.cleanup(); textEdit = null; delete clippedSelection.dataset.textEditing; }
     }
 
     let layerPreview = null; // {ids, parentId, index?} while a drag previews a new parent in the Layers tree

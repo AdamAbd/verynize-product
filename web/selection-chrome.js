@@ -90,7 +90,7 @@
 .moving #canvas-overlay:not([data-multi-select]) #selection-measure{visibility:hidden!important}
 #canvas .layer.selected[data-text-editing]{outline:none!important}
 #canvas .layer.selected[data-text-editing]::after,#canvas .layer[data-text-editing]>.handle{display:none!important}
-#canvas-wrap:has(#canvas .layer[data-text-editing]) #canvas-overlay .clipped-selection{display:none}
+#canvas-overlay .clipped-selection[data-text-editing]{display:none}
 #canvas .layer.selected[data-clip-ring]:not([data-outline]){outline:none!important}
 #canvas .layer.selected[data-clip-ring]::after,#canvas .layer[data-clip-ring]>.handle{display:none!important}`;
 
@@ -167,6 +167,9 @@
       const ids = [...sel()], multi = ids.length > 1;
       const name = document.getElementById('selection-name'), badge = document.getElementById('selection-measure');
       if (multi) { ed.canvas.dataset.multiSelect = ''; overlay.dataset.multiSelect = ''; } else { delete ed.canvas.dataset.multiSelect; delete overlay.dataset.multiSelect; }
+      // A selected live preview hides the name label and chip (live-preview.css, preview-frame-chrome.css). An attribute
+      // set here, not `#workspace:has(.canvas-preview.selected)`: such a rule makes every canvas mutation walk the canvas.
+      overlay.toggleAttribute('data-preview-selected', ids.some(id => elementOf(id)?.classList.contains('canvas-preview')));
       union.hidden = box.hidden = textBox.hidden = hiddenOutline.hidden = true;
       guides.replaceChildren();
       for (const el of ed.canvas.querySelectorAll('[data-clip-ring]')) delete el.dataset.clipRing;
