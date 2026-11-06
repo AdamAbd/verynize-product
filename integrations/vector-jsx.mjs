@@ -112,17 +112,18 @@ export function vectorFromElement(el, { tokens = {}, reused = null, warnings = [
       out.strokeToken = token;
       if (HEX.test(tokens[token] || "")) out.strokeColor = tokens[token];
     }
-    const cap = a.strokeLinecap ?? a["stroke-linecap"],
-      join = a.strokeLinejoin ?? a["stroke-linejoin"],
-      miter = Number(a.strokeMiterlimit ?? a["stroke-miterlimit"]),
-      dash = numbers(a.strokeDasharray ?? a["stroke-dasharray"]);
-    if (["butt", "round", "square"].includes(cap) && cap !== "butt") out.strokeCap = cap;
-    if (["miter", "round", "bevel"].includes(join) && join !== "miter") out.strokeJoin = join;
-    if (miter >= 1 && miter <= 100) out.strokeMiter = miter;
-    if (dash.length && dash.length <= 16 && dash.every((v) => Number.isFinite(v) && v >= 0) && dash.some((v) => v > 0))
-      out.strokeDash = dash;
-    if (a["data-stroke-hidden"] === "true" || a["data-stroke-hidden"] === true) out.strokeHidden = true;
   }
+  // Stroke details are read even without a stroke, so an edit can state them on their own.
+  const cap = a.strokeLinecap ?? a["stroke-linecap"],
+    join = a.strokeLinejoin ?? a["stroke-linejoin"],
+    miter = Number(a.strokeMiterlimit ?? a["stroke-miterlimit"]),
+    dash = numbers(a.strokeDasharray ?? a["stroke-dasharray"]);
+  if (["round", "square"].includes(cap)) out.strokeCap = cap;
+  if (["round", "bevel"].includes(join)) out.strokeJoin = join;
+  if (miter >= 1 && miter <= 100) out.strokeMiter = miter;
+  if (dash.length && dash.length <= 16 && dash.every((v) => Number.isFinite(v) && v >= 0) && dash.some((v) => v > 0))
+    out.strokeDash = dash;
+  if (a["data-stroke-hidden"] === "true" || a["data-stroke-hidden"] === true) out.strokeHidden = true;
   return out;
 }
 

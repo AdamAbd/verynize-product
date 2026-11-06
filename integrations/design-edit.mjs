@@ -364,7 +364,7 @@ function svgToVector(el, markup, { tokens, parentNode, warnings }) {
   const keep = Object.entries(el.attrs).filter(([k]) => k.startsWith('data-') && k !== 'data-vector');
   const attrs = keep.map(([k, v]) => (v === true ? k : `${k}="${String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"`));
   const sized = [Number(el.attrs.width) > 0 ? `[width:${Number(el.attrs.width)}px]` : '', Number(el.attrs.height) > 0 ? `[height:${Number(el.attrs.height)}px]` : ''].filter(Boolean);
-  const out = svgElementJsx(markup, { color, attrs, className: [className, ...sized].join(' ').trim(), label: el.attrs['data-node-label'] || el.attrs['aria-label'] || 'Vector', w: px(spec.w, el.attrs.width), h: px(spec.h, el.attrs.height) });
+  const out = svgElementJsx(markup, { color, attrs, className: [className, ...sized].join(' ').trim(), label: el.attrs['data-node-label'] || el.attrs['data-name'] || el.attrs['aria-label'] || 'Vector', w: px(spec.w, el.attrs.width), h: px(spec.h, el.attrs.height) });
   if (!out.ok) {
     warnings.push(`${out.reason}; kept it as an SVG image`);
     return null;
@@ -436,7 +436,7 @@ export function buildNodes(elements, { document, page, parent = null, warnings =
     if (type === 'text') node.styleOwn = [];
     if (type === 'shader') applyShaderAttrs(node, el.attrs);
     if (type === 'vector') {
-      Object.assign(node, { color: '#000000', radius: 0 }, vectorFromElement(el, { tokens, reused, warnings, where }));
+      Object.assign(node, { color: '#000000', radius: 0 }, vectorFromElement(el, { tokens, reused: old, warnings, where }));
       if (!node.paths.length) throw new Error(`${where}: a vector needs at least one <path d="…" />`);
       if (!node.viewBox) node.viewBox = [0, 0, Number(el.attrs.width) || 24, Number(el.attrs.height) || 24];
       // Unsized, it keeps its viewBox (or width/height attributes) as its size, like an <svg> in a browser.
@@ -755,6 +755,7 @@ function editNode(document, page, node, el, warnings) {
   applyResidual(node, el.attrs, { tokens: document.tokens || {}, warnings, where: index.shortId(node) });
   editComponentAttrs(document, page, node, el.attrs, index);
   if (node.type === 'shader') applyShaderAttrs(node, el.attrs);
+  if (node.type === 'vector') return editVector(node, el, document.tokens || {}, warnings, index.shortId(node));
   if (node.type === 'text') {
     if (el.children.length) {
       if (!isTextOnly(el)) throw new Error(`Text element ${index.shortId(node)} can only contain text and inline tags (b, i, span, br)`);
@@ -772,6 +773,35 @@ function editNode(document, page, node, el, warnings) {
     if (target.parentId !== node.id) throw new Error(`${ref} is not a direct child of ${index.shortId(node)}`);
     editNode(document, page, target, child, warnings);
   }
+}
+
+/** An edit of a vector (<svg data-vector …>): only the attributes it states change; <path> children replace the paths. */
+function editVector(node, el, tokens, warnings, where) {
+  if (el.tag !== 'svg') throw new Error(`Element ${where} is a vector; edit it with <svg data-vector …>`);
+  const v = vectorFromElement(el, { tokens, reused: node, warnings, where });
+  const has = (...keys) => keys.some(k => Object.hasOwn(el.attrs, k));
+  if (el.children.some(c => c.tag === 'path')) {
+    if (!v.paths.length) throw new Error(`${where}: a vector needs at least one <path d="…" />`);
+    node.paths = v.paths;
+  }
+  if (has('viewBox') && v.viewBox) node.viewBox = v.viewBox;
+  if (has('fill')) {
+    if (v.fills) node.fills = [];
+    else if (v.color) { delete node.fills; node.color = v.color; node.token = ''; }
+  }
+  if (has('data-fill-token')) { node.token = v.token || ''; if (v.color) node.color = v.color; }
+  if (has('stroke', 'strokeWidth', 'stroke-width')) {
+    const stroke = el.attrs.stroke, width = Number(el.attrs.strokeWidth ?? el.attrs['stroke-width']);
+    if (stroke === 'none' || (has('strokeWidth', 'stroke-width') && !(width > 0))) node.strokeWidth = 0;
+    else {
+      if (has('stroke') && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(String(stroke).trim())) { node.strokeColor = String(stroke).trim().toLowerCase(); delete node.strokeToken; }
+      if (width > 0) node.strokeWidth = width;
+      else if (!(Number(node.strokeWidth) > 0)) node.strokeWidth = 1;
+    }
+  }
+  if (has('data-stroke-token')) { if (el.attrs['data-stroke-token']) { node.strokeToken = el.attrs['data-stroke-token']; if (tokens[node.strokeToken]) node.strokeColor = tokens[node.strokeToken]; } else delete node.strokeToken; }
+  for (const [attrs, key] of [[['strokeLinecap', 'stroke-linecap'], 'strokeCap'], [['strokeLinejoin', 'stroke-linejoin'], 'strokeJoin'], [['strokeMiterlimit', 'stroke-miterlimit'], 'strokeMiter'], [['strokeDasharray', 'stroke-dasharray'], 'strokeDash'], [['data-stroke-hidden'], 'strokeHidden']])
+    if (has(...attrs)) { if (v[key] === undefined) delete node[key]; else node[key] = v[key]; }
 }
 
 /** Component attributes on an edit: patches only; links an edit cannot express are refused. */

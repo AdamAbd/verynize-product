@@ -15,12 +15,25 @@ const svg =
   '<svg width="24" height="24" viewBox="0 0 24 24"><path d="M0 0 L24 24" stroke="red"/></svg>';
 const png =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jJ1kAAAAASUVORK5CYII=";
-test("HTML and JSX SVG preserve one sanitized image with geometry and paths", async () => {
+test("HTML and JSX SVG become one vector layer with geometry and paths", async () => {
   for (const r of [await importHtml(svg), jsxToDocument(svg)]) {
+    assert.equal(nodes(r).length, 1);
+    const n = nodes(r)[0];
+    assert.equal(n.type, "vector");
+    assert.equal(n.w, 24);
+    assert.deepEqual(n.viewBox, [0, 0, 24, 24]);
+    assert.deepEqual(n.paths, [{ d: "M0 0L24 24" }]);
+    assert.equal(n.strokeColor, "#ff0000");
+  }
+});
+test("HTML and JSX SVG a vector cannot hold stay one sanitized image with geometry and paths", async () => {
+  const text = svg.replace("</svg>", "<text>Label</text></svg>");
+  for (const r of [await importHtml(text), jsxToDocument(text)]) {
     assert.equal(nodes(r).length, 1);
     const n = nodes(r)[0];
     assert.equal(n.type, "image");
     assert.equal(n.w, 24);
+    assert.ok(r.warnings.some((w) => /SVG uses text; kept it as an SVG image/.test(w)));
     const decoded = Buffer.from(n.src.split(",")[1], "base64").toString();
     assert.match(decoded, /viewBox="0 0 24 24"/);
     assert.match(decoded, /M0 0 L24 24/);
