@@ -1,0 +1,46 @@
+/* Workspace-local surface: no title bar or panel participates in this stacking context. */
+#bd-switch-loading-root {
+  display: contents;
+}
+#switch-loading-logo {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+  background: var(--canvas, var(--shell-canvas));
+  color: var(--shell-text);
+  opacity: 1;
+  transition: opacity 100ms ease-out;
+}
+#switch-loading-logo svg {
+  width: 48px;
+  height: 48px;
+}
+#workspace[data-switch-loading="file"] #switch-loading-logo {
+  display: flex;
+}
+#workspace[data-switch-loading="file"] > :not(#bd-switch-loading-root) {
+  visibility: hidden;
+}
+#workspace[data-switch-pending] > :not(#bd-switch-loading-root),
+#workspace[data-switch-pending] > :not(#bd-switch-loading-root) * {
+  pointer-events: none !important;
+}
+#workspace[data-switch-loading="page"] #canvas {
+  filter: blur(16px);
+}
+#workspace[data-switch-leaving] #switch-loading-logo {
+  opacity: 0;
+}
+#workspace[data-switch-leaving="true"][data-switch-loading="page"] #canvas {
+  filter: blur(0);
+  transition: filter 100ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  #switch-loading-logo,
+  #workspace[data-switch-leaving="true"][data-switch-loading="page"] #canvas {
+    transition: none;
+  }
+}

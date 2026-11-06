@@ -3,7 +3,8 @@
 // (toolbar, page pill, help, zoom) and the main app menu.
 import { useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { mountIsland } from "@/lib/mount";
+import { SwitchLoading } from "./chrome/SwitchLoading";
+import { mountIsland, ensureContainer } from "@/lib/mount";
 import { useBodyClass, useWindowEvent } from "@/lib/bridge";
 import { TitleBar } from "./chrome/TitleBar";
 import { AppMenu } from "./chrome/AppMenu";
@@ -103,3 +104,9 @@ function overlayHost() {
 }
 
 mountIsland("chrome", container, () => <Island overlayHost={overlayHost()} />);
+
+mountIsland(
+  "switch-loading",
+  () => ensureContainer("bd-switch-loading-root", document.getElementById("workspace")!),
+  () => <SwitchLoading />,
+);
