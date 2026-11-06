@@ -44,7 +44,7 @@ const apps=[];let legacyMf;try{const server=(await mf.ready).origin;const env={.
  await a.locator('.app-menu-trigger:visible').first().click();await b.locator('.app-menu-trigger:visible').first().click();await Promise.all([a.locator('#rectangle').click(),b.locator('#rectangle').click()]);
  await Promise.all([a,b].map(page=>page.waitForFunction(()=>window.design.getDocument().pages[0].nodes.length===8)));
  const sharedDoc=page=>page.evaluate(()=>{const d=window.design.getDocument();delete d.activePage;return JSON.stringify(d)});
- await a.waitForFunction(async expected=>{const d=window.design.getDocument();delete d.activePage;return JSON.stringify(d)===expected},await sharedDoc(b)).catch(()=>{});assert.equal(await sharedDoc(a),await sharedDoc(b));
+ await a.waitForFunction(expected=>{const d=window.design.getDocument();delete d.activePage;return JSON.stringify(d)===expected},await sharedDoc(b));assert.equal(await sharedDoc(a),await sharedDoc(b));
  // Concurrent edits to different properties of one layer, and to disjoint ranges of one text, both survive.
  const textId=await a.evaluate(()=>window.design.getDocument().pages[0].nodes.find(n=>n.type==='text').id);const rectId=await a.evaluate(()=>window.design.getDocument().pages[0].nodes.find(n=>n.type==='rectangle').id);
  await a.evaluate(id=>window.design.updateNodes([id],{text:'Shared words'}),textId);await b.waitForFunction(id=>window.design.getDocument().pages[0].nodes.find(n=>n.id===id).text==='Shared words',textId);
