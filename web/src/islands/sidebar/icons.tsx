@@ -1,5 +1,5 @@
 // Layer type icons for the layer tree. Glyphs come from lucide or the shared set in @/components/icons.
-import { AppWindow, Circle, Frame, Image as ImageIcon, LayoutGrid, Square, Star, Type, type LucideIcon } from "lucide-react";
+import { AppWindow, Circle, Frame, Image as ImageIcon, LayoutGrid, PenTool, Square, Star, Type, type LucideIcon } from "lucide-react";
 import {
   ComponentInstanceIcon,
   ComponentMainIcon,
@@ -16,6 +16,7 @@ const byType: Record<string, LucideIcon | ComponentType<IconProps>> = {
   rectangle: Square,
   image: ImageIcon,
   shader: ShaderIcon,
+  vector: PenTool,
   icon: Star,
 };
 

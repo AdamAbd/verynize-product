@@ -1,6 +1,7 @@
 // Verynize document schema: ONE validator for the live canvas (web/app.js, loaded as a classic <script>
-// after web/node-style.js and web/shaders.js) and the headless engine (integrations/design-store.mjs,
-// which imports this file through integrations/document-core.mjs). Registers globalThis.VerynizeDocument.
+// after web/node-style.js, web/shaders.js and web/vector-geometry.js) and the headless engine
+// (integrations/design-store.mjs, which imports this file through integrations/document-core.mjs). Registers
+// globalThis.VerynizeDocument.
 //
 // validateDocument(d)              strict, never mutates, throws Error on the first problem. What a file on
 //                                  disk, an agent edit or a cloud room snapshot must satisfy.
@@ -21,13 +22,13 @@
 (function (root) {
   "use strict";
   // Provisional limits under contention; see docs/canvas-performance/node-cap-2026-11-06.md.
-  const NODE_LIMITS = Object.freeze({ perPage: 5000, perDocument: 50000 });
+  const NODE_LIMITS = Object.freeze({ perPage: 10000, perDocument: 50000 });
   const nodeLimitMessage = (count, limit, pageName) =>
     pageName === undefined
       ? `Document has ${count} nodes; limit is ${limit}. Split the design into multiple documents.`
       : `Page "${pageName}" has ${count} nodes; limit is ${limit}. Split the page into multiple pages or documents.`;
   const IMAGE_FILL_TYPES = Object.freeze(["frame", "rectangle"]);
-  const NODE_TYPES = ["rectangle", "text", "frame", "image", "shader"];
+  const NODE_TYPES = ["rectangle", "text", "frame", "image", "shader", "vector"];
   const LAYOUTS = ["free", "flex", "grid", "block", "inline"];
   const ANIMATED = ["", "aurora", "sunset", "ocean"];
   const VARIABLE_TYPES = ["dimension", "number", "fontFamily", "fontWeight"];
@@ -108,6 +109,7 @@
     frame: "Frame",
     image: "Image",
     shader: "Shader",
+    vector: "Vector",
   };
 
   const own = (object, key) => !!object && typeof object === "object" && Object.hasOwn(object, key);
@@ -121,6 +123,8 @@
   // node-style.js and shaders.js are loaded first (a <script> tag before app.js; imports in document-core.mjs).
   const nodeStyle = () => root.BetterNodeStyle;
   const shaders = () => root.BetterShaders;
+  // web/vector-geometry.js (integrations/vector-geometry.mjs) parses path data; loaded before this file.
+  const vectors = () => root.VerynizeVector;
 
   /** Room asset URLs (cloud/assets.js): https (http only on loopback), no credentials, exactly
    * /api/rooms/<uuid>/assets/<uuid> with an optional ?sig=<64 hex>. */
@@ -345,6 +349,66 @@
       return "Invalid node slotName";
     return null;
   }
+  // Vector layers (docs/vector-nodes.md): SVG path data in viewBox units, drawn stretched over the layer box. Fill is
+  // the paint model of every layer (`color`/`token` or `fills`); the stroke is `strokeWidth`/`strokeColor`/
+  // `strokeToken` plus the vector-only cap, join, miter limit and dash pattern (layer pixels).
+  const VECTOR_ONLY = ["paths", "viewBox", "strokeCap", "strokeJoin", "strokeMiter", "strokeDash"];
+  function vectorError(node) {
+    if (node.type !== "vector") {
+      const key = VECTOR_ONLY.find((k) => node[k] !== undefined);
+      return key ? `${key} belongs to vector layers` : "";
+    }
+    const geometry = vectors();
+    const limits = geometry?.LIMITS || { paths: 500, pathChars: 200000, totalChars: 500000 };
+    const paths = node.paths;
+    if (!Array.isArray(paths) || !paths.length || paths.length > limits.paths)
+      return `A vector layer needs 1–${limits.paths} paths`;
+    let chars = 0;
+    for (const p of paths) {
+      if (!plainObject(p) || Object.keys(p).some((k) => k !== "d" && k !== "fillRule"))
+        return "Vector paths are {d, fillRule?}";
+      if (p.fillRule !== undefined && p.fillRule !== "nonzero" && p.fillRule !== "evenodd")
+        return "Vector fillRule must be nonzero or evenodd";
+      // Without the geometry module (a loader that only needs the limits) the characters are checked.
+      const error = geometry
+        ? geometry.pathError(p.d)
+        : typeof p.d === "string" &&
+            p.d.length <= limits.pathChars &&
+            /^\s*[Mm][\d\s,.eE+\-MmLlHhVvCcSsQqTtAaZz]*$/.test(p.d)
+          ? ""
+          : "Invalid path data";
+      if (error) return `Invalid vector path: ${error}`;
+      chars += p.d.length;
+    }
+    if (chars > limits.totalChars)
+      return `A vector layer holds at most ${limits.totalChars} characters of path data`;
+    const vb = node.viewBox;
+    if (
+      !Array.isArray(vb) ||
+      vb.length !== 4 ||
+      !vb.every((v) => Number.isFinite(v) && Math.abs(v) <= 1e7) ||
+      !(vb[2] > 0) ||
+      !(vb[3] > 0)
+    )
+      return "A vector viewBox is [x, y, width, height] with a positive size";
+    if (node.strokeCap !== undefined && !["butt", "round", "square"].includes(node.strokeCap))
+      return "Invalid stroke cap";
+    if (node.strokeJoin !== undefined && !["miter", "round", "bevel"].includes(node.strokeJoin))
+      return "Invalid stroke join";
+    if (
+      node.strokeMiter !== undefined &&
+      (!Number.isFinite(node.strokeMiter) || node.strokeMiter < 1 || node.strokeMiter > 100)
+    )
+      return "Invalid stroke miter limit";
+    if (
+      node.strokeDash !== undefined &&
+      (!Array.isArray(node.strokeDash) ||
+        node.strokeDash.length > 16 ||
+        node.strokeDash.some((v) => !Number.isFinite(v) || v < 0 || v > 10000))
+    )
+      return "strokeDash is at most 16 lengths of 0–10000";
+    return "";
+  }
   function validateNode(node) {
     const S = nodeStyle(),
       shader = shaders();
@@ -466,6 +530,10 @@
       const pe = S.paintError(node);
       if (pe) throw new Error(pe);
     } // paint stack + SVG paints
+    {
+      const ve = vectorError(node);
+      if (ve) throw new Error(ve);
+    } // vector paths, viewBox and stroke details
   }
   function validateViews(document) {
     if (document.views === undefined) return;

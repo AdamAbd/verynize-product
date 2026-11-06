@@ -1,3 +1,5 @@
+import { pruneImportRules } from "./import-css-prune.mjs";
+import { NODE_LIMITS } from "./document-core.mjs";
 // HTML + CSS import. A page (string, local file or http(s) URL) is parsed, its stylesheets resolved
 // (<style>, <link rel=stylesheet>, @import; local files and http(s) with size/time limits), and the
 // cascade computed for a chosen viewport (specificity, !important, @layer, inline styles, @media,
@@ -38,6 +40,7 @@ import { validateDocument, VARIABLE_NAME } from "./design-store.mjs";
 import { sniffImageType, imageSize } from "./images.mjs";
 import { sanitizeSvg } from "./assets.mjs";
 import { RESIDUAL_ATTR } from "./codec-residual.mjs";
+import { svgElementJsx } from "./vector-jsx.mjs";
 
 export const IMPORT_LIMITS = Object.freeze({
   maxBytes: 2 * 1024 * 1024,
@@ -45,7 +48,7 @@ export const IMPORT_LIMITS = Object.freeze({
   timeoutMs: 8000,
   maxSheets: 48,
   maxDepth: 8,
-  maxElements: 4000,
+  maxElements: NODE_LIMITS.perDocument,
   maxImageBytes: 4 * 1024 * 1024,
 });
 
@@ -177,9 +180,11 @@ function makeElement(tag, attrs, parent) {
 
 /** Parse HTML into a tree of {tag, attrs, children, parent} elements and {text} nodes. */
 export function parseHtml(source) {
+  if (String(source).length > 5_000_000) throw new Error("HTML parse stage exceeds 5000000 characters");
   const s = String(source || "").replace(/^﻿/, "");
   const root = makeElement("#document", {}, null);
   const stack = [root];
+  let elementTotal = 0;
   const top = () => stack[stack.length - 1];
   const close = (tag) => {
     for (let i = stack.length - 1; i > 0; i--)
@@ -278,6 +283,7 @@ export function parseHtml(source) {
             if (["ul", "ol", "table", "dl", "select", "div"].includes(stack[k].tag)) break;
           }
         }
+        if (++elementTotal > NODE_LIMITS.perDocument + 256) throw new Error("HTML parse stage exceeds document element budget");
         const el = makeElement(tag, attrs, top());
         top().children.push(el);
         i = j;
@@ -302,6 +308,7 @@ export function parseHtml(source) {
           i = close < 0 ? s.length : close + 1;
           continue;
         }
+        if (stack.length >= 256) throw new Error("HTML parse stage exceeds nesting limit 256");
         stack.push(el);
         continue;
       }
@@ -1023,8 +1030,13 @@ export async function importHtml(html, options = {}) {
     if (classes.length >= 10 && known / classes.length >= 0.6) tailwindPage = true;
   }
 
+  const expandImport = declaration => {
+    if (declaration.property === "border-radius" && declaration.value.includes("/"))
+      warnings.push("elliptical border radius is approximated by horizontal radii");
+    return expand(declaration);
+  };
   // --- rules (media evaluated once for the viewport)
-  const rules = [];
+  let rules = [];
   const referenced = new Set();
   let order = 0;
   const layerRank = (name) =>
@@ -1039,7 +1051,7 @@ export async function importHtml(html, options = {}) {
       for (const m of item.selector.matchAll(/\.((?:\\.|[\w-])+)/g))
         referenced.add(m[1].replace(/\\(.)/g, "$1"));
       const selectors = parseSelectorList(item.selector);
-      const decls = item.decls.flatMap(expand);
+      const decls = item.decls.flatMap(expandImport);
       rules.push({
         selectors,
         decls,
@@ -1049,6 +1061,9 @@ export async function importHtml(html, options = {}) {
       });
       stats.rules++;
     }
+  const beforePruning = rules.length;
+  if (options.pruneCss !== false) rules = pruneImportRules(rules, [htmlEl, ...all(htmlEl, () => true)]);
+  stats.prunedRules = beforePruning - rules.length;
   if (!preflightRules)
     preflightRules = parseStylesheet(PREFLIGHT_CSS)
       .items.filter((it) => it.type === "rule")
@@ -1083,7 +1098,7 @@ export async function importHtml(html, options = {}) {
           out.push({
             cls,
             rank: rank.get(cls),
-            decls: compiled.decls.flatMap(expand),
+            decls: compiled.decls.flatMap(expandImport),
             children:
               compiled.childDecls.length && !/^-?space-[xy]-/.test(cls)
                 ? compiled.childDecls.flatMap(expand)
@@ -1097,7 +1112,7 @@ export async function importHtml(html, options = {}) {
           out.push({
             cls,
             rank: rank.get(cls),
-            decls: applies ? compiled.decls.flatMap(expand) : [],
+            decls: applies ? compiled.decls.flatMap(expandImport) : [],
           });
         }
       }
@@ -1117,7 +1132,9 @@ export async function importHtml(html, options = {}) {
   const computedOf = new Map();
   const usedVars = new Map(); // name -> {type, value}
   const rootFsBox = { value: 16 };
+  const cascadeDeadline = performance.now() + 60_000;
   const computeElement = (el, parent) => {
+    if (performance.now() > cascadeDeadline) throw new Error("HTML cascade exceeds 60000ms budget; simplify the stylesheet or import fewer boards");
     const entries = [];
     const sigEntries = [];
     for (const rule of uaRules)
@@ -1198,7 +1215,7 @@ export async function importHtml(html, options = {}) {
           layerRank: -1,
         });
     if (el.attrs.style)
-      for (const [i, d] of parseDeclarations(el.attrs.style).flatMap(expand).entries()) {
+      for (const [i, d] of parseDeclarations(el.attrs.style).flatMap(expandImport).entries()) {
         const entry = { ...d, origin: "inline", spec: [1, 0, 0], order: 2e6 + i };
         entries.push(entry);
         sigEntries.push(entry);
@@ -1417,7 +1434,7 @@ export async function importHtml(html, options = {}) {
       }
       if (property === "background-image" && /url\(/i.test(v)) {
         for (const p of ["background-position", "background-repeat"])
-          if (info.style.has(p))
+          if (info.style.has(p) && !((p === "background-position" && /^(center|50% 50%)$/.test(info.style.get(p))) || (p === "background-repeat" && info.style.get(p) === "no-repeat")))
             warnings.push(
               `${p}:${info.style.get(p)} is approximated by a centered cover/contain image fill`,
             );
@@ -1439,7 +1456,7 @@ export async function importHtml(html, options = {}) {
                 ? "cover"
                 : /contain/.test(info.style.get("background-size") || "")
                   ? "contain"
-                  : "cover",
+                  : info.style.get("background-size") === "100% 100%" ? "fill" : info.style.get("background-size") === "auto" ? "none" : "cover",
             });
         }
         v =
@@ -1812,7 +1829,8 @@ export async function importHtml(html, options = {}) {
       const { classes, fills } = await classesFor(el, info);
       let src = "",
         assetError = "",
-        size = null;
+        size = null,
+        vectorMarkup = "";
       if (el.tag === "svg") {
         const markup = (el.svg || "").replace(/currentColor/g, info.color);
         const withNs = /xmlns=/.test(markup.slice(0, 200))
@@ -1820,6 +1838,7 @@ export async function importHtml(html, options = {}) {
           : markup.replace(/^<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
         const clean = sanitizeSvg(`${withNs}</svg>`);
         if (!clean) warnings.push("Inline SVG was rejected by the sanitizer");
+        vectorMarkup = clean;
         if (clean) {
           const buf = Buffer.from(clean);
           src = `data:image/svg+xml;base64,${buf.toString("base64")}`;
@@ -1863,6 +1882,31 @@ export async function importHtml(html, options = {}) {
         else if (size?.height && !(w > 0)) sized.push(`[height:${size.height}px]`);
         else if (w > 0 && size?.width)
           sized.push(`[height:${r2((w * size.height) / size.width)}px]`);
+      }
+      // Inline SVG becomes vector layers when it can (web/vector-svg.js); otherwise an SVG image.
+      if (vectorMarkup) {
+        const px = (prop, attr) => {
+          const v = String(info.style.get(prop) || "");
+          return /^[\d.]+px$/.test(v) ? parseFloat(v) : Number(attr) > 0 ? Number(attr) : undefined;
+        };
+        const out = svgElementJsx(vectorMarkup, {
+          color: info.color,
+          attrs: [
+            `data-node-label="${escAttr(name)}"`,
+            ...(residual ? [`${RESIDUAL_ATTR}='${escSingle(JSON.stringify(residual))}'`] : []),
+          ],
+          className: [...classes, ...sized].join(" "),
+          label: name,
+          indent,
+          w: px("width", el.attrs.width),
+          h: px("height", el.attrs.height),
+        });
+        if (out.ok) {
+          lines.push(out.jsx);
+          for (const w of out.warnings.slice(0, 6)) warnings.push(`Inline SVG: ${w}`);
+          return;
+        }
+        warnings.push(`${out.reason}; kept it as an SVG image`);
       }
       lines.push(
         `${indent}<img data-node-label="${escAttr(name)}" src="${escAttr(src)}"${assetError ? ` data-asset-error="${escAttr(assetError)}"` : ""}${common([...classes, ...sized])}${fills.length ? ` data-fills="${escAttr(JSON.stringify(fills))}"` : ""} />`,
@@ -1975,7 +2019,7 @@ export async function importHtml(html, options = {}) {
         el.parent && el.parent !== bodyEl ? computeElement(el.parent, bodyInfo) : bodyInfo;
       await emit(el, parentInfo, "", { root: true });
     }
-  } else if (options.fragment ?? !/<(?:html|head|body)[\s>]/i.test(String(html))) {
+  } else if ((options.fragment ?? !/<(?:html|head|body)[\s>]/i.test(String(html))) || (options.split !== "none" && all(bodyEl, () => true).length > NODE_LIMITS.perPage)) {
     // A fragment (pasted markup without <html>/<body>): each top-level element is an artboard, styled
     // with the page's own <style> rules and inheriting from the implied <html>/<body>.
     const bodyInfo = computeElement(bodyEl, htmlComputed);
@@ -2060,7 +2104,7 @@ export async function importHtml(html, options = {}) {
   validateDocument(target);
   const pageId = options.pageId || target.activePage || target.pages[0].id;
   if (!lines.length) throw new Error("No importable elements were found in the HTML");
-  const result = createArtboards(target, pageId, jsx, { viewport: view });
+  const result = createArtboards(target, pageId, jsx, { viewport: view, split: options.split || "pages" });
   const unsupported = [...stats.unsupported].sort((a, b) => b[1] - a[1]);
   if (unsupported.length)
     warnings.push(

@@ -11,7 +11,7 @@
   const SELECTION_SAFE = {top: 64, right: 29, bottom: 120, left: 29};
   const BOARD = {x: 0, y: 0, w: 1000, h: 700};
   const DRAW_TOOLS = new Set(['frame', 'rectangle', 'ellipse', 'text', 'shader']);
-  const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', eyedropper: 'eyedropper-tool', frame: 'add-frame', rectangle: 'rectangle', ellipse: 'add-ellipse', text: 'text', shader: 'add-shader'};
+  const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', eyedropper: 'eyedropper-tool', frame: 'add-frame', rectangle: 'rectangle', ellipse: 'add-ellipse', text: 'text', shader: 'add-shader', pen: 'pen-tool'};
   const STYLE_KEYS = ['color', 'token', 'gradient', 'radius', 'ellipse', 'strokeWidth', 'strokeColor', 'shadow', 'opacity', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'textAlignVertical', 'textTransform', 'textDecoration', 'textWrap', 'whiteSpace', 'wordBreak', 'textIndent', 'fontSmoothing', 'truncate', 'mask', 'animated', 'clipContent'];
   const CLIP_MARKER = 'verynize/nodes';
   // Wonder's frame tool presets (Properties panel with the Frame tool on and nothing selected): [category, [[name, w, h]]].
@@ -50,7 +50,8 @@
     const sel = () => ed.getSelection();
     const selectedNodes = () => ed.nodes().filter(n => sel().has(n.id));
     const isFlow = n => !!n && n.type === 'frame' && n.layout !== 'free';
-    const elementOf = id => canvas.querySelector('[data-id="' + CSS.escape(id) + '"]');
+    // The renderer's map first: an attribute query walks the canvas (O(page) per call, several calls per pointer move).
+    const elementOf = id => { const el = ed.layerOf?.(id); return el && canvas.contains(el) ? el : canvas.querySelector('[data-id="' + CSS.escape(id) + '"]'); };
     const footer = message => { const f = $('#workspace footer') || $('footer'); if (f) f.textContent = message; };
 
     // ---------- Overlay (screen-space chrome) ----------
@@ -502,10 +503,12 @@
     function select(ids) { ed.setSelection(new Set(ids)); ed.render(); }
     function clearSelection() { drilled.clear(); select([]); }
 
-    // Lazy undo: only record history once a gesture actually changes something.
-    function gesture() {
-      const before = ed.snapshot(); let committed = false;
-      return {commit() { if (!committed) { ed.pushHistory(before); committed = true; } }, get committed() { return committed; }};
+    // Lazy undo: only record history once a gesture actually changes something. A late gesture takes its snapshot
+    // when it commits (the whole document, so a click that never commits does not pay for it); its caller commits
+    // before its first change to the document.
+    function gesture(late = false) {
+      const before = late ? null : ed.snapshot(); let committed = false;
+      return {commit() { if (!committed) { ed.pushHistory(before ?? ed.snapshot()); committed = true; } }, get committed() { return committed; }};
     }
 
     // ---------- Pointer: pan / move / resize / marquee / draw ----------
@@ -685,7 +688,7 @@
       fillEditor(el, String(n.text || ''), charStylesOf(n));
       try { el.contentEditable = 'plaintext-only'; } catch {}
       if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
-      el.spellcheck = false; el.dataset.textEditing = '';
+      el.spellcheck = false; el.dataset.textEditing = ''; clippedSelection.dataset.textEditing = ''; // selection-chrome.js hides it
       el.style.setProperty('user-select', 'text'); el.style.setProperty('-webkit-user-select', 'text'); el.style.setProperty('cursor', 'text');
       const onKey = e => {
         if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) { e.preventDefault(); e.stopPropagation(); finishText(true); return; }
@@ -711,7 +714,7 @@
       const s = textEdit; if (!s) return;
       textEdit = null; s.cleanup();
       const {text, styles} = readEditor(s.el);
-      s.el.removeAttribute('contenteditable'); delete s.el.dataset.textEditing;
+      s.el.removeAttribute('contenteditable'); delete s.el.dataset.textEditing; delete clippedSelection.dataset.textEditing;
       for (const k of ['user-select', '-webkit-user-select', 'cursor']) s.el.style.removeProperty(k);
       if (document.activeElement === s.el) s.el.blur();
       const n = find(s.id), draft = draftText?.id === s.id ? draftText : null;
@@ -765,10 +768,11 @@
       if (!textEdit || textEdit.el.isConnected) return;
       const fresh = elementOf(textEdit.id);
       if (fresh && find(textEdit.id)) { fresh.replaceWith(textEdit.el); textEdit.el.focus({preventScroll: true}); }
-      else { textEdit.cleanup(); textEdit = null; }
+      else { textEdit.cleanup(); textEdit = null; delete clippedSelection.dataset.textEditing; }
     }
 
     let layerPreview = null; // {ids, parentId, index?} while a drag previews a new parent in the Layers tree
+    const dropHits = window.VerynizeDropHits.create({canvas, wrap, camera: cam, find});
     function guideTargets(moving) {
       const first = find(moving[0]); if (!first) return [];
       const excluded = new Set(moving.flatMap(id => [...ed.descendants(id)]));
@@ -812,16 +816,26 @@
     }
     // Back to the layer's own translate before the render that commits the drag.
     function unfollow(list) { for (const s of list) if (s.el?.isConnected && s.el.style.translate === s.shown) s.el.style.translate = s.base; }
+    // While a drag runs the overlay and the selected layers carry the state its chrome reads (selection-chrome.js). Not
+    // a class on #workspace: rules under one restyle every layer of the page when it toggles (1 s at 50,000 layers).
+    let dragMarked = [];
+    function markDrag(on) {
+      workspace.classList.toggle('moving', on);
+      overlay.toggleAttribute('data-moving', on);
+      for (const el of dragMarked) el.removeAttribute('data-dragging');
+      dragMarked = on ? [...sel()].map(elementOf).filter(Boolean) : [];
+      for (const el of dragMarked) el.setAttribute('data-dragging', '');
+    }
     function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
-      const g = gesture(), start = {x: e.clientX, y: e.clientY};
-      let free = null, flowOnly = false, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null, deferred = false, cancelled = false;
+      const g = gesture(true), start = {x: e.clientX, y: e.clientY};
+      let free = null, flowOnly = false, stacked = [], grab = null, box = null, targets = null, excluded = null, home, origin, drop = null, deferred = false, cancelled = false;
       const onKey = ev => {
         if (ev.key !== 'Escape' || !deferred || cancelled) return;
         ev.preventDefault(); ev.stopImmediatePropagation();
         cancelled = true; window.removeEventListener('keydown', onKey, true);
         clearGhosts(stacked); drawGuides([]); drawDrop(null); setLayerPreview(null);
-        workspace.classList.remove('moving'); ed.updateMeasurement();
+        markDrag(false); ed.updateMeasurement();
       };
       const begin = ev => {
         const picked = moving.map(find).filter(Boolean);
@@ -835,10 +849,10 @@
         box = union(free.map(s => grab.get(s.n.id))); targets = free.length ? guideTargets(free.map(s => s.n.id)) : [];
         excluded = new Set(nodes.flatMap(n => [...ed.descendants(n.id)]));
         const parents = new Set(nodes.map(n => n.parentId || null));
-        home = parents.size === 1 ? [...parents][0] : undefined;
+        home = origin = parents.size === 1 ? [...parents][0] : undefined;
         // A top-level frame enters a stack by a drag (Wonder R1-row-return-during) but never a free frame (unproven).
         flowOnly = nodes.some(n => !n.parentId && n.type === 'frame');
-        workspace.classList.add('moving'); showHover(null);
+        markDrag(true); showHover(null);
       };
       track(e, ev => {
         if (!moving.length || cancelled) return;
@@ -861,13 +875,16 @@
         if (drop.parent && free.length && !stacked.length && drop.index === undefined) {
           unfollow(free);
           relocate(free.map(s => s.n), drop.parent.id === '' ? null : drop.parent.id);
-          ed.render();
+          // Canvas only: panels, save and subscribers see the new parent with the release's render (the Layers tree
+          // previews it meanwhile, below), so a drag across frames costs the page, not the whole document.
+          ed.renderCanvas(); markDrag(true); // the render may have replaced the dragged layers' elements
           home = free[0].n.parentId || null;
           for (const s of free) { s.x = s.n.x - dx; s.y = s.n.y - dy; s.el = null; s.lx = s.n.x; s.ly = s.n.y; }
           targets = guideTargets(free.map(s => s.n.id));
           drop = {};
         }
-        const previewed = setLayerPreview(drop.parent ? {ids: [...moving], parentId: drop.parent.id || null, ...(drop.index === undefined ? {} : {index: drop.index})} : null);
+        const previewed = setLayerPreview(drop.parent ? {ids: [...moving], parentId: drop.parent.id || null, ...(drop.index === undefined ? {} : {index: drop.index})}
+          : free.length && home !== origin ? {ids: [...moving], parentId: home} : null);
         placeGhosts(stacked, grab, dx, dy);
         if (free.length || stacked.length || previewed) ed.updateMeasurement(); // the name label (and a multi-selection's box) follows the dragged layers
         if (free.some(s => !s.n.parentId && s.n.type === 'frame')) drawFrameLabels(); // artboard labels ride with their frames
@@ -875,7 +892,7 @@
       }, () => {
         window.removeEventListener('keydown', onKey, true);
         if (cancelled) return;
-        workspace.classList.remove('moving');
+        markDrag(false);
         if (!free) { onClick?.(); return; }
         unfollow(free);
         drawGuides([]); drawDrop(null); setLayerPreview(null);
@@ -895,11 +912,14 @@
       let target = home;
       if (!excluded || home === undefined) return {};
       if (!(isFlow(homeNode) && stacked.length && (() => { const r = worldRect(home); return r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; })())) {
-        target = null;
-        for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
-          if (!canvas.contains(el) || !el.classList.contains('frame-layer') || excluded.has(el.dataset.id)) continue;
-          const n = find(el.dataset.id); if (n && !n.locked && !n.hidden) { target = n.id; break; }
-        }
+        // The full hit test walks the whole page: web/canvas-drop-hits.js repeats it only when the answer can change.
+        target = dropHits.frameAt(e.clientX, e.clientY, excluded, (x, y) => {
+          for (const el of document.elementsFromPoint(x, y)) {
+            if (!canvas.contains(el) || !el.classList.contains('frame-layer') || excluded.has(el.dataset.id)) continue;
+            const n = find(el.dataset.id); if (n && !n.locked && !n.hidden) return n.id;
+          }
+          return null;
+        });
         if (flowOnly && !isFlow(find(target))) target = home;
         if (target && target !== home && cycleDrop(excluded, target)) target = home;
       }
@@ -1845,6 +1865,7 @@
 
     // ---------- Render integration ----------
     function afterRender() {
+      dropHits.invalidate();
       keepTextEditor();
       syncAnchored();
       const pageId = ed.page().id;

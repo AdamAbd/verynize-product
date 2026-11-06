@@ -1,3 +1,5 @@
+import { attachToolHints } from './tool-hints.mjs';
+import { replaceInElement } from './replace-in-element.mjs';
 import { IMAGE_PROVIDERS } from "./image-provider.mjs";
 import { IMAGE_FILL_TYPES } from "./document-core.mjs";
 // One definition of the Verynize MCP tool set, shared by the stdio server
@@ -44,6 +46,8 @@ import {
 } from './design-edit.mjs';
 import { fundamentals, getDesignGuidelines, getSkill, skillCatalog, styleIds, archetypes, designTokens } from './design-knowledge/index.mjs';
 import { lintArtboard } from './design-lint.mjs';
+import { restore as restoreVersion } from './version-core.mjs';
+import { sidecarFor } from './version-store.mjs';
 import { ReceiptStore, createReceipt, finishGate, MAX_REPAIRS } from './verification.mjs';
 import { searchIcons, resolveIcon, ICON_SETS } from './assets.mjs';
 import { searchStockPhotos, fetchImageAsDataUrl, attribution, trackUnsplashDownload } from './images.mjs';
@@ -65,7 +69,7 @@ export const TOOLS_VERSION = (() => {
   const knowledge = ['index', 'fundamentals', 'archetypes', 'playbooks', 'elevation', 'color', 'skills', 'persona'].map(name => `design-knowledge/${name}.mjs`);
   let styleFiles = [];
   try { styleFiles = readdirSync(new URL('design-knowledge/styles/', import.meta.url)).filter(name => name.endsWith('.mjs')).sort().map(name => `design-knowledge/styles/${name}`); } catch { /* packaged without sources */ }
-  for (const file of ['design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', ...knowledge, ...styleFiles, 'shell-tools.mjs']) {
+  for (const file of ['tool-hints.mjs', 'replace-in-element.mjs', 'design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', ...knowledge, ...styleFiles, 'shell-tools.mjs']) {
     hash.update(file + '\0');
     try { hash.update(readFileSync(new URL(file, import.meta.url))); } catch { hash.update('missing'); }
     hash.update('\0');
@@ -92,7 +96,7 @@ export const INSTRUCTIONS = `Verynize is a local design editor with a live canva
 - ask_agent asks another agent (Claude or Codex) for a read-only second opinion or design review of your plan or result; pass the context it needs in task. It cannot edit the canvas.
 
 ## Code model (Tailwind v4 JSX)
-- Frames are <div>, <section>, <header>, <nav>, <button>…; text elements hold text with inline <b>, <i>, <span className="…"> and <br />; a self-closing <div /> is a rectangle; <img src="https://…" alt="…"> places a photo (downloaded and embedded in the background) and also accepts data:image/… URLs; <Icon name="lucide:arrow-right" className="size-5 text-…" /> places an icon from get_icons; <Shader preset="aurora" /> is a WebGL fill.
+- Frames are <div>, <section>, <header>, <nav>, <button>…; text elements hold text with inline <b>, <i>, <span className="…"> and <br />; a self-closing <div /> is a rectangle; <img src="https://…" alt="…"> places a photo (downloaded and embedded in the background) and also accepts data:image/… URLs; <Icon name="lucide:arrow-right" className="size-5 text-…" /> places an icon from get_icons; <Shader preset="aurora" /> is a WebGL fill. An inline <svg viewBox="…"><path d="…" /></svg> (paths and basic shapes, solid fills and strokes, transforms and <use>) becomes an editable vector layer, read back as <svg data-vector viewBox="…" fill="#…" stroke="#…" strokeWidth={2} strokeLinecap="round"><path d="…" /></svg>: there strokeWidth and strokeDasharray are layer pixels, fill="none" means no fill, data-fill-token / data-stroke-token bind colour tokens, and an edit may restate only the attributes it changes (path children replace all paths). SVG with gradients, filters, masks, clip paths or text stays an image. Long path data reads as [path data N KB] and is kept when written back unchanged.
 - Layout is CSS. A plain <div> is block flow: children stack vertically and padding applies. Use flex, flex-col, grid grid-cols-N, gap-*, items-*, justify-*, flex-wrap, grow, basis-*, mx-auto for layout. Position a child out of flow only with \`absolute\` plus top-*/right-*/bottom-*/left-* inside a \`relative\` parent; never write left-[x] top-[y] without \`absolute\`.
 - Sizing: w-*/h-*/size-* (px, fractions, full), min-*/max-*, aspect-*. Let heights hug content unless a fixed height is intended.
 - Spacing is real CSS: per-side padding and margins (pt-*, pr-*, pb-*, pl-*, px-*, py-*, mt-*, mx-auto…) and per-corner radius (rounded-t-*, rounded-tl-*…) all work. Sections hug their content: create vertical space with padding (py-24) and gap, never pin a section height with h-[…] to fake spacing. Fixed heights are for media, icons and deliberately sized UI (a 64px nav bar, a full-viewport hero with min-h-*).
@@ -226,7 +230,15 @@ const componentFields = {
   slot: z.boolean().describe('slot frame inside a main component').optional(),
   slotName: z.string().max(100).optional(),
 };
-const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), shaderFill: z.boolean().describe('Shader mode: a non-shader layer paints its fill with shaderPreset/shaderColors/shaderParams/shaderSpeed').optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields, ...componentFields };
+const vectorFields = {
+  paths: z.array(z.object({ d: z.string().min(1).max(200000).describe('SVG path data in viewBox units'), fillRule: z.enum(['nonzero', 'evenodd']).optional() }).strict()).min(1).max(500).describe('vector layers: the paths, drawn stretched from viewBox over the layer box').optional(),
+  viewBox: z.array(z.number().finite()).length(4).describe('vector layers: [x, y, width, height] of the path coordinates').optional(),
+  strokeCap: z.enum(['butt', 'round', 'square']).optional(),
+  strokeJoin: z.enum(['miter', 'round', 'bevel']).optional(),
+  strokeMiter: z.number().min(1).max(100).optional(),
+  strokeDash: z.array(z.number().min(0).max(10000)).max(16).describe('vector stroke dash pattern in layer pixels').optional(),
+};
+const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader', 'vector']).optional(), ...vectorFields, shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), shaderFill: z.boolean().describe('Shader mode: a non-shader layer paints its fill with shaderPreset/shaderColors/shaderParams/shaderSpeed').optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields, ...componentFields };
 const pageName = z.string().min(1).max(200);
 const operations = z.array(z.discriminatedUnion('type', [
   z.object({ type: z.literal('create_page'), id: z.string().min(1).max(200).optional(), name: pageName }),
@@ -251,10 +263,12 @@ const MAX_CODE = 400_000;
 async function readPrepared(backend, ref) {
   const state = await backend.read(ref);
   const document = clone(state.document); ensureShortIds(document);
-  return { ...state, document };
+  const prepared = { ...state, document };
+  sessionFor(backend).last = { ref, state: prepared }; // reused by the next-step hints
+  return prepared;
 }
 const linkFor = (state, pageId, shortId) => `verynize://node/${encodeURIComponent(state.name || 'editor')}/${encodeURIComponent(pageId)}/${encodeURIComponent(shortId)}`;
-const tagOf = node => node.htmlTag || ({ frame: 'div', rectangle: 'div', text: 'p', image: 'img', shader: 'Shader' })[node.type] || 'div';
+const tagOf = node => (node.type === 'vector' ? 'svg' : node.htmlTag) || ({ frame: 'div', rectangle: 'div', text: 'p', image: 'img', shader: 'Shader', vector: 'svg' })[node.type] || 'div';
 
 function artboardSummary(page) {
   const index = indexPage(page);
@@ -420,17 +434,20 @@ function ignoreLayout(before, after) {
  * fn returns {document, result, reconciled?}: reconciled means fn already re-synced instances itself (component
  * commands), so nothing it changed is marked as an override.
  */
-async function write(backend, ref, fn) {
-  let pending = [];
+async function writeAs(backend, ref, fn, options) {
+  let pending = [], committed = null;
   const out = await backend.transact(ref, (document, meta) => {
     ensureShortIds(document);
     const before = hasComponents(document) ? clone(document) : null;
     const result = fn(document, meta);
     syncInstances(before, result.document, { reconciled: result.reconciled });
     ensureShortIds(result.document); syncTokenColors(result.document);
+    result.guard?.(result.document);
     pending = pendingAssets(result.document);
+    committed = result.document;
     return result;
-  });
+  }, options);
+  sessionFor(backend).last = { ref, state: { name: out.name, revision: out.revision, document: committed } };
   const key = docKey(out.name, ref);
   sessionFor(backend).receipts.invalidate(key);
   if (pending.length) scheduleAssets(backend, ref ?? out.name ?? undefined, pending, key);
@@ -460,8 +477,20 @@ const WARNING_NOTE = 'These classes or elements were not applied. Rewrite the af
 // Tool table
 
 /** The tool table for a backend: {name: {description, inputSchema (zod shape), annotations, raw?, run}}. */
+/**
+ * The agent a tool call edits as, for version history: named after the MCP client when known
+ * (backends name an unnamed agent themselves).
+ */
+function agentActor(context) {
+  const client = String(context?.clientName?.() || '').trim();
+  const name = /claude/i.test(client) ? 'Claude' : /codex/i.test(client) ? 'Codex' : client.slice(0, 40);
+  return name ? { kind: 'agent', name } : { kind: 'agent' };
+}
+
 export function toolTable(backend, context = {}) {
   const t = {};
+  // Every edit of this table is an agent edit (version history, docs/version-history.md).
+  const write = (target, ref, fn, options) => writeAs(target, ref, fn, { actor: agentActor(context), ...options });
   t.get_design_context = {
     description: 'Start here. Summarizes the document: pages, active page, current selection (live editor only), open/saved documents, design tokens, artboards on the page, the user\'s saved design preferences, and the design fundamentals that apply to every design (guidelines:"none" leaves the fundamentals out when you already have them).',
     inputSchema: { document: documentArg, pageId: pageArg, guidelines: z.enum(['fundamentals', 'none']).optional().describe('fundamentals (default) appends the design fundamentals; none omits them') }, annotations: { readOnlyHint: true },
@@ -510,7 +539,7 @@ export function toolTable(backend, context = {}) {
     inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).min(1).max(50), depth: z.number().int().min(0).max(50).optional() }, annotations: { readOnlyHint: true },
     run: async ({ document: ref, pageId, ids, depth }) => {
       const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
-      return { pageId: page.id, results: ids.map(id => ({ id, code: capCode(elementCode(state.document, page, index.require(id), depth ?? Infinity)) })) };
+      return { pageId: page.id, revision: state.revision, results: ids.map(id => ({ id, code: capCode(elementCode(state.document, page, index.require(id), depth ?? Infinity)) })) };
     },
   };
   t.find_elements = {
@@ -586,8 +615,19 @@ export function toolTable(backend, context = {}) {
       return { ...(warnings.length ? { WARNINGS: warnings, warningNote: WARNING_NOTE } : { warnings: [] }), ...rest, ...(out.pendingAssets ? { pendingImages: `${out.pendingAssets} remote image(s) are downloading; take_screenshot waits for them.` } : {}), live: out.live, revision: out.revision };
     },
   };
+  t.replace_in_element = {
+    description: 'Preferred for small text or class edits. Read get_element_code, then replace old with new in exactly one occurrence of the full serialized JSX of id. Preserves untouched descendant ids. Pass the revision get_element_code returned to reject the edit if the document changed since. Invalid JSX, ambiguous matches, revision conflicts or changes outside the element abort the transaction. Returns the resulting JSX.',
+    inputSchema: { document: documentArg, pageId: pageArg, id: elementId, old: z.string().min(1).max(2_000_000), new: z.string().max(2_000_000), revision: z.string().min(1).optional() },
+    run: async ({ document: ref, pageId, id, old, new: replacement, revision }) => {
+      const out = await write(backend, ref, (document, meta) => {
+        if (revision !== undefined && meta.revision !== revision) throw new Error('Revision conflict; call get_element_code again before replacing');
+        return replaceInElement(document, pageId, id, old, replacement);
+      });
+      return { ...out.result, revision: out.revision, live: out.live };
+    },
+  };
   t.update_elements = {
-    description: 'Edit elements with a directive script. Each directive is a JSX comment followed by JSX: {/* edit ID */}, {/* replace ID */}, {/* insert as first child of ID */}, {/* insert as last child of ID */}, {/* insert before ID */}, {/* insert after ID */}, {/* delete ID */}. Directives apply independently; the report shows OK/FAIL per directive, codec warnings (must be addressed) and the resulting JSX.',
+    description: 'Prefer replace_in_element for small text/class edits. Edit elements with a directive script. Each directive is a JSX comment followed by JSX: {/* edit ID */}, {/* replace ID */}, {/* insert as first child of ID */}, {/* insert as last child of ID */}, {/* insert before ID */}, {/* insert after ID */}, {/* delete ID */}. Directives apply independently; the report shows OK/FAIL per directive, codec warnings (must be addressed) and the resulting JSX.',
     inputSchema: { document: documentArg, pageId: pageArg, edit: z.string().min(1).max(2_000_000) },
     run: async ({ document: ref, pageId, edit }) => {
       let report = '', warnings = [];
@@ -759,6 +799,8 @@ export function toolTable(backend, context = {}) {
         return { isError: true, content: [{ type: 'text', text: `Finish blocked for artboard ${artboardId} (status: blocked).\nReasons:\n${gate.reasons.map(r => `- ${r}`).join('\n')}\n\nFix these critical problems with update_elements, take_screenshot of ${artboardId} again, then call finish_artboard again:\n${fixes.join('\n')}\n\nRepair round ${budget.used} of ${budget.max}.${budget.exhausted ? ' The repair budget is now exhausted: the next finish_artboard will be accepted as "unverified".' : ''}` }] };
       }
       if (stored) session.receipts.record(key, createReceipt({ documentRevision: stored.documentRevision, pageId: stored.pageId, artboardId, screenshot: stored.screenshot, reviewNote }));
+      // Version history milestone (docs/version-history.md); never blocks finishing.
+      await backend.versions?.capture?.(ref, node.id, { reason: 'finish', label: 'Finished by agent' }).catch(() => {});
       const focus = state.live && backend.focus ? await backend.focus(ref, page.id, node.id).catch(error => ({ focused: false, error: error.message })) : { focused: false };
       return text({
         status: gate.status, verified: gate.status === 'verified', reasons: gate.reasons, artboardId,
@@ -766,6 +808,51 @@ export function toolTable(backend, context = {}) {
         headless: !state.live, focused: !!focus.focused, designLink: { name: node.name, url: linkFor(state, page.id, artboardId), markdown: `[${String(node.name || 'Artboard').replace(/[[\]]/g, '')}](${linkFor(state, page.id, artboardId)})` },
         note: `${gate.status === 'verified' ? 'Verified: screenshot at the current revision plus design review.' : 'Unverified: tell the user which checks did not happen (see reasons).'} ${state.live ? 'The artboard is selected in the editor.' : 'Saved on disk. Open the document in Verynize to view it.'} Include designLink.markdown (or the url) verbatim in your final reply so the user can open the artboard.`,
       });
+    },
+  };
+  // Version history (docs/version-history.md): per-artboard snapshots captured by the backends.
+  const versionRow = meta => ({ version: meta.id, at: new Date(meta.at).toISOString(), author: `${meta.author?.name || 'Unknown'} (${meta.author?.kind || 'unknown'})`, reason: meta.reason, summary: meta.summary, ...(meta.label ? { label: meta.label } : {}) });
+  const versionsOf = () => { if (!backend.versions) throw new Error('Version history is unavailable for this document'); return backend.versions; };
+  t.list_versions = {
+    description: 'Version history of an artboard, newest first: snapshots captured when its editor changes (you, the user, another collaborator), after 2 minutes without edits, before every restore and at finish_artboard. Each row: version id, time, author, reason, summary. Without artboard: the artboards of the page (and deleted ones) that have versions. Restore one with restore_version.',
+    inputSchema: { document: documentArg, pageId: pageArg, artboard: z.string().min(1).max(200).optional().describe('Artboard short id (or the long id of a deleted artboard from the listing without artboard)'), limit: z.number().int().min(1).max(50).optional() }, annotations: { readOnlyHint: true },
+    run: async ({ document: ref, pageId, artboard, limit = 20 }) => {
+      const store = versionsOf();
+      const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
+      if (artboard) {
+        const node = index.resolve(artboard);
+        const id = node ? index.rootOf(node).id : artboard;
+        const list = await store.list(ref, id);
+        if (!node && !list.length) throw new Error(`Artboard ${JSON.stringify(artboard)} not found on page ${page.id} and has no versions`);
+        const root = node ? index.rootOf(node) : null;
+        return { artboard: root ? root.shortId : id, name: root ? root.name : list[0].name, deleted: !root, total: list.length, versions: list.slice(0, limit).map(versionRow) };
+      }
+      const all = await store.list(ref, null);
+      const byBoard = new Map();
+      for (const meta of all) { if (!byBoard.has(meta.artboardId)) byBoard.set(meta.artboardId, []); byBoard.get(meta.artboardId).push(meta); }
+      const onPage = new Set(page.nodes.map(n => n.id));
+      const exists = new Set(state.document.pages.flatMap(p => p.nodes.map(n => n.id)));
+      const artboards = [...byBoard].filter(([id, list]) => onPage.has(id) || (!exists.has(id) && list[0].pageId === page.id)).map(([id, list]) => { const node = index.byId.get(id); return { artboard: node ? node.shortId : id, name: node ? node.name : list[0].name, deleted: !node, versions: list.length, latest: versionRow(list[0]) }; });
+      return { pageId: page.id, artboards, note: artboards.length ? 'Pass artboard to list its versions.' : 'No versions yet: they are captured as the artboards are edited.' };
+    },
+  };
+  t.restore_version = {
+    description: 'Restore an artboard to a version from list_versions. The artboard\'s subtree is replaced in one undoable edit (re-created when it was deleted; ids used elsewhere are renamed), and the state it replaces is stored as a new version first, so a restore can itself be undone with restore_version. asCopy places the version as a new artboard next to the current one instead.',
+    inputSchema: { document: documentArg, pageId: pageArg, artboard: z.string().min(1).max(200).describe('Artboard short id, or the long id of a deleted artboard'), version: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).describe('Version id from list_versions'), asCopy: z.boolean().optional() },
+    run: async ({ document: ref, pageId, artboard, version, asCopy = false }) => {
+      const store = versionsOf();
+      const found = await store.get(ref, version);
+      if (!found) throw new Error(`Version ${version} not found; call list_versions`);
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page); const node = index.resolve(artboard);
+        const id = node ? index.rootOf(node).id : artboard;
+        if (id !== found.meta.artboardId) throw new Error(`Version ${version} belongs to another artboard (${found.meta.name}); call list_versions with artboard ${JSON.stringify(artboard)}`);
+        const r = restoreVersion(document, found.snapshot, { asCopy });
+        return { document: r.document, result: { artboardId: r.artboardId, pageId: r.pageId, renamedIds: r.remapped } };
+      }, { actor: { ...agentActor(context), restore: version }, force: asCopy ? undefined : 'restore', artboardId: found.meta.artboardId, label: `Before restoring ${new Date(found.meta.at).toISOString()}` });
+      const page = getPage((await readPrepared(backend, ref)).document, out.result.pageId); const node = indexPage(page).byId.get(out.result.artboardId);
+      if (node) sessionFor(backend).receipts.reset(docKey(out.name, ref), node.shortId);
+      return { restored: version, artboard: node?.shortId || out.result.artboardId, asCopy, renamedIds: out.result.renamedIds, note: asCopy ? 'The version was placed as a new artboard.' : 'The replaced state was saved as a version; restore it to undo.', live: out.live, revision: out.revision };
     },
   };
   t.get_design_guidelines = {
@@ -967,7 +1054,7 @@ export function toolTable(backend, context = {}) {
     },
   };
   t.read_document = {
-    description: 'Low-level: the complete version 2 document JSON and its revision (needed by apply_operations).',
+    description: 'Low-level: the complete version 2 document JSON and its revision (needed by replace_in_element and apply_operations).',
     inputSchema: { name: documentArg }, annotations: { readOnlyHint: true },
     run: async ({ name }) => { const state = await readPrepared(backend, name); return { document: state.document, revision: state.revision, live: !!state.live }; },
   };
@@ -1101,13 +1188,14 @@ export function toolTable(backend, context = {}) {
   };
   const viewportArg = z.object({ width: z.number().int().min(200).max(8000), height: z.number().int().min(200).max(8000), colorScheme: z.enum(['light', 'dark']).optional() }).strict().optional().describe('Viewport for @media, vw/vh and responsive Tailwind variants (default 1440x900, light)');
   const importOptions = {
+    split: z.enum(['pages', 'none']).optional().describe('pages (default) distributes whole artboards across pages; none fails atomically on page overflow'),
     name: z.string().min(1).max(200).optional().describe('Artboard name; defaults to title, file basename, or a unique Imported page N'),
     placement: z.enum(['auto', 'preserve']).optional().describe('auto (default) places new roots beside existing roots; preserve keeps source coordinates'),
   };
   t.import_html = {
     description: 'Import HTML as new artboards: inline html, a local .html file path (its <link>/@import stylesheets and images resolve relative to it, inside its folder), or an http(s) url (needs allowRemote). Computes the CSS cascade for the viewport, turns :root custom properties into colour tokens and typed variables, keeps Tailwind classes. Also reads export_css output losslessly. Supports sanitized inline SVG and URL backgrounds. allowRemote explicitly permits local HTTP images for this local HTML import. Returns warnings for unavailable images and CSS that has no canvas equivalent.',
     inputSchema: { ...importOptions, document: documentArg, pageId: pageArg, html: z.string().min(1).max(5_000_000).optional(), path: z.string().min(1).max(4096).optional(), url: z.string().url().max(4096).optional(), viewport: viewportArg, allowRemote: z.boolean().optional().describe('Fetch http(s) stylesheets and images (default false)') },
-    run: async ({ document: ref, pageId, html, path: file, url, viewport, allowRemote = false, name, placement = 'auto' }) => {
+    run: async ({ document: ref, pageId, html, path: file, url, viewport, allowRemote = false, name, placement = 'auto', split = 'pages' }) => {
       if ([html, file, url].filter(v => v !== undefined).length !== 1) throw new Error('Pass exactly one of html, path or url');
       const { readFile, stat } = await import('node:fs/promises');
       const nodePath = await import('node:path');
@@ -1129,24 +1217,25 @@ export function toolTable(backend, context = {}) {
       }
       const state = await backend.read(ref);
       const page = getPage(state.document, pageId);
-      const prepared = await prepareHtmlImport(source, state.document, page.id, { baseUrl, root, allowFiles: file !== undefined, allowRemote, viewport, name, fallbackName: file ? nodePath.basename(file, nodePath.extname(file)) : undefined, placement });
-      let created = [], appliedWarnings = [];
-      const out = await write(backend, ref, document => { const r = prepared.apply(document); appliedWarnings = r.warnings; created = r.roots.map(root => indexPage(r.page).shortId(root)); return { document: r.document, result: null }; });
+      const prepared = await prepareHtmlImport(source, state.document, page.id, { baseUrl, root, allowFiles: file !== undefined, allowRemote, viewport, name, fallbackName: file ? nodePath.basename(file, nodePath.extname(file)) : undefined, placement, split });
+      let created = [], appliedWarnings = [], pages = [];
+      const out = await write(backend, ref, document => { const r = prepared.apply(document); appliedWarnings = r.warnings; pages = r.pages; created = pages.flatMap(p => p.artboards.map(a => a.id)); return { document: r.document, result: null }; });
       const warnings = warningText([...new Set([...prepared.warnings.filter(w => !w.startsWith('Image pending:')), ...appliedWarnings, ...(await imageWarnings(backend, ref, out))])]);
-      return { artboards: created, stats: { elements: prepared.stats.elements, stylesheets: prepared.stats.stylesheets, rules: prepared.stats.rules, tokens: prepared.stats.tokens, variables: prepared.stats.variables, bindings: prepared.stats.bindings, restored: prepared.stats.restored }, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
+      return { artboards: created, pages, stats: { elements: prepared.stats.elements, stylesheets: prepared.stats.stylesheets, rules: prepared.stats.rules, prunedRules: prepared.stats.prunedRules, tokens: prepared.stats.tokens, variables: prepared.stats.variables, bindings: prepared.stats.bindings, restored: prepared.stats.restored }, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
     },
   };
   t.import_jsx = {
     description: 'Import Tailwind JSX with any number of root elements as new artboards: export_jsx output, an exported React component (Code export), or create_artboard JSX. Variables in the @verynize header are added when missing.',
     inputSchema: { ...importOptions, document: documentArg, pageId: pageArg, code: z.string().min(1).max(5_000_000), viewport: viewportArg },
-    run: async ({ document: ref, pageId, code, viewport, name, placement = 'auto' }) => {
-      let created = [], warnings = [];
-      const out = await write(backend, ref, document => { const r = importJsxInto(document, getPage(document, pageId).id, code, { viewport: viewport || null, name, placement }); created = r.roots.map(root => indexPage(r.page).shortId(root)); warnings = warningText(r.warnings || []); return { document: r.document, result: null }; });
+    run: async ({ document: ref, pageId, code, viewport, name, placement = 'auto', split = 'pages' }) => {
+      let created = [], warnings = [], pages = [];
+      const out = await write(backend, ref, document => { const r = importJsxInto(document, getPage(document, pageId).id, code, { viewport: viewport || null, name, placement, split }); pages = r.pages; created = pages.flatMap(p => p.artboards.map(a => a.id)); warnings = warningText(r.warnings || []); return { document: r.document, result: null }; });
       warnings.push(...(await imageWarnings(backend, ref, out)));
-      return { artboards: created, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
+      return { artboards: created, pages, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
     },
   };
   Object.assign(t, shellToolTable(backend, context, { readPrepared, write, getPage, indexPage, invalidate: name => sessionFor(backend).receipts.invalidate(docKey(name)) }));
+  attachToolHints(t, { read: ref => readPrepared(backend, ref), session: sessionFor(backend), keyOf: docKey });
   return t;
 }
 
@@ -1157,7 +1246,7 @@ export const TOOL_NAMES = Object.keys(toolTable({}));
  * each validated call to another server (the stdio proxy uses this).
  */
 export function registerDesignTools(server, { backend, forward, context }) {
-  const table = toolTable(backend || {}, context);
+  const table = toolTable(backend || {}, { ...context, clientName: () => server.server?.getClientVersion?.()?.name });
   for (const [name, tool] of Object.entries(table)) {
     server.registerTool(name, { description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations }, async args => {
       try { return forward ? await forward(name, args || {}) : await execute(tool, args || {}); } catch (error) { return failure(error); }
@@ -1191,7 +1280,7 @@ export function createDesignServer(options, { instructions = INSTRUCTIONS } = {}
 // ---------------------------------------------------------------------------------------------
 // Store (on-disk) backend
 
-export function createStoreBackend(store, { screenshot, defaultName, fetchImage, searchImages, preferences, askAgent, generateImage } = {}) {
+export function createStoreBackend(store, { screenshot, defaultName, fetchImage, searchImages, preferences, askAgent, generateImage, agentName = 'Agent' } = {}) {
   const resolveName = async ref => {
     if (ref) return ref;
     if (defaultName) return defaultName;
@@ -1208,19 +1297,29 @@ export function createStoreBackend(store, { screenshot, defaultName, fetchImage,
       return { documents, editor: null, headless: true };
     },
     async read(ref) { const name = await resolveName(ref); const state = await store.read(name); return { ...state, name, live: false, selection: [] }; },
-    async transact(ref, fn) {
+    async transact(ref, fn, options = {}) {
       const name = await resolveName(ref); let result;
-      let saved;
+      let saved, before;
       for (let attempt = 0; ; attempt++) {
         try {
-          saved = await store.mutate(name, async () => { const current = await store.read(name); const out = fn(clone(current.document), { revision: current.revision }); result = out.result; return out.document; });
+          saved = await store.mutate(name, async () => { const current = await store.read(name); before = current.document; const out = fn(clone(current.document), { revision: current.revision }); result = out.result; return out.document; });
           break;
         } catch (error) {
           if (!/Document is locked/.test(error.message) || attempt >= 40) throw error;
           await new Promise(resolve => setTimeout(resolve, 25 + attempt * 5));
         }
       }
+      // Version history sidecar (integrations/version-store.mjs); history problems never fail an edit.
+      await sidecarFor(store.file(name)).observe(before, saved.document, { kind: 'agent', name: agentName, ...options.actor }, { force: options.force, artboardId: options.artboardId, label: options.label }).catch(() => {});
       return { result, revision: saved.revision, live: false, name };
+    },
+    versions: {
+      list: async (ref, artboardId) => sidecarFor(store.file(await resolveName(ref))).list(artboardId),
+      get: async (ref, id) => sidecarFor(store.file(await resolveName(ref))).get(id),
+      async capture(ref, artboardId, { reason = 'manual', label, actor } = {}) {
+        const name = await resolveName(ref); const { document } = await store.read(name);
+        return sidecarFor(store.file(name)).observe(document, document, { kind: 'agent', name: agentName, ...actor }, { force: reason === 'finish' ? 'finish' : 'manual', artboardId, label });
+      },
     },
     async create(name, title) { const state = await store.create(name, title); return { name, title, pageId: state.document.pages[0].id, revision: state.revision, live: false, opened: false }; },
     screenshot: screenshot ? async (ref, pageId, nodeId, scale, state) => screenshot(state.document, pageId, nodeId, scale) : undefined,

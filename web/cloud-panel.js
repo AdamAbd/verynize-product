@@ -409,7 +409,14 @@
         if (!saved) status("Unable to save local edits on this device. Keep this window open.");
         return;
       }
-      socket.send(JSON.stringify({ type: "ops", batch: batch.n, ops: batch.ops }));
+      socket.send(
+        JSON.stringify({
+          type: "ops",
+          batch: batch.n,
+          ops: batch.ops,
+          actor: batch.actor || undefined,
+        }),
+      );
     }
   }
   function retryRetained() {
@@ -439,6 +446,9 @@
     }
     const limits = window.VerynizeRoomLimits;
     const groups = limits.batchOps(ops.map((op) => ({ ...op, s: clock.next() })));
+    // Version history: a batch names its editor (an agent, a restore) when it is not the person;
+    // batches of different editors never merge (web/version-history.js, cloud/room-history.js).
+    const actor = window.versionHistory?.batchActor?.() || null;
     if (!groups) {
       retained = pending.flatMap((b) => b.ops).concat(ops);
       pending = [];
@@ -453,12 +463,13 @@
           last &&
           !last.sent &&
           last.size &&
+          JSON.stringify(last.actor || null) === JSON.stringify(actor) &&
           last.ops.length + group.length <= 4000 &&
           last.size + size <= limits.MESSAGE_BYTES - 65536
         ) {
           last.ops.push(...group);
           last.size += size;
-        } else pending.push({ n: ++batchNumber, ops: group, sent: false, size });
+        } else pending.push({ n: ++batchNumber, ops: group, sent: false, size, actor });
       }
     clearTimeout(sendTimer);
     sendTimer = setTimeout(sendPending, 40);
@@ -722,7 +733,12 @@
         `/api/rooms/${info.id}/ops`,
         {
           method: "POST",
-          body: JSON.stringify({ client: clientId, batch: batch.n, ops: batch.ops }),
+          body: JSON.stringify({
+            client: clientId,
+            batch: batch.n,
+            ops: batch.ops,
+            actor: batch.actor || undefined,
+          }),
         },
         info,
       );
@@ -781,7 +797,7 @@
   const clearOutbox = (key) => outbox("readwrite", (store) => store.delete(key));
   function outboxState() {
     if (!connection || protocol < 2 || !confirmed || !clientId) return null;
-    const batches = pending.map((batch) => ({ n: batch.n, ops: batch.ops }));
+    const batches = pending.map((batch) => ({ n: batch.n, ops: batch.ops, actor: batch.actor }));
     return {
       server: connection.server,
       id: connection.id,
@@ -1229,7 +1245,12 @@
     clientId = restore ? restore.clientId : randomId();
     clock = Ops ? Ops.createClock(clientId) : null;
     pending = restore
-      ? (restore.pending || []).map((batch) => ({ n: batch.n, ops: batch.ops, sent: false }))
+      ? (restore.pending || []).map((batch) => ({
+          n: batch.n,
+          ops: batch.ops,
+          sent: false,
+          actor: batch.actor || null,
+        }))
       : [];
     retained = restore?.retained || [];
     batchNumber = restore ? restore.batch || 0 : 0;

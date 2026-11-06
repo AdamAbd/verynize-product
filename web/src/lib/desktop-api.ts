@@ -189,6 +189,10 @@ export interface DesktopApi {
   designSave: Untyped;
   designReload: Untyped;
   onDesignFileChanged: Untyped;
+  // Version history sidecar of the open native file (desktop/design-files.cjs).
+  versionsList: Untyped;
+  versionsGet: Untyped;
+  versionsAdd: Untyped;
   // Running-app preview frames, Preview Edit and web capture (desktop/preview*.cjs, desktop/capture-remote.cjs).
   previewInput: Untyped;
   previewOpenBrowser(options?: PreviewTarget): Promise<unknown>;
@@ -376,6 +380,9 @@ export const DESKTOP_API_SHAPE = {
   designSave: true,
   designReload: true,
   onDesignFileChanged: true,
+  versionsList: true,
+  versionsGet: true,
+  versionsAdd: true,
   previewInput: true,
   previewOpenBrowser: true,
   previewLocation: true,

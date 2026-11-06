@@ -1,3 +1,4 @@
+const { waitForAsync } = require("./helpers/wait-for-async.cjs");
 const { _electron } = require("@playwright/test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
@@ -75,7 +76,8 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     const custom = catalog.find((p) => p.vendor === "custom");
     await page.getByRole("option", { name: custom.label, exact: true }).click();
     if (initial.providers)
-      await page.waitForFunction(
+      await waitForAsync(
+        page,
         (id) => window.desktop.imageProvider.get().then((s) => s.defaultProvider === id),
         custom.id,
       );

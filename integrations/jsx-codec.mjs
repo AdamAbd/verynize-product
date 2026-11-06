@@ -13,6 +13,7 @@ import { paintAttrs } from './paints.mjs';
 import { shaderJsxAttrs } from './shaders.mjs';
 import { baselineTextStyle, TEXT_DEFAULTS } from './codec-text.mjs';
 import { residualAttr } from './codec-residual.mjs';
+import { vectorAttrs, vectorPaths } from './vector-jsx.mjs';
 
 export { cssVarForToken };
 
@@ -84,7 +85,7 @@ export function defaultSizing(node, parent) {
     return { w: set(1) && set(3) ? 'fill' : canHug ? 'hug' : 'fixed', h: set(0) && set(2) ? 'fill' : h };
   }
   if (!parent.layout || parent.layout === 'free') return { w: canHug ? 'hug' : 'fixed', h };
-  if (node.type === 'image' || node.type === 'shader') return { w: 'fixed', h: 'fixed' };
+  if (node.type === 'image' || node.type === 'shader' || node.type === 'vector') return { w: 'fixed', h: 'fixed' };
   if (parent.layout === 'flex' && parent.direction !== 'column') return { w: canHug ? 'hug' : 'fixed', h };
   // Inline-level tags (span, a, button…) shrink to fit in block flow, like inline-block.
   if ((parent.layout === 'block' || parent.layout === 'inline') && canHug && INLINE_TAGS.has(node.htmlTag) && node.layout !== 'block') return { w: 'hug', h };
@@ -314,7 +315,7 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
     if (Number(node.textIndent)) c.push(signed('indent', node.textIndent));
     if (node.fontSmoothing === 'antialiased') c.push('antialiased'); else if (node.fontSmoothing === 'subpixel-antialiased') c.push('subpixel-antialiased');
     if (Number(node.lineClamp) > 0) c.push(`line-clamp-${node.lineClamp}`);
-  } else if (node.type !== 'image') {
+  } else if (node.type !== 'image' && node.type !== 'vector') {
     const color = node.color ?? '#d9d9d9';
     if (node.type !== 'frame' || node.token || (color !== 'transparent' && color !== '#00000000')) c.push(colorClass('bg', color, node.token, tokens));
     if (node.gradient) c.push(`bg-[${toArbitrary(node.gradient)}]`);
@@ -328,12 +329,13 @@ function classesFor(node, { parent, isRoot, tokens, ancestors }) {
     const [tl, tr, br, bl] = node.cornerRadii; const r = (p, v) => (v ? radiusClass(p, v) : null);
     const out = tl === tr && bl === br ? [r('rounded-t', tl), r('rounded-b', bl)] : tl === bl && tr === br ? [r('rounded-l', tl), r('rounded-r', tr)] : [r('rounded-tl', tl), r('rounded-tr', tr), r('rounded-br', br), r('rounded-bl', bl)];
     c.push(...out.filter(Boolean));
-  } else if (Number(node.radius)) c.push(radiusClass('rounded', Number(node.radius)));
+  } else if (Number(node.radius) && node.type !== 'vector') c.push(radiusClass('rounded', Number(node.radius)));
   if (node.opacity !== undefined && Number(node.opacity) !== 100) c.push(Number.isInteger(node.opacity) ? `opacity-${node.opacity}` : `opacity-[${round(node.opacity)}%]`);
   if (Number(node.rotation)) c.push(`rotate-[${round(node.rotation)}deg]`);
   if (node.flipX === true && node.flipY === true) c.push('-scale-100'); else if (node.flipX === true) c.push('-scale-x-100'); else if (node.flipY === true) c.push('-scale-y-100');
   // A hidden border (inspector eye) draws nothing, so it writes no classes; data-vn keeps it (codec-residual.mjs).
-  const strokeShown = node.strokeHidden !== true;
+  // A vector's stroke follows its path and is written as SVG attributes instead.
+  const strokeShown = node.strokeHidden !== true && node.type !== 'vector';
   // A side hidden with its own eye (strokeHiddenSides) draws nothing either; data-vn keeps its width.
   const sideHidden = i => Array.isArray(node.strokeHiddenSides) && node.strokeHiddenSides[i] === true;
   const widths = Array.isArray(node.strokeWidths) && node.strokeWidths.length === 4 ? node.strokeWidths.map((v, i) => (sideHidden(i) ? 0 : Number(v))) : null;
@@ -400,7 +402,7 @@ function richChildren(node) {
   return out;
 }
 
-const DEFAULT_TAG = { frame: 'div', rectangle: 'div', text: 'p', image: 'img', shader: 'Shader' };
+const DEFAULT_TAG = { frame: 'div', rectangle: 'div', text: 'p', image: 'img', shader: 'Shader', vector: 'svg' };
 const SAFE_TAGS = new Set(['div', 'section', 'header', 'footer', 'main', 'nav', 'aside', 'article', 'ul', 'ol', 'li', 'form', 'figure', 'p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'label', 'a', 'button', 'small', 'strong', 'em', 'blockquote', 'code', 'hr', 'input']);
 export const isSafeTag = tag => SAFE_TAGS.has(tag);
 export const MAX_INLINE_SRC = 2048;
@@ -432,7 +434,7 @@ export function componentAttrs(node, index) {
  */
 export function serializeNode(node, index, { depth = Infinity, tokens = {}, indent = '', parent = null, isRoot = !node.parentId, full = false } = {}) {
   const icon = node.type === 'image' && typeof node.icon === 'string' && node.icon;
-  const tag = icon ? 'Icon' : node.type !== 'image' && node.type !== 'shader' && node.htmlTag && SAFE_TAGS.has(node.htmlTag) ? node.htmlTag : DEFAULT_TAG[node.type] || 'div';
+  const tag = icon ? 'Icon' : node.type !== 'image' && node.type !== 'shader' && node.type !== 'vector' && node.htmlTag && SAFE_TAGS.has(node.htmlTag) ? node.htmlTag : DEFAULT_TAG[node.type] || 'div';
   const attrs = [`data-node-id="${escapeAttr(index.shortId(node))}"`, `data-node-label="${escapeAttr(node.name || '')}"`, ...componentAttrs(node, index)];
   if (isRoot) attrs.push(`data-component-x="${round(node.x)}"`, `data-component-y="${round(node.y)}"`);
   if (icon) {
@@ -445,7 +447,9 @@ export function serializeNode(node, index, { depth = Infinity, tokens = {}, inde
     if (node.svgColorToken) attrs.push(`data-svg-color-token="${escapeAttr(node.svgColorToken)}"`);
     attrs.push(`src="${escapeAttr(!full && src.length > MAX_INLINE_SRC ? `[embedded image ${Math.round(src.length / 1024)} KB]` : src)}"`, `alt="${escapeAttr(node.name || '')}"`);
   }
-  attrs.push(...(full && Array.isArray(node.fills) ? [`data-fills="${escapeAttr(JSON.stringify(node.fills))}"`, ...paintAttrs({ ...node, fills: undefined }, escapeAttr)] : paintAttrs(node, escapeAttr)));
+  // Vector layers write their fill and stroke as SVG attributes (vector-jsx.mjs).
+  if (node.type === 'vector') attrs.push(...vectorAttrs(node), ...paintAttrs({ ...node, fills: undefined }, escapeAttr));
+  else attrs.push(...(full && Array.isArray(node.fills) ? [`data-fills="${escapeAttr(JSON.stringify(node.fills))}"`, ...paintAttrs({ ...node, fills: undefined }, escapeAttr)] : paintAttrs(node, escapeAttr)));
   if (node.type === 'shader') attrs.push(...shaderJsxAttrs(node, escapeAttr));
   const ancestors = isRoot ? [] : typeof index.ancestors === 'function' ? index.ancestors(node) : parent ? [parent] : [];
   const classes = classesFor(node, { parent, isRoot, tokens, ancestors });
@@ -454,6 +458,7 @@ export function serializeNode(node, index, { depth = Infinity, tokens = {}, inde
   if (residual) attrs.push(residual);
   const open = `${indent}<${tag} ${attrs.join(' ')}`;
   if (node.type === 'text') return `${open}>${richChildren(node)}</${tag}>`;
+  if (node.type === 'vector') return `${open}>\n${vectorPaths(node, { indent: indent + '  ', full })}\n${indent}</${tag}>`;
   if (node.type !== 'frame') return `${open} />`;
   const children = index.children(node.id);
   if (!children.length) return `${open}></${tag}>`;
@@ -468,7 +473,7 @@ export function serializeNode(node, index, { depth = Infinity, tokens = {}, inde
 export class JsxSyntaxError extends Error {}
 
 /** Parse JSX source into an array of element ASTs. Leading import lines are ignored. */
-export function parseJsx(source, { maxLength = 5_000_000, maxElements = NODE_LIMITS.perPage } = {}) {
+export function parseJsx(source, { maxLength = 5_000_000, maxElements = NODE_LIMITS.perDocument } = {}) {
   if (typeof source !== 'string') throw new JsxSyntaxError('Code must be a string');
   if (source.length > maxLength) throw new JsxSyntaxError(`JSX parse stage exceeds ${maxLength} characters`);
   let src = source.replace(/^﻿/, '');
@@ -528,7 +533,9 @@ export function parseJsx(source, { maxLength = 5_000_000, maxElements = NODE_LIM
     }
     return { tag, attrs, children: parseChildren(tag), selfClosing: false };
   };
+  let nesting = 0;
   const parseChildren = tag => {
+    if (++nesting > 256) fail("JSX parse stage exceeds nesting limit 256");
     const children = [];
     for (;;) {
       if (i >= src.length) fail(`Missing closing tag </${tag || ''}>`);
@@ -536,7 +543,7 @@ export function parseJsx(source, { maxLength = 5_000_000, maxElements = NODE_LIM
         i += 2; skipSpace(); const name = src[i] === '>' ? '' : readName(); skipSpace();
         if (src[i] !== '>') fail('Expected > in closing tag'); i++;
         if (name !== tag) fail(`Closing tag </${name}> does not match <${tag}>`);
-        return children;
+        nesting--; return children;
       }
       if (src[i] === '<') { children.push(parseElement()); continue; }
       if (src[i] === '{') {

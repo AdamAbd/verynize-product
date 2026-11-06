@@ -340,4 +340,4 @@
 .pf-pub-primary:disabled { opacity: 0.6; }
 .pf-publish button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 /* The generic "Add to chat" selection chip would sit on the toolbar; preview context comes from Edit mode. */
-#workspace:has(.canvas-preview.selected) #selection-chat-chip { display: none; }
+#canvas-overlay[data-preview-selected] #selection-chat-chip { display: none; }

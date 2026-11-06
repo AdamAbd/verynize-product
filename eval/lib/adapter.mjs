@@ -199,4 +199,9 @@ export const outlineWidth = node => node.outlineWidth;
 export const fills = node => node.fills;
 export const svgMarkup = node => /^data:image\/svg\+xml;base64,/.test(node.src || '') ? Buffer.from(node.src.split(',')[1], 'base64').toString() : '';
 
-export const ACCESSORS = { type, w, src, outlineWidth, fills, svgMarkup, token, variants, bindings, hidden, effects, padding, radius, gap, fill, ink, strokeColor, strokeWidth, sizing, layout, direction, fontSize, lineHeightPx, fontWeight, fontFamily, letterSpacingPx, gradient, shadow, truncate, positioning, flexGrow, textTransform, box };
+// Vector layers: path data joined with " | ", the viewBox as "x y w h", the stroke cap.
+export const paths = node => (Array.isArray(node.paths) ? node.paths.map(p => p.d).join(' | ') : '');
+export const viewBox = node => (Array.isArray(node.viewBox) ? node.viewBox.join(' ') : '');
+export const strokeCap = node => node.strokeCap ?? 'butt';
+
+export const ACCESSORS = { paths, viewBox, strokeCap, type, w, src, outlineWidth, fills, svgMarkup, token, variants, bindings, hidden, effects, padding, radius, gap, fill, ink, strokeColor, strokeWidth, sizing, layout, direction, fontSize, lineHeightPx, fontWeight, fontFamily, letterSpacingPx, gradient, shadow, truncate, positioning, flexGrow, textTransform, box };

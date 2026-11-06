@@ -6,6 +6,7 @@
 // "Your app is running" card, the stop command, and propose_preview saved directly in auto access but shown as a
 // review card in edit access.
 // PREVIEW_HEADER_SHOTS=/dir saves 1440×870 screenshots of the states.
+const { waitForAsync } = require("./helpers/wait-for-async.cjs");
 const { _electron } = require('@playwright/test');
 const { mod } = require("./helpers/keys.cjs");
 const { waitForUiReady } = require('./helpers/ui-ready.cjs');
@@ -155,7 +156,7 @@ process.on('SIGTERM',()=>process.exit(0));
     await page.locator('#chat-start-preview').click();
     await page.waitForFunction(() => document.querySelector('#chat-start-preview')?.textContent === 'Stop preview', null, { timeout: 500 });
     assert.equal(await phase(), 'starting');
-    await page.waitForFunction(root => window.desktop.devServer.status({ root }).then(s => s.setup?.state === 'running'), chatRoot, { timeout: 5000 });
+    await waitForAsync(page, root => window.desktop.devServer.status({ root }).then(s => s.setup?.state === 'running'), chatRoot, { timeout: 5000 });
     assert.equal(await label(), 'Stop preview', 'still Stop preview while the setup command runs');
     assert.equal(await phase(), 'starting');
     await shot('PS3-starting');
@@ -204,12 +205,16 @@ process.on('SIGTERM',()=>process.exit(0));
     // Stop: the stop command runs; a second start does not repeat the finished setup.
     await page.locator('#chat-start-preview').click();
     await page.waitForFunction(() => document.querySelector('#chat-start-preview')?.textContent === 'Start preview', null, { timeout: 15000 });
+    // The server exits before its saved cleanup command finishes; wait for that command too.
+    await waitForAsync(page, root => window.desktop.devServer.status({ root }).then(s => s.stopCommand?.exitCode === 0), chatRoot, { timeout: 15000 });
     assert.equal(await fs.readFile(path.join(chatRoot, 'stopped.txt'), 'utf8'), 'yes', 'the stop command ran');
     await page.locator('#chat-start-preview').click();
     await page.waitForFunction(() => document.querySelector('[data-preview-phase]')?.getAttribute('data-preview-phase') === 'running', null, { timeout: 20000 });
     assert.equal(await fs.readFile(path.join(chatRoot, 'setup.log'), 'utf8'), 'ab', 'unchanged setup does not run again');
     await page.locator('#chat-start-preview').click();
     await page.waitForFunction(() => document.querySelector('#chat-start-preview')?.textContent === 'Start preview', null, { timeout: 15000 });
+    // The server exits before its saved cleanup command finishes; wait for that command too.
+    await waitForAsync(page, root => window.desktop.devServer.status({ root }).then(s => s.stopCommand?.exitCode === 0), chatRoot, { timeout: 15000 });
 
     // The intro returns after a reload until "Don't show this again".
     await page.reload();
