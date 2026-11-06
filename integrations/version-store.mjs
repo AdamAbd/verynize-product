@@ -5,6 +5,7 @@
 //   NAME.verynize.history/
 //     index.json                   {format: 1, last: {[artboardId]: {author, at, hash}}, versions: [meta]}
 //     <versionId>.json             one snapshot {artboardId, pageId, index, name, nodes}
+//     .gitignore                   `*`, written when the folder is created (history stays out of git)
 //
 // The capture rules, pruning and restore are web/version-history-core.js (integrations/version-core.mjs).
 // Writers (the desktop main process for edits made in the app, the stdio MCP server for headless agent
@@ -18,6 +19,7 @@ const SUFFIX = ".verynize.json";
 const SNAPSHOT_BYTES = 20 * 1024 * 1024;
 const FORMAT = 1;
 const VERSION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const GITIGNORE = "# Verynize version history stays local; delete this file to commit it.\n*\n";
 
 /** The sidecar directory of a `.verynize.json` file. */
 export function historyDir(file) {
@@ -82,7 +84,10 @@ export class VersionSidecar {
 
   /** Run `fn(index)` under the sidecar lock and write the index it returns. */
   async mutate(fn) {
-    await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
+    // A new sidecar ignores itself, so it never shows in `git status` next to a design kept in a
+    // repository. Written only when the folder is created: deleting it opts into committing history.
+    if (await fs.mkdir(this.dir, { recursive: true, mode: 0o700 }))
+      await fs.writeFile(path.join(this.dir, ".gitignore"), GITIGNORE, { flag: "wx" }).catch(() => {});
     const lock = path.join(this.dir, "index.json.lock");
     let handle;
     for (let attempt = 0; !handle; attempt++)

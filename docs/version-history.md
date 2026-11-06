@@ -37,7 +37,7 @@ At most 50 versions per artboard (`MAX_VERSIONS`). The newest 20 are always kept
 
 ## Storage details
 
-- **Sidecar.** `NAME.verynize.history/index.json` holds `{format: 1, last, versions: [meta]}`; each snapshot is `<version id>.json`. Writers take `index.json.lock` (exclusive create, stale after a minute) and replace the index atomically. The document and its 20 MiB limit are unaffected. The desktop main process only accepts the sidecar of the file open in its window (the renderer names the path; any other path is refused).
+- **Sidecar.** `NAME.verynize.history/index.json` holds `{format: 1, last, versions: [meta]}`; each snapshot is `<version id>.json`. Writers take `index.json.lock` (exclusive create, stale after a minute) and replace the index atomically. The document and its 20 MiB limit are unaffected. The desktop main process only accepts the sidecar of the file open in its window (the renderer names the path; any other path is refused). When the folder is created it gets a `.gitignore` containing `*`, so the history of a design kept in a git repository stays local and never shows in `git status` (git already versions committed files, and a shared index would conflict on every branch). To commit the history, delete that `.gitignore`; Verynize does not write it again.
 - **Rooms.** `history_versions (id, artboard_id, page_id, at, bytes, meta)`, snapshots in `history_parts` rows of at most 256 Ki UTF-16 units (a Durable Object SQLite row holds at most 2 MB), `history_last` per artboard. The room compares only the artboards holding the nodes a batch touched (node-level operations), else the touched pages. History failures are logged and never fail an edit.
 
 ## Restore

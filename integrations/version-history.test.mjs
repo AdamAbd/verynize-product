@@ -3,6 +3,7 @@
 // and the list_versions / restore_version MCP tools over the store backend.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -277,6 +278,33 @@ test("sidecar stores versions next to the file, prunes and survives reopening", 
   assert.equal(await sidecar.get("../index"), null);
   // Untrusted entries are validated.
   await assert.rejects(sidecar.add([{ meta: { id: "../x", artboardId: "A" }, snapshot: {} }]));
+});
+
+test("a new sidecar ignores itself in git; deleting its .gitignore opts in for good", async (t) => {
+  const dir = await tempDir(t, "verynize-history-git-");
+  const git = (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  git("init", "-q");
+  const file = path.join(dir, "home.verynize.json");
+  await fs.writeFile(file, "{}\n");
+  git("add", "home.verynize.json");
+  git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "design");
+  const sidecar = new VersionSidecar(file);
+  let current = doc(board("A", ["a1"]));
+  const edit = async (who, at) => {
+    const next = structuredClone(current);
+    next.pages[0].nodes[1].x = at;
+    await sidecar.observe(current, next, who, { at });
+    current = next;
+  };
+  await edit(agent, 1);
+  await edit(user, 2);
+  assert.ok((await sidecar.list("A")).length > 0, "a version was stored");
+  assert.equal(git("status", "--porcelain", "--untracked-files=all"), "", "history stays out of git");
+  // Deleting the .gitignore opts in; later writes do not put it back.
+  await fs.unlink(path.join(historyDir(file), ".gitignore"));
+  await edit(agent, 3);
+  assert.match(git("status", "--porcelain", "--untracked-files=all"), /home\.verynize\.history\/index\.json/);
+  await assert.rejects(fs.access(path.join(historyDir(file), ".gitignore")));
 });
 
 test("MCP list_versions and restore_version (store backend)", async (t) => {
