@@ -57,7 +57,7 @@ Claude and Codex use installed CLIs and their existing accounts. Tasks execute o
 
 **Import Figma** accepts a file/selection URL and a transient Figma personal access token with `file_content:read`. The adapter imports supported hierarchy, layout, text, paint and bitmap data, reporting approximations. Tokens are not saved. Converter/request-security tests pass; a live authenticated import has not been performed.
 
-**Generate illustration** uses your installed Codex or Claude to produce original SVG artwork, sanitizes the returned markup, and inserts SVG or rasterized PNG. A real Codex illustration request passed. This is vector-style illustration generation, not a photographic image model. **Trace selected bitmap** converts a raster into quantized SVG paths; it is a block-style trace, not smooth curve fitting.
+**Images come from chat**: ask the agent and it calls the `generate_image` tool, which uses your Codex ChatGPT plan by default (an own API key is optional, in Settings › Import & generation) and fills the selected frame or inserts an image layer. There is no separate generate dialog. **Trace selected bitmap** converts a raster into quantized SVG paths; it is a block-style trace, not smooth curve fitting.
 
 ## Shared desktop / CLI / MCP documents
 

@@ -25,7 +25,7 @@ const fs = require("node:fs/promises"),
     await page.locator(".app-menu-trigger:visible").first().click();
     await page.locator("#rectangle").click();
     assert.equal(await page.locator("#canvas .layer").count(), 4);
-    assert.equal(await page.locator("#generate-art").count(), 1);
+    assert.equal(await page.locator("#generate-art").count(), 0);
     assert.equal(await page.locator("#figma-import").count(), 1);
     const target = path.join(root, "packaged.verynize.json");
     await app.evaluate(({ dialog }, target) => {

@@ -36,7 +36,7 @@
   const button = document.createElement("button");
   button.id = "figma-import";
   button.textContent = "Import Figma";
-  document.getElementById("generate-art").after(button);
+  document.querySelector("#image").parentElement.after(button);
   const report = (title, warnings) => {
     $("figma-status").textContent =
       title +

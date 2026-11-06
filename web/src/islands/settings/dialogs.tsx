@@ -9,7 +9,6 @@ const DIALOGS: Record<string, { title?: string; label?: string; close?: string }
   "cloud-dialog": { label: "Share", close: "cloud-close" },
   "templates-dialog": { label: "Templates", close: "templates-close" },
   "views-dialog": { label: "Saved views", close: "views-close" },
-  "generate-dialog": { label: "Generate illustration", close: "generate-close" },
   "figma-dialog": { label: "Import from Figma", close: "figma-close" },
   "text-prompt": { title: "text-prompt-label" },
   modal: { title: "modal-title", close: "close" },
@@ -30,7 +29,7 @@ function labelDialogs() {
     }
   }
   // Primary actions get the purple button treatment.
-  for (const id of ["cloud-create", "generate-run", "figma-run", "text-prompt-ok", "apply", "view-save"])
+  for (const id of ["cloud-create", "figma-run", "text-prompt-ok", "apply", "view-save"])
     document.getElementById(id)?.classList.add("bd-primary");
   // Cloud share: group the room actions so the panel reads like Wonder's share popover.
   const publicLink = document.getElementById("cloud-public");

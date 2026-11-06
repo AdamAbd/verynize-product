@@ -43,7 +43,7 @@ contextBridge.exposeInMainWorld('desktop',{
  // Figma clipboard/.fig import and OAuth account (desktop/figma.cjs, desktop/figma-oauth.cjs).
  figmaClipboard:html=>call('figmaClipboard',html),figmaFile:options=>call('figmaFile',options),figmaFileOpen:()=>call('figmaFileOpen'),
  figmaOAuth:{status:()=>call('figmaOAuthStatus'),configure:options=>call('figmaOAuthConfigure',options),connect:()=>call('figmaOAuthConnect'),cancel:()=>call('figmaOAuthCancel'),disconnect:()=>call('figmaOAuthDisconnect')},
- generateVector:options=>call('generateVector',options),cancelGeneration:()=>call('cancelGeneration'),
+ 
  designDetach:()=>call('designDetach'),
  designOpen:()=>call('designOpen'),designSave:options=>call('designSave',options),designReload:()=>call('designReload'),
  onDesignFileChanged:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('design:file-changed',listener);return()=>ipcRenderer.removeListener('design:file-changed',listener)},

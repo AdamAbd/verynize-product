@@ -183,8 +183,6 @@ export interface DesktopApi {
     cancel: Untyped;
     disconnect: Untyped;
   };
-  generateVector: Untyped;
-  cancelGeneration: Untyped;
   // Native design files (desktop/design-files.cjs).
   designDetach: Untyped;
   designOpen: Untyped;
@@ -373,8 +371,6 @@ export const DESKTOP_API_SHAPE = {
   figmaFile: true,
   figmaFileOpen: true,
   figmaOAuth: { status: true, configure: true, connect: true, cancel: true, disconnect: true },
-  generateVector: true,
-  cancelGeneration: true,
   designDetach: true,
   designOpen: true,
   designSave: true,

@@ -32,7 +32,7 @@
     // Offscreen PNG/PDF rendering and native save (desktop/render.cjs).
     rasterExport: ["renderDesign", "renderPDF", "saveExport"],
     codeExport: ["exportCode"],
-    imageGeneration: ["generateVector", "imageProvider.generate"],
+    imageGeneration: ["imageProvider.generate"],
     // Figma import: link (REST or connected account), clipboard paste and .fig files (desktop/figma*.cjs).
     figma: ["importFigma", "figmaClipboard", "figmaFile", "figmaFileOpen", "figmaOAuth.status"],
     // Native HTML import (integrations codec) and template packs as zip files (desktop/template-packs.cjs).

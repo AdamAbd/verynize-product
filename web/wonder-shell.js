@@ -12,7 +12,7 @@
   toolbar.addEventListener('click',event=>{const target=event.target.closest('button');if(target&&target.id!=='pan-tool')pan(false);});
   for(const [id,name,label]of [['add-frame','sidebar-simple','Frame'],['rectangle','rectangle','Rectangle'],['image','image','Image / SVG'],['text','text-t','Text'],['add-shader','wave-sine','Shader'],['add-icon','star','Icon']]){setIcon(id,name,label);toolbar.append($(id));}
   toolbar.append($('icon-kind'));
-  for(const [id,name,label]of [['import','code','Import HTML'],['generate-art','sparkle','Generate illustration'],['figma-import','file','Import Figma'],['trace-bitmap','pencil-simple','Trace selected bitmap']]){setIcon(id,name,label);if($(id))toolbar.append($(id));}
+  for(const [id,name,label]of [['import','code','Import HTML'],['figma-import','file','Import Figma'],['trace-bitmap','pencil-simple','Trace selected bitmap']]){setIcon(id,name,label);if($(id))toolbar.append($(id));}
   workspace.append(toolbar);layerPanel.querySelector('.tool-grid')?.remove();
   const variables=document.createElement('section');variables.className='variables-section';const variableHeader=document.createElement('div');variableHeader.className='panel-section-title';variableHeader.innerHTML='<span>Variables</span>';const add=$('add-token');setIcon('add-token','plus','Create color variable');variableHeader.append(add);variables.append(variableHeader,$('tokens'));setIcon('import-tokens','code','Import CSS variables');const tokenImport=$('import-tokens');tokenImport.classList.add('variables-import');variables.append(tokenImport);
   [...layerPanel.querySelectorAll('.label')].find(el=>el.textContent==='COLOR VARIABLES')?.remove();

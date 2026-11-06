@@ -25,6 +25,7 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const env = { ...process.env, VERYNIZE_SKIP_ONBOARDING: "1", VERYNIZE_DISABLE_USAGE_PROBES: "1" };
   delete env.ELECTRON_RUN_AS_NODE;
+  delete env.VERYNIZE_DISABLE_MCP;
   let app, page;
   const launch = async () => {
     app = await _electron.launch({
@@ -137,45 +138,53 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     const rectangle = await page.evaluate(() =>
       window.design.addNode("rectangle", { x: 10, y: 20, w: 200, h: 100 }),
     );
-    await page.locator(".app-menu-trigger:visible").first().click();
-    await page.locator("#generate-art").click();
-    await page.locator("#generate-engine").selectOption("image");
-    await page.waitForFunction(() => document.getElementById("image-model").value === "fixture");
-    assert.equal(await page.locator("#generate-image-provider").inputValue(), custom.id);
-    await page.locator("#generate-prompt").fill("A blue ceramic tile");
-    await capture("generate-dialog.png");
-    const generate = async () => {
-      await page.locator("#generate-run").click();
-      await page.waitForFunction(() =>
-        /Image inserted/.test(document.getElementById("generate-status").textContent),
-      );
-    };
-    await generate();
-    let nodes = await page.evaluate(() =>
-      window.design.getDocument().pages.flatMap((p) => p.nodes),
+    assert.equal(
+      await page.locator("#generate-art, #generate-dialog").count(),
+      0,
+      "images are generated from chat, not a dialog",
     );
-    const filled = nodes.find((n) => n.id === rectangle);
-    assert.deepEqual(filled.fills, [
-      {
-        type: "image",
-        src: "data:image/png;base64," + photo.toString("base64"),
-        fit: "cover",
-        imageWidth: 96,
-        imageHeight: 64,
-      },
-    ]);
-    assert.equal(nodes.filter((n) => n.type === "image").length, 0);
-    await page.evaluate(() => window.design.setSelection([]));
-    await generate();
-    nodes = await page.evaluate(() => window.design.getDocument().pages.flatMap((p) => p.nodes));
-    const image = nodes.find((n) => n.type === "image");
-    assert.ok(image);
-    const center = await page.evaluate(() => {
-      const r = document.getElementById("canvas-wrap").getBoundingClientRect();
-      return window.design.screenToWorld(r.left + r.width / 2, r.top + r.height / 2);
-    });
-    assert.ok(Math.abs(image.x + image.w / 2 - center.x) < 1);
-    assert.ok(Math.abs(image.y + image.h / 2 - center.y) < 1);
+    // Chat agents reach the generator through the live MCP bridge's generate_image tool.
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { StreamableHTTPClientTransport } =
+      await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+    let info;
+    for (let i = 0; i < 100 && !info; i++)
+      info = await fs
+        .readFile(path.join(dir, "mcp.json"), "utf8")
+        .then(JSON.parse)
+        .catch(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    assert.ok(info, "MCP bridge started");
+    const client = new Client({ name: "settings-image-test", version: "1" });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(info.url), {
+        requestInit: { headers: { Authorization: `Bearer ${info.token}` } },
+      }),
+    );
+    const generate = async (args) => {
+      const result = await client.callTool({ name: "generate_image", arguments: args });
+      assert.ok(!result.isError, result.content?.[0]?.text);
+      return result;
+    };
+    try {
+      await generate({ prompt: "A blue ceramic tile", element: rectangle });
+      let nodes = await page.evaluate(() =>
+        window.design.getDocument().pages.flatMap((p) => p.nodes),
+      );
+      const [fill] = nodes.find((n) => n.id === rectangle).fills;
+      assert.equal(fill.type, "image");
+      assert.equal(fill.fit, "cover");
+      assert.match(fill.src, /^data:image\//);
+      assert.deepEqual([fill.imageWidth, fill.imageHeight], [96, 64]);
+      assert.equal(nodes.filter((n) => n.type === "image").length, 0);
+      await generate({ prompt: "A second tile" });
+      nodes = await page.evaluate(() => window.design.getDocument().pages.flatMap((p) => p.nodes));
+      const image = nodes.find((n) => n.type === "image");
+      assert.ok(image, "inserted as an image layer");
+      assert.deepEqual([image.w, image.h], [96, 64]);
+      await page.locator(`#canvas [data-id="${image.id}"]`).waitFor({ state: "attached" });
+    } finally {
+      await client.close().catch(() => {});
+    }
     assert.equal(requests.length, 2);
     await page.evaluate(() => window.design.runCommand("edit.undo"));
     assert.equal(
@@ -189,7 +198,7 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
       0,
     );
     console.log(
-      `PASS settings image generation (${initial.providers ? "catalog" : "v1 fallback"}): provider, keys, relaunch, fill, centered insertion, undo`,
+      `PASS settings image generation (${initial.providers ? "catalog" : "v1 fallback"}): provider, keys, relaunch, chat (MCP) fill, insertion, undo`,
     );
   } finally {
     await app?.close().catch(() => {});

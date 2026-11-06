@@ -155,7 +155,6 @@ const AREA = {
     "integrations/font-faces.mjs",
   ],
   generate: [
-    "web/generate-panel.*",
     "desktop/generate.cjs",
     "desktop/secure-storage.cjs",
     "integrations/image-provider.mjs",
