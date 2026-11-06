@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
-import documentSchema from "./document-core.mjs";
+import { NODE_LIMITS } from "./document-core.mjs";
 import { preflightImportNodes } from "./design-edit.mjs";
 import { importHtml } from "./codec-html.mjs";
 import { jsxToDocument, documentFromMeta, importJsxInto } from "./codec-source.mjs";
@@ -73,7 +73,7 @@ test("source budget allows embedded data above the former hidden cap", async () 
 test("expanded node preflight is atomic and reports counts", () => {
   const doc = documentFromMeta();
   const before = structuredClone(doc);
-  const limit = documentSchema.MAX_NODES_PER_PAGE ?? 5000;
+  const limit = NODE_LIMITS.perPage;
   assert.throws(
     () => preflightImportNodes(doc, doc.activePage, limit + 1),
     new RegExp(`existing=0, incoming=${limit + 1}, limit=${limit}`),
@@ -83,6 +83,24 @@ test("expanded node preflight is atomic and reports counts", () => {
   if (limit < 5001) assert.throws(importButtons, /incoming=5001/);
   else assert.equal(nodes(importButtons()).length, 5001);
   assert.deepEqual(doc, before);
+  // The document budget counts every page, not only the target page.
+  const full = documentFromMeta();
+  const filler = (count) =>
+    Array.from({ length: count }, (_, i) => ({
+      id: `n${full.pages.length}-${i}`,
+      type: "rectangle",
+    }));
+  while (full.pages.reduce((sum, p) => sum + p.nodes.length, 0) < NODE_LIMITS.perDocument - limit)
+    full.pages.push({ id: `p${full.pages.length}`, name: "Filler", nodes: filler(limit) });
+  const total = full.pages.reduce((sum, p) => sum + p.nodes.length, 0);
+  assert.ok(total > 10000, "the document budget is larger than the old 10,000-node cap");
+  preflightImportNodes(full, full.activePage, NODE_LIMITS.perDocument - total);
+  assert.throws(
+    () => preflightImportNodes(full, full.activePage, NODE_LIMITS.perDocument - total + 1),
+    new RegExp(
+      `document existing=${total}, incoming=${NODE_LIMITS.perDocument - total + 1}, limit=${NODE_LIMITS.perDocument}`,
+    ),
+  );
 });
 test("concurrent imports both land, auto placement separates roots and names persist", async () => {
   const dir = await mkdtemp(join(tmpdir(), "import-fidelity-"));

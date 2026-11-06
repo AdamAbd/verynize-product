@@ -9,6 +9,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import "../web/cloud-ops.js";
+import { NODE_LIMITS, nodeLimitMessage } from "../integrations/document-core.mjs";
 import { DOCUMENT_BYTES, PAGE_BYTES } from "../cloud/limits.js";
 import { digestHex } from "../cloud/http.js";
 import { Miniflare, cloudOptions } from "./cloud-harness.mjs";
@@ -229,6 +230,69 @@ try {
   assert.deepEqual(whole, expected);
   editor.ws.close();
   lazyClient.ws.close();
+
+  // Node limits include unloaded pages, and failed operations leave stored content intact.
+  const capped = { version: 2, name: "Capped", activePage: "cap0", pages: [] };
+  for (let offset = 0; offset < NODE_LIMITS.perDocument; offset += NODE_LIMITS.perPage)
+    capped.pages.push({
+      id: `cap${capped.pages.length}`,
+      name: "Capacity",
+      nodes: Array.from(
+        { length: Math.min(NODE_LIMITS.perPage, NODE_LIMITS.perDocument - offset) },
+        (_, i) => node(`limit${offset + i}`),
+      ),
+    });
+  const capRoom = await data(
+    await call("/api/rooms", { method: "POST", body: { document: capped } }),
+    201,
+  );
+  const capUrl = `/api/rooms/${capRoom.id}`;
+  const overflow = await data(
+    await call(capUrl + "/ops", {
+      method: "POST",
+      token: capRoom.token,
+      body: {
+        client: "limits",
+        batch: 1,
+        ops: [
+          {
+            t: "addPage",
+            id: "extra",
+            value: { id: "extra", name: "Extra", nodes: [node("extraNode")] },
+          },
+        ],
+      },
+    }),
+    413,
+  );
+  assert.equal(
+    overflow.error,
+    nodeLimitMessage(NODE_LIMITS.perDocument + 1, NODE_LIMITS.perDocument),
+  );
+  assert.equal(overflow.rejected, 1);
+  const retained = await data(await call(capUrl, { token: capRoom.token }));
+  assert.equal(
+    retained.document.pages.reduce((n, p) => n + p.nodes.length, 0),
+    NODE_LIMITS.perDocument,
+  );
+  const fullPage = {
+    ...board(),
+    pages: [
+      {
+        id: "p2",
+        name: "Capacity",
+        nodes: Array.from({ length: NODE_LIMITS.perPage + 1 }, (_, i) => node(`over${i}`)),
+      },
+    ],
+  };
+  const pageOverflow = await data(
+    await call("/api/rooms", { method: "POST", body: { document: fullPage } }),
+    413,
+  );
+  assert.equal(
+    pageOverflow.error,
+    nodeLimitMessage(NODE_LIMITS.perPage + 1, NODE_LIMITS.perPage, "Capacity"),
+  );
 
   // ---- limits: per page and per document, instead of one 2 MB room -------------------------
   const filler = (bytes) => "x".repeat(bytes);

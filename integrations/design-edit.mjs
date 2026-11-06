@@ -2,6 +2,7 @@
 // JSX -> node construction (Tailwind v4 classes, CSS-like flow layout with hug/fill sizing and
 // text inheritance), and the update_elements directive script. Everything here operates on plain
 // version-2 document objects.
+import { NODE_LIMITS } from './document-core.mjs';
 import { randomUUID } from 'node:crypto';
 import { NODE_DEFAULTS, parseJsx, parseClasses, collectText, isTextOnly, isSafeTag, serializeNode, cssVarForToken, normalizeColor, JsxSyntaxError, defaultSizing, isFlexRow } from './jsx-codec.mjs';
 import { layoutPage, measureText } from './codec-layout.mjs';
@@ -15,7 +16,6 @@ import { applyShaderAttrs } from './shaders.mjs';
 import { applyResidual } from './codec-residual.mjs';
 import { createInstance, createComponent, adoptCopies, componentInfo } from './component-core.mjs';
 
-import documentSchema from './document-core.mjs';
 export { measureText };
 
 export const clone = value => structuredClone(value);
@@ -545,7 +545,7 @@ export function placeBuilt(document, page, built, warnings = []) {
   const parentOf = node => page.nodes.find(n => n.id === node.parentId);
   for (const slot of built.slots || []) {
     let inMain = false;
-    for (let cur = parentOf(slot), guard = 0; cur && guard < 10000; cur = parentOf(cur), guard++) if (isMainNode(cur)) { inMain = true; break; }
+    for (let cur = parentOf(slot), guard = 0; cur && guard < NODE_LIMITS.perPage; cur = parentOf(cur), guard++) if (isMainNode(cur)) { inMain = true; break; }
     if (!inMain) { delete slot.slot; delete slot.slotName; warnings.push(`data-slot on "${slot.name}" ignored: a slot must be inside a main component (data-component="true")`); }
   }
   let pending = [...(built.instances || [])];
@@ -855,10 +855,9 @@ export function runDirectives(document, pageId, script) {
 export function preflightImportNodes(document, pageId, incoming) {
   const existing = getPage(document, pageId).nodes.length;
   const total = document.pages.reduce((sum, p) => sum + p.nodes.length, 0);
-  const pageLimit = documentSchema.MAX_NODES_PER_PAGE ?? 5000;
-  const documentLimit = documentSchema.MAX_NODES_PER_DOCUMENT ?? 10000;
+  const { perPage: pageLimit, perDocument: documentLimit } = NODE_LIMITS;
   if (existing + incoming > pageLimit || total + incoming > documentLimit)
-    throw new Error(`Import node preflight: page existing=${existing}, incoming=${incoming}, limit=${pageLimit}; document existing=${total}, incoming=${incoming}, limit=${documentLimit}`);
+    throw new Error(`Import node preflight: page existing=${existing}, incoming=${incoming}, limit=${pageLimit}; document existing=${total}, incoming=${incoming}, limit=${documentLimit}. Nothing was imported; import into another page or split the source into smaller artboards.`);
 }
 
 export function createArtboards(document, pageId, code, { viewport = null, name, placement = 'preserve', importNames = false } = {}) {

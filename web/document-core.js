@@ -20,6 +20,12 @@
 // and stay with each store (integrations/design-store.mjs, cloud/http.js).
 (function (root) {
   "use strict";
+  // Provisional limits under contention; see docs/canvas-performance/node-cap-2026-11-06.md.
+  const NODE_LIMITS = Object.freeze({ perPage: 5000, perDocument: 50000 });
+  const nodeLimitMessage = (count, limit, pageName) =>
+    pageName === undefined
+      ? `Document has ${count} nodes; limit is ${limit}. Split the design into multiple documents.`
+      : `Page "${pageName}" has ${count} nodes; limit is ${limit}. Split the page into multiple pages or documents.`;
   const IMAGE_FILL_TYPES = Object.freeze(["frame", "rectangle"]);
   const NODE_TYPES = ["rectangle", "text", "frame", "image", "shader"];
   const LAYOUTS = ["free", "flex", "grid", "block", "inline"];
@@ -510,7 +516,12 @@
     validateIcons(document);
     validateFontFaces(document);
     const ids = new Set();
-    let total = 0;
+    const total = document.pages.reduce(
+      (sum, page) => sum + (Array.isArray(page?.nodes) ? page.nodes.length : 0),
+      0,
+    );
+    if (total > NODE_LIMITS.perDocument)
+      throw new Error(nodeLimitMessage(total, NODE_LIMITS.perDocument));
     for (const page of document.pages) {
       if (!page || typeof page !== "object") throw new Error("Invalid page");
       requireString(page.id, "Page id");
@@ -525,12 +536,9 @@
         throw new Error("Page backgroundHidden must be true when set");
       if (ids.has(page.id)) throw new Error("Duplicate id");
       ids.add(page.id);
-      if (
-        !Array.isArray(page.nodes) ||
-        page.nodes.length > 5000 ||
-        (total += page.nodes.length) > 10000
-      )
-        throw new Error("Maximum 10000 nodes");
+      if (!Array.isArray(page.nodes)) throw new Error("Page nodes must be an array");
+      if (page.nodes.length > NODE_LIMITS.perPage)
+        throw new Error(nodeLimitMessage(page.nodes.length, NODE_LIMITS.perPage, page.name));
       const nodes = new Map();
       for (const node of page.nodes) {
         if (!node || typeof node !== "object") throw new Error("Invalid node");
@@ -699,6 +707,11 @@
     pages.forEach((page, i) => {
       if (!page || !Array.isArray(page.nodes)) return;
       total += page.nodes.length;
+      if (page.nodes.length > NODE_LIMITS.perPage)
+        add(
+          `pages[${i}].nodes`,
+          nodeLimitMessage(page.nodes.length, NODE_LIMITS.perPage, page.name),
+        );
       const byId = new Map();
       page.nodes.forEach((node, j) => {
         const path = `pages[${i}].nodes[${j}]`;
@@ -729,11 +742,14 @@
         }
       });
     });
-    if (total > 10000) add("pages", `Maximum 10000 nodes (${total})`);
+    if (total > NODE_LIMITS.perDocument)
+      add("pages", nodeLimitMessage(total, NODE_LIMITS.perDocument));
     return problems;
   }
 
   root.VerynizeDocument = {
+    NODE_LIMITS,
+    nodeLimitMessage,
     validateDocument,
     normalizeDocument,
     resolveAliases,

@@ -3,6 +3,7 @@
 // number and boolean literals, and child expressions are limited to comments and string literals.
 // Classes are resolved by the real Tailwind v4 engine (tailwind-map.mjs); the serializer writes
 // flow-preserving Tailwind (flex/gap/p-*/w-full) and uses `absolute` only for absolute nodes.
+import { NODE_LIMITS } from './document-core.mjs';
 import { parseClasses as mapClasses, cssVarForToken, GENERIC_FAMILIES } from './tailwind-map.mjs';
 import { paletteName, fontSizeName, fontSizeLineHeight, radiusName, shadowName, weightName, trackingName, leadingName, containerName } from './tailwind-engine.mjs';
 import { cssColorToHex } from './codec-css.mjs';
@@ -467,7 +468,7 @@ export function serializeNode(node, index, { depth = Infinity, tokens = {}, inde
 export class JsxSyntaxError extends Error {}
 
 /** Parse JSX source into an array of element ASTs. Leading import lines are ignored. */
-export function parseJsx(source, { maxLength = 5_000_000, maxElements = 5000 } = {}) {
+export function parseJsx(source, { maxLength = 5_000_000, maxElements = NODE_LIMITS.perPage } = {}) {
   if (typeof source !== 'string') throw new JsxSyntaxError('Code must be a string');
   if (source.length > maxLength) throw new JsxSyntaxError(`JSX parse stage exceeds ${maxLength} characters`);
   let src = source.replace(/^﻿/, '');
@@ -509,7 +510,7 @@ export function parseJsx(source, { maxLength = 5_000_000, maxElements = 5000 } =
   };
   const parseElement = () => {
     if (src[i] !== '<') fail('Expected an element starting with <');
-    if (++count > maxElements) fail(`More than ${maxElements} elements`);
+    if (++count > maxElements) fail(`Import has at least ${count} elements; limit is ${maxElements}. Split the import across multiple pages or documents`);
     i++;
     if (src[i] === '>') { i++; const children = parseChildren(''); return { tag: '#fragment', attrs: {}, children, selfClosing: false }; }
     const tag = readName(); const attrs = {};

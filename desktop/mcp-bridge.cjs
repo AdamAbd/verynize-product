@@ -1,3 +1,5 @@
+require('../web/document-core.js');
+const {NODE_LIMITS}=globalThis.VerynizeDocument;
 const {onWindowClosed}=require('./window-cleanup.cjs');
 /**
  * Verynize live MCP bridge (desktop main process)
@@ -125,7 +127,7 @@ const looksLikeDocument = d => d && d.version === 2 && Array.isArray(d.pages) &&
 function validBounds(bounds) {
   if (!bounds || typeof bounds !== 'object' || Array.isArray(bounds)) return false;
   const entries = Object.entries(bounds);
-  return entries.length > 0 && entries.length <= 5000 && entries.every(([, b]) => b && ['x', 'y', 'w', 'h'].every(k => Number.isFinite(b[k])));
+  return entries.length > 0 && entries.length <= NODE_LIMITS.perPage && entries.every(([, b]) => b && ['x', 'y', 'w', 'h'].every(k => Number.isFinite(b[k])));
 }
 
 function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, validateDocument, fonts }) {
