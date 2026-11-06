@@ -14,7 +14,7 @@ component expansion is included in the count. Both store and desktop bridge use
 this same design-tools transaction implementation.
 
 split: "none" retains atomic page/document preflight. A single artboard above
-5,000 nodes fails with its name, node count, limit, and advice to split its sections.
+the per-page limit (`NODE_LIMITS.perPage`, 10,000 since the idle rerun) fails with its name, node count, limit, and advice to split its sections.
 The document limit remains 50,000 nodes. Image data and other large payloads are
 still subject to the store's 20 MiB serialized-document limit.
 

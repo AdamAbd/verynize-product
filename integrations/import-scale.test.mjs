@@ -8,17 +8,21 @@ import { parseJsx } from "./jsx-codec.mjs";
 import { importHtml, parseHtml } from "./codec-html.mjs";
 import { DesignStore } from "./design-store.mjs";
 import { createStoreBackend, runTool } from "./design-tools.mjs";
+import { NODE_LIMITS } from "./document-core.mjs";
+
+const L = NODE_LIMITS.perPage,
+  part = Math.floor(L * 0.6);
 
 const board = (count, name = "Board") =>
   `<div data-name="${name}">${"<div/>".repeat(count - 1)}</div>`;
 const count = (doc) => doc.pages.reduce((n, p) => n + p.nodes.length, 0);
 test("whole artboards split by default, including a full target; opt-out is atomic", () => {
-  const doc = importJsxInto(documentFromMeta(), "page-1", board(5000)).document;
+  const doc = importJsxInto(documentFromMeta(), "page-1", board(L)).document;
   const before = structuredClone(doc);
-  const r = importJsxInto(doc, "page-1", board(3000, "A") + board(3000, "B"));
+  const r = importJsxInto(doc, "page-1", board(part, "A") + board(part, "B"));
   assert.deepEqual(
     r.document.pages.map((p) => p.nodes.length),
-    [5000, 3000, 3000],
+    [L, part, part],
   );
   assert.deepEqual(
     r.pages.map((p) => p.name),
@@ -33,14 +37,14 @@ test("whole artboards split by default, including a full target; opt-out is atom
     /Nothing was imported/,
   );
   assert.deepEqual(doc, before);
-  assert.throws(() => importJsxInto(doc, "page-1", board(5001)), /incoming=5001/);
+  assert.throws(() => importJsxInto(doc, "page-1", board(L + 1)), new RegExp(`incoming=${L + 1}`));
 });
 test("document cap rejects all incoming boards atomically", () => {
   const doc = documentFromMeta();
-  doc.pages = Array.from({ length: 10 }, (_, p) => ({
+  doc.pages = Array.from({ length: NODE_LIMITS.perDocument / L }, (_, p) => ({
     id: p ? `page-${p + 1}` : "page-1",
     name: `Page ${p}`,
-    nodes: Array.from({ length: 5000 }, (_, n) => ({
+    nodes: Array.from({ length: L }, (_, n) => ({
       id: `n-${p}-${n}`,
       type: "rectangle",
       parentId: null,
@@ -48,9 +52,11 @@ test("document cap rejects all incoming boards atomically", () => {
   }));
   assert.throws(
     () => importJsxInto(doc, "page-1", "<div/>"),
-    /document existing=50000, incoming=1, limit=50000/,
+    new RegExp(
+      `document existing=${NODE_LIMITS.perDocument}, incoming=1, limit=${NODE_LIMITS.perDocument}`,
+    ),
   );
-  assert.equal(count(doc), 50000);
+  assert.equal(count(doc), NODE_LIMITS.perDocument);
 });
 test("parser guards permit 20K elements and reject excess and deep nesting", () => {
   const start = performance.now(),
@@ -109,7 +115,7 @@ test("20K-node HTML and JSX imports run end-to-end through file backend", async 
       );
       const saved = await backend.read(format);
       assert.equal(count(saved.document), 20000);
-      assert.equal(saved.document.pages.length, 4);
+      assert.equal(saved.document.pages.length, Math.ceil(20000 / L));
       console.log(
         `20K ${format} runTool: ${(performance.now() - start).toFixed(0)}ms, heap delta ${((process.memoryUsage().heapUsed - heap) / 1048576).toFixed(1)} MiB, RSS ${(process.memoryUsage().rss / 1048576).toFixed(1)} MiB`,
       );
@@ -145,11 +151,11 @@ test("elliptical radius approximation and image sizing agree across HTML and JSX
 test("large full HTML promotes body sections and honors explicit opt-out", async () => {
   const source =
     "<html><body>" +
-    (board(3000, "A") + board(3000, "B")).replaceAll("<div/>", "<div></div>") +
+    (board(part, "A") + board(part, "B")).replaceAll("<div/>", "<div></div>") +
     "</body></html>";
   const result = await importHtml(source);
   assert.equal(result.document.pages.length, 2);
-  assert.equal(count(result.document), 6000);
+  assert.equal(count(result.document), 2 * part);
   await assert.rejects(importHtml(source, { split: "none" }), /Nothing was imported/);
 });
 test("HTML emitted element budget fails atomically at a configured limit", async () => {
@@ -159,7 +165,7 @@ test("HTML emitted element budget fails atomically at a configured limit", async
   );
 });
 test("splitting retains sibling order and per-page root placement", () => {
-  const doc = importJsxInto(documentFromMeta(), "page-1", board(5000)).document;
+  const doc = importJsxInto(documentFromMeta(), "page-1", board(L)).document;
   const result = importJsxInto(
     doc,
     "page-1",
@@ -191,7 +197,7 @@ test("HTML tool splits a full target page and opt-out preserves revision", async
     const store = new DesignStore(dir),
       backend = createStoreBackend(store);
     await store.create("full", "Full");
-    const filled = await runTool(backend, "import_jsx", { document: "full", code: board(5000) });
+    const filled = await runTool(backend, "import_jsx", { document: "full", code: board(L) });
     assert.ok(!filled.isError, JSON.stringify(filled));
     const before = await backend.read("full");
     const refused = await runTool(backend, "import_html", {
@@ -211,7 +217,7 @@ test("HTML tool splits a full target page and opt-out preserves revision", async
     assert.equal(report.pages[0].artboards[0].name, "New");
     const saved = await backend.read("full");
     assert.equal(saved.document.pages.length, 2);
-    assert.equal(saved.document.pages[0].nodes.length, 5000);
+    assert.equal(saved.document.pages[0].nodes.length, L);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

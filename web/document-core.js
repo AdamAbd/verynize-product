@@ -22,7 +22,7 @@
 (function (root) {
   "use strict";
   // Provisional limits under contention; see docs/canvas-performance/node-cap-2026-11-06.md.
-  const NODE_LIMITS = Object.freeze({ perPage: 5000, perDocument: 50000 });
+  const NODE_LIMITS = Object.freeze({ perPage: 10000, perDocument: 50000 });
   const nodeLimitMessage = (count, limit, pageName) =>
     pageName === undefined
       ? `Document has ${count} nodes; limit is ${limit}. Split the design into multiple documents.`

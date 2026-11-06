@@ -1,6 +1,6 @@
 # Cloud collaboration service
 
-Structured room documents share `VerynizeDocument.NODE_LIMITS`: provisionally 5,000 nodes per page and 50,000 per document. Counts include unloaded pages. Exceeding a node limit rejects the write with HTTP 413 and an actionable count/limit message; no partial content is saved. Existing 2 MiB page and 20 MiB document byte limits still apply. See [capacity measurements](../docs/canvas-performance/node-cap-2026-11-06.md).
+Structured room documents share `VerynizeDocument.NODE_LIMITS`: 10,000 nodes per page and 50,000 per document. Counts include unloaded pages. Exceeding a node limit rejects the write with HTTP 413 and an actionable count/limit message; no partial content is saved. Existing 2 MiB page and 20 MiB document byte limits still apply. See [capacity measurements](../docs/canvas-performance/node-cap-2026-11-06.md).
 
 The Worker (`cloud/worker.js`) serves Better Auth identities from D1 (`cloud/auth.js`) and routes the rest of the HTTP API to four kinds of SQLite Durable Objects:
 
