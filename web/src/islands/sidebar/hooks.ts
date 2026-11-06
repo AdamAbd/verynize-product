@@ -3,6 +3,7 @@
 // slice it shows actually changes.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { activePage, design, type DesignDocument, type LayerNode } from "@/lib/bridge";
+import { layerRole, type LayerRole } from "@/lib/components";
 
 /** Subscribe to a JSON-serialisable slice of the document; re-renders only when the slice changes. */
 export function useDesignSlice<T>(select: (doc: DesignDocument) => T): T {
@@ -45,6 +46,8 @@ export type TreeNode = Pick<LayerNode, "id" | "name" | "type" | "parentId" | "hi
   ellipse?: boolean;
   /** A live preview frame (preview audit PF7): drawn with a browser-window icon. */
   preview?: true;
+  /** Main component, instance root, slot or inherited instance layer (design/component-audit "Layers panel"). */
+  role?: Exclude<LayerRole, null>;
 };
 
 export function useTreeNodes(): TreeNode[] {
@@ -60,6 +63,7 @@ export function useTreeNodes(): TreeNode[] {
       direction: typeof n.direction === "string" ? n.direction : undefined,
       ellipse: n.ellipse === true || undefined,
       preview: n.preview ? (true as const) : undefined,
+      role: layerRole(n) ?? undefined,
     })),
   );
 }

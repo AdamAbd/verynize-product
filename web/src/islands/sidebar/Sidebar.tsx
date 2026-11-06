@@ -1,21 +1,24 @@
-// Left sidebar (contents of aside#layer-panel): file header, Pages, Layers.
+// Left sidebar (contents of aside#layer-panel): file header, Pages, Components, Layers.
 import { useEffect, useState } from "react";
 import { useBodyClass } from "@/lib/bridge";
 import { FileHeader } from "./FileHeader";
 import { PagesSection } from "./PagesSection";
 import { LayersSection } from "./LayersSection";
+import { ComponentsSection } from "./ComponentsSection";
 
 const STORAGE_KEY = "bd-sidebar-sections";
 
-function loadSections(): { pages: boolean; layers: boolean } {
+type Sections = { pages: boolean; components: boolean; layers: boolean };
+
+function loadSections(): Sections {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
     if (saved && typeof saved.pages === "boolean" && typeof saved.layers === "boolean")
-      return saved;
+      return { pages: saved.pages, layers: saved.layers, components: saved.components === true };
   } catch {
     /* ignore corrupt preference */
   }
-  return { pages: true, layers: true };
+  return { pages: true, components: false, layers: true };
 }
 
 export function Sidebar() {
@@ -40,6 +43,10 @@ export function Sidebar() {
       <PagesSection
         open={sections.pages}
         onToggle={() => setSections((s) => ({ ...s, pages: !s.pages }))}
+      />
+      <ComponentsSection
+        open={sections.components}
+        onToggle={() => setSections((s) => ({ ...s, components: !s.components }))}
       />
       <LayersSection
         open={sections.layers}

@@ -14,6 +14,7 @@ import {
   setSlot,
   componentInfo,
   componentProblems,
+  wouldCycle,
   adoptCopies,
   derivedId,
   snapshot,
@@ -468,6 +469,27 @@ test("cycles are never synced and creating one is refused", () => {
   const stored = clone(raw);
   normalizeDocument(stored, {}, []);
   validateDocument(stored); // documentSafety keeps loading it
+});
+
+test("wouldCycle refuses placing an instance (or a layer holding one) inside a main it depends on", () => {
+  const d = nestedDoc();
+  const all = (id) => nodesOf(d).filter((n) => n.id === id || owner(d, n) === id);
+  assert.equal(wouldCycle(d, all("c1"), "card"), true, "Card instance into Card");
+  assert.equal(
+    wouldCycle(d, all("c1"), "button"),
+    true,
+    "Card instance into Button (Card holds a Button)",
+  );
+  assert.equal(
+    wouldCycle(d, [byId(d, "b-in-card")], "button"),
+    true,
+    "Button instance into Button",
+  );
+  assert.equal(wouldCycle(d, all("c1"), null), false, "onto the page");
+  d.pages[0].nodes.push(frame("plain", { x: 900 }));
+  assert.equal(wouldCycle(d, all("c1"), "plain"), false, "into a plain frame");
+  const wrapper = [frame("w", { x: 0 }), { ...byId(d, "c1"), parentId: "w" }];
+  assert.equal(wouldCycle(d, wrapper, "card"), true, "a frame holding an instance counts too");
 });
 
 test("a missing main leaves its instances as they are; restoring it resumes the sync", () => {

@@ -102,7 +102,7 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await openSub('menu.arrange');
     assert.deepEqual(await items('[data-submenu="menu.arrange"]'), ['Bring to front', 'Bring forward', 'Send backward', 'Send to back', '|', 'Flip horizontal', 'Flip vertical']);
     await openSub('menu.layout');
-    assert.deepEqual(await items('[data-submenu="menu.layout"]'), ['Frame selection', 'Add auto layout']);
+    assert.deepEqual(await items('[data-submenu="menu.layout"]'), ['Frame selection', 'Create component', 'Add auto layout']);
     await openSub('menu.selectLayer');
     assert.deepEqual(await items('[data-submenu="menu.selectLayer"]'), ['art'], 'Select layer lists the layers under the pointer');
     await close();

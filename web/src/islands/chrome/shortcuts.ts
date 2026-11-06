@@ -15,6 +15,7 @@ export const SECTION_ORDER = [
   "SELECTION",
   "VIEW",
   "TRANSFORM",
+  "COMPONENTS",
   "SHAPE",
   "ALIGNMENT",
   "MOVEMENT",
@@ -28,6 +29,7 @@ const REGISTRY_SECTION: Record<string, string> = {
   Selection: "SELECTION",
   View: "VIEW",
   Transform: "TRANSFORM",
+  Components: "COMPONENTS",
   Shape: "SHAPE",
   Alignment: "ALIGNMENT",
   Pages: "PAGES",
@@ -144,6 +146,10 @@ const ENTRIES: Record<(typeof SECTION_ORDER)[number], Entry[]> = {
     { command: "arrange.front", label: "Bring to front" },
     { command: "transform.rotate90", label: "Rotate 90° right" },
     { command: "transform.rotate90ccw", label: "Rotate 90° left" },
+  ],
+  COMPONENTS: [
+    { command: "component.create", label: "Create component" },
+    { command: "component.detach", label: "Detach instance" },
   ],
   SHAPE: [],
   ALIGNMENT: [

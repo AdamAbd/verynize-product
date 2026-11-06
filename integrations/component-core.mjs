@@ -13,6 +13,7 @@ export const {
   setSlot,
   componentInfo,
   componentProblems,
+  wouldCycle,
   adoptCopies,
   hasComponents,
   snapshot,

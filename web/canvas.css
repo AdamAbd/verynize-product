@@ -97,3 +97,16 @@ html>body>main>#workspace.page-transparent{background-color:var(--page-checker-a
 #canvas .layer[data-text-editing]:empty{min-width:1px;min-height:1lh}
 /* Offscreen artboards (web/canvas-render.js): the board's box stays, its contents skip style, layout and paint. */
 #canvas>.layer[data-culled]{content-visibility:hidden}
+/* Components (design/component-audit/README.md "Canvas"; Figma 02/09/25): a selected main or instance gets the
+   component purple outline and handles (dashed for an instance), a selected slot the slot pink; their name labels
+   take the same colour with a ❖ (main) or ◇ (instance) mark. An empty slot shows a "+" in its centre. --iz keeps
+   the chrome a constant size on screen. Tokens: --component / --slot in web/src/styles/globals.css. */
+#canvas .layer.selected[data-component=main]:not([data-outline]),#canvas .layer.selected[data-component=instance]:not([data-outline]){outline-color:var(--component,#8f4ff0)!important}
+#canvas .layer.selected[data-component=instance]:not([data-outline]){outline-style:dashed!important}
+#canvas .layer.selected[data-component=slot]:not([data-outline]),#canvas .layer.selected[data-component=instance-slot]:not([data-outline]){outline-color:var(--slot,#df37ac)!important}
+#canvas .layer[data-component=main]>.handle,#canvas .layer[data-component=instance]>.handle{border-color:var(--component,#8f4ff0)!important}
+#canvas .layer[data-component=slot]>.handle,#canvas .layer[data-component=instance-slot]>.handle{border-color:var(--slot,#df37ac)!important}
+#canvas .layer[data-component=instance-slot]:not(:has(>.layer))::before,#canvas .layer.selected[data-component=slot]:not(:has(>.layer))::before{content:'+';position:absolute;left:50%;top:50%;width:calc(20px * var(--iz));height:calc(20px * var(--iz));translate:-50% -50%;border-radius:50%;border:calc(1px * var(--iz)) solid var(--slot,#df37ac);color:var(--slot,#df37ac);background:color-mix(in srgb,var(--slot,#df37ac) 10%,transparent);font:400 calc(15px * var(--iz))/calc(18px * var(--iz)) Inter,system-ui,sans-serif;text-align:center;pointer-events:none;box-sizing:border-box}
+#canvas-overlay .frame-label.is-main,#canvas-overlay .frame-label.is-instance,#canvas-overlay #selection-name[data-component=main],#canvas-overlay #selection-name[data-component=instance]{color:var(--component-foreground,#cbaaf9)}
+#canvas-overlay .frame-label.is-main::before,#canvas-overlay #selection-name[data-component=main]::before{content:'❖ '}
+#canvas-overlay .frame-label.is-instance::before,#canvas-overlay #selection-name[data-component=instance]::before{content:'◇ '}

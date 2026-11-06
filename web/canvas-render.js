@@ -116,6 +116,20 @@
       el.dataset.id = n.id;
       el.dataset.designType = n.type;
       el.dataset.name = n.name;
+      // Component chrome (canvas.css): main, instance root, slot of a main, or slot of an instance.
+      const role = !editing
+        ? ""
+        : n.component === true
+          ? "main"
+          : n.instanceOf
+            ? "instance"
+            : n.slot === true
+              ? n.sourceId
+                ? "instance-slot"
+                : "slot"
+              : "";
+      if (role) el.dataset.component = role;
+      else delete el.dataset.component;
       const color = tokens[n.token] || n.color;
       const css = S.nodeStyle(n, parent, {
         color,
