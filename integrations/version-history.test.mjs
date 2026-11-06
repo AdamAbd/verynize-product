@@ -299,11 +299,18 @@ test("a new sidecar ignores itself in git; deleting its .gitignore opts in for g
   await edit(agent, 1);
   await edit(user, 2);
   assert.ok((await sidecar.list("A")).length > 0, "a version was stored");
-  assert.equal(git("status", "--porcelain", "--untracked-files=all"), "", "history stays out of git");
+  assert.equal(
+    git("status", "--porcelain", "--untracked-files=all"),
+    "",
+    "history stays out of git",
+  );
   // Deleting the .gitignore opts in; later writes do not put it back.
   await fs.unlink(path.join(historyDir(file), ".gitignore"));
   await edit(agent, 3);
-  assert.match(git("status", "--porcelain", "--untracked-files=all"), /home\.verynize\.history\/index\.json/);
+  assert.match(
+    git("status", "--porcelain", "--untracked-files=all"),
+    /home\.verynize\.history\/index\.json/,
+  );
   await assert.rejects(fs.access(path.join(historyDir(file), ".gitignore")));
 });
 

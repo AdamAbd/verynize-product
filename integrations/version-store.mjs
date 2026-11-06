@@ -87,7 +87,9 @@ export class VersionSidecar {
     // A new sidecar ignores itself, so it never shows in `git status` next to a design kept in a
     // repository. Written only when the folder is created: deleting it opts into committing history.
     if (await fs.mkdir(this.dir, { recursive: true, mode: 0o700 }))
-      await fs.writeFile(path.join(this.dir, ".gitignore"), GITIGNORE, { flag: "wx" }).catch(() => {});
+      await fs
+        .writeFile(path.join(this.dir, ".gitignore"), GITIGNORE, { flag: "wx" })
+        .catch(() => {});
     const lock = path.join(this.dir, "index.json.lock");
     let handle;
     for (let attempt = 0; !handle; attempt++)
