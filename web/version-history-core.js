@@ -259,16 +259,22 @@
     return out;
   }
 
-  /** Versions for artboards idle for `idleMs` whose current state is not stored yet. */
+  /**
+   * Versions for artboards idle for `idleMs` whose current state is not stored yet. Every artboard
+   * looked at is settled: its current state counts as seen, and a deleted one is forgotten.
+   */
   function idle(state, now, current, { idleMs = IDLE_MS } = {}) {
     const out = [];
     for (const [artboardId, last] of Object.entries(state.last || {})) {
       if (now - last.at < idleMs) continue;
       if (state.latest?.[artboardId]?.hash === last.hash) continue;
       const snap = current(artboardId);
-      if (snap && fresh(state, snap)) out.push(entry(state, snap, last.author, last.at, "idle"));
-      else if (snap)
-        state.latest[artboardId] = { hash: snapshotHash(snap), nodes: snap.nodes.length };
+      if (!snap) {
+        delete state.last[artboardId];
+        continue;
+      }
+      if (fresh(state, snap)) out.push(entry(state, snap, last.author, last.at, "idle"));
+      last.hash = snapshotHash(snap);
     }
     return out;
   }

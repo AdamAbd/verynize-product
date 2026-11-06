@@ -226,9 +226,8 @@ export class RoomHistory {
     const ids = this.due(now).map((row) => row.artboardId);
     if (!ids.length) return [];
     const state = this.state(ids);
+    // Settles each artboard (seen state, deleted ones forgotten), so the alarm does not repeat.
     const out = V.idle(state, now, current, { idleMs: this.idleMs });
-    // A deleted artboard has nothing idle to store.
-    for (const id of ids) if (!current(id)) delete state.last[id];
     this.saveLast(state, ids);
     return this.store(out);
   }

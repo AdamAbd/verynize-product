@@ -120,6 +120,23 @@ test("capture rules: editor switch, idle, agent baseline, delete, restore and fi
   const timer = V.idle(state, 4000 + 3 * V.IDLE_MS, () => snap(5));
   assert.equal(timer.length, 1);
   assert.equal(V.idle(state, 4000 + 4 * V.IDLE_MS, () => snap(5)).length, 0);
+  // Idle settles what it looked at: a deleted artboard is forgotten, a state equal to the newest
+  // version counts as seen (no timer loops on either).
+  const settled = { last: { X: { author: user, at: 0, hash: "old" } }, latest: {} };
+  assert.deepEqual(
+    V.idle(settled, V.IDLE_MS, () => null),
+    [],
+  );
+  assert.deepEqual(settled.last, {});
+  const seen = {
+    last: { A: { author: user, at: 0, hash: "old" } },
+    latest: { A: { hash: V.snapshotHash(snap(5)), nodes: 2 } },
+  };
+  assert.deepEqual(
+    V.idle(seen, V.IDLE_MS, () => snap(5)),
+    [],
+  );
+  assert.equal(seen.last.A.hash, seen.latest.A.hash);
   // Identical snapshots are never stored twice.
   assert.equal(
     V.observe(state, {
