@@ -62,6 +62,8 @@ jobs:
       - run: npm run typecheck:ui
       # The tree predates the formatter (hundreds of unformatted files), so only files a PR adds
       # must be formatted. Run `npm run format:check` locally for the whole tree.
+      # The sparse checkout leaves out /design/, so a PR that only adds files there passes paths
+      # that don't exist; those must not fail the step.
       - name: Format check (files added by this PR)
         if: github.event_name == 'pull_request'
         env:
@@ -69,7 +71,7 @@ jobs:
         run: |
           git diff --name-only -z --diff-filter=A "$BASE_SHA" HEAD -- \
             | grep -zE '\.(js|cjs|mjs|ts|tsx|json|css|md|yml|yaml)$' \
-            | xargs -0 -r npx --no-install vp fmt --check
+            | xargs -0 -r npx --no-install vp fmt --check --no-error-on-unmatched-pattern
 
   plan:
     name: plan
