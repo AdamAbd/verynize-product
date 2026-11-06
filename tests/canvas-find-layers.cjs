@@ -42,8 +42,8 @@ const path = require("node:path");
               shortId: "par",
               name: "Container",
               type: "frame",
-              w: 400,
-              h: 300,
+              w: 1440,
+              h: 900,
             },
             { ...base, id: "child", shortId: "kid", parentId: "parent", name: "Nested target" },
             {
@@ -79,8 +79,28 @@ const path = require("node:path");
     const input = p.locator("#find-layers-input");
     const rows = p.locator("[data-find-result]");
     const count = p.locator("#find-layers-count");
+    const spotlight = p.locator("#find-layers-spotlight");
     const camera = () => p.evaluate(() => window.design.getCamera());
     const selection = () => p.evaluate(() => window.design.getSelection());
+    const expectFramed = async (id) => {
+      await expect
+        .poll(() =>
+          p.evaluate((id) => {
+            const node = document
+              .querySelector(`#canvas [data-id="${id}"]`)
+              .getBoundingClientRect();
+            const viewport = document.getElementById("canvas-wrap").getBoundingClientRect();
+            const finder = document.getElementById("find-layers").getBoundingClientRect();
+            return (
+              node.left >= viewport.left + 31 &&
+              node.right <= finder.left - 31 &&
+              node.top >= viewport.top + 47 &&
+              node.bottom <= viewport.bottom - 79
+            );
+          }, id),
+        )
+        .toBe(true);
+    };
     const shot = async (name) => {
       if (!process.env.FIND_SCREENSHOT_DIR) return;
       await fs.mkdir(process.env.FIND_SCREENSHOT_DIR, { recursive: true });
@@ -89,10 +109,12 @@ const path = require("node:path");
     await p.getByRole("button", { name: "Collapse Container", exact: true }).click();
     await expect(p.locator('.layer-row[data-id="child"]')).toHaveCount(0);
     await p.evaluate(() => document.activeElement?.blur());
+    const originalCamera = await camera();
     await p.keyboard.press(mod("f"));
     await expect(panel).toBeVisible();
     assert.deepEqual(await selection(), []);
     await expect(panel).toContainText("Search by layer name, text, or ID");
+    await expect(spotlight).toHaveCount(0);
     await shot("empty");
     await input.fill(" CARD ");
     await expect(rows).toHaveCount(4);
@@ -106,10 +128,33 @@ const path = require("node:path");
     await p.evaluate(() => window.design.setCamera(0, 0, 1));
     await p.keyboard.press("ArrowUp");
     await expect(count).toHaveText("4 of 4");
+    await expectFramed("11111111-2222-4333-8444-555555555555");
     const before = await camera();
     await p.keyboard.press("ArrowUp");
     await expect(count).toHaveText("3 of 4");
     assert.notDeepEqual(await camera(), before);
+    await expectFramed("text");
+    await expect(spotlight).toBeVisible();
+    const expectSpotlight = async (id) => {
+      await expect
+        .poll(() =>
+          p.evaluate((id) => {
+            const node = document
+              .querySelector(`#canvas [data-id="${id}"]`)
+              .getBoundingClientRect();
+            const focus = document.getElementById("find-layers-spotlight").getBoundingClientRect();
+            return ["left", "top", "width", "height"].every(
+              (key) => Math.abs(node[key] - focus[key]) < 1,
+            );
+          }, id),
+        )
+        .toBe(true);
+    };
+    await expectSpotlight("text");
+    await p.evaluate(() => window.design.setCamera(-320, 120, 0.25));
+    await expectSpotlight("text");
+    assert.equal(await spotlight.evaluate((el) => getComputedStyle(el).outlineWidth), "2px");
+    assert.equal(await spotlight.evaluate((el) => getComputedStyle(el).pointerEvents), "none");
     assert.deepEqual(await selection(), []);
     await p.evaluate(() =>
       window.design.updateNodes(["text"], { text: "A ripe mango [literal]. Updated" }),
@@ -118,6 +163,8 @@ const path = require("node:path");
     await expect(p.locator('#canvas [data-id="text"]')).toHaveAttribute("data-find-focus", "");
     await p.keyboard.press("Escape");
     assert.deepEqual(await selection(), ["child"]);
+    assert.deepEqual(await camera(), originalCamera);
+    await expect(spotlight).toHaveCount(0);
     await p.locator("#find-layers-button").click();
     await expect(count).toHaveText("3 of 4");
     await panel.getByRole("button", { name: "Close", exact: true }).click();
@@ -133,8 +180,11 @@ const path = require("node:path");
     await p.mouse.wheel(0, 250);
     await p.waitForTimeout(100);
     assert.deepEqual(await camera(), wheelBefore);
+    await p.evaluate(() => window.design.setCamera(0, 0, 0.16));
     await rows.first().click();
     await expect(count).toHaveText("1 of 4");
+    await expectFramed("locked");
+    assert.equal((await camera()).zoom, 1);
     assert.deepEqual(await selection(), []);
     const derivedRef = await p.evaluate(
       () => window.agentWorkspace.searchElements("Card beta").find((n) => n.id === "text").shortId,
@@ -143,6 +193,15 @@ const path = require("node:path");
     // The derived ref "ner" also occurs in Container; name matching remains enabled.
     await expect(rows).toHaveCount(2);
     await expect(p.locator('[data-find-result="text"]')).toBeVisible();
+    await input.fill("Container");
+    await expect(rows).toHaveCount(1);
+    await expectFramed("parent");
+    await expectSpotlight("parent");
+    assert.ok((await camera()).zoom > 0.16 && (await camera()).zoom < 1);
+    // Clicking the active result also recovers the framing after a manual camera change.
+    await p.evaluate(() => window.design.setCamera(0, 0, 0.16));
+    await rows.first().click();
+    await expectFramed("parent");
     for (const [query, id] of [
       ["MANGO", "text"],
       ["[literal]", "text"],
@@ -154,8 +213,11 @@ const path = require("node:path");
       await expect(rows).toHaveCount(1);
       await expect(rows).toHaveAttribute("data-find-result", id);
     }
+    await expectFramed("child");
+    const committedCamera = await camera();
     await shot("id");
     await p.keyboard.press("Enter");
+    assert.deepEqual(await camera(), committedCamera);
     await expect(panel).toHaveCount(0);
     assert.deepEqual(await selection(), ["child"]);
     await expect(p.locator('.layer-row[data-id="child"]')).toBeVisible();
@@ -164,6 +226,7 @@ const path = require("node:path");
     await input.fill("11111111-2222");
     await expect(rows).toHaveCount(0);
     await expect(panel).toContainText("No layers found for");
+    await expect(spotlight).toHaveCount(0);
     await shot("no-results");
     await input.fill("card");
     await p.evaluate(() => window.design.setActivePage("two"));

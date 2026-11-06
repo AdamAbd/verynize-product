@@ -162,8 +162,14 @@ body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) #file-home {
   display: none;
 }
 
-/* Finder preview is independent of the canvas selection and survives camera changes. */
-#canvas [data-find-focus] {
+/* Finder focus is above the artwork, below chrome, and never intercepts canvas input.
+ * The transparent window leaves the result untouched; its shadow dims the surroundings. */
+#find-layers-spotlight {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  border-radius: 2px;
   outline: 2px solid var(--color-find-active);
-  outline-offset: 3px;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 100vmax var(--command-palette-scrim);
 }

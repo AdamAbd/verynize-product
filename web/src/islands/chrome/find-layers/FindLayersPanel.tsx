@@ -5,10 +5,36 @@ import { cn } from "@/lib/utils";
 import { paletteKeyAllowed } from "../CommandPalette";
 import { setPanelOpen, usePanelOpen } from "../shortcuts";
 import { buildIndex, search } from "./search";
+import { spotlightResult } from "./spotlight";
 
 let lastQuery = "";
 let lastActiveId: string | null = null;
 const close = () => setPanelOpen("find", false);
+// Use rendered bounds so nested, rotated and auto-layout layers are framed correctly.
+function frameResult(id: string, panel: HTMLDivElement | null) {
+  const node = document.querySelector(`#canvas [data-id="${CSS.escape(id)}"]`);
+  const viewport = document.getElementById("canvas-wrap")?.getBoundingClientRect();
+  const bounds = node?.getBoundingClientRect();
+  if (!viewport || !bounds || (!bounds.width && !bounds.height)) return;
+  const camera = design().getCamera();
+  const x = (bounds.left - viewport.left - camera.x) / camera.zoom;
+  const y = (bounds.top - viewport.top - camera.y) / camera.zoom;
+  const width = bounds.width / camera.zoom;
+  const height = bounds.height / camera.zoom;
+  // Reserve the finder on the right and the floating toolbar along the bottom.
+  const right = Math.min(viewport.right, panel?.getBoundingClientRect().left ?? viewport.right);
+  const availableWidth = Math.max(40, right - viewport.left - 64);
+  const availableHeight = Math.max(40, viewport.height - 128);
+  const zoom = Math.max(
+    0.05,
+    Math.min(1, availableWidth / Math.max(1, width), availableHeight / Math.max(1, height)),
+  );
+  design().setCamera(
+    32 + (availableWidth - width * zoom) / 2 - x * zoom,
+    48 + (availableHeight - height * zoom) / 2 - y * zoom,
+    zoom,
+  );
+}
 function slice(doc: DesignDocument) {
   return {
     page: doc.activePage,
@@ -83,8 +109,14 @@ function Finder() {
     setActiveId(lastActiveId);
   };
   const previousSelection = useRef(design().getSelection());
+  const previousCamera = useRef(design().getCamera());
+  const previousPage = useRef(index.page);
   const cancel = () => {
-    design().setSelection(previousSelection.current);
+    if (index.page === previousPage.current) {
+      design().setSelection(previousSelection.current);
+      const { x, y, zoom } = previousCamera.current;
+      design().setCamera(x, y, zoom);
+    }
     close();
   };
   const input = useRef<HTMLInputElement>(null);
@@ -110,17 +142,18 @@ function Finder() {
   }, []);
   useEffect(() => {
     if (!current) return;
-    const node = document.querySelector(`#canvas [data-id="${CSS.escape(current.id)}"]`);
-    node?.scrollIntoView();
+    frameResult(current.id, panel.current);
     const highlight = () =>
       document
         .querySelector(`#canvas [data-id="${CSS.escape(current.id)}"]`)
         ?.setAttribute("data-find-focus", "");
     highlight();
+    const removeSpotlight = spotlightResult(current.id);
     const unsubscribe = design().subscribe(() => highlight());
     document.getElementById(`find-option-${current.id}`)?.scrollIntoView({ block: "nearest" });
     return () => {
       unsubscribe();
+      removeSpotlight();
       document
         .querySelectorAll("[data-find-focus]")
         .forEach((n) => n.removeAttribute("data-find-focus"));
@@ -237,6 +270,7 @@ function Finder() {
                 )}
                 onClick={() => {
                   setPosition(start + offset);
+                  frameResult(result.id, panel.current);
                   input.current?.focus();
                 }}
               >
