@@ -6,12 +6,12 @@ Per-artboard version history for local files and shared rooms. An artboard is a 
 
 `web/version-history-core.js` (`globalThis.VerynizeVersions`; Node: `integrations/version-core.mjs`) holds the capture rules, pruning and restore. Four places use it:
 
-| Where the document lives | Captured by | Stored in |
-| --- | --- | --- |
-| Native file `NAME.verynize.json` (desktop) | the editor (`web/version-history.js`) | sidecar `NAME.verynize.history/` (main process, `desktop/design-files.cjs`) |
-| Native file edited headlessly (stdio MCP, desktop bridge for files that are not open) | the store backend (`integrations/design-tools.mjs`) | the same sidecar (`integrations/version-store.mjs`) |
-| Library document (browser storage) | the editor | IndexedDB `verynize-versions` (stores `meta` and `snapshots`, keyed `<file key>\|<version id>`) |
-| Shared room | the room (`cloud/room-history.js` in `cloud/rooms.js`) | the room's SQLite (`history_versions`, `history_parts`, `history_last`) |
+| Where the document lives                                                              | Captured by                                            | Stored in                                                                                       |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Native file `NAME.verynize.json` (desktop)                                            | the editor (`web/version-history.js`)                  | sidecar `NAME.verynize.history/` (main process, `desktop/design-files.cjs`)                     |
+| Native file edited headlessly (stdio MCP, desktop bridge for files that are not open) | the store backend (`integrations/design-tools.mjs`)    | the same sidecar (`integrations/version-store.mjs`)                                             |
+| Library document (browser storage)                                                    | the editor                                             | IndexedDB `verynize-versions` (stores `meta` and `snapshots`, keyed `<file key>\|<version id>`) |
+| Shared room                                                                           | the room (`cloud/room-history.js` in `cloud/rooms.js`) | the room's SQLite (`history_versions`, `history_parts`, `history_last`)                         |
 
 ## When a version is captured
 
