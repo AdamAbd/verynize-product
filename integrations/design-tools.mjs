@@ -1,3 +1,5 @@
+import { attachToolHints } from './tool-hints.mjs';
+import { replaceInElement } from './replace-in-element.mjs';
 import { IMAGE_PROVIDERS } from "./image-provider.mjs";
 import { IMAGE_FILL_TYPES } from "./document-core.mjs";
 // One definition of the Verynize MCP tool set, shared by the stdio server
@@ -65,7 +67,7 @@ export const TOOLS_VERSION = (() => {
   const knowledge = ['index', 'fundamentals', 'archetypes', 'playbooks', 'elevation', 'color', 'skills', 'persona'].map(name => `design-knowledge/${name}.mjs`);
   let styleFiles = [];
   try { styleFiles = readdirSync(new URL('design-knowledge/styles/', import.meta.url)).filter(name => name.endsWith('.mjs')).sort().map(name => `design-knowledge/styles/${name}`); } catch { /* packaged without sources */ }
-  for (const file of ['design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', ...knowledge, ...styleFiles, 'shell-tools.mjs']) {
+  for (const file of ['tool-hints.mjs', 'replace-in-element.mjs', 'design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', ...knowledge, ...styleFiles, 'shell-tools.mjs']) {
     hash.update(file + '\0');
     try { hash.update(readFileSync(new URL(file, import.meta.url))); } catch { hash.update('missing'); }
     hash.update('\0');
@@ -251,7 +253,9 @@ const MAX_CODE = 400_000;
 async function readPrepared(backend, ref) {
   const state = await backend.read(ref);
   const document = clone(state.document); ensureShortIds(document);
-  return { ...state, document };
+  const prepared = { ...state, document };
+  sessionFor(backend).last = { ref, state: prepared }; // reused by the next-step hints
+  return prepared;
 }
 const linkFor = (state, pageId, shortId) => `verynize://node/${encodeURIComponent(state.name || 'editor')}/${encodeURIComponent(pageId)}/${encodeURIComponent(shortId)}`;
 const tagOf = node => node.htmlTag || ({ frame: 'div', rectangle: 'div', text: 'p', image: 'img', shader: 'Shader' })[node.type] || 'div';
@@ -421,16 +425,19 @@ function ignoreLayout(before, after) {
  * commands), so nothing it changed is marked as an override.
  */
 async function write(backend, ref, fn) {
-  let pending = [];
+  let pending = [], committed = null;
   const out = await backend.transact(ref, (document, meta) => {
     ensureShortIds(document);
     const before = hasComponents(document) ? clone(document) : null;
     const result = fn(document, meta);
     syncInstances(before, result.document, { reconciled: result.reconciled });
     ensureShortIds(result.document); syncTokenColors(result.document);
+    result.guard?.(result.document);
     pending = pendingAssets(result.document);
+    committed = result.document;
     return result;
   });
+  sessionFor(backend).last = { ref, state: { name: out.name, revision: out.revision, document: committed } };
   const key = docKey(out.name, ref);
   sessionFor(backend).receipts.invalidate(key);
   if (pending.length) scheduleAssets(backend, ref ?? out.name ?? undefined, pending, key);
@@ -510,7 +517,7 @@ export function toolTable(backend, context = {}) {
     inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).min(1).max(50), depth: z.number().int().min(0).max(50).optional() }, annotations: { readOnlyHint: true },
     run: async ({ document: ref, pageId, ids, depth }) => {
       const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
-      return { pageId: page.id, results: ids.map(id => ({ id, code: capCode(elementCode(state.document, page, index.require(id), depth ?? Infinity)) })) };
+      return { pageId: page.id, revision: state.revision, results: ids.map(id => ({ id, code: capCode(elementCode(state.document, page, index.require(id), depth ?? Infinity)) })) };
     },
   };
   t.find_elements = {
@@ -586,8 +593,19 @@ export function toolTable(backend, context = {}) {
       return { ...(warnings.length ? { WARNINGS: warnings, warningNote: WARNING_NOTE } : { warnings: [] }), ...rest, ...(out.pendingAssets ? { pendingImages: `${out.pendingAssets} remote image(s) are downloading; take_screenshot waits for them.` } : {}), live: out.live, revision: out.revision };
     },
   };
+  t.replace_in_element = {
+    description: 'Preferred for small text or class edits. Read get_element_code, then replace old with new in exactly one occurrence of the full serialized JSX of id. Preserves untouched descendant ids. Pass the revision get_element_code returned to reject the edit if the document changed since. Invalid JSX, ambiguous matches, revision conflicts or changes outside the element abort the transaction. Returns the resulting JSX.',
+    inputSchema: { document: documentArg, pageId: pageArg, id: elementId, old: z.string().min(1).max(2_000_000), new: z.string().max(2_000_000), revision: z.string().min(1).optional() },
+    run: async ({ document: ref, pageId, id, old, new: replacement, revision }) => {
+      const out = await write(backend, ref, (document, meta) => {
+        if (revision !== undefined && meta.revision !== revision) throw new Error('Revision conflict; call get_element_code again before replacing');
+        return replaceInElement(document, pageId, id, old, replacement);
+      });
+      return { ...out.result, revision: out.revision, live: out.live };
+    },
+  };
   t.update_elements = {
-    description: 'Edit elements with a directive script. Each directive is a JSX comment followed by JSX: {/* edit ID */}, {/* replace ID */}, {/* insert as first child of ID */}, {/* insert as last child of ID */}, {/* insert before ID */}, {/* insert after ID */}, {/* delete ID */}. Directives apply independently; the report shows OK/FAIL per directive, codec warnings (must be addressed) and the resulting JSX.',
+    description: 'Prefer replace_in_element for small text/class edits. Edit elements with a directive script. Each directive is a JSX comment followed by JSX: {/* edit ID */}, {/* replace ID */}, {/* insert as first child of ID */}, {/* insert as last child of ID */}, {/* insert before ID */}, {/* insert after ID */}, {/* delete ID */}. Directives apply independently; the report shows OK/FAIL per directive, codec warnings (must be addressed) and the resulting JSX.',
     inputSchema: { document: documentArg, pageId: pageArg, edit: z.string().min(1).max(2_000_000) },
     run: async ({ document: ref, pageId, edit }) => {
       let report = '', warnings = [];
@@ -967,7 +985,7 @@ export function toolTable(backend, context = {}) {
     },
   };
   t.read_document = {
-    description: 'Low-level: the complete version 2 document JSON and its revision (needed by apply_operations).',
+    description: 'Low-level: the complete version 2 document JSON and its revision (needed by replace_in_element and apply_operations).',
     inputSchema: { name: documentArg }, annotations: { readOnlyHint: true },
     run: async ({ name }) => { const state = await readPrepared(backend, name); return { document: state.document, revision: state.revision, live: !!state.live }; },
   };
@@ -1147,6 +1165,7 @@ export function toolTable(backend, context = {}) {
     },
   };
   Object.assign(t, shellToolTable(backend, context, { readPrepared, write, getPage, indexPage, invalidate: name => sessionFor(backend).receipts.invalidate(docKey(name)) }));
+  attachToolHints(t, { read: ref => readPrepared(backend, ref), session: sessionFor(backend), keyOf: docKey });
   return t;
 }
 

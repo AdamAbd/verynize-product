@@ -61,6 +61,7 @@ Supporting skills: **new-design-references** when real references would sharpen 
 - Name the existing direction: fonts, palette, radius, spacing rhythm, tokens. Preserve it unless asked for a new one. If the design follows a named style, or the user picks a new one, call get_design_guidelines with \`style\` so edits stay inside it.
 
 ## 2. Change the minimum
+- For small copy/class changes, read get_element_code and read_document, then use replace_in_element with the current revision and an exact old string occurring once. Preserve data-node-id attributes.
 - Edit the smallest element that solves it, in place: \`edit\` directives merge classes, \`replace\` only for a real restructure. Never insert a new version beside the old one.
 - Keep ids stable. Do not rebuild a section to change a word.
 - Reuse existing tokens and sibling classes; do not invent colors or sizes. A token change restyles every element bound to it, other artboards included, so change the token itself only when the user wants it everywhere, and ask first when other designs use it.
