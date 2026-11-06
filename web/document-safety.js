@@ -230,6 +230,7 @@
   function load(d) {
     const ctx = sources[sources.length - 1] || {},
       repairs = [];
+    if (ctx.source === "library" && window.switchCache?.isTrustedLocal(d)) return structuredClone(d);
     let prepared;
     try {
       prepared = core.prepareDocument(structuredClone(d), defaults, repairs);
