@@ -17,6 +17,9 @@ import { loadLegacyUi } from "./ui";
 
 /** The desktop UI bundle; on the web its source is part of Start's client build instead. */
 const isUiBundle = (src: string | undefined) => !!src && /(^|\/)dist\/ui\.js(\?|$)/.test(src);
+/** The desktop crash-report bootstrap (web/src/telemetry.ts); the web app starts its own SDK (../telemetry.ts). */
+const isDesktopOnly = (src: string | undefined) =>
+  !!src && /(^|\/)dist\/telemetry\.js(\?|$)/.test(src);
 
 let booted: Promise<void> | undefined;
 let styled: Promise<void> | undefined;
@@ -77,6 +80,7 @@ async function run() {
   let last: Promise<void> = Promise.resolve();
   let afterUi = false;
   for (const script of shell.scripts) {
+    if (isDesktopOnly(script.attrs.src)) continue;
     if (isUiBundle(script.attrs.src)) {
       // Runs after the scripts before it, like the ordered script it replaces.
       last = last.then(loadLegacyUi).then(

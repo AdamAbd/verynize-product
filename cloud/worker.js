@@ -43,6 +43,7 @@ import { verifiedPage, resetPasswordPage, resetPasswordScript } from "./account-
 import * as profiles from "./profiles.js";
 import { handleRoomAssets } from "./assets.js";
 import { requireRoomAccount } from "./web-access.js";
+import { reportError } from "./telemetry.js";
 import { extractInline, migrateRoomInline } from "./inline-binaries.js";
 
 export { DesignRoom } from "./rooms.js";
@@ -952,8 +953,10 @@ export default {
         return (await serveApp(request, env, url)) || missingApp();
       return env.ASSETS ? env.ASSETS.fetch(request) : new Response("Verynize API", { status: 200 });
     } catch (error) {
-      if (!(error instanceof HttpError))
+      if (!(error instanceof HttpError)) {
         console.error("request failed", url.pathname, error?.message);
+        reportError(error, "worker");
+      }
       return errorResponse(error);
     }
   },

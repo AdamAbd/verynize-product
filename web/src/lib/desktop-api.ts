@@ -18,6 +18,7 @@ import type {
   ToolServer,
 } from "@/islands/settings/workspace-ipc";
 import type { AppPreferencesApi } from "@/islands/settings/preference-runtime";
+import type { TelemetryIpc } from "./telemetry/types";
 import type { BehaviorIpc } from "@/islands/settings/behavior-store";
 import type { AgentToolsIpc } from "@/islands/settings/agents-tools";
 import type { AllowRule, PreferencesIpc } from "@/islands/settings/agent-memory";
@@ -83,6 +84,8 @@ export interface DesktopApi {
   cloudPasskeyOpen: Untyped;
   cloudPasskeyClose: Untyped;
   appPreferences: AppPreferencesApi;
+  /** Crash reports, opt-in (desktop/telemetry.cjs). */
+  telemetry: TelemetryIpc;
   agentUsage: UsageIpc;
   agentProfiles: {
     list(): Promise<ProfileList>;
@@ -322,6 +325,7 @@ export const DESKTOP_API_SHAPE = {
     worktreeLineStats: true,
     onOpenLink: true,
   },
+  telemetry: { config: true, get: true, set: true },
   agentUsage: { read: true, layers: true },
   agentProfiles: {
     list: true,

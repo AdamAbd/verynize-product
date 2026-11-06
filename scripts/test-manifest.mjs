@@ -406,6 +406,24 @@ const desktop = [
   ),
   electron("tests/changes-panel.cjs", "desktop", [...AREA.code, ...AREA.chat]),
   electron("tests/desktop-ipc.cjs", "desktop", AREA.desktopAll),
+  // Crash reports: the shared scrubber, and the desktop opt-in end to end against a local ingest server.
+  unit("tests/telemetry-scrub.cjs", "desktop", [
+    "web/telemetry-scrub.js",
+    "web/src/lib/telemetry/**",
+    "cloud/telemetry.js",
+    "server/telemetry.mjs",
+    "web-start/src/server-telemetry.ts",
+    "web-start/src/telemetry.ts",
+  ]),
+  electron("tests/telemetry-desktop.cjs", "desktop", [
+    "desktop/telemetry.cjs",
+    "web/telemetry-scrub.js",
+    "web/src/telemetry.ts",
+    "web/src/lib/telemetry/**",
+    "web/src/islands/settings/telemetry.tsx",
+    "web/src/islands/settings/pages.tsx",
+    "scripts/package-macos.cjs",
+  ]),
   electron("tests/app-protocol.cjs", "desktop", [
     "desktop/storage-migration.cjs",
     "web/storage-migration.html",

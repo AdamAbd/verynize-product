@@ -12,7 +12,11 @@ const {execFileSync}=require('node:child_process');
  await fs.rm(path.join(resources,'default_app.asar'),{force:true});
  for(const name of ['LICENSE','LICENSES.chromium.html'])await fs.copyFile(path.join(root,'node_modules/electron/dist',name),path.join(resources,name));
  const app=path.join(resources,'app');await fs.mkdir(app);
- for(const directory of ['desktop','web','integrations'])await fs.cp(path.join(root,directory),path.join(app,directory),{recursive:true,filter:source=>!source.endsWith('.test.mjs')});
+ // Source maps never ship (app://verynize would serve them): uploads to Sentry delete them, and this filter is the backstop.
+ for(const directory of ['desktop','web','integrations'])await fs.cp(path.join(root,directory),path.join(app,directory),{recursive:true,filter:source=>!source.endsWith('.test.mjs')&&!source.endsWith('.map')&&path.basename(source)!=='telemetry-build.json'});
+ // Crash reports (desktop/telemetry.cjs): the DSN and sample rates come from the packaging environment; without
+ // SENTRY_DSN_DESKTOP the app ships without a reporting destination and the setting says so.
+ if(process.env.SENTRY_DSN_DESKTOP)await fs.writeFile(path.join(app,'desktop','telemetry-build.json'),JSON.stringify({dsn:process.env.SENTRY_DSN_DESKTOP,environment:process.env.SENTRY_ENVIRONMENT||undefined,sampleRate:process.env.SENTRY_SAMPLE_RATE||undefined,tracesSampleRate:process.env.SENTRY_TRACES_SAMPLE_RATE||undefined}));
  // Runtime node_modules: every non-dev package in package-lock.json that is installed (MCP SDK, zod,
  // Claude Agent SDK, tailwindcss for the codec, @iconify/* icon sets, @fontsource/inter, …). Nested
  // node_modules travel with their parent package; optional platform packages missing here are skipped.

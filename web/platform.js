@@ -54,6 +54,8 @@
     onboarding: ["onboardingState"],
     // Share panel server default (desktop/cloud-defaults.cjs).
     cloudDefaults: ["cloudDefaults"],
+    // Crash report opt-in (desktop/telemetry.cjs).
+    telemetry: ["telemetry.get", "telemetry.set"],
   };
   const exposed = root.desktop;
   const desktop = exposed && typeof exposed === "object" ? exposed : null;

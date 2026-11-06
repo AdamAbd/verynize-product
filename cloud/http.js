@@ -3,7 +3,9 @@ export const MAX_JSON = 2 * 1024 * 1024;
 export const corsHeaders = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  "access-control-allow-headers": "Content-Type,Authorization,X-Verynize-Session",
+  // sentry-trace/baggage: distributed tracing from opted-in desktop and web clients.
+  "access-control-allow-headers":
+    "Content-Type,Authorization,X-Verynize-Session,sentry-trace,baggage",
 };
 export const jsonHeaders = {
   "content-type": "application/json",

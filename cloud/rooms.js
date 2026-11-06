@@ -18,7 +18,9 @@ import {
   roleRank,
   ROLES,
   rpcFail,
+  HttpError,
 } from "./http.js";
+import { reportError } from "./telemetry.js";
 import { mayHoldInline, rejectInline, screenOps } from "./inline-binaries.js";
 
 const Ops = globalThis.VerynizeOps;
@@ -992,6 +994,7 @@ export class DesignRoom extends DurableObject {
       }
       return json({ error: "Not found" }, 404);
     } catch (error) {
+      if (!(error instanceof HttpError)) reportError(error, "room");
       return errorResponse(error);
     }
   }

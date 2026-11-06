@@ -52,6 +52,8 @@ appProtocol.registerSchemes(protocol); // must run before app ready
 let editorOpened=false; // set once the first editor window exists (window-all-closed)
 let primaryRuntime=null,repositories=null,behaviorStore=null,agentStores=null;const liveRuntimes=new Set(); // agent runtime of the latest editor window (serves ask_agent)
 app.setName('Verynize');
+// Crash reports (desktop/telemetry.cjs): main-process error handlers, and Sentry when the user opted in (off by default).
+const telemetry=require('./telemetry.cjs');telemetry.start(app,{dialog});
 // Shared storage policy disables keychain access when HOME differs from the OS user home.
 // Image keys then remain in session memory; never enable a mock keychain for users.
 require('./secure-storage.cjs');
@@ -91,7 +93,7 @@ app.whenReady().then(async () => {
     // by macOS but retains off-screen restore bounds, making zoom/resize inconsistent.
     const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
     const width = Math.min(1440, workArea.width), height = Math.min(950, workArea.height);
-    const win = new BrowserWindow({...process.platform==='darwin'?{titleBarStyle:'hiddenInset',trafficLightPosition:{x:12,y:13}}:{},x: workArea.x + Math.round((workArea.width - width) / 2), y: workArea.y + Math.round((workArea.height - height) / 2), width, height, minWidth: Math.min(900, workArea.width), minHeight: Math.min(600, workArea.height), backgroundColor: '#141416', webPreferences: {preload:path.join(__dirname,'preload.cjs'),nodeIntegration: false, contextIsolation: true, sandbox: true}});
+    const win = new BrowserWindow({...process.platform==='darwin'?{titleBarStyle:'hiddenInset',trafficLightPosition:{x:12,y:13}}:{},x: workArea.x + Math.round((workArea.width - width) / 2), y: workArea.y + Math.round((workArea.height - height) / 2), width, height, minWidth: Math.min(900, workArea.width), minHeight: Math.min(600, workArea.height), backgroundColor: '#141416', webPreferences: {preload:path.join(__dirname,'preload.cjs'),nodeIntegration: false, contextIsolation: true, sandbox: true, additionalArguments: telemetry.rendererArguments()}});
     // Off macOS the default Electron menu would be a window menu bar: the shell draws its own (AppMenu), and the bar's
     // Alt focus/mnemonics and Ctrl accelerators (Ctrl+Shift+I, Ctrl+R, Ctrl+0/±) would compete with editor shortcuts.
     if(process.platform!=='darwin')win.removeMenu();
@@ -120,6 +122,7 @@ app.whenReady().then(async () => {
     require('./agent-memory.cjs').registerAgentMemory(handle,{userData:app.getPath('userData'),shell});
     // First-run onboarding (web/src/islands/onboarding): automated runs skip it with VERYNIZE_SKIP_ONBOARDING=1.
     handle('onboardingState',()=>({skip:process.env.VERYNIZE_SKIP_ONBOARDING==='1'}));
+    telemetry.registerTelemetry(handle); // Settings › Preferences › Privacy: telemetryGet, telemetrySet
     require('./cloud-defaults.cjs').registerCloudDefaults(handle); // Share panel server default: production or VERYNIZE_CLOUD_SERVER
     handle('openExternal',value=>{const url=new URL(value);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('Only HTTP and HTTPS links are supported');return shell.openExternal(url.href);});
     let lastNotification=0;

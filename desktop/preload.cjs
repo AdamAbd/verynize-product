@@ -1,5 +1,7 @@
 const {contextBridge,ipcRenderer}=require('electron');
 const call=(method,...args)=>ipcRenderer.invoke('desktop:'+method,...args);
+// Crash report settings for web/src/telemetry.ts, passed by main as an additional argument (desktop/telemetry.cjs).
+const telemetryConfig=(()=>{const arg=(process.argv||[]).find(value=>typeof value==='string'&&value.startsWith('--verynize-telemetry='));try{return Object.freeze(JSON.parse(atob(arg.slice('--verynize-telemetry='.length))));}catch{return Object.freeze({enabled:false});}})();
 contextBridge.exposeInMainWorld('desktop',{
  agentAccountStatus:options=>call('agentAccountStatus',options),startAgentLogin:options=>call('startAgentLogin',options),cancelAgentLogin:options=>call('cancelAgentLogin',options),agentLogout:options=>call('agentLogout',options),openExternal:url=>call('openExternal',url),onboardingState:()=>call('onboardingState'),cloudDefaults:()=>call('cloudDefaults'),
  onAuthEvent:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('desktop:auth-event',listener);return()=>ipcRenderer.removeListener('desktop:auth-event',listener)},
@@ -9,6 +11,8 @@ contextBridge.exposeInMainWorld('desktop',{
  // Settings › Preferences hook (desktop/app-preferences.cjs): custom chat sound, verynize:// links, worktree line counts.
  appPreferences:{chooseSound:()=>call('soundChoose'),readSound:()=>call('soundRead'),clearSound:()=>call('soundClear'),linksReady:options=>call('linksReady',options),setLinksEnabled:enabled=>call('linksSetEnabled',enabled),worktreeLineStats:roots=>call('worktreeLineStats',roots),onOpenLink:callback=>{const listener=(_event,url)=>callback(url);ipcRenderer.on('desktop:open-link',listener);return()=>ipcRenderer.removeListener('desktop:open-link',listener)}},
  // end Settings › Preferences hook
+ // Crash reports (desktop/telemetry.cjs): opt-in setting and the renderer SDK configuration.
+ telemetry:{config:()=>telemetryConfig,get:()=>call('telemetryGet'),set:enabled=>call('telemetrySet',enabled)},
  // Settings › Usage and Memory (desktop/agent-usage.cjs, desktop/agent-memory.cjs).
  agentUsage:{read:options=>call('agentUsage',options),layers:()=>call('agentLayerUsage')},
  // Named provider accounts, Verynize MCP servers + permission defaults, per-chat autonomy (desktop/agent-profiles.cjs, agent-tool-config.cjs, agent-autonomy.cjs).

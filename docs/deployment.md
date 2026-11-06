@@ -70,6 +70,10 @@ Shared-room images live in the R2 bucket `verynize-assets` (binding `ASSETS_BUCK
 
 Do not rotate `ASSET_SIGNING_SECRET`: every image URL stored in room documents depends on it. Without the bucket or the secret, the asset endpoints answer 503 and the desktop keeps images embedded as before. These steps were checked only with `npm run deploy:check`; no bucket or secret was created against a real account.
 
+### Crash reports (Sentry)
+
+Optional. Set `SENTRY_DSN_SERVER` as a Worker secret (`npx cf workers secrets update SENTRY_DSN_SERVER --worker verynize --text '<dsn>'`), and export `SENTRY_DSN_WEB` (and `SENTRY_AUTH_TOKEN` for source maps) when running `npm run build`. Without them nothing is reported. See docs/telemetry.md.
+
 ### Transactional email
 
 Production uses Cloudflare Email Sending through the native `EMAIL` binding.
