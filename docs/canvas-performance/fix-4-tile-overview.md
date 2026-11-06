@@ -1,5 +1,7 @@
 # Fix 4: experimental Canvas 2D overview tiles
 
+> Historical measurement. The node-cap follow-up and current decision are in [node-cap-2026-11-06.md](node-cap-2026-11-06.md).
+
 **Recommendation: keep OFF.** This branch is stacked on research PR #12 (`docs/perf-research`), without parallel fixes 1–3. It does not establish that optimized DOM zoom needs tiles. The product's 10,000-node document limit also prevents the requested 13K/50K real-app decision gate on this base. Do not bypass document validation to claim a large-document measurement.
 
 ## Activation and integration

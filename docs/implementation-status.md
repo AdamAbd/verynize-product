@@ -1,5 +1,7 @@
 # Implementation acceptance status
 
+Document capacity: provisionally 5,000 nodes per page and 50,000 per document, defined once by `VerynizeDocument.NODE_LIMITS`. Errors report count/limit and suggest splitting pages or documents; rejected loads retain recoverable content. See [contention measurements and pending idle rerun](canvas-performance/node-cap-2026-11-06.md).
+
 Updated 2026-10-31. This records actual implementation and tests, not a claim that every Wonder feature is equivalent. The original vendor checklist remains in wonder-roadmap.md.
 
 ## Renderer status — 2026-11-05

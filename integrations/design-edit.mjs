@@ -2,6 +2,7 @@
 // JSX -> node construction (Tailwind v4 classes, CSS-like flow layout with hug/fill sizing and
 // text inheritance), and the update_elements directive script. Everything here operates on plain
 // version-2 document objects.
+import { NODE_LIMITS } from './document-core.mjs';
 import { randomUUID } from 'node:crypto';
 import { NODE_DEFAULTS, parseJsx, parseClasses, collectText, isTextOnly, isSafeTag, serializeNode, cssVarForToken, normalizeColor, JsxSyntaxError, defaultSizing, isFlexRow } from './jsx-codec.mjs';
 import { layoutPage, measureText } from './codec-layout.mjs';
@@ -526,7 +527,7 @@ export function placeBuilt(document, page, built, warnings = []) {
   const parentOf = node => page.nodes.find(n => n.id === node.parentId);
   for (const slot of built.slots || []) {
     let inMain = false;
-    for (let cur = parentOf(slot), guard = 0; cur && guard < 10000; cur = parentOf(cur), guard++) if (isMainNode(cur)) { inMain = true; break; }
+    for (let cur = parentOf(slot), guard = 0; cur && guard < NODE_LIMITS.perPage; cur = parentOf(cur), guard++) if (isMainNode(cur)) { inMain = true; break; }
     if (!inMain) { delete slot.slot; delete slot.slotName; warnings.push(`data-slot on "${slot.name}" ignored: a slot must be inside a main component (data-component="true")`); }
   }
   let pending = [...(built.instances || [])];

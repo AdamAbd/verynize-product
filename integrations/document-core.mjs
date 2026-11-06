@@ -8,6 +8,8 @@ import "../web/document-core.js";
 
 const api = globalThis.VerynizeDocument;
 export const {
+  NODE_LIMITS,
+  nodeLimitMessage,
   validateDocument,
   normalizeDocument,
   resolveAliases,
