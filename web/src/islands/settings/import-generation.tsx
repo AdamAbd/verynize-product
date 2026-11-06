@@ -134,10 +134,25 @@ export function ImportGenerationSection() {
               </SelectContent>
             </Select>
           </Row>
-          {enabled &&
-            settings &&
-            (settings.keys ? (["google", "openai", "custom"] as const) : (["custom"] as const)).map(
-              (vendor) => (
+          {enabled && (
+            <Row
+              title="Codex · ChatGPT plan"
+              description="Uses your Codex login on this computer. No image API key needed."
+            >
+              <span>
+                {providers.find((provider) => provider.id === "codex_plan")?.status ||
+                  "Checking status"}
+              </span>
+            </Row>
+          )}
+          <details>
+            <summary className="cursor-pointer px-4 py-2 text-sm">Use your own API key</summary>
+            {enabled &&
+              settings &&
+              (settings.keys
+                ? (["google", "openai", "custom"] as const)
+                : (["custom"] as const)
+              ).map((vendor) => (
                 <KeyRow
                   key={vendor}
                   vendor={vendor}
@@ -150,8 +165,8 @@ export function ImportGenerationSection() {
                     })
                   }
                 />
-              ),
-            )}
+              ))}
+          </details>
         </Card>
         <p role="status" className="mt-2 px-4 text-sm text-muted-foreground">
           {message}

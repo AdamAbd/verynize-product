@@ -1,87 +1,12 @@
 const { onWindowClosed } = require("./window-cleanup.cjs");
 const fs = require("node:fs/promises");
-const os = require("node:os");
 const path = require("node:path");
-const { execFile } = require("node:child_process");
 const { app, safeStorage } = require("electron");
 const { isEncryptionAvailable } = require("./secure-storage.cjs");
 const { pathToFileURL } = require("node:url");
-const exec = require("node:util").promisify(execFile);
-const agents = require("./agents.cjs");
+const codexImage = require("./codex-image.cjs");
 function registerGeneration(handle, parent) {
-  let active = null;
-  onWindowClosed(parent, () => {
-    active?.cancel();
-    imageGenerator.cancel(parent);
-  });
-  handle("generateVector", async (options) => {
-    if (active) throw Error("A vector is already being generated");
-    if (
-      !options ||
-      !["claude", "codex"].includes(options.agent) ||
-      typeof options.prompt !== "string" ||
-      !options.prompt.trim() ||
-      options.prompt.length > 4000
-    )
-      throw Error("Choose an agent and a prompt under 4000 characters");
-    const provider = (await agents.discover()).find((a) => a.id === options.agent && a.available);
-    if (!provider) throw Error("Selected agent CLI is not installed");
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "better-vector-"));
-    try {
-      await exec("git", ["init", root]);
-      const svg = await new Promise((resolve, reject) => {
-        let output = "",
-          done = false,
-          timer;
-        const finish = (error, value) => {
-          if (done) return;
-          done = true;
-          clearTimeout(timer);
-          error ? reject(error) : resolve(value);
-        };
-        active = agents.start(
-          provider.path,
-          provider.id,
-          "Create one original standalone SVG illustration for the following request. Return only the SVG markup, starting with <svg and ending with </svg>. Use a viewBox of 0 0 512 512. Use vector shapes, paths and text only. No external references, images, scripts, foreignObject, event handlers, or tools. Do not read or change any files. Request: " +
-            options.prompt,
-          root,
-          (event) => {
-            if (event.type === "stdout") {
-              output += event.text;
-              if (output.length > 2 * 1024 * 1024) {
-                active?.cancel();
-                finish(Error("Generated SVG exceeded 2 MB"));
-              }
-            }
-            if (event.type === "error") finish(Error(event.text));
-            if (event.type === "exit") {
-              if (event.code !== 0) {
-                finish(Error("Agent generation failed; check CLI account and permissions"));
-                return;
-              }
-              const match = output.match(/<svg\b[\s\S]*?<\/svg>/i);
-              if (!match)
-                finish(Error("Agent did not return SVG; try a more specific illustration prompt"));
-              else finish(null, match[0]);
-            }
-          },
-        );
-        timer = setTimeout(() => {
-          active?.cancel();
-          finish(Error("Vector generation timed out"));
-        }, 90000);
-      });
-      return { svg };
-    } finally {
-      active = null;
-      await fs.rm(root, { recursive: true, force: true });
-    }
-  });
-  handle("cancelGeneration", () => {
-    active?.cancel();
-    imageGenerator.cancel(parent);
-    return true;
-  });
+  onWindowClosed(parent, () => imageGenerator.cancel(parent));
   handle("imageProviderGet", () => imageGenerator.get());
   handle("imageProviderSet", (options) => imageGenerator.set(options));
   handle("generateImage", (options) => imageGenerator.generate(options, parent));
@@ -115,6 +40,14 @@ function createImageGenerator() {
     const engine = await load();
     const saved = engine.migrateSettings(raw);
     if (raw?.version !== 2) await save(saved);
+    if (
+      !saved.providerChosen &&
+      !Object.values(saved.keys).some(Boolean) &&
+      !Object.values(sessionKeys).some(Boolean)
+    )
+      saved.defaultProvider = (await codexImage.status()).available
+        ? "codex_plan"
+        : engine.DEFAULT_IMAGE_PROVIDER;
     return saved;
   }
   function key(saved, vendor) {
@@ -138,6 +71,7 @@ function createImageGenerator() {
         ];
       }),
     );
+    const codex = await codexImage.status();
     return {
       defaultProvider: saved.defaultProvider,
       providers: engine.IMAGE_PROVIDERS.map((p) => ({
@@ -145,9 +79,12 @@ function createImageGenerator() {
         label: p.label,
         vendor: p.vendor,
         model: p.vendor === "custom" ? saved.custom.model : p.model,
-        hasKey: keys[p.vendor].hasKey,
+        hasKey: keys[p.vendor]?.hasKey || false,
+        ...(p.vendor === "codex" ? { status: codex.status } : {}),
         available:
-          keys[p.vendor].hasKey || (p.vendor === "custom" && saved.custom.provider === "http"),
+          p.vendor === "codex"
+            ? codex.available
+            : keys[p.vendor].hasKey || (p.vendor === "custom" && saved.custom.provider === "http"),
       })),
       keys,
       custom: saved.custom,
@@ -156,8 +93,10 @@ function createImageGenerator() {
       ...saved.custom,
       ...keys.custom,
       configured:
-        saved.defaultProvider === "custom" ||
-        keys[engine.IMAGE_PROVIDERS.find((p) => p.id === saved.defaultProvider).vendor].hasKey,
+        saved.defaultProvider === "codex_plan"
+          ? codex.available
+          : saved.defaultProvider === "custom" ||
+            keys[engine.IMAGE_PROVIDERS.find((p) => p.id === saved.defaultProvider).vendor].hasKey,
     };
   }
   function locked(fn) {
@@ -194,6 +133,8 @@ function createImageGenerator() {
         }
         const next = engine.migrateSettings({
           ...saved,
+          providerChosen:
+            saved.providerChosen || !!options.defaultProvider || !!Object.keys(legacy).length,
           defaultProvider:
             options.defaultProvider ??
             (Object.keys(legacy).length ? "custom" : saved.defaultProvider),
@@ -229,7 +170,7 @@ function createImageGenerator() {
         const now = Date.now();
         while (mcpAttempts.length && mcpAttempts[0] <= now - 3600000) mcpAttempts.shift();
         if (mcpAttempts.length >= 5)
-          throw Error("Paid image generation limit reached (5 attempts per hour)");
+          throw Error("Image generation limit reached (5 attempts per hour)");
         mcpAttempts.push(now);
       }
       const imageAbort = new AbortController();
@@ -263,6 +204,7 @@ function createImageGenerator() {
           apiKey: key(saved, entry.vendor),
           prompt: options.prompt,
           signal,
+          codex: codexImage.generate,
         });
       } finally {
         imageAborts.delete(caller);

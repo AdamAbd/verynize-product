@@ -59,11 +59,6 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     );
     await page.evaluate(() => window.appSettings.close());
     await page.locator(".app-menu-trigger:visible").first().click();
-    await page.locator("#generate-art").click();
-    await page.locator("#generate-dialog").waitFor({ state: "visible" });
-    await page.locator("#generate-engine").selectOption("image");
-    await page.locator("#generate-close").click();
-    await page.locator(".app-menu-trigger:visible").first().click();
     await page.locator("#figma-import").click();
     await page.locator("#figma-dialog").waitFor({ state: "visible" });
     await page.evaluate(() => window.desktop.figmaOAuth.status());
@@ -95,7 +90,7 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     assert.equal(figma.secureStorage, false);
     assert.deepEqual(await diagnostics(), { availabilityChecks: 0, keychainReachable: false });
     console.log(
-      "PASS launch, Preferences, Generate and Figma never probe the keychain under redirected HOME; image keys stay in session memory",
+      "PASS launch, Preferences and Figma never probe the keychain under redirected HOME; image keys stay in session memory",
     );
   } finally {
     if (app) await app.close();

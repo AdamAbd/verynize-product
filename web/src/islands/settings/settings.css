@@ -32,7 +32,7 @@ html #settings-screen[data-bd] input[type="search"]::-webkit-search-cancel-butto
 }
 
 /* ---------- 2. Shared dialog chrome ---------- */
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal) {
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) {
   box-sizing: border-box;
   padding: 16px;
   background: var(--card);
@@ -44,15 +44,15 @@ html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #fig
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)::backdrop {
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)::backdrop {
   background: rgb(0 0 0 / 0.5);
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal) * {
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) * {
   box-sizing: border-box;
 }
 
 /* Header: 13px title + 24px icon close button. */
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog) > header,
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog) > header,
 html #modal > .dialog-head {
   display: flex;
   align-items: center;
@@ -65,7 +65,7 @@ html #modal > .dialog-head {
   border: 0;
   overflow: visible;
 }
-html :is(#cloud-dialog, #generate-dialog, #figma-dialog) > header > strong,
+html :is(#cloud-dialog, #figma-dialog) > header > strong,
 html #modal #modal-title,
 html :is(#templates-dialog, #views-dialog) h2 {
   flex: 1;
@@ -92,7 +92,7 @@ html #templates-dialog h2 {
   line-height: 24px;
 }
 
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close {
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close {
   flex: none;
   display: inline-grid;
   place-items: center;
@@ -109,7 +109,7 @@ html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #fig
   overflow: hidden;
   cursor: default;
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close::before {
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close::before {
   content: "";
   width: 14px;
   height: 14px;
@@ -119,22 +119,22 @@ html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #fig
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M18 6 6 18M6 6l12 12'/%3E%3C/svg%3E")
     center / contain no-repeat;
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close:hover {
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close:hover {
   background: var(--muted);
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close:hover::before {
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close:hover::before {
   background: var(--foreground);
 }
 
 /* Body copy, labels, fields. */
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog) > p,
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog) > p,
 html #cloud-conflict p {
   margin: 0 0 12px;
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 18px;
 }
-html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt) label {
+html :is(#cloud-dialog, #figma-dialog, #text-prompt) label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -143,7 +143,7 @@ html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt) label {
   font-size: 12px;
   line-height: 16px;
 }
-html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)
+html :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal)
   :is(input:not([type="checkbox"], [type="file"]), select, textarea):not(.project-agent *) {
   display: block;
   width: 100%;
@@ -158,30 +158,30 @@ html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)
   outline: none;
   box-shadow: none;
 }
-html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal) textarea:not(.project-agent *) {
+html :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal) textarea:not(.project-agent *) {
   height: auto;
   padding: 8px;
   resize: vertical;
 }
-html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal) select:not(.project-agent *) {
+html :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal) select:not(.project-agent *) {
   appearance: none;
   padding-right: 24px;
   background: var(--input)
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8a8a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
     right 6px center / 14px no-repeat;
 }
-html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)
+html :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal)
   :is(input, select, textarea)::placeholder {
   color: var(--subtle-foreground);
 }
-html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)
+html :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal)
   :is(input, select, textarea):not(.project-agent *):focus-visible {
   border-color: var(--primary);
   outline: none;
 }
 
 /* Buttons: 28px secondary, purple primary. */
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   button:not(.bd-dialog-close, .template-card, .view-name, .project-agent *) {
   display: inline-flex;
   align-items: center;
@@ -198,30 +198,30 @@ html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #fig
   white-space: nowrap;
   cursor: default;
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   button:not(.bd-dialog-close, .template-card, .view-name, .project-agent *):hover {
   background: var(--accent);
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   button.bd-primary:not(.project-agent *) {
   background: var(--primary);
   color: var(--primary-foreground);
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   button.bd-primary:not(.project-agent *):hover {
   background: var(--primary-hover);
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   button:not(.project-agent *):disabled {
   opacity: 0.4;
   pointer-events: none;
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #generate-dialog, #figma-dialog, #text-prompt, #modal)
+html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   :is(button, a, input, select, textarea):not(.project-agent *):focus-visible {
   outline: 1px solid var(--ring);
   outline-offset: 1px;
 }
-html :is(#cloud-dialog, #generate-dialog, #figma-dialog, #text-prompt) [role="status"],
+html :is(#cloud-dialog, #figma-dialog, #text-prompt) [role="status"],
 html #figma-status,
 html #views-status {
   margin: 8px 0 0;
@@ -229,7 +229,7 @@ html #views-status {
   font-size: 12px;
   line-height: 16px;
 }
-html :is(#cloud-status, #generate-status, #figma-status, #views-status, #status):empty {
+html :is(#cloud-status, #figma-status, #views-status, #status):empty {
   display: none;
 }
 
@@ -312,19 +312,10 @@ html #text-prompt form > div {
   margin-top: 16px;
 }
 
-/* ---------- Generate illustration / Figma import ---------- */
-html :is(#generate-dialog, #figma-dialog) {
+/* ---------- Figma import ---------- */
+html #figma-dialog {
   width: 440px;
   max-width: calc(100vw - 32px);
-}
-html #generate-dialog textarea {
-  min-height: 96px;
-}
-html #generate-dialog > div {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
 }
 html #figma-dialog #figma-run {
   width: 100%;

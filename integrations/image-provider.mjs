@@ -12,6 +12,13 @@
 export const IMAGE_PROVIDERS = Object.freeze(
   [
     {
+      id: "codex_plan",
+      label: "Codex · ChatGPT plan",
+      vendor: "codex",
+      model: "",
+      adapter: "codex",
+    },
+    {
       id: "nano_banana_lite",
       label: "Nano Banana 2 Lite",
       vendor: "google",
@@ -83,11 +90,23 @@ export function migrateSettings(input = {}) {
     /^(gpt-image-1|dall-e-.*)$/.test(input.model || "")
   )
     defaultProvider = "openai_gpt_image_2";
-  return { version: 2, defaultProvider, keys, custom };
+  return {
+    version: 2,
+    defaultProvider,
+    keys,
+    custom,
+    // Older v2 records did not record a choice. The keyless old default never worked, so only it moves.
+    providerChosen:
+      input.providerChosen ??
+      (legacy ||
+        (input.version === 2 &&
+          !(defaultProvider === DEFAULT_IMAGE_PROVIDER && !Object.keys(keys).length))),
+  };
 }
 export function providerSettings(saved, id = saved.defaultProvider, baseURLs = {}) {
   const entry = IMAGE_PROVIDERS.find((p) => p.id === id);
   if (!entry) throw new Error("Unknown image provider");
+  if (entry.vendor === "codex") return { provider: "codex", model: "", size: "1024x1024" };
   if (entry.vendor === "custom") return { ...saved.custom };
   return normalizeSettings({
     provider: entry.adapter,
@@ -252,10 +271,19 @@ export async function generateImage({
   prompt,
   signal,
   fetch: fetchImpl = globalThis.fetch,
+  codex,
 }) {
-  const s = normalizeSettings(settings);
+  const s = settings?.provider === "codex" ? settings : normalizeSettings(settings);
   if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 4000)
     throw new Error("Describe the image in under 4000 characters");
+  if (s.provider === "codex") {
+    if (!SIZES.includes(s.size)) throw new Error("Unsupported image size");
+    if (!codex)
+      throw new Error(
+        "Open Verynize desktop and sign in to Codex on this computer to generate images",
+      );
+    return imageResult(await codex({ prompt, size: s.size, signal }), s);
+  }
   if (["openai", "gemini"].includes(s.provider) && !apiKey)
     throw new Error(
       s.provider === "gemini"
@@ -345,6 +373,10 @@ export async function generateImage({
       bytes = await readBody(download);
     }
   }
+  return imageResult(bytes, s);
+}
+
+export function imageResult(bytes, s) {
   if (bytes.length > MAX_IMAGE) throw new Error("Generated image exceeds 8 MB");
   const info = inspectImage(bytes);
   if (!info || !info.width || !info.height)

@@ -29,8 +29,9 @@ test("generate_image inserts, fills, preserves other properties and rejects head
   assert.equal(SERVER_VERSION, "0.8.0");
   assert.equal(tool.inputSchema.provider.parse("openai_gpt_image_2"), "openai_gpt_image_2");
   assert.throws(() => tool.inputSchema.provider.parse("unknown"));
-  const inserted = await tool.run({ document: "doc", prompt: "Forest", provider: "nano_banana" });
+  const inserted = await tool.run({ document: "doc", prompt: "Forest", provider: "codex_plan" });
   assert.equal(inserted.filled, false);
+  assert.equal(calls[0].provider, "codex_plan");
   let doc = (await store.read("doc")).document;
   assert.equal(doc.pages[0].nodes[0].src, src);
   assert.equal(doc.pages[0].nodes[0].x, 40);
@@ -88,5 +89,76 @@ test("generate_image inserts, fills, preserves other properties and rejects head
   assert.equal(child.parentId, (await store.read("doc")).document.pages[0].nodes[0].id);
   assert.equal(child.x, 12);
   assert.equal(child.y, 24);
-  assert.deepEqual(calls[0], { prompt: "Forest", provider: "nano_banana" });
+  assert.deepEqual(calls[0], { prompt: "Forest", provider: "codex_plan" });
+});
+
+test("system Codex app-server images: inline, saved path, signed out, cancellation", async (t) => {
+  const fs = await import("node:fs/promises");
+  const { generate } = createRequire(import.meta.url)("../desktop/codex-image.cjs");
+  const root = await fs.mkdtemp(path.join(os.homedir(), ".cache", "verynize-codex-image-test-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const image = png(32, 24, [20, 40, 60]);
+  const imagePath = path.join(root, "image.png");
+  await fs.writeFile(imagePath, image);
+  for (const mode of ["result", "savedPath", "signedOut", "cancel"]) {
+    await t.test(mode, async () => {
+      const executable = path.join(root, "codex-" + mode + ".cjs");
+      const interrupted = path.join(root, "interrupted");
+      const ready = path.join(root, "ready");
+      await fs.writeFile(
+        executable,
+        `#!/usr/bin/env node
+const readline = require('node:readline');
+const fs = require('node:fs');
+const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
+readline.createInterface({input: process.stdin}).on('line', line => {
+ const m=JSON.parse(line); if (!m.id) return;
+ let result={};
+ if(m.method==='account/read') result={account:${mode === "signedOut" ? "null" : '{type:"chatgpt"}'}};
+ if(m.method==='thread/start') {
+   if(m.params.sandbox!=='read-only'||m.params.approvalPolicy!=='never'||!m.params.ephemeral) process.exit(2);
+   result={thread:{id:'fixture-thread'}};
+ }
+ if(m.method==='turn/start') { result={turn:{id:'fixture-turn'}}; fs.writeFileSync(${JSON.stringify(ready)},'yes'); }
+ if(m.method==='turn/interrupt') fs.writeFileSync(${JSON.stringify(interrupted)},'yes');
+ send({id:m.id,result});
+ if(m.method==='turn/start'&&${JSON.stringify(mode)}!=='cancel') {
+   send({method:'item/completed',params:{threadId:'fixture-thread',item:{type:'imageGeneration',id:'image',status:'completed',${mode === "savedPath" ? "savedPath:" + JSON.stringify(imagePath) : "result:" + JSON.stringify(image.toString("base64"))}}}});
+   send({method:'turn/completed',params:{threadId:'fixture-thread',turn:{id:'fixture-turn',status:'completed'}}});
+ }
+});
+`,
+        { mode: 0o700 },
+      );
+      await fs.rm(ready, { force: true });
+      const controller = new AbortController();
+      const request = generate({
+        executable,
+        tempRoot: root,
+        prompt: "A teapot",
+        signal: controller.signal,
+      });
+      if (mode === "signedOut") await assert.rejects(request, /Sign in to Codex/);
+      else if (mode === "cancel") {
+        for (let i = 0; i < 200; i++) {
+          if (
+            await fs.stat(ready).then(
+              () => true,
+              () => false,
+            )
+          )
+            break;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        controller.abort();
+        await assert.rejects(request, /canceled/);
+
+        assert.equal(await fs.readFile(interrupted, "utf8"), "yes");
+      } else assert.deepEqual(await request, image);
+      assert.equal(
+        (await fs.readdir(root)).some((name) => name.startsWith("image-")),
+        false,
+      );
+    });
+  }
 });

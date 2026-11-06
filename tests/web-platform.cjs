@@ -196,8 +196,6 @@ async function openBrowser(url) {
       const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
       $("figma-run").click();
       await settle();
-      $("generate-run").click();
-      await settle();
       $("capture-web-url").value = "https://example.com/";
       $("capture-web-form").requestSubmit();
       await settle();
@@ -205,14 +203,12 @@ async function openBrowser(url) {
       await settle();
       return {
         figma: $("figma-status").textContent,
-        generate: $("generate-status").textContent,
         capture: $("capture-web-status").textContent,
         publish: $("cloud-app-project").textContent,
       };
     });
     assert.deepEqual(notes, {
       figma: "Open the desktop app to import from Figma.",
-      generate: "Open the desktop app to generate images.",
       capture: "Open the desktop app to capture web pages.",
       publish: "App publishing runs in the Verynize desktop app.",
     });

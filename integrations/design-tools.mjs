@@ -795,7 +795,7 @@ export function toolTable(backend, context = {}) {
   };
   t.generate_image = {
     description:
-      "Generate an image using the desktop image provider. Replace a frame or rectangle fill, or insert an image on the active page. Costs money on the user’s API key ; limited to five MCP attempts per hour. Requires a configured provider.",
+      "Generate an image using the desktop image provider. Replace a frame or rectangle fill, or insert an image on the active page. Uses the configured image provider (Codex ChatGPT plan by default when connected); limited to five MCP attempts per hour. Sign in to Codex on this computer or configure an API key in Settings → Import & generation.",
     inputSchema: {
       document: documentArg,
       element: z.string().optional(),

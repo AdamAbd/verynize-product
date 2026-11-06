@@ -141,7 +141,7 @@ body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) #file-home {
 }
 
 /* Menu items reuse legacy ids, so unscoped legacy rules (`#project-toggle{position:fixed;left:12px…}`,
- * `#generate-art{margin-top:8px}`, …) would leak in. Island utilities are layered !important and still win. */
+ * `#import{…}`, …) would leak in. Island utilities are layered !important and still win. */
 :is(#bd-app-menu, #bd-zoom-menu) [role^="menuitem"][id] {
   inset: auto !important;
   margin: 0 !important;
