@@ -26,7 +26,8 @@ const { waitForUiReady } = require(process.cwd() + "/tests/helpers/ui-ready.cjs"
       return { a, b };
     });
     await page.waitForTimeout(500);
-    const shot = (n) => page.screenshot({ path: path.join(out, n + ".png"), style: "#presence-slot{visibility:hidden!important}" });
+    const urls = {};
+    const shot = async (n) => { urls[n] = await page.evaluate(() => location.href); await page.screenshot({ path: path.join(out, n + ".png"), style: "#presence-slot{visibility:hidden!important}" }); };
     await shot("tab-before");
     // Slow the outgoing flush so the real file switch has a visible wait.
     await page.evaluate(() => { const orig = window.documentLifecycle.prepareSwitch; window.documentLifecycle.prepareSwitch = async (o) => { await new Promise(r => setTimeout(r, 2000)); return orig(o); }; });
@@ -45,6 +46,7 @@ const { waitForUiReady } = require(process.cwd() + "/tests/helpers/ui-ready.cjs"
     await page.waitForFunction(() => !document.querySelector("#workspace").dataset.switchLoading, null, { timeout: 10000 });
     await page.waitForTimeout(300);
     await shot("page-after");
+    await fs.writeFile(path.join(out, "urls-desktop.json"), JSON.stringify(urls, null, 2) + "\n");
     console.log("ok");
   } finally { await app.close(); await fs.rm(profile, { recursive: true, force: true }); }
 })().catch((e) => { console.error(e); process.exitCode = 1; });
