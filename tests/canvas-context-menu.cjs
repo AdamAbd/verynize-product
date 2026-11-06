@@ -174,7 +174,7 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await page.evaluate(() => window.design.setSelection([]));
     assert.equal(await page.locator('#canvas-overlay .frame-label', {hasText: 'side'}).count(), 0, 'the label is gone');
     await rightClick(await at('side'));
-    assert.equal((await items())[14], 'Show label');
+    assert.equal((await items())[15], 'Show label');
     await item('menu.hideLabel').click();
     assert.equal((await node('side')).labelHidden, undefined, 'Show label');
 

@@ -653,6 +653,12 @@ const e2eCloud = [
     ...isl("home"),
   ]),
   electron("tests/cloud-files-desktop.mjs", "e2e-cloud", [...AREA.cloudRenderer, ...isl("home")]),
+  electron("tests/cloud-version-history-desktop.mjs", "e2e-cloud", [
+    ...AREA.cloudRenderer,
+    ...isl("history"),
+    "web/version-history.js",
+    "web/version-history-core.js",
+  ]),
   electron(
     "tests/share-collab.mjs",
     "e2e-cloud",
