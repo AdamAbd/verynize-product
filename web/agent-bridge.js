@@ -102,17 +102,35 @@
       const document = editor().getDocument();
       return { document, stamp, selection: editor().getSelection(), activePage: document.activePage, ...library() };
     },
-    commit({ document, stamp: expected }) {
+    commit({ document, stamp: expected, actor, force, artboardId, label }) {
       if (expected !== stamp) return { conflict: true };
       const selection = editor().getSelection();
       const view = editor().getView();
-      editor().setDocument(document);
+      // Version history (web/version-history.js): the commit is an agent edit; a restore_version
+      // commit stores the state it replaces first.
+      const history = window.versionHistory;
+      const run = () => editor().setDocument(document);
+      if (history) history.as(actor?.kind === 'agent' ? actor : { kind: 'agent', name: actor?.name || 'Agent', restore: actor?.restore }, run, force === 'restore' && typeof artboardId === 'string' ? { force, artboardId, label } : null);
+      else run();
       const after = editor().getDocument();
       const page = after.pages.find(p => p.id === after.activePage);
       const keep = selection.filter(id => page?.nodes.some(n => n.id === id));
       if (keep.length) editor().setSelection(keep);
       if (view.page !== after.activePage && after.pages.some(p => p.id === view.page)) editor().setView(view);
       return { ok: true, document: editor().getDocument() };
+    },
+    // Version history of the open document (web/version-history.js) for list_versions/restore_version.
+    async versions({ artboardId }) {
+      if (!window.versionHistory) throw new Error('Version history is unavailable in this editor');
+      return { versions: await window.versionHistory.list(typeof artboardId === 'string' ? artboardId : null) };
+    },
+    async version({ id }) {
+      if (!window.versionHistory) throw new Error('Version history is unavailable in this editor');
+      return { found: await window.versionHistory.get(String(id || '')) };
+    },
+    async versionCapture({ artboardId, reason, label }) {
+      if (!window.versionHistory) throw new Error('Version history is unavailable in this editor');
+      return { versions: await window.versionHistory.capture(String(artboardId || ''), { reason, label, author: { kind: 'agent', name: 'Agent' } }) };
     },
     focus({ pageId, nodeId }) {
       const view = editor().getView();

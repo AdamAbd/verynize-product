@@ -168,19 +168,21 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
       if (!target.live) return storeBackend.read(ref);
       return { document: target.state.document, revision: tools.revisionOf(target.state.document), live: true, name: target.name, selection: target.state.selection || [] };
     },
-    async transact(ref, fn) {
+    async transact(ref, fn, options = {}) {
       for (let attempt = 0; attempt < 4; attempt++) {
         const target = await route(ref);
         if (!target.live) { // Settings › Usage: count layers the agent added (desktop/agent-usage.cjs)
           let added = 0;
-          const result = await storeBackend.transact(ref, (document, meta) => { const before = structuredClone(document); const out = fn(document, meta); added = agentUsage.countNewNodes(before, out?.document); return out; });
+          const result = await storeBackend.transact(ref, (document, meta) => { const before = structuredClone(document); const out = fn(document, meta); added = agentUsage.countNewNodes(before, out?.document); return out; }, options);
           agentUsage.recordGeneratedLayers(added);
           return result;
         }
         const { state, entry } = target;
         const out = fn(structuredClone(state.document), { revision: tools.revisionOf(state.document) });
         validateDocument(withName(out.document));
-        const reply = await request(entry, 'commit', { document: out.document, stamp: state.stamp }, 15000);
+        // Version history (web/version-history.js): an agent edit; restore_version marks a restore.
+        const history = { actor: options.actor || { kind: 'agent', name: 'Agent' }, ...(options.force ? { force: options.force, artboardId: options.artboardId, label: options.label } : {}) };
+        const reply = await request(entry, 'commit', { document: out.document, stamp: state.stamp, ...history }, 15000);
         if (reply?.conflict) continue; // the user edited meanwhile; re-read and re-apply
         const committed = looksLikeDocument(reply?.document) ? reply.document : out.document;
         agentUsage.recordGeneratedLayers(agentUsage.countNewNodes(state.document, committed));
@@ -201,6 +203,25 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
       const state = entry.designFiles ? await entry.designFiles.open(file) : { ...(await store.read(name)), path: file };
       await request(entry, 'open', { document: state.document, path: file }, 15000);
       return { opened: true, name, path: file, live: true, pageId: state.document.pages[0].id };
+    },
+    // Version history: the open document's (sidecar, browser storage or room) through the editor,
+    // a stored file's sidecar otherwise.
+    versions: {
+      async list(ref, artboardId) {
+        const target = await route(ref);
+        if (!target.live) return storeBackend.versions.list(ref, artboardId);
+        return (await request(target.entry, 'versions', { artboardId }, 15000)).versions;
+      },
+      async get(ref, id) {
+        const target = await route(ref);
+        if (!target.live) return storeBackend.versions.get(ref, id);
+        return (await request(target.entry, 'version', { id }, 15000)).found;
+      },
+      async capture(ref, artboardId, options = {}) {
+        const target = await route(ref);
+        if (!target.live) return storeBackend.versions.capture(ref, artboardId, options);
+        return (await request(target.entry, 'versionCapture', { artboardId, reason: options.reason, label: options.label }, 15000)).versions;
+      },
     },
     async focus(ref, pageId, nodeId) {
       const target = await route(ref);

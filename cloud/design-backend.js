@@ -240,7 +240,7 @@ export function createRoomBackend(env, request, url, account, { roomId: scope } 
         selection: [],
       };
     },
-    async transact(ref, fn) {
+    async transact(ref, fn, options = {}) {
       const id = await resolve(ref);
       for (let attempt = 0; attempt < 5; attempt++) {
         const state = await readRoom(id);
@@ -267,6 +267,8 @@ export function createRoomBackend(env, request, url, account, { roomId: scope } 
             orgRole: state.orgRole,
             baseRevision: state.revision,
             ops,
+            // Version history: a restore_version edit stores the state it replaces first.
+            ...(options.actor ? { actor: options.actor } : {}),
           }),
         );
         if (applied.conflict) continue; // someone edited in between: recompute on the new snapshot
@@ -370,6 +372,42 @@ export function createRoomBackend(env, request, url, account, { roomId: scope } 
       };
     },
     focus: async () => ({ focused: false, headless: true }),
+    /** Version history of a room (cloud/room-history.js); the room checks access on every call. */
+    versions: {
+      async list(ref, artboardId) {
+        const id = await resolve(ref);
+        const stub = env.ROOMS.getByName(id);
+        const caller = { accountId: account.id, orgRole: await orgRole(id) };
+        if (artboardId) return rpc(stub.historyList({ ...caller, artboardId }));
+        const boards = await rpc(stub.historyList(caller));
+        const out = [];
+        for (const board of boards)
+          out.push(...(await rpc(stub.historyList({ ...caller, artboardId: board.artboardId }))));
+        return out.sort((a, b) => b.at - a.at);
+      },
+      async get(ref, versionId) {
+        const id = await resolve(ref);
+        return rpc(
+          env.ROOMS.getByName(id).historyGet({
+            accountId: account.id,
+            orgRole: await orgRole(id),
+            id: versionId,
+          }),
+        );
+      },
+      async capture(ref, artboardId, { reason, label } = {}) {
+        const id = await resolve(ref);
+        return rpc(
+          env.ROOMS.getByName(id).historyCapture({
+            accountId: account.id,
+            orgRole: await orgRole(id),
+            artboardId,
+            reason,
+            label,
+          }),
+        );
+      },
+    },
     fetchImage: (src) => fetchImageAsDataUrl(src, { maxBytes: MAX_IMAGE }),
     preferences: { list: async () => [] },
   };

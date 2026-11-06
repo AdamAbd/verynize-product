@@ -648,3 +648,14 @@ html[data-ui-theme="light"] {
   --color-slot-tint: color-mix(in srgb, var(--slot) 16%, transparent);
 }
 /* </component-tokens> */
+
+/* <history-tokens> (version history panel, web/src/islands/history; docs/version-history.md)
+ * A floating panel over the canvas, 12px below the window chrome and 12px left of the inspector, 320 wide like a
+ * Wonder side panel; it never grows past the canvas height. */
+@theme inline {
+  --spacing-history-panel: 320px;
+  --spacing-history-top: calc(var(--spacing-chrome) + 12px);
+  --spacing-history-inset: calc(var(--panel-right-width) + 12px);
+  --spacing-history-height: calc(100vh - var(--spacing-chrome) - 72px);
+}
+/* </history-tokens> */

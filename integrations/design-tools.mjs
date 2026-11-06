@@ -46,6 +46,8 @@ import {
 } from './design-edit.mjs';
 import { fundamentals, getDesignGuidelines, getSkill, skillCatalog, styleIds, archetypes, designTokens } from './design-knowledge/index.mjs';
 import { lintArtboard } from './design-lint.mjs';
+import { restore as restoreVersion } from './version-core.mjs';
+import { sidecarFor } from './version-store.mjs';
 import { ReceiptStore, createReceipt, finishGate, MAX_REPAIRS } from './verification.mjs';
 import { searchIcons, resolveIcon, ICON_SETS } from './assets.mjs';
 import { searchStockPhotos, fetchImageAsDataUrl, attribution, trackUnsplashDownload } from './images.mjs';
@@ -424,7 +426,7 @@ function ignoreLayout(before, after) {
  * fn returns {document, result, reconciled?}: reconciled means fn already re-synced instances itself (component
  * commands), so nothing it changed is marked as an override.
  */
-async function write(backend, ref, fn) {
+async function writeAs(backend, ref, fn, options) {
   let pending = [], committed = null;
   const out = await backend.transact(ref, (document, meta) => {
     ensureShortIds(document);
@@ -436,7 +438,7 @@ async function write(backend, ref, fn) {
     pending = pendingAssets(result.document);
     committed = result.document;
     return result;
-  });
+  }, options);
   sessionFor(backend).last = { ref, state: { name: out.name, revision: out.revision, document: committed } };
   const key = docKey(out.name, ref);
   sessionFor(backend).receipts.invalidate(key);
@@ -467,8 +469,20 @@ const WARNING_NOTE = 'These classes or elements were not applied. Rewrite the af
 // Tool table
 
 /** The tool table for a backend: {name: {description, inputSchema (zod shape), annotations, raw?, run}}. */
+/**
+ * The agent a tool call edits as, for version history: named after the MCP client when known
+ * (backends name an unnamed agent themselves).
+ */
+function agentActor(context) {
+  const client = String(context?.clientName?.() || '').trim();
+  const name = /claude/i.test(client) ? 'Claude' : /codex/i.test(client) ? 'Codex' : client.slice(0, 40);
+  return name ? { kind: 'agent', name } : { kind: 'agent' };
+}
+
 export function toolTable(backend, context = {}) {
   const t = {};
+  // Every edit of this table is an agent edit (version history, docs/version-history.md).
+  const write = (target, ref, fn, options) => writeAs(target, ref, fn, { actor: agentActor(context), ...options });
   t.get_design_context = {
     description: 'Start here. Summarizes the document: pages, active page, current selection (live editor only), open/saved documents, design tokens, artboards on the page, the user\'s saved design preferences, and the design fundamentals that apply to every design (guidelines:"none" leaves the fundamentals out when you already have them).',
     inputSchema: { document: documentArg, pageId: pageArg, guidelines: z.enum(['fundamentals', 'none']).optional().describe('fundamentals (default) appends the design fundamentals; none omits them') }, annotations: { readOnlyHint: true },
@@ -777,6 +791,8 @@ export function toolTable(backend, context = {}) {
         return { isError: true, content: [{ type: 'text', text: `Finish blocked for artboard ${artboardId} (status: blocked).\nReasons:\n${gate.reasons.map(r => `- ${r}`).join('\n')}\n\nFix these critical problems with update_elements, take_screenshot of ${artboardId} again, then call finish_artboard again:\n${fixes.join('\n')}\n\nRepair round ${budget.used} of ${budget.max}.${budget.exhausted ? ' The repair budget is now exhausted: the next finish_artboard will be accepted as "unverified".' : ''}` }] };
       }
       if (stored) session.receipts.record(key, createReceipt({ documentRevision: stored.documentRevision, pageId: stored.pageId, artboardId, screenshot: stored.screenshot, reviewNote }));
+      // Version history milestone (docs/version-history.md); never blocks finishing.
+      await backend.versions?.capture?.(ref, node.id, { reason: 'finish', label: 'Finished by agent' }).catch(() => {});
       const focus = state.live && backend.focus ? await backend.focus(ref, page.id, node.id).catch(error => ({ focused: false, error: error.message })) : { focused: false };
       return text({
         status: gate.status, verified: gate.status === 'verified', reasons: gate.reasons, artboardId,
@@ -784,6 +800,51 @@ export function toolTable(backend, context = {}) {
         headless: !state.live, focused: !!focus.focused, designLink: { name: node.name, url: linkFor(state, page.id, artboardId), markdown: `[${String(node.name || 'Artboard').replace(/[[\]]/g, '')}](${linkFor(state, page.id, artboardId)})` },
         note: `${gate.status === 'verified' ? 'Verified: screenshot at the current revision plus design review.' : 'Unverified: tell the user which checks did not happen (see reasons).'} ${state.live ? 'The artboard is selected in the editor.' : 'Saved on disk. Open the document in Verynize to view it.'} Include designLink.markdown (or the url) verbatim in your final reply so the user can open the artboard.`,
       });
+    },
+  };
+  // Version history (docs/version-history.md): per-artboard snapshots captured by the backends.
+  const versionRow = meta => ({ version: meta.id, at: new Date(meta.at).toISOString(), author: `${meta.author?.name || 'Unknown'} (${meta.author?.kind || 'unknown'})`, reason: meta.reason, summary: meta.summary, ...(meta.label ? { label: meta.label } : {}) });
+  const versionsOf = () => { if (!backend.versions) throw new Error('Version history is unavailable for this document'); return backend.versions; };
+  t.list_versions = {
+    description: 'Version history of an artboard, newest first: snapshots captured when its editor changes (you, the user, another collaborator), after 2 minutes without edits, before every restore and at finish_artboard. Each row: version id, time, author, reason, summary. Without artboard: the artboards of the page (and deleted ones) that have versions. Restore one with restore_version.',
+    inputSchema: { document: documentArg, pageId: pageArg, artboard: z.string().min(1).max(200).optional().describe('Artboard short id (or the long id of a deleted artboard from the listing without artboard)'), limit: z.number().int().min(1).max(50).optional() }, annotations: { readOnlyHint: true },
+    run: async ({ document: ref, pageId, artboard, limit = 20 }) => {
+      const store = versionsOf();
+      const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
+      if (artboard) {
+        const node = index.resolve(artboard);
+        const id = node ? index.rootOf(node).id : artboard;
+        const list = await store.list(ref, id);
+        if (!node && !list.length) throw new Error(`Artboard ${JSON.stringify(artboard)} not found on page ${page.id} and has no versions`);
+        const root = node ? index.rootOf(node) : null;
+        return { artboard: root ? root.shortId : id, name: root ? root.name : list[0].name, deleted: !root, total: list.length, versions: list.slice(0, limit).map(versionRow) };
+      }
+      const all = await store.list(ref, null);
+      const byBoard = new Map();
+      for (const meta of all) { if (!byBoard.has(meta.artboardId)) byBoard.set(meta.artboardId, []); byBoard.get(meta.artboardId).push(meta); }
+      const onPage = new Set(page.nodes.map(n => n.id));
+      const exists = new Set(state.document.pages.flatMap(p => p.nodes.map(n => n.id)));
+      const artboards = [...byBoard].filter(([id, list]) => onPage.has(id) || (!exists.has(id) && list[0].pageId === page.id)).map(([id, list]) => { const node = index.byId.get(id); return { artboard: node ? node.shortId : id, name: node ? node.name : list[0].name, deleted: !node, versions: list.length, latest: versionRow(list[0]) }; });
+      return { pageId: page.id, artboards, note: artboards.length ? 'Pass artboard to list its versions.' : 'No versions yet: they are captured as the artboards are edited.' };
+    },
+  };
+  t.restore_version = {
+    description: 'Restore an artboard to a version from list_versions. The artboard\'s subtree is replaced in one undoable edit (re-created when it was deleted; ids used elsewhere are renamed), and the state it replaces is stored as a new version first, so a restore can itself be undone with restore_version. asCopy places the version as a new artboard next to the current one instead.',
+    inputSchema: { document: documentArg, pageId: pageArg, artboard: z.string().min(1).max(200).describe('Artboard short id, or the long id of a deleted artboard'), version: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).describe('Version id from list_versions'), asCopy: z.boolean().optional() },
+    run: async ({ document: ref, pageId, artboard, version, asCopy = false }) => {
+      const store = versionsOf();
+      const found = await store.get(ref, version);
+      if (!found) throw new Error(`Version ${version} not found; call list_versions`);
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page); const node = index.resolve(artboard);
+        const id = node ? index.rootOf(node).id : artboard;
+        if (id !== found.meta.artboardId) throw new Error(`Version ${version} belongs to another artboard (${found.meta.name}); call list_versions with artboard ${JSON.stringify(artboard)}`);
+        const r = restoreVersion(document, found.snapshot, { asCopy });
+        return { document: r.document, result: { artboardId: r.artboardId, pageId: r.pageId, renamedIds: r.remapped } };
+      }, { actor: { ...agentActor(context), restore: version }, force: asCopy ? undefined : 'restore', artboardId: found.meta.artboardId, label: `Before restoring ${new Date(found.meta.at).toISOString()}` });
+      const page = getPage((await readPrepared(backend, ref)).document, out.result.pageId); const node = indexPage(page).byId.get(out.result.artboardId);
+      if (node) sessionFor(backend).receipts.reset(docKey(out.name, ref), node.shortId);
+      return { restored: version, artboard: node?.shortId || out.result.artboardId, asCopy, renamedIds: out.result.renamedIds, note: asCopy ? 'The version was placed as a new artboard.' : 'The replaced state was saved as a version; restore it to undo.', live: out.live, revision: out.revision };
     },
   };
   t.get_design_guidelines = {
@@ -1177,7 +1238,7 @@ export const TOOL_NAMES = Object.keys(toolTable({}));
  * each validated call to another server (the stdio proxy uses this).
  */
 export function registerDesignTools(server, { backend, forward, context }) {
-  const table = toolTable(backend || {}, context);
+  const table = toolTable(backend || {}, { ...context, clientName: () => server.server?.getClientVersion?.()?.name });
   for (const [name, tool] of Object.entries(table)) {
     server.registerTool(name, { description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations }, async args => {
       try { return forward ? await forward(name, args || {}) : await execute(tool, args || {}); } catch (error) { return failure(error); }
@@ -1211,7 +1272,7 @@ export function createDesignServer(options, { instructions = INSTRUCTIONS } = {}
 // ---------------------------------------------------------------------------------------------
 // Store (on-disk) backend
 
-export function createStoreBackend(store, { screenshot, defaultName, fetchImage, searchImages, preferences, askAgent, generateImage } = {}) {
+export function createStoreBackend(store, { screenshot, defaultName, fetchImage, searchImages, preferences, askAgent, generateImage, agentName = 'Agent' } = {}) {
   const resolveName = async ref => {
     if (ref) return ref;
     if (defaultName) return defaultName;
@@ -1228,19 +1289,29 @@ export function createStoreBackend(store, { screenshot, defaultName, fetchImage,
       return { documents, editor: null, headless: true };
     },
     async read(ref) { const name = await resolveName(ref); const state = await store.read(name); return { ...state, name, live: false, selection: [] }; },
-    async transact(ref, fn) {
+    async transact(ref, fn, options = {}) {
       const name = await resolveName(ref); let result;
-      let saved;
+      let saved, before;
       for (let attempt = 0; ; attempt++) {
         try {
-          saved = await store.mutate(name, async () => { const current = await store.read(name); const out = fn(clone(current.document), { revision: current.revision }); result = out.result; return out.document; });
+          saved = await store.mutate(name, async () => { const current = await store.read(name); before = current.document; const out = fn(clone(current.document), { revision: current.revision }); result = out.result; return out.document; });
           break;
         } catch (error) {
           if (!/Document is locked/.test(error.message) || attempt >= 40) throw error;
           await new Promise(resolve => setTimeout(resolve, 25 + attempt * 5));
         }
       }
+      // Version history sidecar (integrations/version-store.mjs); history problems never fail an edit.
+      await sidecarFor(store.file(name)).observe(before, saved.document, { kind: 'agent', name: agentName, ...options.actor }, { force: options.force, artboardId: options.artboardId, label: options.label }).catch(() => {});
       return { result, revision: saved.revision, live: false, name };
+    },
+    versions: {
+      list: async (ref, artboardId) => sidecarFor(store.file(await resolveName(ref))).list(artboardId),
+      get: async (ref, id) => sidecarFor(store.file(await resolveName(ref))).get(id),
+      async capture(ref, artboardId, { reason = 'manual', label, actor } = {}) {
+        const name = await resolveName(ref); const { document } = await store.read(name);
+        return sidecarFor(store.file(name)).observe(document, document, { kind: 'agent', name: agentName, ...actor }, { force: reason === 'finish' ? 'finish' : 'manual', artboardId, label });
+      },
     },
     async create(name, title) { const state = await store.create(name, title); return { name, title, pageId: state.document.pages[0].id, revision: state.revision, live: false, opened: false }; },
     screenshot: screenshot ? async (ref, pageId, nodeId, scale, state) => screenshot(state.document, pageId, nodeId, scale) : undefined,

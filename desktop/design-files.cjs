@@ -4,6 +4,7 @@ const fs=require('node:fs');
 const {promises:fsp}=fs;
 const {pathToFileURL}=require('node:url');
 const engine=()=>import(pathToFileURL(path.join(__dirname,'../integrations/design-store.mjs')).href);
+const versionStore=()=>import(pathToFileURL(path.join(__dirname,'../integrations/version-store.mjs')).href);
 // A file the store refuses (strict schema, size, JSON) is never modified and nothing opens: the error names the file,
 // the first problem and how many there are.
 async function unopened(file,error){let count=0;try{const {documentProblems}=await import(pathToFileURL(path.join(__dirname,'../integrations/document-core.mjs')).href);count=documentProblems(JSON.parse(await fsp.readFile(file,'utf8'))).length;}catch{}
@@ -32,6 +33,12 @@ function registerDesignFiles(handle,parent){const {dialog}=require('electron');c
   if(generation!==files.generation)return null;return files.save(options.document,destination,generation);
  });
  handle('designDetach',()=>{files.detach();return true;});
+ // Version history sidecar (NAME.verynize.history/, integrations/version-store.mjs) of the open file only: the renderer names
+ // the path it means, and a request for any other file is refused.
+ const sidecar=async options=>{const file=options&&typeof options==='object'?options.path:null;if(!files.selected||file!==files.selected.path)throw Error('Version history follows the open design file');const {sidecarFor}=await versionStore();return sidecarFor(files.selected.path);};
+ handle('versionsList',async options=>{const store=await sidecar(options);const versions=await store.list(typeof options.artboardId==='string'?options.artboardId:null);return {versions,last:await store.last()};});
+ handle('versionsGet',async options=>(await sidecar(options)).get(String(options.id||'')));
+ handle('versionsAdd',async options=>(await sidecar(options)).add(Array.isArray(options.entries)?options.entries.slice(0,50):[],{last:options.last&&typeof options.last==='object'?options.last:undefined}));
  handle('designReload',()=>files.reload());onWindowClosed(parent,()=>files.close());return files;
 }
 module.exports={DesignFileSession,registerDesignFiles};

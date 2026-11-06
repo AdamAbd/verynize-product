@@ -52,7 +52,7 @@ export { AiRun } from "./ai-run.js";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const ROOM_ROUTE = new RegExp(
-  `^/api/rooms/(${UUID})(/socket|/publish|/ops|/pages|/access|/members(?:/${UUID})?|/claim|/organization|/visibility|/share-invitations|/invitation|/tokens(?:/rotate|/${UUID})?|/comments)?$`,
+  `^/api/rooms/(${UUID})(/socket|/publish|/ops|/pages|/access|/members(?:/${UUID})?|/claim|/organization|/visibility|/share-invitations|/invitation|/tokens(?:/rotate|/${UUID})?|/comments|/versions(?:/[A-Za-z0-9_-]{1,64})?)?$`,
 );
 const APP_ROUTE = new RegExp(
   `^/api/apps/(${UUID})(/versions(?:/(\\d+)(/finalize|/files/(.+))?)?|/activate|/publish)?$`,
@@ -570,6 +570,8 @@ async function handleRooms(request, env, url) {
     for (const key of ["token", "client", "lazy"])
       if (url.searchParams.get(key)) forward.searchParams.set(key, url.searchParams.get(key));
   // Lazy page loading (cloud/room-store.js): `lazy=1&page=<id>` on GET /room, `id=<page>` on /pages.
+  if (action === "/versions" && url.searchParams.get("artboard"))
+    forward.searchParams.set("artboard", url.searchParams.get("artboard").slice(0, 200));
   if (action === "/room" || action === "/pages")
     for (const key of ["lazy", "page", "id"])
       for (const value of url.searchParams.getAll(key).slice(0, 200))

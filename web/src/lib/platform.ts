@@ -13,6 +13,7 @@ export const CAPABILITIES = [
   "projects",
   "git",
   "designFiles",
+  "versionHistory",
   "agents",
   "agentAccounts",
   "terminal",

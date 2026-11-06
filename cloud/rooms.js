@@ -5,6 +5,7 @@
 import { DurableObject, acceptWebSocket } from "#cloud-runtime";
 import "../web/cloud-ops.js";
 import { RoomStore } from "./room-store.js";
+import { RoomHistory } from "./room-history.js";
 import { MESSAGE_BYTES, REQUEST_BYTES, byteSize } from "./limits.js";
 import {
   json,
@@ -55,6 +56,8 @@ export class DesignRoom extends DurableObject {
     `);
     this.clock = Ops.createClock("server");
     this.store = new RoomStore(this.sql);
+    // Per-artboard version history (cloud/room-history.js, docs/version-history.md).
+    this.history = new RoomHistory(this.sql, { idleMs: Number(env?.VERSION_IDLE_MS) || undefined });
     this.migrateLegacyToken();
     // Rooms that kept the whole document in room.document move to per-page records once.
     this.store.migrate(this.row());
@@ -288,8 +291,11 @@ export class DesignRoom extends DurableObject {
       .map((row) => row.batch);
   }
 
-  /** Apply one client batch of operations. Returns the message describing the outcome. */
-  applyBatch(data, role) {
+  /**
+   * Apply one client batch of operations. Returns the message describing the outcome. `who`
+   * ({id, name}) is the editor the version history records (with the batch's optional `actor`).
+   */
+  applyBatch(data, role, who = null) {
     const client = data?.client,
       batch = data?.batch,
       ops = data?.ops;
@@ -395,6 +401,7 @@ export class DesignRoom extends DurableObject {
     }
     store.flush();
     this.sql.exec("UPDATE room SET revision=revision+1 WHERE id=1");
+    this.recordHistory(state, result, data.actor, who);
     return {
       type: "ops",
       client,
@@ -404,6 +411,114 @@ export class DesignRoom extends DurableObject {
       rejected: result.rejected.length,
       reasons: result.rejected.slice(0, 20),
     };
+  }
+
+  /** The version history's author of a batch: the agent the client names, else the person. */
+  historyAuthor(actor, who) {
+    const text = (value) =>
+      typeof value === "string" && value.trim() ? value.trim().slice(0, 80) : null;
+    const id = text(who?.id) || "anonymous";
+    if (actor?.kind === "agent") {
+      const name = text(actor.name) || "Agent";
+      return { kind: "agent", name, id: `${id}:agent:${name}` };
+    }
+    return { kind: "user", name: text(who?.name) || "Guest", id };
+  }
+
+  /** Version history of an applied batch; history problems never fail the edit. */
+  recordHistory(state, result, actor, who) {
+    try {
+      if (!Ops.isStructured(result.doc)) return;
+      const pages = result.doc.pages.map((page) => page.id).filter((id) => !state.stubs.has(id));
+      const nodeLevel = result.applied.every((op) =>
+        ["add", "remove", "node", "text"].includes(op.t),
+      );
+      const restoring =
+        typeof actor?.restore === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(actor.restore)
+          ? this.sql
+              .exec("SELECT artboard_id FROM history_versions WHERE id=?", actor.restore)
+              .toArray()[0]
+          : null;
+      this.history.observe(state.doc, result.doc, {
+        pages,
+        nodes: nodeLevel ? result.applied.map((op) => op.id) : null,
+        author: this.historyAuthor(actor, who),
+        ...(restoring
+          ? { force: "restore", artboardId: restoring.artboard_id, label: "Before restore" }
+          : {}),
+      });
+      this.scheduleHistory();
+    } catch (error) {
+      console.error("[room-history]", error?.message || error);
+    }
+  }
+
+  /** Wake up when the next artboard has been idle long enough to store its last state. */
+  scheduleHistory(at = Date.now() + this.history.idleMs + 1000) {
+    if (this.historyAlarm && this.historyAlarm <= at && this.historyAlarm > Date.now()) return;
+    this.historyAlarm = at;
+    Promise.resolve(this.ctx.storage.setAlarm(at)).catch(() => {});
+  }
+
+  async alarm() {
+    this.historyAlarm = null;
+    try {
+      const now = Date.now();
+      const due = this.history.due(now);
+      if (due.length) {
+        const pages = [
+          ...new Set(due.map((row) => this.store.nodePage(row.artboardId)).filter(Boolean)),
+        ];
+        const doc = pages.length ? this.store.load(new Set(pages)).doc : null;
+        this.history.idle(now, (id) =>
+          doc ? globalThis.VerynizeVersions.snapshot(doc, id) : null,
+        );
+      }
+      const next = this.history.nextDue();
+      if (next) this.scheduleHistory(Math.max(next, Date.now() + 1000));
+    } catch (error) {
+      console.error("[room-history]", error?.message || error);
+    }
+  }
+
+  /** Store the current state of an artboard as a version (manual or finish_artboard). */
+  captureVersion(artboardId, author, reason, label) {
+    const page = this.store.nodePage(artboardId);
+    if (!page) fail(404, "Artboard not found");
+    return this.history.capture(this.store.load(new Set([page])).doc, artboardId, {
+      author,
+      reason,
+      label: typeof label === "string" ? label.slice(0, 120) : undefined,
+    });
+  }
+
+  /** Hosted MCP (cloud/design-backend.js): versions of an artboard, or the artboards with versions. */
+  historyList({ accountId, orgRole, artboardId } = {}) {
+    if (!this.row() || !this.memberRole(accountId, orgRole))
+      rpcFail(404, "Room not found, or you have no access to it");
+    return this.history.list(typeof artboardId === "string" ? artboardId : null);
+  }
+
+  historyGet({ accountId, orgRole, id } = {}) {
+    if (!this.row() || !this.memberRole(accountId, orgRole))
+      rpcFail(404, "Room not found, or you have no access to it");
+    return this.history.get(id);
+  }
+
+  historyCapture({ accountId, orgRole, artboardId, reason, label } = {}) {
+    const role = this.row() ? this.memberRole(accountId, orgRole) : null;
+    if (!role) rpcFail(404, "Room not found, or you have no access to it");
+    if (!atLeast(role, "editor")) rpcFail(403, `Your role in this room (${role}) cannot edit`);
+    try {
+      return this.captureVersion(
+        artboardId,
+        this.historyAuthor({ kind: "agent" }, { id: `mcp-${accountId}` }),
+        reason === "finish" ? "finish" : "manual",
+        label,
+      );
+    } catch (error) {
+      rpcFail(error?.status || 400, error?.message || "Capture failed");
+    }
   }
 
   /** Role of a signed-in account here: its membership and/or organization role (no links). */
@@ -435,7 +550,7 @@ export class DesignRoom extends DurableObject {
    * from `baseRevision`, applied with the caller's role and broadcast to live sockets as `ops`.
    * A newer revision returns {conflict:true} so the caller recomputes its edit.
    */
-  agentApply({ accountId, orgRole, baseRevision, ops } = {}) {
+  agentApply({ accountId, orgRole, baseRevision, ops, actor } = {}) {
     const row = this.row();
     const role = row ? this.memberRole(accountId, orgRole) : null;
     if (!role) rpcFail(404, "Room not found, or you have no access to it");
@@ -448,7 +563,11 @@ export class DesignRoom extends DurableObject {
     const last =
       this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
         ?.last_batch ?? 0;
-    const message = this.applyBatch({ client, batch: last + 1, ops }, role);
+    const message = this.applyBatch(
+      { client, batch: last + 1, ops, actor: { ...actor, kind: "agent" } },
+      role,
+      { id: client, name: "Agent" },
+    );
     if (message.error) rpcFail(403, message.error);
     if (message.ops.length) this.broadcast(message);
     return {
@@ -682,7 +801,10 @@ export class DesignRoom extends DurableObject {
         return this.update(data.document, data.baseRevision);
       }
       if (action === "/ops" && method === "POST") {
-        const message = this.applyBatch(await readJson(request, MESSAGE_BYTES), role);
+        const message = this.applyBatch(await readJson(request, MESSAGE_BYTES), role, {
+          id: account?.id || capability,
+          name: account?.displayName || account?.handle,
+        });
         if (message.ops.length) this.broadcast(message);
         return json(message, message.tooLarge ? 413 : message.error ? 403 : 200);
       }
@@ -703,6 +825,34 @@ export class DesignRoom extends DurableObject {
         );
         this.store.unpublish();
         return json({ unpublished: true });
+      }
+      // Version history (docs/version-history.md): viewers list and preview, editors capture.
+      // Visitors of a public room see the current document only, not earlier (deleted) content.
+      if ((action === "/versions" || action.startsWith("/versions/")) && publicOnly)
+        fail(403, "Version history needs access to this file");
+      if (action === "/versions" && method === "GET") {
+        const artboard = url.searchParams.get("artboard");
+        return json(
+          artboard
+            ? { artboardId: artboard, versions: this.history.list(artboard) }
+            : { artboards: this.history.list() },
+        );
+      }
+      if (action === "/versions" && method === "POST") {
+        need("editor");
+        const data = await readJson(request, 16 * 1024);
+        if (typeof data.artboard !== "string") fail(400, "artboard required");
+        const author = this.historyAuthor(null, {
+          id: account?.id || capability,
+          name: account?.displayName || account?.handle,
+        });
+        return json({ versions: this.captureVersion(data.artboard, author, "manual", data.label) });
+      }
+      const versionPath = action.match(/^\/versions\/([A-Za-z0-9_-]{1,64})$/);
+      if (versionPath && method === "GET") {
+        const found = this.history.get(versionPath[1]);
+        if (!found) return json({ error: "Version not found" }, 404);
+        return json({ version: found.meta, snapshot: found.snapshot });
       }
       if (action === "/access" && method === "GET")
         return json({
@@ -901,6 +1051,7 @@ export class DesignRoom extends DurableObject {
         const result = this.applyBatch(
           { ...data, client: state.client || data.client },
           state.role,
+          { id: state.accountId || state.client || state.id, name: state.name },
         );
         if (result.ops.length) this.broadcast(result);
         else ws.send(JSON.stringify(result));

@@ -450,6 +450,15 @@ const desktop = [
   electron("tests/preview-interaction.cjs", "desktop", AREA.preview),
   electron("tests/window-layout.cjs", "desktop", [...AREA.shell, "desktop/window-cleanup.cjs"]),
   electron("tests/mcp-live.cjs", "desktop", AREA.mcp),
+  electron("tests/version-history.cjs", "desktop", [
+    ...AREA.mcp,
+    ...isl("history"),
+    "web/version-history.js",
+    "web/version-history-core.js",
+    "web/agent-bridge.js",
+    "desktop/design-files.cjs",
+    "integrations/version-*.mjs",
+  ]),
   unit("tests/dev-server.cjs", "desktop"),
   electron(
     "tests/mcp-shell.cjs",
@@ -557,6 +566,7 @@ const ux = [
 export const CLOUD_SCENARIOS = [
   "tests/cloud-rooms.mjs",
   "tests/cloud-room-pages.mjs",
+  "tests/cloud-version-history.mjs",
   "tests/cloud-auth.mjs",
   "tests/cloud-web-access.mjs",
   "tests/cloud-auth-bridge.mjs",
@@ -643,6 +653,12 @@ const e2eCloud = [
     ...isl("home"),
   ]),
   electron("tests/cloud-files-desktop.mjs", "e2e-cloud", [...AREA.cloudRenderer, ...isl("home")]),
+  electron("tests/cloud-version-history-desktop.mjs", "e2e-cloud", [
+    ...AREA.cloudRenderer,
+    ...isl("history"),
+    "web/version-history.js",
+    "web/version-history-core.js",
+  ]),
   electron(
     "tests/share-collab.mjs",
     "e2e-cloud",
