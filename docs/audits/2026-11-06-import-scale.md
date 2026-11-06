@@ -73,3 +73,38 @@ images and HTML's resolved images use the mapped fit. SVG handling is untouched.
 See final implementation handoff for exact commands, counts, and log paths.
 Regression coverage lives in integrations/import-scale.test.mjs and fidelity
 fixture 35-radius-background. No UI was changed, so screenshots are not applicable.
+
+### Recorded checks
+
+- npm run build:ui, npm run lint, npm run lint:ui, npm run typecheck:ui,
+  npm run check: passed (lint reports existing warnings).
+- node --test integrations/import-scale.test.mjs: 11 passed, 0 failed.
+- node eval/run-fidelity.mjs --verbose: 35 fixtures / 172 checks passed, no skips.
+- node --test --test-concurrency=1 integrations/*.test.mjs: 411 passed, 1 failed
+  (desktop file-watch notification timeout); subsequent isolated
+  node --test integrations/design-files.test.mjs: 2 passed, 0 failed.
+- Targeted codec-html and node-import-limits tests after final fixes: 7 passed.
+- New-file formatter check and git diff --check: passed.
+- The changed-test selection started before the final root-selector and parser-test
+  updates; final handoff records that run's outcome separately.
+- npm run test:changed -- --base origin/fix/large-design-import: 81 passed,
+  6 failed, 0 skipped (1424.6s). The real Electron MCP bridge test passed,
+  including the newly added 6,000-node split. The HTML import dialog passed.
+  Failures were codec-html (root selector inventory, fixed), node-import-limits
+  (old page-cap expectation, updated to the document cap), design-files (watch
+  timeout), generate-image (cancellation marker), chat-composer-menu (terminal
+  output), and mcp-shell (expected empty page title).
+- Final serial rerun of codec-html, node-import-limits, generate-image, and
+  design-files: 15 passed, 0 failed. Isolated chat-composer-menu: passed.
+
+- Isolated node tests/mcp-shell.cjs still fails at line 121: page title is
+  "Fixture shop" rather than empty following navigation. This remains outside
+  import scope (the separate async-wait test agent owns that work). The full
+  changed suite was not repeated after fixes/reruns and is not claimed all-pass.
+- Live splitting was tested with 6,000 nodes; the 20,000-node end-to-end tests
+  used the real file backend. No original Pencil export was available.
+
+Logs are under /tmp/import-scale-*: regressions.log (11 tests),
+fidelity-verified.log (35/172), integrations-final.log (411/412),
+rerun-integration.log (15/15), changed.log (81/87), chat-rerun.log and
+shell-rerun.log. Build/lint/typecheck/check logs use the same prefix.
