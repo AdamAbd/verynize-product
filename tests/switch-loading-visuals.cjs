@@ -54,10 +54,19 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     const logo = page.locator("#switch-loading-logo");
     assert.equal(await logo.isVisible(), true);
     assert.equal(await logo.getAttribute("aria-label"), "Loading file");
-    const workspace = await page.locator("#workspace").boundingBox();
+    // Like Pen: only the title bar and the mark; the cover spans sidebar, workspace and inspector.
+    const main = await page.locator("main").boundingBox();
+    const cover = await logo.boundingBox();
+    assert.deepEqual(cover, main);
     const mark = await logo.locator("svg").boundingBox();
-    assert.ok(Math.abs(mark.x + mark.width / 2 - workspace.x - workspace.width / 2) < 2);
-    assert.ok(Math.abs(mark.y + mark.height / 2 - workspace.y - workspace.height / 2) < 2);
+    assert.ok(Math.abs(mark.x + mark.width / 2 - main.x - main.width / 2) < 2);
+    assert.ok(Math.abs(mark.y + mark.height / 2 - main.y - main.height / 2) < 2);
+    for (const panel of ["#layer-panel", "#properties"])
+      assert.equal(
+        await page.locator(panel).evaluate((el) => getComputedStyle(el).visibility),
+        "hidden",
+        panel + " is hidden under the file cover",
+      );
     await shot("file-after");
     await page.locator("[data-file-tab]:visible").filter({ hasText: "Sample A" }).click();
     await page.waitForFunction(() => window.design.getDocument().name === "Sample A");

@@ -107,6 +107,7 @@ mountIsland("chrome", container, () => <Island overlayHost={overlayHost()} />);
 
 mountIsland(
   "switch-loading",
-  () => ensureContainer("bd-switch-loading-root", document.getElementById("workspace")!),
+  // In <main>, so the file-switch cover can hide the sidebar and inspector too (tabs stay usable).
+  () => ensureContainer("bd-switch-loading-root", document.querySelector("main")!),
   () => <SwitchLoading />,
 );

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { LogoIcon } from "@/components/icons";
 import "./switch-loading.css";
 
@@ -10,9 +10,23 @@ type SwitchState = {
 
 /** Presentation only: the coordinator owns data, ordering and the live outgoing canvas. */
 export function SwitchLoading() {
+  const cover = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const workspace = document.getElementById("workspace");
     if (!workspace) return;
+    const show = (kind: SwitchState["kind"]) => {
+      // The file cover starts below the title bar, wherever the shell puts <main>.
+      const top = document.querySelector("main")?.getBoundingClientRect().top ?? 0;
+      cover.current?.style.setProperty("top", `${top}px`);
+      workspace.dataset.switchLoading = kind;
+      document.body.dataset.switchLoading = kind;
+    };
+    const hide = () => {
+      delete workspace.dataset.switchLoading;
+      delete workspace.dataset.switchLeaving;
+      delete document.body.dataset.switchLoading;
+      delete document.body.dataset.switchLeaving;
+    };
     let current: number | null = null;
     let delayTimer: ReturnType<typeof setTimeout>;
     let safetyTimer: ReturnType<typeof setTimeout>;
@@ -29,16 +43,12 @@ export function SwitchLoading() {
       clearTimeout(fadeTimer);
       delete workspace.dataset.switchPending;
       restore();
-      if (immediate || !workspace.dataset.switchLoading) {
-        delete workspace.dataset.switchLoading;
-        delete workspace.dataset.switchLeaving;
-      } else {
+      if (immediate || !workspace.dataset.switchLoading) hide();
+      else {
         workspace.dataset.switchLeaving = "true";
+        document.body.dataset.switchLeaving = "true";
         fadeTimer = setTimeout(
-          () => {
-            delete workspace.dataset.switchLoading;
-            delete workspace.dataset.switchLeaving;
-          },
+          hide,
           matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 100,
         );
       }
@@ -73,9 +83,7 @@ export function SwitchLoading() {
       } catch {
         /* Storage can be unavailable in restricted contexts. */
       }
-      delayTimer = setTimeout(() => {
-        workspace.dataset.switchLoading = state.kind;
-      }, delay);
+      delayTimer = setTimeout(() => show(state.kind), delay);
       safetyTimer = setTimeout(() => clear(), 30000);
     };
     const onChange = (event: Event) => update((event as CustomEvent<SwitchState>).detail);
@@ -139,7 +147,7 @@ export function SwitchLoading() {
     };
   }, []);
   return (
-    <div id="switch-loading-logo" role="status" aria-label="Loading file">
+    <div ref={cover} id="switch-loading-logo" role="status" aria-label="Loading file">
       <LogoIcon />
     </div>
   );
