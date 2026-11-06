@@ -153,6 +153,26 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     );
     await page.waitForFunction((id) => location.pathname === "/editor/" + id && window.fileLibrary.currentId === id, fileIds.Beta);
     await page.evaluate((id) => window.fileLibrary.setCloud(id, null), fileIds.Beta);
+    // While a tab loads, the clicked tab already looks active and the outgoing one does not.
+    const target = await page.evaluate(
+      () => window.fileLibrary.summaries().find((f) => f.id !== window.fileLibrary.currentId).id,
+    );
+    await page.evaluate(() => {
+      const prepare = window.documentLifecycle.prepareSwitch;
+      window.documentLifecycle.prepareSwitch = async (options) => {
+        window.documentLifecycle.prepareSwitch = prepare;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        return prepare(options);
+      };
+    });
+    await page.locator(`[data-file-tab="${target}"]:not([data-document-tab])`).click();
+    const pendingTab = page.locator(`[data-file-tab="${target}"][data-switch-pending]`);
+    await pendingTab.waitFor();
+    assert.match(await pendingTab.getAttribute("class"), /bg-input/);
+    assert.doesNotMatch(await page.locator("[data-document-tab]").getAttribute("class"), /bg-input/);
+    await page.waitForFunction((id) => window.fileLibrary.currentId === id, target);
+    assert.equal(await page.locator("[data-switch-pending]").count(), 0);
+    assert.match(await page.locator("[data-document-tab]").getAttribute("class"), /bg-input/);
     // Closing each active tab selects its neighbour, then returns to Files.
     while (await page.locator("[data-file-tab-close]").count()) {
       const id = await page.evaluate(() => window.fileLibrary.currentId);
