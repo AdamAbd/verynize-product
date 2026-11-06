@@ -186,6 +186,9 @@ export function clearRoomHash(roomId?: string) {
 /* ---------- History ---------- */
 
 const entryState = () => history.location.state as EntryState;
+// The entry the page was loaded on: its key and the path it was loaded at. Set at startup (below), and moved to the
+// replacement when a bare /editor launch is replaced with the active file's URL.
+const launch: { key?: string; path?: string } = {};
 const settingsStateOf = ({ settingsUnder, settingsPushed }: EntryState): EntryState => ({
   ...(settingsUnder ? { settingsUnder } : {}),
   ...(settingsPushed ? { settingsPushed } : {}),
@@ -332,9 +335,7 @@ export function request(target: ShellRequest, { replace = false }: { replace?: b
  * history state: not a reload or Back/Forward).
  */
 export const isLaunchEntry = (path: ViewPath) =>
-  !rawStartState?.__TSR_key &&
-  entryState().__TSR_key === launchKey &&
-  history.location.pathname === path;
+  !rawStartState?.__TSR_key && entryState().__TSR_key === launch.key && launch.path === path;
 
 /* ---------- Route components: URL → shell ---------- */
 
@@ -392,7 +393,12 @@ function restoreFile(view: ViewPath) {
         ...settingsStateOf(entryState()),
         settingsUnder: path,
       });
-    else commit(path, "replace");
+    else {
+      // The launch entry stays the launch entry under its canonical URL (code mode restores in its place).
+      const wasLaunch = isLaunchEntry("/editor");
+      commit(path, "replace");
+      if (wasLaunch) launch.key = entryState().__TSR_key;
+    }
     return;
   }
   let id = "";
@@ -508,7 +514,8 @@ export type ShellRouter = ReturnType<typeof createShellRouter>;
 
 /* ---------- Startup ---------- */
 
-const launchKey = entryState().__TSR_key;
+launch.key = entryState().__TSR_key;
+launch.path = history.location.pathname;
 
 // A reload while settings was closing (history.back() not landed yet) comes back closed, on the view underneath.
 // Chromium can drop the entry's state when a reload cancels the traversal, so a state-less entry on the same path
