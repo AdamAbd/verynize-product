@@ -24,7 +24,8 @@ Org `adamabdrrahman` (US region). The server project tells deployments apart by 
   "Restart Verynize…". Turning it off is immediate: main closes the client, and the offline transport's
   `shouldSend`/`shouldStore` refuse anything still queued.
 - **Web.** The choice is stored in `localStorage["verynize:telemetry"]` (`on`/`off`). Off by default; turning it on
-  starts reporting on the next page load, and turning it off closes the client at once.
+  starts reporting on the next page load, and turning it off closes the client at once, in every open tab
+  (each event re-reads the stored choice, and a `storage` event from another tab closes the client).
 - **Servers.** These are the operator's own errors, so no visitor consent applies. They pass the same scrubber.
 - **Automated runs** (`VERYNIZE_SKIP_ONBOARDING=1`, `VERYNIZE_BLOCK_PRODUCTION_CLOUD=1` or `CI`): the desktop only
   ever reports to a loopback DSN (`tests/telemetry-desktop.cjs` runs a local ingest server).

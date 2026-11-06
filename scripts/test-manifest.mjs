@@ -665,6 +665,11 @@ const AI = ["cloud/ai*.js", "web-start/**", "server/node.mjs", "tests/helpers/fa
 const web = [
   webBuild("tests/web-cloudflare.mjs", []),
   webBuild("tests/web-node.mjs", []),
+  webBuild("tests/web-telemetry.mjs", [
+    "vite.node.config.ts",
+    "web/telemetry-scrub.js",
+    "web/src/lib/telemetry/**",
+  ]),
   webBuild("tests/ai-routing.mjs", [...AI, "api/**", "vercel.json", "cloud/platform/**"]),
   webBuild("tests/web-ai-chat.mjs", [...AI, "web/src/lib/agent-service.ts", ...isl("chat")]),
   webBuild("tests/web-nitro.mjs", ["vite.nitro.config.ts", "web-start/nitro/**"], {

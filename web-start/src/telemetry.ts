@@ -11,7 +11,12 @@ import {
   privacyOptions,
   sampleRate,
 } from "@/lib/telemetry/privacy";
-import { readWebConsent, registerTelemetryRuntime } from "@/lib/telemetry/runtime";
+import {
+  readWebConsent,
+  registerTelemetryRuntime,
+  WEB_CONSENT_KEY,
+  type TelemetryRuntime,
+} from "@/lib/telemetry/runtime";
 import { onRouterCreated } from "./router-created";
 
 function startWebTelemetry() {
@@ -30,14 +35,15 @@ function startWebTelemetry() {
       integrations: (defaults) =>
         defaults.filter((integration) => !BROWSER_DROPPED.has(integration.name)),
       initialScope: { tags: { surface: "web" } },
-      ...privacyOptions(() => active),
+      // The stored choice is re-read per event: another tab may have turned reports off.
+      ...privacyOptions(() => active && readWebConsent()),
     });
     // Route-based pageload and navigation spans, once getRouter() created the router.
     onRouterCreated((router) =>
       Sentry.addIntegration(Sentry.tanstackRouterBrowserTracingIntegration(router)),
     );
   }
-  registerTelemetryRuntime({
+  const runtime: TelemetryRuntime = {
     available,
     get active() {
       return active;
@@ -56,7 +62,14 @@ function startWebTelemetry() {
       active = false;
       await Sentry.close(2000);
     },
-  });
+  };
+  registerTelemetryRuntime(runtime);
+  // Opting out in another tab (or clearing site data) closes this tab's client too.
+  if (active)
+    addEventListener("storage", (event) => {
+      if ((event.key === WEB_CONSENT_KEY || event.key === null) && !readWebConsent())
+        void runtime.stop();
+    });
 }
 
 startWebTelemetry();
