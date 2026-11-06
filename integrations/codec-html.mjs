@@ -38,6 +38,7 @@ import { validateDocument, VARIABLE_NAME } from "./design-store.mjs";
 import { sniffImageType, imageSize } from "./images.mjs";
 import { sanitizeSvg } from "./assets.mjs";
 import { RESIDUAL_ATTR } from "./codec-residual.mjs";
+import { svgElementJsx } from "./vector-jsx.mjs";
 
 export const IMPORT_LIMITS = Object.freeze({
   maxBytes: 2 * 1024 * 1024,
@@ -1812,7 +1813,8 @@ export async function importHtml(html, options = {}) {
       const { classes, fills } = await classesFor(el, info);
       let src = "",
         assetError = "",
-        size = null;
+        size = null,
+        vectorMarkup = "";
       if (el.tag === "svg") {
         const markup = (el.svg || "").replace(/currentColor/g, info.color);
         const withNs = /xmlns=/.test(markup.slice(0, 200))
@@ -1820,6 +1822,7 @@ export async function importHtml(html, options = {}) {
           : markup.replace(/^<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
         const clean = sanitizeSvg(`${withNs}</svg>`);
         if (!clean) warnings.push("Inline SVG was rejected by the sanitizer");
+        vectorMarkup = clean;
         if (clean) {
           const buf = Buffer.from(clean);
           src = `data:image/svg+xml;base64,${buf.toString("base64")}`;
@@ -1863,6 +1866,31 @@ export async function importHtml(html, options = {}) {
         else if (size?.height && !(w > 0)) sized.push(`[height:${size.height}px]`);
         else if (w > 0 && size?.width)
           sized.push(`[height:${r2((w * size.height) / size.width)}px]`);
+      }
+      // Inline SVG becomes vector layers when it can (web/vector-svg.js); otherwise an SVG image.
+      if (vectorMarkup) {
+        const px = (prop, attr) => {
+          const v = String(info.style.get(prop) || "");
+          return /^[\d.]+px$/.test(v) ? parseFloat(v) : Number(attr) > 0 ? Number(attr) : undefined;
+        };
+        const out = svgElementJsx(vectorMarkup, {
+          color: info.color,
+          attrs: [
+            `data-node-label="${escAttr(name)}"`,
+            ...(residual ? [`${RESIDUAL_ATTR}='${escSingle(JSON.stringify(residual))}'`] : []),
+          ],
+          className: [...classes, ...sized].join(" "),
+          label: name,
+          indent,
+          w: px("width", el.attrs.width),
+          h: px("height", el.attrs.height),
+        });
+        if (out.ok) {
+          lines.push(out.jsx);
+          for (const w of out.warnings.slice(0, 6)) warnings.push(`Inline SVG: ${w}`);
+          return;
+        }
+        warnings.push(`${out.reason}; kept it as an SVG image`);
       }
       lines.push(
         `${indent}<img data-node-label="${escAttr(name)}" src="${escAttr(src)}"${assetError ? ` data-asset-error="${escAttr(assetError)}"` : ""}${common([...classes, ...sized])}${fills.length ? ` data-fills="${escAttr(JSON.stringify(fills))}"` : ""} />`,

@@ -7,6 +7,7 @@ import {
   File,
   Hand,
   MousePointer2,
+  PenTool,
   Pin,
   SquareArrowUpRight,
   Scan,
@@ -55,8 +56,8 @@ import { setPanelOpen } from "./shortcuts";
 import { PreviewToolbar } from "./PreviewToolbar";
 
 type Icon = ComponentType<{ className?: string }>;
-// Wonder T1: Move, Scale, Hand | Frame, Shader, Text. Eyedropper (I) and Ellipse (O) stay on the keyboard and in
-// the command palette.
+// Wonder T1: Move, Scale, Hand | Frame, Shader, Text, plus Verynize's Pen (vector layers, web/vector-edit.js).
+// Eyedropper (I) and Ellipse (O) stay on the keyboard and in the command palette.
 const TOOLS: { id: string; tool: string; label: string; key: string; icon: Icon }[] = [
   { id: "select-tool", tool: "move", label: "Move", key: "V", icon: MousePointer2 },
   { id: "scale-tool", tool: "scale", label: "Scale", key: "K", icon: SquareArrowUpRight },
@@ -64,6 +65,7 @@ const TOOLS: { id: string; tool: string; label: string; key: string; icon: Icon 
   { id: "add-frame", tool: "frame", label: "Frame", key: "F", icon: Scan },
   { id: "add-shader", tool: "shader", label: "Shader", key: "S", icon: ShaderIcon },
   { id: "text", tool: "text", label: "Text", key: "T", icon: Type },
+  { id: "pen-tool", tool: "pen", label: "Pen", key: "P", icon: PenTool },
 ];
 /** Index of the first creation tool (Frame); a divider separates it from the pointer tools. */
 const TOOL_GROUP_SPLIT = TOOLS.findIndex((t) => t.id === "add-frame");
@@ -133,7 +135,9 @@ function Toolbar() {
                   toolButton,
                   tool === name && "bg-accent text-foreground hover:bg-accent",
                 )}
-                onClick={() => (name === "text" ? toggleTool("text") : run(id))}
+                onClick={() =>
+                  name === "text" || name === "pen" ? toggleTool(name) : run(id)
+                }
               >
                 <Icon />
               </button>
@@ -186,7 +190,7 @@ function Toolbar() {
   );
 }
 
-/** Text arms the tool like Frame does (Wonder TX1): a canvas click or drag then creates the layer. */
+/** Text and Pen arm the tool like Frame does (Wonder TX1): canvas clicks then create the layer. */
 function toggleTool(name: string) {
   window.design.setTool(window.design.getTool() === name ? "move" : name);
 }

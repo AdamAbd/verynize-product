@@ -11,7 +11,7 @@
   const SELECTION_SAFE = {top: 64, right: 29, bottom: 120, left: 29};
   const BOARD = {x: 0, y: 0, w: 1000, h: 700};
   const DRAW_TOOLS = new Set(['frame', 'rectangle', 'ellipse', 'text', 'shader']);
-  const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', eyedropper: 'eyedropper-tool', frame: 'add-frame', rectangle: 'rectangle', ellipse: 'add-ellipse', text: 'text', shader: 'add-shader'};
+  const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', eyedropper: 'eyedropper-tool', frame: 'add-frame', rectangle: 'rectangle', ellipse: 'add-ellipse', text: 'text', shader: 'add-shader', pen: 'pen-tool'};
   const STYLE_KEYS = ['color', 'token', 'gradient', 'radius', 'ellipse', 'strokeWidth', 'strokeColor', 'shadow', 'opacity', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'textAlignVertical', 'textTransform', 'textDecoration', 'textWrap', 'whiteSpace', 'wordBreak', 'textIndent', 'fontSmoothing', 'truncate', 'mask', 'animated', 'clipContent'];
   const CLIP_MARKER = 'verynize/nodes';
   // Wonder's frame tool presets (Properties panel with the Frame tool on and nothing selected): [category, [[name, w, h]]].
