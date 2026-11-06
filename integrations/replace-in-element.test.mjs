@@ -80,6 +80,50 @@ test("real file backend runTool smoke: revision check, replacement and hint", as
   assert.equal((await backend.read("doc")).revision, out.revision);
 });
 
+test("get_element_code revision drives replacement; hints reuse the tool's document", async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "vn-replace-rev-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const backend = createStoreBackend(await DesignStore.open(dir));
+  let reads = 0;
+  const read = backend.read.bind(backend);
+  backend.read = (...a) => (reads++, read(...a));
+  const run = (name, args) => runTool(backend, name, args);
+  const json = (r) => {
+    assert.ok(!r.isError, r.content[0].text);
+    return JSON.parse(r.content[0].text);
+  };
+  json(await run("create_document", { name: "doc", title: "Doc" }));
+  const id = json(
+    await run("create_artboard", {
+      document: "doc",
+      code: '<div className="w-[400px] h-[300px]"><p>Hello</p></div>',
+    }),
+  ).trees[0].id;
+  reads = 0;
+  const code = json(await run("get_element_code", { document: "doc", ids: [id] }));
+  assert.equal(reads, 1, "the hint must not read the document a second time");
+  assert.ok(code.revision, "get_element_code returns the revision replace_in_element checks");
+  assert.doesNotMatch(
+    code.nextStep || "",
+    /take_screenshot/,
+    "read-only tools get no finish hints",
+  );
+  const out = json(
+    await run("replace_in_element", {
+      document: "doc",
+      id,
+      old: ">Hello<",
+      new: ">Hi<",
+      revision: code.revision,
+    }),
+  );
+  assert.match(out.code, />Hi</);
+  const loose = json(
+    await run("replace_in_element", { document: "doc", id, old: ">Hi<", new: ">Yo<" }),
+  );
+  assert.match(loose.code, />Yo</, "revision is optional");
+});
+
 test("real stdio exposes and executes exact replacement", async (t) => {
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");

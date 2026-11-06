@@ -46,14 +46,17 @@ export function attachToolHints(table, { read, session, keyOf }) {
       continue;
     if (name === "finish_artboard") continue;
     const run = tool.run;
+    const readOnly = !!tool.annotations?.readOnlyHint;
     tool.run = async (args) => {
+      session.last = null;
       const result = await run(args);
       if (result?.isError) return result;
       try {
         const ref = ["read_document", "apply_operations"].includes(name)
           ? args.name
           : args.document;
-        const state = await read(ref);
+        // Reuse the document the tool just read or wrote instead of reading it again.
+        const state = session.last?.ref === ref ? session.last.state : await read(ref);
         const page = getPage(state.document, args.pageId || result?.pageId);
         const index = indexPage(page);
         const roots =
@@ -78,12 +81,14 @@ export function attachToolHints(table, { read, session, keyOf }) {
           omit:
             name === "take_screenshot"
               ? new Set(["assets", "lint", "screenshot"])
-              : new Set(
-                  result?.pendingImages ||
-                    (typeof result === "string" && /remote image.*downloading/.test(result))
-                    ? ["assets"]
-                    : [],
-                ),
+              : readOnly
+                ? new Set(["lint", "screenshot"])
+                : new Set(
+                    result?.pendingImages ||
+                      (typeof result === "string" && /remote image.*downloading/.test(result))
+                      ? ["assets"]
+                      : [],
+                  ),
         });
         if (!hint) return result;
         if (result?.content)

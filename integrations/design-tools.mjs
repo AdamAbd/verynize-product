@@ -253,7 +253,9 @@ const MAX_CODE = 400_000;
 async function readPrepared(backend, ref) {
   const state = await backend.read(ref);
   const document = clone(state.document); ensureShortIds(document);
-  return { ...state, document };
+  const prepared = { ...state, document };
+  sessionFor(backend).last = { ref, state: prepared }; // reused by the next-step hints
+  return prepared;
 }
 const linkFor = (state, pageId, shortId) => `verynize://node/${encodeURIComponent(state.name || 'editor')}/${encodeURIComponent(pageId)}/${encodeURIComponent(shortId)}`;
 const tagOf = node => node.htmlTag || ({ frame: 'div', rectangle: 'div', text: 'p', image: 'img', shader: 'Shader' })[node.type] || 'div';
@@ -423,7 +425,7 @@ function ignoreLayout(before, after) {
  * commands), so nothing it changed is marked as an override.
  */
 async function write(backend, ref, fn) {
-  let pending = [];
+  let pending = [], committed = null;
   const out = await backend.transact(ref, (document, meta) => {
     ensureShortIds(document);
     const before = hasComponents(document) ? clone(document) : null;
@@ -432,8 +434,10 @@ async function write(backend, ref, fn) {
     ensureShortIds(result.document); syncTokenColors(result.document);
     result.guard?.(result.document);
     pending = pendingAssets(result.document);
+    committed = result.document;
     return result;
   });
+  sessionFor(backend).last = { ref, state: { name: out.name, revision: out.revision, document: committed } };
   const key = docKey(out.name, ref);
   sessionFor(backend).receipts.invalidate(key);
   if (pending.length) scheduleAssets(backend, ref ?? out.name ?? undefined, pending, key);
@@ -513,7 +517,7 @@ export function toolTable(backend, context = {}) {
     inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).min(1).max(50), depth: z.number().int().min(0).max(50).optional() }, annotations: { readOnlyHint: true },
     run: async ({ document: ref, pageId, ids, depth }) => {
       const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
-      return { pageId: page.id, results: ids.map(id => ({ id, code: capCode(elementCode(state.document, page, index.require(id), depth ?? Infinity)) })) };
+      return { pageId: page.id, revision: state.revision, results: ids.map(id => ({ id, code: capCode(elementCode(state.document, page, index.require(id), depth ?? Infinity)) })) };
     },
   };
   t.find_elements = {
@@ -590,11 +594,11 @@ export function toolTable(backend, context = {}) {
     },
   };
   t.replace_in_element = {
-    description: 'Preferred for small text or class edits. Read get_element_code, then replace old with new in exactly one occurrence of the full serialized JSX of id. Preserves untouched descendant ids. Invalid JSX, ambiguous matches, revision conflicts or changes outside the element abort the transaction. Returns the resulting JSX.',
-    inputSchema: { document: documentArg, pageId: pageArg, id: elementId, old: z.string().min(1).max(2_000_000), new: z.string().max(2_000_000), revision: z.string().min(1) },
+    description: 'Preferred for small text or class edits. Read get_element_code, then replace old with new in exactly one occurrence of the full serialized JSX of id. Preserves untouched descendant ids. Pass the revision get_element_code returned to reject the edit if the document changed since. Invalid JSX, ambiguous matches, revision conflicts or changes outside the element abort the transaction. Returns the resulting JSX.',
+    inputSchema: { document: documentArg, pageId: pageArg, id: elementId, old: z.string().min(1).max(2_000_000), new: z.string().max(2_000_000), revision: z.string().min(1).optional() },
     run: async ({ document: ref, pageId, id, old, new: replacement, revision }) => {
       const out = await write(backend, ref, (document, meta) => {
-        if (meta.revision !== revision) throw new Error('Revision conflict; read_document again before replacing');
+        if (revision !== undefined && meta.revision !== revision) throw new Error('Revision conflict; call get_element_code again before replacing');
         return replaceInElement(document, pageId, id, old, replacement);
       });
       return { ...out.result, revision: out.revision, live: out.live };
