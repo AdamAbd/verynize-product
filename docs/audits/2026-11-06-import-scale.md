@@ -49,9 +49,10 @@ measured 146ms without pruning versus 108ms with pruning (10,000 rules removed).
 These are observations, not CI thresholds; parallel Electron/build workloads
 increase timings substantially. The tests print timing, heap delta, and RSS.
 
-Store serialization is now compact: validation previously measured compact JSON
-but wrote pretty JSON, allowing a successful large write that the reader rejected
-as over 20 MiB. Compact output makes the write/read budgets agree.
+Store serialization stays pretty-printed (readable diffs for files kept in git),
+but a document whose pretty form exceeds 20 MiB is written compact: validation
+measured compact JSON while the writer emitted pretty JSON, allowing a successful
+large write that the reader then rejected. Covered by integrations/design-store.test.mjs.
 
 ## Fidelity choices
 
