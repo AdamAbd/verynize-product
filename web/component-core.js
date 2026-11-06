@@ -148,33 +148,55 @@
   }
 
   // ---- index ------------------------------------------------------------------------------------
-  // id → node, id → page, parent id → children. Children are kept in page order (`pos`) so the sync can reorder
-  // siblings by swapping their slots in the page array.
+  // id → node and parent id → children (page order). Each node's page and array position are located on first use
+  // (reconciling, commands): the sync reorders siblings by swapping their slots in the page array, and a group is
+  // re-sorted only after a move or a reorder.
+  const MAX_DEPTH = 10001;
   function indexOf(doc) {
     const byId = new Map(),
-      pageOf = new Map(),
       kids = new Map(),
-      pos = new Map();
-    for (const page of pagesOf(doc))
-      page.nodes.forEach((n, i) => {
-        if (!n || typeof n !== "object" || !nonempty(n.id) || byId.has(n.id)) return;
+      unsorted = new Set(),
+      pages = pagesOf(doc);
+    for (const page of pages) {
+      const list = page.nodes;
+      for (let i = 0; i < list.length; i++) {
+        const n = list[i];
+        if (!n || typeof n !== "object" || !nonempty(n.id) || byId.has(n.id)) continue;
         byId.set(n.id, n);
-        pageOf.set(n.id, page);
-        pos.set(n, i);
-        if (!n.parentId) return;
-        let group = kids.get(n.parentId);
-        if (!group) kids.set(n.parentId, (group = []));
-        group.push(n);
-      });
+        if (!n.parentId) continue;
+        const group = kids.get(n.parentId);
+        if (group) group.push(n);
+        else kids.set(n.parentId, [n]);
+      }
+    }
+    let located = null;
+    const pageMap = new Map(),
+      posMap = new Map();
+    const locate = () => {
+      if (located) return;
+      located = true;
+      for (const page of pages)
+        page.nodes.forEach((n, i) => {
+          if (n && byId.get(n.id) === n) {
+            pageMap.set(n.id, page);
+            posMap.set(n, i);
+          }
+        });
+    };
     const ix = {
       byId,
-      pageOf,
-      pos,
+      pageOf: { get: (id) => (locate(), pageMap.get(id)) },
+      pos: { get: (n) => (locate(), posMap.get(n)), set: (n, i) => (locate(), posMap.set(n, i)) },
       get: (id) => (nonempty(id) ? byId.get(id) : undefined),
-      children(id) {
+      /** Children in page order; read-only (`children` returns a copy that may be changed). */
+      kidsOf(id) {
         const group = kids.get(id);
-        return group ? group.slice().sort((a, b) => pos.get(a) - pos.get(b)) : [];
+        if (!group) return [];
+        if (unsorted.delete(id)) group.sort((a, b) => ix.pos.get(a) - ix.pos.get(b));
+        return group;
       },
+      children: (id) => ix.kidsOf(id).slice(),
+      reordered: (id) => unsorted.add(id),
       parent: (n) => (n.parentId ? byId.get(n.parentId) : undefined),
       /** `id` and everything below it, depth first in page order (cycle-safe). */
       subtree(id) {
@@ -185,15 +207,16 @@
           if (!n || seen.has(n)) return;
           seen.add(n);
           out.push(n);
-          for (const c of ix.children(n.id)) visit(c);
+          for (const c of ix.kidsOf(n.id)) visit(c);
         };
         visit(start);
         return out;
       },
       add(n, page) {
+        locate();
         byId.set(n.id, n);
-        pageOf.set(n.id, page);
-        pos.set(n, page.nodes.length);
+        pageMap.set(n.id, page);
+        posMap.set(n, page.nodes.length);
         page.nodes.push(n);
         if (n.parentId) {
           let group = kids.get(n.parentId);
@@ -209,6 +232,7 @@
         let group = kids.get(parentId);
         if (!group) kids.set(parentId, (group = []));
         group.push(n);
+        unsorted.add(parentId);
       },
       /** Drops a node and its subtree from the index; the page arrays are compacted by `compact`. */
       remove(n, removed) {
@@ -235,18 +259,13 @@
   }
   /** The instance root a node belongs to: the nearest top instance root at or above it. */
   function ownerOf(ix, n) {
-    const seen = new Set();
-    for (let cur = n; cur && !seen.has(cur); cur = ix.parent(cur)) {
-      seen.add(cur);
+    for (let cur = n, i = 0; cur && i < MAX_DEPTH; cur = ix.parent(cur), i++)
       if (isTop(cur)) return cur;
-    }
     return null;
   }
   /** The nearest slot frame strictly above `n`, up to and including the instance root. */
   function slotAbove(ix, n, rootNode) {
-    const seen = new Set();
-    for (let cur = ix.parent(n); cur && !seen.has(cur); cur = ix.parent(cur)) {
-      seen.add(cur);
+    for (let cur = ix.parent(n), i = 0; cur && i < MAX_DEPTH; cur = ix.parent(cur), i++) {
       if (cur.slot === true) return cur;
       if (cur === rootNode) break;
     }
@@ -259,12 +278,15 @@
   function planOf(ix) {
     const mains = [...ix.byId.values()].filter(isMain),
       deps = new Map(),
-      scope = new Map();
+      scope = new Map(),
+      containers = new Map();
     for (const m of mains) {
       const set = new Set(),
         ids = new Set();
       for (const n of ix.subtree(m.id)) {
         ids.add(n.id);
+        if (!containers.has(n.id)) containers.set(n.id, []);
+        containers.get(n.id).push(m.id);
         if (isTop(n) && isMain(ix.get(n.instanceOf))) set.add(n.instanceOf);
       }
       deps.set(m.id, set);
@@ -307,7 +329,8 @@
       order,
       syncable,
       inScope: (r, sourceId) => !!scope.get(r.instanceOf)?.has(sourceId),
-      scopeOf: (mainId) => scope.get(mainId) || new Set(),
+      /** The mains whose subtree holds the node. */
+      mainsOf: (id) => containers.get(id) || [],
     };
   }
 
@@ -351,27 +374,37 @@
   }
 
   // ---- property copy ----------------------------------------------------------------------------
+  /** Copies the source's keys onto a linked node (not local keys, not overrides); true when anything changed. */
   function copyProps(n, s, isRoot, fresh) {
     const local = isRoot ? ROOT_LOCAL : NODE_LOCAL;
-    if (hasOverride(n, CHILDREN) && s.slot !== true)
+    let changed = false;
+    if (hasOverride(n, CHILDREN) && s.slot !== true) {
       setOverrides(
         n,
         overridesOf(n).filter((k) => k !== CHILDREN),
       );
-    const ov = new Set(overridesOf(n));
-    if (!isRoot) delete n.component;
-    for (const key of new Set([...Object.keys(n), ...Object.keys(s)])) {
-      if (local.has(key) || ov.has(key) || GEOMETRY.includes(key)) continue;
-      if (own(s, key) && s[key] !== undefined) {
-        if (!equal(n[key], s[key])) n[key] = copy(s[key]);
-      } else if (own(n, key)) delete n[key];
+      changed = true;
     }
-    for (const key of GEOMETRY) {
-      if (local.has(key) || ov.has(key) || (!fresh && measured(n, key))) continue;
-      if (own(s, key) && s[key] !== undefined) {
-        if (!equal(n[key], s[key])) n[key] = copy(s[key]);
-      } else if (own(n, key)) delete n[key];
+    const ov = overridesOf(n);
+    if (!isRoot && own(n, "component")) {
+      delete n.component;
+      changed = true;
     }
+    const skip = (key) =>
+      local.has(key) || ov.includes(key) || (GEOMETRY.includes(key) && !fresh && measured(n, key));
+    // Sizing modes first, so `measured` sees the source's modes.
+    const keys = Object.keys(s).sort((a, b) => GEOMETRY.includes(a) - GEOMETRY.includes(b));
+    for (const key of keys) {
+      if (s[key] === undefined || skip(key) || equal(n[key], s[key])) continue;
+      n[key] = copy(s[key]);
+      changed = true;
+    }
+    for (const key of Object.keys(n)) {
+      if ((own(s, key) && s[key] !== undefined) || skip(key)) continue;
+      delete n[key];
+      changed = true;
+    }
+    return changed;
   }
 
   // ---- phase 1: what the edit between prev and next did to instances ----------------------------
@@ -396,10 +429,68 @@
       .filter((d) => isLinked(d) && ownerOf(ix, d) === rootNode);
     unlink(ix, inside);
   }
-  function detect(prev, doc) {
-    let ix = indexOf(doc),
-      plan = planOf(ix);
-    const prevIx = prev ? indexOf(prev) : null;
+  /** Same keys with equal values (undefined counts as absent). */
+  /** Same keys with equal values (undefined counts as absent), measured geometry aside. */
+  function sameNode(a, b) {
+    let count = 0;
+    for (const key in a) {
+      const v = a[key];
+      if (v === undefined) continue;
+      count++;
+      if (
+        v !== b[key] &&
+        !equal(v, b[key]) &&
+        !(GEOMETRY.includes(key) && (measured(a, key) || measured(b, key)))
+      )
+        return false;
+    }
+    for (const key in b) if (b[key] !== undefined) count--;
+    return count === 0;
+  }
+  /** Mains, instances and linked layers with everything inside them. */
+  function relevantOf(ix) {
+    const keep = new Set();
+    for (const n of ix.byId.values())
+      if (!keep.has(n) && (isMain(n) || isTop(n) || isLinked(n)))
+        for (const d of ix.subtree(n.id)) keep.add(d);
+    return keep;
+  }
+  /** Which instances and mains an edit touched: changed, added, removed or reordered layers inside them. Only those
+   * are checked for overrides and re-synced; the others were left consistent by the previous sync. */
+  function dirtyOf(prevIx, ix, plan) {
+    const roots = new Set(),
+      mains = new Set();
+    const mark = (n) => {
+      if (!n) return;
+      const r = ownerOf(ix, n);
+      if (r) roots.add(r.id);
+      for (const m of plan.mainsOf(n.id)) mains.add(m);
+    };
+    for (const d of relevantOf(ix)) {
+      {
+        const p = prevIx.get(d.id);
+        if (!p) mark(d);
+        else if (!sameNode(p, d)) {
+          mark(d);
+          if (p.parentId !== d.parentId) mark(ix.get(p.parentId));
+        }
+        const now = ix.kidsOf(d.id),
+          before = prevIx.kidsOf(d.id);
+        if (now.length !== before.length || now.some((c, i) => c.id !== before[i].id)) mark(d);
+      }
+    }
+    for (const p of prevIx.byId.values()) {
+      if (ix.get(p.id)) continue;
+      mark(ix.get(p.parentId));
+      const was = ownerOf(prevIx, p);
+      if (was && ix.get(was.id)) roots.add(was.id);
+    }
+    return { roots, mains };
+  }
+  /** Phase 1, on the instances the edit touched: strays, Modified slots, overrides, deleted inherited layers.
+   * Reports whether it changed the tree (the caller re-indexes) or any node. */
+  function detect(prevIx, ix, plan, dirty, doc) {
+    let structural = false;
     // Linked nodes outside their instance (moved out, pasted, or a stray duplicate): back to their previous parent
     // when that is still in the same instance, otherwise they become plain layers.
     const strays = () =>
@@ -421,41 +512,56 @@
         if (ix.pageOf.get(parent.id) !== ix.pageOf.get(n.id)) continue;
         if (ownerOf(ix, parent) !== ix.get(was.id)) continue;
         n.parentId = parent.id;
+        structural = true;
       }
-      ix = indexOf(doc);
-      lost = strays();
+      if (structural) {
+        ix = indexOf(doc);
+        lost = strays();
+      }
     }
     if (lost.length) unlink(ix, lost);
+    let changed = structural || lost.length > 0;
     // Instance roots written without a sourceId (agents) point it at their main.
     for (const n of ix.byId.values())
-      if (isTop(n) && n.sourceId !== n.instanceOf) n.sourceId = n.instanceOf;
-    if (!prevIx) return;
-    ix = indexOf(doc);
-    plan = planOf(ix);
-    // Slots in Default state whose content changed (added, removed, reordered, moved, edited) become Modified.
-    for (const n of ix.byId.values()) {
-      if (!isLinked(n) || n.slot !== true || hasOverride(n, CHILDREN)) continue;
-      const r = ownerOf(ix, n),
-        p = prevIx.get(n.id);
-      if (!plan.syncable(r) || !p) continue;
-      if (slotSignature(ix, n) !== slotSignature(prevIx, p)) markModified(ix, n, r);
+      if (isTop(n) && n.sourceId !== n.instanceOf) {
+        n.sourceId = n.instanceOf;
+        changed = true;
+      }
+    if (!prevIx || (!dirty.roots.size && !dirty.mains.size)) return { structural, changed };
+    changed = true;
+    const touched = [];
+    for (const id of dirty.roots) {
+      const r = ix.get(id);
+      if (plan.syncable(r)) touched.push(r);
     }
+    const owned = new Map(touched.map((r) => [r, ownedBy(ix, r)]));
+    // Slots in Default state whose content changed (added, removed, reordered, moved, edited) become Modified.
+    for (const r of touched)
+      for (const n of owned.get(r)) {
+        if (n.slot !== true || hasOverride(n, CHILDREN) || !isLinked(n)) continue;
+        const p = prevIx.get(n.id);
+        if (p && slotSignature(ix, n) !== slotSignature(prevIx, p)) markModified(ix, n, r);
+      }
     // Changed keys of linked nodes (and instance roots) that differ from their source become overrides.
-    for (const n of ix.byId.values()) {
-      const top = isTop(n);
-      if (!top && !isLinked(n)) continue;
-      const r = top ? n : ownerOf(ix, n);
-      if (!plan.syncable(r)) continue;
-      const slot = top ? null : slotAbove(ix, n, r);
-      if (slot && !hasOverride(slot, CHILDREN)) continue; // covered by the slot signature
-      const p = prevIx.get(n.id),
-        s = ix.get(top ? n.instanceOf : n.sourceId);
-      if (!p || !s) continue;
-      const local = top ? ROOT_LOCAL : UNMARKED;
-      for (const key of new Set([...Object.keys(p), ...Object.keys(n)])) {
-        if (local.has(key) || key === "instanceOf" || measured(n, key) || measured(p, key))
-          continue;
+    const mark = (n, p, s, local) => {
+      const check = (key) => {
+        if (local.has(key) || measured(n, key) || measured(p, key)) return;
         if (!equal(p[key], n[key]) && !equal(n[key], s[key])) addOverride(n, key);
+      };
+      for (const key of Object.keys(p)) check(key);
+      for (const key of Object.keys(n)) if (!own(p, key)) check(key);
+    };
+    for (const r of touched) {
+      const main = ix.get(r.instanceOf),
+        before = prevIx.get(r.id);
+      if (before && !sameNode(before, r)) mark(r, before, main, ROOT_LOCAL);
+      for (const n of owned.get(r)) {
+        if (!isLinked(n)) continue; // unlinked by a slot turning Modified
+        const slot = slotAbove(ix, n, r);
+        if (slot && !hasOverride(slot, CHILDREN)) continue; // covered by the slot signature
+        const p = prevIx.get(n.id),
+          source = ix.get(n.sourceId);
+        if (p && source && !sameNode(p, n)) mark(n, p, source, UNMARKED);
       }
     }
     // Inherited layers deleted inside an instance (outside slots) come back hidden.
@@ -471,10 +577,14 @@
       // Inside a slot the deletion is a slot change (the signature above made it Modified).
       if (parent.slot === true || (parent !== r && slotAbove(ix, parent, r))) continue;
       const page = ix.pageOf.get(r.id);
-      const clones = prevIx
-        .subtree(p.id)
-        .filter((d) => !ix.get(d.id))
-        .map(copy);
+      // Only the linked part comes back (the canvas keeps no history of local layers).
+      const clones = [];
+      const keep = (d) => {
+        if (ix.get(d.id) || !isLinked(d)) return;
+        clones.push(copy(d));
+        for (const c of prevIx.kidsOf(d.id)) keep(c);
+      };
+      keep(p);
       clones[0].hidden = true;
       if (source.hidden !== true) addOverride(clones[0], "hidden");
       else
@@ -482,21 +592,24 @@
           clones[0],
           overridesOf(clones[0]).filter((k) => k !== "hidden"),
         );
-      for (const c of clones) page.nodes.push(c);
-      ix = indexOf(doc);
+      for (const c of clones) ix.add(c, page);
+      structural = true;
     }
+    return { structural, changed };
   }
 
   // ---- phase 2: copy each main onto its instances ----------------------------------------------
-  function reconcile(doc, ix, plan, rootNode, removed) {
+  /** Copies the main onto one instance; true when anything changed. */
+  function reconcile(ix, plan, rootNode, removed) {
     const main = ix.get(rootNode.instanceOf),
       page = ix.pageOf.get(rootNode.id);
+    let changed = false;
     // Linked nodes of this instance by source id; later duplicates of a source become plain layers.
     const bySource = new Map(),
       strays = [];
     const seen = new Set();
     const walk = (n) => {
-      for (const c of ix.children(n.id)) {
+      for (const c of ix.kidsOf(n.id)) {
         if (seen.has(c) || isTop(c)) continue;
         seen.add(c);
         if (isLinked(c)) {
@@ -507,20 +620,27 @@
       }
     };
     walk(rootNode);
-    if (strays.length) unlink(ix, strays);
+    if (strays.length) {
+      unlink(ix, strays);
+      changed = true;
+    }
     const visited = new Set();
     const taken = (id) => ix.byId.has(id);
+    const drop = (c) => {
+      ix.remove(c, removed);
+      changed = true;
+    };
     const visit = (n, s, isRoot, fresh) => {
       visited.add(n);
-      copyProps(n, s, isRoot, fresh);
+      if (copyProps(n, s, isRoot, fresh)) changed = true;
       if (isModifiedSlot(n)) return;
-      const sourceKids = ix.children(s.id);
-      const wanted = new Set(sourceKids.map((k) => k.id));
+      const sourceKids = ix.kidsOf(s.id);
       // A slot in Default state shows exactly the main's content.
-      if (n.slot === true)
+      if (n.slot === true) {
+        const wanted = new Set(sourceKids.map((k) => k.id));
         for (const c of ix.children(n.id))
-          if (!(isLinked(c) && bySource.get(c.sourceId) === c && wanted.has(c.sourceId)))
-            ix.remove(c, removed);
+          if (!(isLinked(c) && bySource.get(c.sourceId) === c && wanted.has(c.sourceId))) drop(c);
+      }
       const ordered = [];
       for (const sc of sourceKids) {
         let c = bySource.get(sc.id),
@@ -529,19 +649,25 @@
           c = { id: freshId(taken, rootNode.id, sc.id), parentId: n.id, sourceId: sc.id };
           bySource.set(sc.id, c);
           ix.add(c, page);
-          created = true;
-        } else if (c.parentId !== n.id) ix.move(c, n.id);
+          created = changed = true;
+        } else if (c.parentId !== n.id) {
+          ix.move(c, n.id);
+          changed = true;
+        }
         ordered.push(c);
         visit(c, sc, false, created);
       }
       // Siblings follow the main's order; local layers keep their places between them.
-      const current = ix.children(n.id).filter((c) => ordered.includes(c));
+      const inOrder = new Set(ordered);
+      const current = ix.kidsOf(n.id).filter((c) => inOrder.has(c));
       if (current.some((c, i) => c !== ordered[i])) {
         const slots = current.map((c) => ix.pos.get(c)).sort((a, b) => a - b);
         ordered.forEach((c, i) => {
           page.nodes[slots[i]] = c;
           ix.pos.set(c, slots[i]);
         });
+        ix.reordered(n.id);
+        changed = true;
       }
     };
     visit(rootNode, main, true, false);
@@ -550,20 +676,40 @@
       if (visited.has(c) || removed.has(c)) continue;
       const slot = slotAbove(ix, c, rootNode);
       if (slot && isModifiedSlot(slot)) continue;
-      ix.remove(c, removed);
+      drop(c);
     }
+    return changed;
   }
 
   function syncComponents(prev, next) {
-    if (!hasComponents(next)) return next;
-    detect(prev && hasComponents(prev) ? prev : prev ? { pages: [] } : null, next);
-    const ix = indexOf(next),
-      plan = planOf(ix),
-      removed = new Set();
-    for (const r of plan.order)
-      if (!removed.has(r) && ix.byId.get(r.id) === r) reconcile(next, ix, plan, r, removed);
-    compact(next, removed);
+    syncIndexed(prev ? indexOf(prev) : null, next);
     return next;
+  }
+  /** Returns false only when nothing changed since `prevIx` and the sync had nothing to do. */
+  function syncIndexed(prevIx, next) {
+    if (!hasComponents(next)) return false;
+    const ix = indexOf(next);
+    return run(next, ix, prevIx, prevIx ? dirtyOf(prevIx, ix, planOf(ix)) : null);
+  }
+  /** The sync proper; `dirty` limits it to the instances and mains an edit touched (null: all of them). Returns
+   * whether anything may have changed. */
+  function run(next, ix, prevIx, dirty) {
+    let plan = planOf(ix);
+    const found = detect(prevIx, ix, plan, dirty, next);
+    if (found.structural) {
+      ix = indexOf(next);
+      plan = planOf(ix);
+    }
+    const removed = new Set();
+    for (const r of plan.order) {
+      if (removed.has(r) || ix.byId.get(r.id) !== r) continue;
+      if (dirty && !dirty.roots.has(r.id) && !dirty.mains.has(r.instanceOf)) continue;
+      // A changed instance inside a main changes that main for the instances synced after it.
+      if (reconcile(ix, plan, r, removed) && dirty)
+        for (const m of plan.mainsOf(r.id)) dirty.mains.add(m);
+    }
+    compact(next, removed);
+    return found.changed || !dirty || dirty.roots.size > 0 || dirty.mains.size > 0;
   }
 
   // ---- commands ---------------------------------------------------------------------------------
@@ -634,7 +780,8 @@
     node.x = Number.isFinite(options.x) ? options.x : (main.x || 0) + (main.w || 0) + 40;
     node.y = Number.isFinite(options.y) ? options.y : main.y || 0;
     page.nodes.push(node);
-    syncComponents(null, doc);
+    // Only the new instance needs copying (mains holding it then re-sync their own instances).
+    run(doc, indexOf(doc), null, { roots: new Set([id]), mains: new Set() });
     return { doc, id };
   }
   function detachInstance(doc, rootId) {
@@ -861,39 +1008,66 @@
     return copies;
   }
 
-  /** The linked part of a document (instance roots and linked nodes): all the sync needs from `prev`. */
+  /** Mains, instances and linked layers with everything inside them: all the sync needs from `prev`. Values are
+   * copied, strings shared (embedded images are not duplicated). */
   function snapshot(doc) {
+    const keep = relevantOf(indexOf(doc));
     return {
       version: 2,
       pages: pagesOf(doc).map((page) => ({
         id: page.id,
-        nodes: page.nodes
-          .filter((n) => n && (n.instanceOf !== undefined || n.sourceId !== undefined))
-          .map(copy),
+        nodes: page.nodes.filter((n) => keep.has(n)).map(copy),
       })),
     };
   }
 
   // ---- renderer glue ----------------------------------------------------------------------------
-  /** web/app.js: render() calls sync(design) first and settle(design) once the canvas wrote measured geometry back.
-   * Edits made in place between two renders are diffed against the settled snapshot; a replaced document (load,
-   * undo, remote edits, agent commits that already ran the sync) is only reconciled. */
+  /** web/app.js: render() calls sync(design) before drawing. In-place edits made since the previous sync are diffed
+   * against that sync's result (geometry the canvas measures while drawing is ignored); a replaced document (load,
+   * undo, remote edits, agent commits that already ran the sync) is only reconciled. settle(doc) makes the document as
+   * it is now the baseline (component commands, which leave it consistent). */
   function live() {
     let baseDoc = null,
-      base = null;
+      baseIx = null,
+      memo = new Map(); // node id → {node, copy}: unchanged nodes keep their copy from one baseline to the next
+    function settle(doc) {
+      baseDoc = doc;
+      baseIx = null;
+      if (!hasComponents(doc)) {
+        memo = new Map();
+        return;
+      }
+      const keep = relevantOf(indexOf(doc)),
+        next = new Map();
+      const pages = pagesOf(doc).map((page) => {
+        const nodes = [];
+        for (const n of page.nodes) {
+          if (!keep.has(n)) continue;
+          let entry = memo.get(n.id);
+          if (!entry || entry.node !== n || !sameNode(entry.copy, n))
+            entry = { node: n, copy: copy(n) };
+          next.set(n.id, entry);
+          nodes.push(entry.copy);
+        }
+        return { id: page.id, nodes };
+      });
+      memo = next;
+      baseIx = indexOf({ pages });
+    }
     return {
       sync(doc) {
         try {
-          if (hasComponents(doc)) syncComponents(doc === baseDoc ? base : null, doc);
+          if (!hasComponents(doc)) {
+            if (baseIx) settle(doc);
+            baseDoc = doc;
+          } else if (syncIndexed(doc === baseDoc ? baseIx : null, doc) || doc !== baseDoc)
+            settle(doc);
         } catch (error) {
           console.error("Component sync failed", error);
         }
         return doc;
       },
-      settle(doc) {
-        baseDoc = doc;
-        base = hasComponents(doc) ? snapshot(doc) : null;
-      },
+      settle,
     };
   }
   /** window.design.components: each command is checked on a copy first, then applied as one undo step. */

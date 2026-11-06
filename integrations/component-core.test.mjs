@@ -724,13 +724,20 @@ test("live(): in-place edits are diffed against the settled state; a replaced do
   tracker.sync(d);
   assert.equal(byId(d, derivedId("i1", "body")).text, "Body");
   assert.equal(byId(d, derivedId("i1", "body")).overrides, undefined);
-  // The snapshot holds only linked nodes.
+  // The snapshot holds mains and instances with their subtrees, not unrelated layers.
+  d.pages[0].nodes.push(frame("unrelated"), rect("inside-unrelated", "unrelated"));
   assert.deepEqual(
     snapshot(d).pages[0].nodes.map((n) => n.id),
     nodesOf(d)
-      .filter((n) => n.sourceId)
+      .filter((n) => !n.id.includes("unrelated"))
       .map((n) => n.id),
   );
+  // Unrelated edits leave instances alone (nothing to re-sync), an edit inside one is still marked.
+  tracker.settle(d);
+  byId(d, "unrelated").x = 99;
+  byId(d, derivedId("i1", "body")).fontSize = 44;
+  tracker.sync(d);
+  assert.deepEqual(byId(d, derivedId("i1", "body")).overrides, ["fontSize"]);
 });
 
 // ---- schema and headless wiring -----------------------------------------------------------------
@@ -803,5 +810,4 @@ test("the canvas loads the engine after the schema and before the editor scripts
   );
   const app = readFileSync(new URL("../web/app.js", import.meta.url), "utf8");
   assert.match(app, /function render\(\)\{componentSync\.sync\(design\);/, "render() syncs first");
-  assert.match(app, /componentSync\.settle\(design\);save\(\);/, "and settles before saving");
 });

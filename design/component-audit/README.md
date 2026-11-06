@@ -94,3 +94,43 @@ Deferred to phase 2: variants and component sets, component properties (text, bo
 - New tools: `create_component`, `create_instance`, `detach_instance`, `reset_overrides`, `set_slot`.
 - The JSX codec writes `data-component`, `data-instance-of` and `data-slot` attributes so agents can see instances and slots.
 - Headless edits run the same shared sync.
+
+## Implementation notes (phase A: core engine)
+
+The engine is `web/component-core.js` (`window.VerynizeComponents`; Node: `integrations/component-core.mjs`). Its tests are `integrations/component-core.test.mjs` and `tests/components.cjs`. Where the code differs from or sharpens the rules above:
+
+- **`syncComponents(prev, next)` mutates `next` in place and returns it.** The canvas and its gestures hold references to node objects, so nodes are updated, not replaced. `prev` is only read.
+- **Where overrides are marked.**
+  - The canvas marks the in-place edits made between two renders. `render()` syncs first and diffs against the previous sync's result, ignoring the geometry the canvas measures while drawing.
+  - Only the instances and mains an edit touched are checked and re-synced. A render costs about one comparison per layer inside mains and instances: 1–4 ms for an app shell with ten instances, about 20 ms at 5,000 instance layers.
+  - A replaced document is only reconciled, never marked. That covers `setDocument`/`loadDocument`, undo, remote operations and agent commits.
+  - Agent edits are marked headless, before they reach the canvas: in `design-tools.mjs` `write()` and in `design-store.mjs` `applyOperations`.
+  - So other `setDocument` callers that edit instance layers (imports, the old library's "Update instances") are reconciled back to the main rather than marked.
+- **Measured geometry is neither marked nor copied**, except when a node is first materialized. That is `w`/`h` under hug, fill or percent sizing, and `x`/`y`/`w`/`h` of constraint-anchored layers. The canvas computes them for each instance; `inset` and the sizing modes themselves do sync.
+- **`parentId` of an inherited layer is not an override.**
+  - With history, moving an inherited layer out of its place snaps it back. Reordering inherited layers outside a slot snaps back too.
+  - Without history, the moved copy becomes a plain layer and the instance gets its layer back.
+  - Inside a slot, any move makes the slot Modified, as specified.
+- **Instance ownership.** The root's `sourceId` is its main's id. A nested instance copied inside another instance has `sourceId` = the node it copies (≠ `instanceOf`), so it belongs to the outer instance; a node belongs to the nearest root whose `sourceId === instanceOf`. Detach, and a slot turning Modified, re-point such nested copies one level down, keeping the overrides of both levels.
+- **Derived ids** are `<instance root id, first 80 characters>~<106-bit hash of (root id, source id)>`. A taken id gets a salted next attempt, deterministically.
+- **Slots.**
+  - On Modified, the layers in the slot lose their link fields and become local; nested instances in it are re-pointed.
+  - Reset to Default removes the local content and re-materializes the main's.
+  - In a merge where a slot ends up Default but holds local layers, the layers are removed: reset wins.
+- **Cycles are not rejected by `validateDocument`.** This deviates from "Validation … reject such a cycle", because `documentSafety` must never reject a stored document.
+  - The sync never touches a main that contains itself, and `componentProblems()` reports it.
+  - `createInstance` and agent writes in `design-tools.mjs` refuse to create a new cycle.
+- **Validation.**
+  - Limits: `instanceOf` and `sourceId` are 1–200 characters; `overrides` has at most 500 keys of at most 120 characters; `slotName` has at most 100 characters.
+  - Load-time repair (`normalizeDocument` with `repairs`) drops mistyped link fields and `slot` on non-frames, and records each drop.
+- **Deleting an inherited layer** restores it hidden, together with its linked descendants. Local layers that were inside it stay deleted.
+- **A same-step edit of the main and the instance on one key** makes the instance's value an override (the instance wins).
+- **`component` on a node copied into an instance is removed**: a nested main is not a main inside instances. `createComponent` refuses instance roots and inherited layers.
+- **Copies (`adoptCopies`).**
+  - A copy of a main becomes an instance only when that main is in the document. A cut-then-paste of a main, or a main pasted from another file, stays a main.
+  - A copied part of an instance becomes plain layers.
+  - The "Name 2" renaming of a duplicate is reverted to the main's name by the next sync, because a new node has no overrides.
+- **Not yet covered (phase B):**
+  - Agent duplicates through `design-edit.mjs` `duplicateElements` do not call `adoptCopies`.
+  - The JSX codec does not emit or read the link fields.
+  - There are no dedicated MCP tools yet.
