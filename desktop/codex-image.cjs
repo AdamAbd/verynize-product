@@ -44,7 +44,29 @@ async function signedIn(rpc) {
   const result = await rpc.request("account/read", { refreshToken: false }, 10000);
   return result.account?.type === "chatgpt";
 }
-async function status() {
+// Each check spawns an app-server, so settings reads share one answer until it expires or the
+// Codex login changes.
+const STATUS_TTL = 60000;
+let cached = null;
+require("./agent-auth.cjs").onAccountChange(({ agent }) => {
+  if (agent === "codex") cached = null;
+});
+function status() {
+  if (cached && Date.now() - cached.at < STATUS_TTL) return cached.promise;
+  const promise = checkStatus();
+  cached = { at: Date.now(), promise };
+  promise.then(
+    (result) => {
+      if (!result.available && cached?.promise === promise)
+        cached.at = Date.now() - STATUS_TTL + 5000;
+    },
+    () => {
+      if (cached?.promise === promise) cached = null;
+    },
+  );
+  return promise;
+}
+async function checkStatus() {
   const executable = await executablePath();
   if (!executable) return { available: false, status: "Codex not installed" };
   let rpc;
@@ -163,7 +185,10 @@ async function generate({ prompt, size = "1024x1024", signal, executable, tempRo
         throw Error("Update Codex to use image generation");
       return await execFallback(executable, cwd, text, combined);
     }
-    if (!(await signedIn(rpc))) throw Error(SIGN_IN);
+    if (!(await signedIn(rpc))) {
+      cached = null;
+      throw Error(SIGN_IN);
+    }
     combined.throwIfAborted();
     const started = await rpc.request("thread/start", {
       cwd,

@@ -95,7 +95,12 @@ export function migrateSettings(input = {}) {
     defaultProvider,
     keys,
     custom,
-    providerChosen: input.providerChosen ?? (legacy || input.version === 2),
+    // Older v2 records did not record a choice. The keyless old default never worked, so only it moves.
+    providerChosen:
+      input.providerChosen ??
+      (legacy ||
+        (input.version === 2 &&
+          !(defaultProvider === DEFAULT_IMAGE_PROVIDER && !Object.keys(keys).length))),
   };
 }
 export function providerSettings(saved, id = saved.defaultProvider, baseURLs = {}) {

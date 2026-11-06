@@ -374,8 +374,18 @@ test("provider output respects the renderer's 8 MB limit", async () => {
 test("Codex provider uses shared validation and preserves explicit choices", async () => {
   const fresh = migrateSettings();
   assert.equal(fresh.providerChosen, false);
+  // A keyless old default never worked, so it may move to Codex; anything else was a real choice.
   assert.equal(
     migrateSettings({ version: 2, defaultProvider: "nano_banana_lite" }).providerChosen,
+    false,
+  );
+  assert.equal(
+    migrateSettings({ version: 2, defaultProvider: "nano_banana_lite", keys: { google: "c" } })
+      .providerChosen,
+    true,
+  );
+  assert.equal(
+    migrateSettings({ version: 2, defaultProvider: "openai_gpt_image_2" }).providerChosen,
     true,
   );
   assert.equal(
