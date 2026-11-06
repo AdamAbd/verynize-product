@@ -134,3 +134,15 @@ The engine is `web/component-core.js` (`window.VerynizeComponents`; Node: `integ
   - Agent duplicates through `design-edit.mjs` `duplicateElements` do not call `adoptCopies`.
   - The JSX codec does not emit or read the link fields.
   - There are no dedicated MCP tools yet.
+
+## Implementation notes (phase B1: UI)
+
+- **Commands** (`component.*` in `web/canvas-interactions.js`, section Components): Create component `⌥⌘K` (one frame becomes a main; several layers, or one non-frame layer, are framed first in the same undo step), Create instance (placed 40 px right of the selection), Go to main component (switches page, selects and zooms), Reset overrides (all overrides of an instance, or one layer's), Detach instance `⌥⌘B`, Convert to slot / Remove slot. They are in the command palette and the shortcuts drawer (section COMPONENTS). In context menus, Create component sits in Layout next to Frame selection; mains, instances, their layers and frames inside a main get their own group.
+- **Cycle guard** (`wouldCycle` in `web/component-core.js`): layer-panel moves and `moveNodes`, paste into a selected frame, the clipboard extension's pastes and canvas drags refuse to put an instance (or a layer holding one) inside a main it depends on. The canvas raises `bd:notice`, shown as a toast; a canvas drag simply does not enter that frame.
+- **Layers**: rows carry `data-role` (`main`, `instance`, `slot`, `inherited`). Icons are `ComponentMainIcon`, `ComponentInstanceIcon` and `SlotIcon` in `web/src/components/icons.tsx`.
+- **Canvas**: `web/canvas-render.js` sets `data-component` (`main`, `instance`, `slot`, `instance-slot`) on canvas layers; `web/canvas.css` draws the component purple and slot pink outlines (dashed for an instance), the ❖/◇ name labels and the "+" on an empty slot.
+- **Inspector**: `web/src/islands/inspector/component.tsx` (`#component-section`, `#component-create-instance`, `#component-go-to-main`, `#component-reset`, `#component-detach`, `[data-slot-state]`, `#component-convert-slot`, `#component-remove-slot`).
+- **Components panel**: `web/src/islands/sidebar/ComponentsSection.tsx` (`#components-panel`, `#components-search`, `[data-component-card]`, `#components-preset-app-shell`, `#components-preset-page-shell`). Thumbnails clone the main's canvas element, so a main on another page shows its icon instead. Presets are built in `web/src/lib/components.ts`.
+- **Tokens**: `--component`, `--component-foreground`, `--component-muted`, `--slot`, `--slot-foreground` (`<component-tokens>` in `web/src/styles/globals.css`, both themes), measured from Figma 25.
+- **Tests**: `tests/components-ui.cjs`. **Evidence**: `verynize/after/` (`verynize/capture-after.cjs`) and Figma | Verynize pairs in `pairs-after/` (`make-pairs.py`).
+- **Not done in B1**: renaming a slot from the inspector (`slotName` can only be set through `setSlot`), Swap instance, thumbnails for mains on unloaded pages.
