@@ -41,6 +41,8 @@ const os = require("node:os");
       await page
         .waitForFunction(
           ({ path, under }) => {
+            if (path === "/editor")
+              path = "/editor/" + encodeURIComponent(window.fileLibrary.currentId);
             const settings = path.startsWith("/settings/") ? path.slice(10) : null;
             const view = settings ? under : path;
             const body = document.body.classList;

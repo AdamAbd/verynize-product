@@ -329,7 +329,10 @@ async function checkApp(origin, mode) {
     timeout: 20000,
   });
   await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
-  assert.equal(await page.evaluate(() => window.shellRouter.state.location.pathname), "/editor");
+  assert.equal(
+    await page.evaluate(() => window.shellRouter.state.location.pathname),
+    await page.evaluate(() => "/editor/" + encodeURIComponent(window.fileLibrary.currentId)),
+  );
   assert.equal(await page.evaluate(() => document.body.classList.contains("files-view")), false);
   // Legacy markup sits directly in <body>, before Start's nodes, and the scripts ran in order.
   assert.equal(
@@ -356,12 +359,27 @@ async function checkApp(origin, mode) {
 
   // Shell navigation keeps the editor mounted (one boot, same layers) and moves the URL.
   await page.evaluate(() => window.shellRouter.navigate({ to: "/" }));
-  await page.waitForFunction(
-    () => location.pathname === "/" && document.body.classList.contains("files-view"),
-  );
+  await page
+    .waitForFunction(
+      () => location.pathname === "/" && document.body.classList.contains("files-view"),
+    )
+    .catch(async (error) => {
+      console.error(
+        "Files route state",
+        await page.evaluate(() => ({
+          path: location.pathname,
+          classes: document.body.className,
+          active: window.fileLibrary.currentId,
+          route: window.shellRouter.state.location.pathname,
+        })),
+      );
+      throw error;
+    });
   await page.goBack();
   await page.waitForFunction(
-    () => location.pathname === "/editor" && !document.body.classList.contains("files-view"),
+    () =>
+      location.pathname === "/editor/" + encodeURIComponent(window.fileLibrary.currentId) &&
+      !document.body.classList.contains("files-view"),
   );
   assert.equal(await layers(), before + 1);
 
@@ -487,7 +505,9 @@ async function checkLinks(engine, origin, { session, me, viewport, mode, label }
     timeout: 30000,
   });
   await page.waitForFunction(
-    () => location.pathname === "/editor" && !document.body.classList.contains("files-view"),
+    () =>
+      location.pathname === "/editor/" + encodeURIComponent(window.fileLibrary.currentId) &&
+      !document.body.classList.contains("files-view"),
   );
   assert.equal(await page.evaluate(() => window.design.getDocument().name), `Linked ${label}`);
   assert.equal(await page.evaluate(() => location.hash), `#room=${owned.id}`);

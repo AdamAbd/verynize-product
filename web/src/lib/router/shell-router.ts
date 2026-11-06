@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { useLayoutEffect } from "react";
 import {
   createBrowserHistory,
@@ -16,14 +17,14 @@ import "@/lib/bridge";
 
 // Shell routes (docs/spikes/tanstack-router.md). The URL is the single source of truth for the top-level shell:
 //   /                    Files home      body.files-view
-//   /editor              editor          (no view class)
+//   /editor/<fileId>      editor (stable library id; /editor replaces to the active file)
 //   /code                Code workspace  body.code-mode
 //   /settings[/section]  settings overlay (body.settings-open) over the view named in history state
 // Legacy entry points (fileLibrary.showHome/showEditor, appSettings.open/close/select, agentWorkspace.setCodeMode)
 // are requests: they call request() (via window.shellRequest, web/shell-request.js), which writes history and applies
 // the resulting shell. Router-driven changes (navigate(), Back/Forward, reload, typed URLs) are applied by the route
 // components. Both apply through applyShell(), which calls the legacy appliers (applyHome/applyEditor,
-// applyOpen/applyClose, applyCodeMode) and nothing else.
+// applyOpen/applyClose, applyCodeMode). File locations open through fileLibrary.open and the switch coordinator.
 // Cloud fragments (#room=<id>&token=<capability>, #public=<id>) are never routes and never move into
 // the query string: every shell navigation keeps them unless clearRoomHash() drops them.
 //
@@ -38,7 +39,7 @@ import "@/lib/bridge";
 //   settings history (the view underneath, closing via history.back()), canonical settings URLs and the cloud
 //   fragment rules are the same.
 
-export type ViewPath = "/" | "/editor" | "/code";
+export type ViewPath = "/" | "/editor" | `/editor/${string}` | "/code";
 type Shell = { view: ViewPath; settings: SectionId | null };
 type EntryState = { settingsUnder?: ViewPath; settingsPushed?: boolean; __TSR_key?: string };
 export type ShellRequest = { view: ViewPath } | { settings: string | null };
@@ -46,7 +47,8 @@ export type ShellRequest = { view: ViewPath } | { settings: string | null };
 const DEFAULT_SECTION = DEFAULT_SETTINGS_SECTION;
 const isSection = isSettingsSection;
 const VIEWS: readonly string[] = ["/", "/editor", "/code"];
-const isView = (value: unknown): value is ViewPath => VIEWS.includes(value as string);
+const isView = (value: unknown): value is ViewPath =>
+  typeof value === "string" && (VIEWS.includes(value) || /^\/editor\/[^/]+$/.test(value));
 const isSettingsPath = (path: string) => path === "/settings" || path.startsWith("/settings/");
 
 const host = shellHost();
@@ -56,7 +58,15 @@ export { hosted };
 /* ---------- Legacy appliers (DOM + body classes only; they never touch history) ---------- */
 
 type LegacyShell = {
-  fileLibrary?: { applyHome?(): void; applyEditor?(): void };
+  fileLibrary?: {
+    applyHome?(): void;
+    applyEditor?(): void;
+    currentId: string | null;
+    summaries(): { id: string }[];
+    cloudOf(id: string): { roomId: string } | null;
+    subscribe(fn: () => void): () => void;
+    open(id: string, options?: { isCurrent(): boolean }): Promise<unknown>;
+  };
   appSettings?: {
     applyOpen?(section: string): void;
     applyClose?(): void;
@@ -71,7 +81,11 @@ const body = () => document.body.classList;
 function shown(): Shell {
   const section = legacy().appSettings?.getState().section;
   return {
-    view: body().contains("code-mode") ? "/code" : body().contains("files-view") ? "/" : "/editor",
+    view: body().contains("code-mode")
+      ? "/code"
+      : body().contains("files-view")
+        ? "/"
+        : editorPath(),
     settings: body().contains("settings-open")
       ? isSection(section)
         ? section
@@ -79,6 +93,10 @@ function shown(): Shell {
       : null,
   };
 }
+const editorPath = (): ViewPath => {
+  const id = legacy().fileLibrary?.currentId;
+  return id ? `/editor/${encodeURIComponent(id)}` : "/";
+};
 const same = (a: Shell, b: Shell) => a.view === b.view && a.settings === b.settings;
 
 function applyShell(next: Shell) {
@@ -274,7 +292,8 @@ history.subscribe(({ location }) => {
 });
 
 function resolve(from: Shell, target: ShellRequest): Shell {
-  if ("view" in target) return { view: target.view, settings: null };
+  if ("view" in target)
+    return { view: target.view === "/editor" ? editorPath() : target.view, settings: null };
   if (target.settings === null) return { view: from.view, settings: null };
   return {
     view: from.view,
@@ -291,6 +310,14 @@ function resolve(from: Shell, target: ShellRequest): Shell {
  *   {settings: null}  close settings
  */
 export function request(target: ShellRequest, { replace = false }: { replace?: boolean } = {}) {
+  if (
+    openingFile &&
+    openingFile.location === fileLocation() &&
+    legacy().fileLibrary?.currentId === openingFile.id &&
+    "view" in target &&
+    target.view.startsWith("/editor")
+  )
+    return true;
   const from = logical();
   const next = resolve(from, target);
   applyShell(next);
@@ -326,7 +353,11 @@ history.subscribe(({ location, action }) => {
 export type ShellArea = ViewPath | "/settings";
 type RenderedLocation = { pathname: string; state: unknown };
 const ownsPath = (area: ShellArea, path: string) =>
-  area === "/settings" ? isSettingsPath(path) : path === area;
+  area === "/settings"
+    ? isSettingsPath(path)
+    : area === "/editor"
+      ? path === "/editor" || path.startsWith("/editor/")
+      : path === area;
 
 /**
  * Applies a location rendered by the route of `area` (this module's route components standalone, Start's route
@@ -338,8 +369,73 @@ export function applyLocation(area: ShellArea, location: RenderedLocation) {
   const key = (location.state as EntryState).__TSR_key;
   if (closing || key !== entryState().__TSR_key || !ownsPath(area, location.pathname)) return false;
   if (area === "/settings") applySettingsLocation(location);
-  else applyShell({ view: area, settings: null });
+  else {
+    const view = location.pathname as ViewPath;
+    applyShell({ view, settings: null });
+    restoreFile(view);
+  }
   return true;
+}
+
+// Route opens retain their history entry, including settingsUnder. A later location invalidates
+// a pending open; the library/coordinator checks isCurrent before committing the document.
+const fileLocation = () => history.location.pathname + "|" + (entryState().settingsUnder ?? "");
+let openingFile: { location: string; id: string } | null = null;
+function restoreFile(view: ViewPath) {
+  if (!view.startsWith("/editor")) return;
+  const lib = legacy().fileLibrary;
+  if (!lib) return;
+  if (view === "/editor") {
+    const path = editorPath();
+    if (isSettingsPath(history.location.pathname))
+      commit(history.location.pathname, "replace", {
+        ...settingsStateOf(entryState()),
+        settingsUnder: path,
+      });
+    else commit(path, "replace");
+    return;
+  }
+  let id = "";
+  try {
+    id = decodeURIComponent(view.slice(8));
+  } catch {}
+  const files = lib.summaries();
+  const file =
+    files.find((file) => file.id === id) ??
+    files.find((file) => lib.cloudOf(file.id)?.roomId === id);
+  const fail = (message: string) => {
+    commit("/", "replace");
+    applyShell({ view: "/", settings: null });
+    toast.error(message);
+  };
+  if (!file) {
+    fail("This file is unavailable. Choose a file from Files.");
+    return;
+  }
+  const canonical: ViewPath = `/editor/${encodeURIComponent(file.id)}`;
+  if (canonical !== view) {
+    if (isSettingsPath(history.location.pathname))
+      commit(history.location.pathname, "replace", {
+        ...settingsStateOf(entryState()),
+        settingsUnder: canonical,
+      });
+    else commit(canonical, "replace");
+    return;
+  }
+  if (file.id === lib.currentId) return;
+  const location = fileLocation();
+  if (openingFile?.id === file.id && openingFile.location === location) return;
+  const pending = { location, id: file.id };
+  openingFile = pending;
+  const isCurrent = () => fileLocation() === location && openingFile === pending;
+  void lib
+    .open(file.id, { isCurrent })
+    .catch((error: unknown) => {
+      if (isCurrent()) fail(error instanceof Error ? error.message : "Unable to open this file.");
+    })
+    .finally(() => {
+      if (openingFile === pending) openingFile = null;
+    });
 }
 
 /** Applies the current history entry (hosted: Start's routes rendered it before this bundle ran). */
@@ -379,8 +475,11 @@ function applySettingsLocation(location: RenderedLocation) {
   const view = record?.settingsUnder ?? state.settingsUnder ?? "/editor";
   applyShell({ view, settings: wanted });
   // Canonical URL (/settings and unknown sections become /settings/<section>) and recorded state, both in place.
-  if (record || location.pathname !== `/settings/${wanted}`)
+  if (record || location.pathname !== `/settings/${wanted}`) {
     commit(`/settings/${wanted}`, "replace", { ...settingsStateOf(state), ...record });
+    return;
+  }
+  restoreFile(view);
 }
 
 // The standalone route tree. Hosted, Start's file routes (web-start/src/routes/_editor/) have the same paths and
@@ -393,6 +492,7 @@ function createShellRouter() {
     routeTree: root.addChildren([
       route("/", "/"),
       route("/editor", "/editor"),
+      route("/editor/$fileId", "/editor"),
       route("/code", "/code"),
       route("/settings", "/settings"),
       route("/settings/$section", "/settings"),
@@ -465,3 +565,24 @@ declare global {
 }
 window.shellRouter = shellRouter;
 window.shellNavigation = { navigate, request, clearRoomHash, applyLocation };
+
+// Library removals (including account/cloud refreshes) must not leave an orphan editor URL.
+legacy().fileLibrary?.subscribe(() => {
+  queueMicrotask(() => {
+    if (isSettingsPath(history.location.pathname)) return;
+    const view = logical().view;
+    if (!view.startsWith("/editor/") || openingFile) return;
+    let id: string;
+    try {
+      id = decodeURIComponent(view.slice(8));
+    } catch {
+      return;
+    }
+    if (
+      !legacy()
+        .fileLibrary?.summaries()
+        .some((file) => file.id === id)
+    )
+      restoreFile(view);
+  });
+});

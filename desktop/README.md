@@ -171,3 +171,8 @@ otherwise a new image node is inserted. Missing targets fail before generation. 
 images through `imageUpload.prepare`; headless backends report that the desktop app is required.
 Test-only `VERYNIZE_TEST_IMAGE_GOOGLE_URL` / `VERYNIZE_TEST_IMAGE_OPENAI_URL` override vendor base URLs,
 accepting loopback HTTP only; they cannot be set through IPC.
+
+Editor files use `/editor/<fileId>` with stable library IDs. Tab switches push history; bare
+`/editor` and known cloud-room ID aliases replace to the local file URL. Unknown or unavailable
+files return to Files with a non-blocking notice. Settings history retains the full file path;
+cloud capabilities remain exclusively in the existing fragments.
