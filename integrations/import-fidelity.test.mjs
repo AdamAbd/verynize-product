@@ -139,3 +139,18 @@ test("explicit remote opt-in embeds real loopback images and reports failures", 
     server.close();
   }
 });
+
+test("shorthand winners honor important declarations and reset every corner", async () => {
+  const cls =
+    "[border-radius:1px_2px_3px_4px] [border-radius:9px]! [border:2px_solid_red]! [border:3px_solid_blue]";
+  for (const result of [
+    await importHtml(`<div class="${cls}"></div>`),
+    jsxToDocument(`<div className="${cls}"/>`),
+  ]) {
+    const node = nodes(result)[0];
+    assert.equal(node.radius, 9);
+    assert.equal(node.cornerRadii, undefined);
+    assert.equal(node.strokeWidth, 2);
+    assert.equal(node.strokeColor, "#ff0000");
+  }
+});

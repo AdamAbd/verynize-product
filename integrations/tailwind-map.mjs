@@ -99,7 +99,7 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
     if (result.kind === 'unsupported') { ignore(cls, `produces only ${result.extras.join(', ')} rules, which the canvas does not represent`); continue; }
     for (const raw of result.decls) {
       if (raw.property === 'border-radius' && raw.value.includes('/')) ignore(cls, 'elliptical border radius is approximated by horizontal radii');
-      for (const decl of /^(border(?:-(?:top|right|bottom|left))?|outline|background)$/.test(raw.property) || (raw.property === 'border-radius' && /[\s/]/.test(raw.value.trim())) ? expand(raw) : [raw]) {
+      for (const decl of /^(border(?:-(?:top|right|bottom|left|radius|width|style|color))?|outline|background)$/.test(raw.property) ? expand(raw) : [raw]) {
         // `hidden` (display:none) hides the layer without discarding its layout class (flex, grid…);
         // a matching responsive variant that sets a display value shows it again (hidden md:flex).
         if (decl.property === 'display') {
@@ -337,13 +337,20 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
     if (base) { set('strokeColor', base.color); set('strokeToken', base.token || ''); }
     if (sides.some(Boolean)) {
       const fallback = base || sides.find(Boolean);
-      if (!base) { set('strokeColor', fallback.color); set('strokeToken', ''); }
-      set('strokeColors', sides.map(c => { const v = c || fallback; return v.token ? { color: v.color, token: v.token } : { color: v.color }; }));
+      if (!base) { set('strokeColor', fallback.color); set('strokeToken', sides.every(c => c?.token === fallback.token) ? fallback.token || '' : ''); }
+      if (!sides.every(c => c?.color === fallback.color && c?.token === fallback.token)) set('strokeColors', sides.map(c => { const v = c || fallback; return v.token ? { color: v.color, token: v.token } : { color: v.color }; }));
     }
   }
   const corners = [undefined, undefined, undefined, undefined];
+  const ellipse = ['top-left', 'top-right', 'bottom-right', 'bottom-left'].every(corner => {
+    const raw = decls.get(`border-${corner}-radius`);
+    const value = raw && lengthOf(resolve(raw.value).value);
+    return value?.frac === 0.5 && !value.px;
+  });
+  if (ellipse) set('ellipse', true);
   for (const [p, idx] of Object.entries(CORNERS)) {
     if (!(d = take(p))) continue;
+    if (ellipse) continue;
     const l = lengthOf(d.resolved);
     // rounded-[50%] on every corner is an ellipse inscribed in the box (other percentages are not represented).
     if (p === 'border-radius' && l?.frac === 0.5 && !l.px) { set('ellipse', true); continue; }

@@ -68,7 +68,7 @@ async function importFile(file, options = {}) {
     baseUrl: file,
     root: path.dirname(file),
     allowFiles: true,
-    name: path.basename(file).replace(/\.html?$/i, ""),
+    fallbackName: path.basename(file).replace(/\.html?$/i, ""),
   });
   return { ...summary(result), file: path.basename(file) };
 }
