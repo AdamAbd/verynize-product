@@ -7,8 +7,10 @@ import { nodeStyle, styleText, textSegments, lastInFlowId, safeCss } from './nod
 import { styleSignature } from './codec-html.mjs';
 
 // Lossless mode: each layer also carries its exact record (data-vn-node) and a signature of its
-// declarations (data-vn-sig) so codec-html.mjs can restore it while the CSS is unchanged.
-const LAYER_SKIP = new Set(['id', 'parentId', 'shortId', 'measured']);
+// declarations (data-vn-sig) so codec-html.mjs can restore it while the CSS is unchanged. Instances are
+// materialized, so they export as the layers they are; their component links (web/component-core.js) point at
+// ids of this document and are left out.
+const LAYER_SKIP = new Set(['id', 'parentId', 'shortId', 'measured', 'component', 'instanceOf', 'sourceId', 'overrides', 'slot', 'slotName']);
 export const layerRecord = node => JSON.stringify(Object.fromEntries(Object.entries(node).filter(([key]) => !LAYER_SKIP.has(key))));
 export const losslessAttrs = (node, style) => ` data-vn-node="${escape(layerRecord(node))}" data-vn-sig="${styleSignature(style)}"`;
 import { paramsAttr } from './shaders.mjs';

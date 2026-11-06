@@ -8,7 +8,7 @@ import { presetIds } from './shaders.mjs';
 
 const words = s => s.trim().split(/\s+/).length;
 const PRIMARY = ['new-design', 'edit-design', 'design-to-code', 'code-to-design', 'design-library', 'generate-assets'];
-const SUPPORTING = ['design-review', 'new-design-references', 'new-design-arrange', 'design-library-icons', 'design-to-code-pull-request', 'code-to-design-library'];
+const SUPPORTING = ['design-review', 'new-design-references', 'new-design-arrange', 'design-library-icons', 'design-to-code-pull-request', 'components', 'code-to-design-library'];
 // snake_case words in skill text that are not tool names.
 const NOT_TOOLS = new Set(['node_modules']);
 
