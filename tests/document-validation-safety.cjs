@@ -4,6 +4,8 @@
 //     overwrite it until the user edits, also across a relaunch;
 // (c) a file-library entry that fails stays listed and marked, and opening it changes nothing;
 // (d) a native .verynize.json the store refuses is left untouched and nothing opens.
+const { waitForAsync } = require("./helpers/wait-for-async.cjs");
+const { check: checkAsyncWaits } = require("../scripts/check-async-waits.cjs");
 const { _electron } = require("@playwright/test");
 const { waitForUiReady } = require("./helpers/ui-ready.cjs");
 const assert = require("node:assert/strict");
@@ -95,6 +97,43 @@ const waitNotice = (page, kind) =>
 // Gives every startup timer, save and library sync a chance to (wrongly) write.
 const settle = (page) => page.waitForTimeout(2500);
 
+// Exercise the shared poller against real renderer Promises (also through a Frame).
+async function asyncWaits(dir) {
+  checkAsyncWaits();
+  const { app, page } = await launch(dir);
+  try {
+    await page.evaluate(() => {
+      window.__asyncPolls = 0;
+    });
+    const result = await waitForAsync(
+      page,
+      async (target) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return ++window.__asyncPolls >= target && "ready";
+      },
+      3,
+      { interval: 5 },
+    );
+    assert.equal(result, "ready");
+    assert.equal(await page.evaluate(() => window.__asyncPolls), 3);
+    assert.equal(await waitForAsync(page.mainFrame(), () => Promise.resolve("frame")), "frame");
+    await assert.rejects(
+      waitForAsync(page, () => Promise.resolve(false), null, { timeout: 100, interval: 5 }),
+      /timed out after 100ms/,
+    );
+    await assert.rejects(
+      waitForAsync(page, () => new Promise(() => {}), null, { timeout: 100 }),
+      /timed out after 100ms/,
+    );
+    await assert.rejects(
+      waitForAsync(page, () => Promise.reject(new Error("predicate failed"))),
+      /predicate failed/,
+    );
+  } finally {
+    await app.close();
+  }
+}
+
 async function repairable(dir) {
   const { app, page, errors } = await launch(dir);
   try {
@@ -115,7 +154,7 @@ async function repairable(dir) {
     assert.match(notice.text, /Repaired “Legacy”/);
     assert.match(notice.text, /2 values/);
     assert.match(notice.text, /backed up/);
-    await page.waitForFunction(() => window.documentSafety.backups().then((b) => b.length > 0));
+    await waitForAsync(page, () => window.documentSafety.backups().then((b) => b.length > 0));
     const [saved] = await backups(page);
     assert.equal(saved.text, text, "the original text is backed up byte for byte");
     assert.equal(saved.reason, "repaired");
@@ -156,7 +195,7 @@ async function unrepairable(dir) {
         label + ": no placeholder file added",
       );
       assert.deepEqual(lib.files[0].document, broken, label + ": library entry untouched");
-      await page.waitForFunction(() => window.documentSafety.backups().then((b) => b.length === 1));
+      await waitForAsync(page, () => window.documentSafety.backups().then((b) => b.length === 1));
       const [saved] = await backups(page);
       assert.equal(saved.text, text, label + ": backed up once");
       assert.equal(saved.reason, "invalid");
@@ -264,7 +303,7 @@ async function library(dir) {
       (await page.evaluate(() => window.design.getDocument())).pages[0].nodes[0].x,
       -1e6,
     );
-    await page.waitForFunction(() =>
+    await waitForAsync(page, () =>
       window.documentSafety.backups().then((b) => b.some((x) => x.source === "library")),
     );
     const saved = (await backups(page)).find((b) => b.source === "library");
@@ -311,6 +350,8 @@ async function native(dir, work) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "document-validation-safety-"));
   try {
     const dir = (name) => path.join(root, name);
+    await asyncWaits(dir("async"));
+    console.log("ok async wait retries false, awaits Promise, supports Frame, times out and propagates errors");
     await repairable(dir("a"));
     console.log("ok repairable legacy document loads repaired, announced and backed up");
     await unrepairable(dir("b"));

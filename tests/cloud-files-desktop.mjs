@@ -1,5 +1,6 @@
 // Cloud files against local workerd: a room is a file that the desktop reopens after a restart,
 // the Files home lists workspace/shared rooms; unsaved edits block switching until the server returns.
+import { waitForAsync } from "./helpers/wait-for-async.cjs";
 import { _electron as electron } from "@playwright/test";
 import { openSharedDesign } from "./helpers/shared-design.cjs";
 import { waitForUiReady } from "./helpers/ui-ready.cjs";
@@ -34,16 +35,6 @@ async function launch(profile) {
   );
   page.on("dialog", (dialog) => dialog.accept().catch(() => {}));
   return { app, page };
-}
-// page.waitForFunction does not await a Promise returned by its predicate (a Promise is truthy, so
-// an async predicate passes at once); poll with evaluate instead.
-async function waitForAsync(page, fn, arg, timeout = 30000) {
-  const until = Date.now() + timeout;
-  for (;;) {
-    if (await page.evaluate(fn, arg)) return;
-    if (Date.now() > until) throw Error(`waitForAsync timed out after ${timeout}ms: ${fn}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
 }
 async function quit(app) {
   await (
@@ -266,7 +257,7 @@ try {
       return saved?.retained.length > 0;
     },
     null,
-    60000,
+    { timeout: 60000 },
   );
   apps.delete(app);
   await app.evaluate(({ BrowserWindow }) => {

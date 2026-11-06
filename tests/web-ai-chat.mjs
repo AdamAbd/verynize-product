@@ -20,6 +20,7 @@
 // OpenRouter account"; a pasted key is checked (rejected, then accepted); OAuth PKCE through the fake OpenRouter
 // sign-in page and the backend callback returns to the editor with its #room= fragment restored; turns carry the
 // account's own key; Settings › Agents shows the connection (last4, source, usage), Disconnect and Paste API key.
+import { waitForAsync } from "./helpers/wait-for-async.cjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -214,7 +215,7 @@ try {
     // Skip for now: closed and remembered for the account on the server.
     await page.locator("#onboarding-ai-skip").click();
     await setup.waitFor({ state: "detached" });
-    await page.waitForFunction(async () => {
+    await waitForAsync(page, async () => {
       const me = await window.cloudAccount.request("/api/me");
       return typeof me.aiSetupAt === "number";
     });

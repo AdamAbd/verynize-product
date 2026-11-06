@@ -1,3 +1,4 @@
+require("./check-async-waits.cjs").check();
 require("./check-css-has.cjs").check();
 const fs=require('node:fs');const path=require('node:path');const {execFileSync}=require('node:child_process');
 for(const directory of ['desktop','web','integrations','cloud','scripts','tests','tests/helpers','web-start','web-start/build','web-start/node']){
