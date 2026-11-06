@@ -308,7 +308,16 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
     }
   }
   if ((d = take('background'))) { const c = cssColorToHex(d.resolved); if (c) set('fill', c); else if (/gradient\(/.test(d.resolved) && SAFE_CSS(d.resolved)) set('gradient', normalizeColorsIn(d.resolved)); else ignore(d.cls, `background ${d.resolved} is not supported`); }
-  for (const p of ['background-size', 'background-position', 'background-repeat', 'background-clip', 'background-attachment', 'background-origin']) if ((d = take(p))) ignore(d.cls, `${p} is not supported`);
+  if ((d = take('background-size'))) {
+    const fit = ({ cover: 'cover', contain: 'contain', '100% 100%': 'fill', auto: 'none' })[d.resolved];
+    if (fit && out.props.fills) { for (const fill of out.props.fills) if (fill.type === 'image') fill.fit = fit; }
+    else if (!fit || out.props.backgroundRemote) ignore(d.cls, 'background-size is approximated by cover');
+  }
+  for (const p of ['background-position', 'background-repeat', 'background-clip', 'background-attachment', 'background-origin']) if ((d = take(p))) {
+    if (p === 'background-position' && /^(center|50% 50%)$/.test(d.resolved)) continue;
+    if (p === 'background-repeat' && d.resolved === 'no-repeat') continue;
+    ignore(d.cls, `${p} is approximated by a centered non-repeating image fill`);
+  }
 
   // --- borders
   const widths = {};
@@ -351,7 +360,9 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
   for (const [p, idx] of Object.entries(CORNERS)) {
     if (!(d = take(p))) continue;
     if (ellipse) continue;
-    const l = lengthOf(d.resolved);
+    const axes = splitTop(d.resolved, ' ');
+    if (axes.length > 1) ignore(d.cls, 'elliptical border radius is approximated by horizontal radii');
+    const l = lengthOf(axes[0]);
     // rounded-[50%] on every corner is an ellipse inscribed in the box (other percentages are not represented).
     if (p === 'border-radius' && l?.frac === 0.5 && !l.px) { set('ellipse', true); continue; }
     if (!l || l.px === undefined || l.frac !== undefined) { ignore(d.cls, `radius ${d.resolved} is not supported`); continue; }

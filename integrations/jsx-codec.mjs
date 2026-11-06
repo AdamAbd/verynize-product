@@ -468,7 +468,7 @@ export function serializeNode(node, index, { depth = Infinity, tokens = {}, inde
 export class JsxSyntaxError extends Error {}
 
 /** Parse JSX source into an array of element ASTs. Leading import lines are ignored. */
-export function parseJsx(source, { maxLength = 5_000_000, maxElements = NODE_LIMITS.perPage } = {}) {
+export function parseJsx(source, { maxLength = 5_000_000, maxElements = NODE_LIMITS.perDocument } = {}) {
   if (typeof source !== 'string') throw new JsxSyntaxError('Code must be a string');
   if (source.length > maxLength) throw new JsxSyntaxError(`JSX parse stage exceeds ${maxLength} characters`);
   let src = source.replace(/^﻿/, '');
@@ -528,7 +528,9 @@ export function parseJsx(source, { maxLength = 5_000_000, maxElements = NODE_LIM
     }
     return { tag, attrs, children: parseChildren(tag), selfClosing: false };
   };
+  let nesting = 0;
   const parseChildren = tag => {
+    if (++nesting > 256) fail("JSX parse stage exceeds nesting limit 256");
     const children = [];
     for (;;) {
       if (i >= src.length) fail(`Missing closing tag </${tag || ''}>`);
@@ -536,7 +538,7 @@ export function parseJsx(source, { maxLength = 5_000_000, maxElements = NODE_LIM
         i += 2; skipSpace(); const name = src[i] === '>' ? '' : readName(); skipSpace();
         if (src[i] !== '>') fail('Expected > in closing tag'); i++;
         if (name !== tag) fail(`Closing tag </${name}> does not match <${tag}>`);
-        return children;
+        nesting--; return children;
       }
       if (src[i] === '<') { children.push(parseElement()); continue; }
       if (src[i] === '{') {

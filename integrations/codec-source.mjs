@@ -110,7 +110,7 @@ export function importJsxInto(
   document,
   pageId,
   code,
-  { viewport = null, name, placement = "preserve" } = {},
+  { viewport = null, name, placement = "preserve", split = "pages" } = {},
 ) {
   const doc = structuredClone(document);
   mergeVariables(doc, readSourceHeader(code) || {});
@@ -119,10 +119,12 @@ export function importJsxInto(
     name,
     placement,
     importNames: true,
+    split,
   });
   return {
     document: validateDocument(result.document),
     roots: result.roots,
+    pages: result.pages,
     page: result.page,
     warnings: result.warnings,
   };
@@ -160,6 +162,7 @@ export async function prepareHtmlImport(html, current, pageId, options = {}) {
         viewport: options.viewport || null,
         name: options.name,
         placement: options.placement || "auto",
+        split: options.split || "pages",
       });
       for (const root of out.roots) {
         if (/^Imported page(?: \d+)?$/.test(root.name) && !options.name) {
@@ -172,6 +175,7 @@ export async function prepareHtmlImport(html, current, pageId, options = {}) {
       return {
         document: validateDocument(out.document),
         roots: out.roots,
+        pages: out.pages,
         page: out.page,
         warnings: out.warnings,
       };
