@@ -79,6 +79,8 @@ Backends implement `versions: {list(ref, artboardId), get(ref, id), capture(ref,
 
 ## UI
 
+![Version history panel](version-history-panel.png)
+
 The history island (`web/src/islands/history.tsx`, `history/version-panel.tsx`) is a floating panel left of the inspector, opened from an artboard's context menu (Version history, `menu.versionHistory`) or with `bd:open-version-history` `{detail: {artboardId}}`. While open it follows the selected artboard. Rows show author, time, reason and summary with Preview, Restore and Restore as copy; Save version stores the current state. Viewers of a room can preview but not restore. Test ids: `#version-history[data-artboard][data-target]`, `li[data-version][data-reason][data-author-kind]`, `[data-version-preview|restore|restore-copy=<id>]`, `[data-version-save]`, `[data-version-close]`, `#version-preview-banner`, `#version-preview-restore`, `#version-preview-exit`, `#version-history-empty`, `#version-history-error`.
 
 ## Tests
