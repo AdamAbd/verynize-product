@@ -216,6 +216,9 @@ ${list(Object.entries(p.density).map(([k, v]) => `**${k}** — ${v}`))}
 ## Must-have states
 ${list(p.states)}
 
+## Small edits
+For small text or class edits, read get_element_code and use replace_in_element with an exact old string that occurs once, the replacement new string, and the current read_document revision. Keep descendant data-node-id attributes. On conflict read again; use update_elements for structural edits.
+
 ## Common failures
 ${list(p.failures)}
 `;
