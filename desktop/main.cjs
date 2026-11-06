@@ -197,10 +197,11 @@ app.whenReady().then(async () => {
       if (!project) throw Error("Open a project folder first");
       return project;
     };
+    /** @type {import("./ipc-contract").Handle} */
     const handle = (name, fn) =>
       win.webContents.ipc.handle("desktop:" + name, (event, ...args) => {
         if (!appProtocol.isTrustedSender(event, win)) throw Error("Untrusted IPC sender");
-        return fn(...args);
+        return fn.apply(undefined, args);
       });
     handle("writeClipboardImage", (dataURL) => {
       if (

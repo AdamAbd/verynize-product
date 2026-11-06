@@ -224,7 +224,10 @@ export interface DesktopApi {
   previewApp(options: { url: string }): Promise<unknown>;
   exportPDF: Untyped;
   // Projects, repositories, dev server and git (desktop/projects.cjs, repositories.cjs, dev-server.cjs, git-changes.cjs).
-  createProject: Untyped;
+  createProject(options: {
+    name: string;
+    repository?: string;
+  }): Promise<{ root: string; name: string; repoId: string }>;
   repositories: {
     list(): Promise<{ repositories: Repository[]; active: { root: string } | null }>;
     addLocal(): Promise<Repository | null>;
@@ -248,7 +251,7 @@ export interface DesktopApi {
     start(options?: { root?: string }): Promise<DevServerStatus>;
     stop(options?: { root?: string }): Promise<DevServerStatus>;
   };
-  openProject: Untyped;
+  openProject(): Promise<{ root: string; name: string; repoId: string } | null>;
   listFiles(): Promise<ProjectFile[]>;
   readFile(path: string): Promise<string>;
   writeFile(path: string, text: string): Promise<boolean>;
@@ -262,7 +265,7 @@ export interface DesktopApi {
   respondAgentQuestion: Untyped;
   steerAgent: Untyped;
   listAgentRuns: Untyped;
-  listAllowRules(): Promise<AllowRule[]>;
+  listAllowRules(options?: { projectKey?: string }): Promise<AllowRule[]>;
   removeAllowRule(rule: unknown): Promise<unknown>;
   agentToolsVersion: Untyped;
   agentTitle: Untyped;

@@ -1,5 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
-const call = (method, ...args) => ipcRenderer.invoke("desktop:" + method, ...args);
+/** @type {import("./ipc-contract").Invoke} */
+const call = (method, ...args) =>
+  ipcRenderer.invoke("desktop:" + method, .../** @type {unknown[]} */ (args));
 contextBridge.exposeInMainWorld("desktop", {
   agentAccountStatus: (options) => call("agentAccountStatus", options),
   startAgentLogin: (options) => call("startAgentLogin", options),
