@@ -218,6 +218,19 @@ export function layerMenu(surface: "canvas" | "label" | "row", under: string[] =
     commandItem(have, "layer.visibility", every("hidden") ? "Show" : "Hide", "⌘⇧H"),
     commandItem(have, "layer.lock", every("locked") ? "Unlock" : "Lock", "⌘⇧L"),
   ];
+  if (artboards && !multi) {
+    // Version history panel (web/src/islands/history, docs/version-history.md).
+    const artboard = selected[0].id;
+    flags.push({
+      type: "item",
+      command: "menu.versionHistory",
+      label: "Version history",
+      run: () =>
+        window.dispatchEvent(
+          new CustomEvent("bd:open-version-history", { detail: { artboardId: artboard } }),
+        ),
+    });
+  }
   if (artboards) {
     const hidden = every("labelHidden");
     flags.push({

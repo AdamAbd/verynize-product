@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('desktop',{
  designDetach:()=>call('designDetach'),
  designOpen:()=>call('designOpen'),designSave:options=>call('designSave',options),designReload:()=>call('designReload'),
  onDesignFileChanged:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('design:file-changed',listener);return()=>ipcRenderer.removeListener('design:file-changed',listener)},
+ // Version history sidecar of the open native file (desktop/design-files.cjs, docs/version-history.md).
+ versionsList:options=>call('versionsList',options),versionsGet:options=>call('versionsGet',options),versionsAdd:options=>call('versionsAdd',options),
  previewInput:options=>call('previewInput',options),
  previewOpenBrowser:options=>call('previewOpenBrowser',options),previewLocation:options=>call('previewLocation',options),
  previewNavigate:options=>call('previewNavigate',options),

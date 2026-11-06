@@ -223,7 +223,7 @@
    *   stored first, so every agent change and every deletion can be undone from the history;
    * - `force: "restore"` stores the state being replaced; `force: "finish"` (an agent finished
    *   the artboard) and `force: "manual"` store the state after.
-   * A snapshot identical to the artboard's newest version is never stored twice.
+   * Except for a restore, a snapshot identical to the artboard's newest version is not stored again.
    */
   function observe(state, change, { idleMs = IDLE_MS } = {}) {
     state.last ||= {};
@@ -234,7 +234,9 @@
     const at = Number.isFinite(change.at) ? change.at : Date.now();
     const last = state.last[artboardId];
     if (force === "restore") {
-      if (fresh(state, before)) out.push(entry(state, before, author, at, "restore", label));
+      // Always listed, even when the newest version holds the same state: the restore is visible
+      // in the history and can itself be undone from there.
+      if (before) out.push(entry(state, before, author, at, "restore", label));
     } else if (before && fresh(state, before)) {
       if (last && last.hash && last.hash !== snapshotHash(before))
         // Someone this history did not see (another app, a merge) changed it since.

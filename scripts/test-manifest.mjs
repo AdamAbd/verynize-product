@@ -450,6 +450,15 @@ const desktop = [
   electron("tests/preview-interaction.cjs", "desktop", AREA.preview),
   electron("tests/window-layout.cjs", "desktop", [...AREA.shell, "desktop/window-cleanup.cjs"]),
   electron("tests/mcp-live.cjs", "desktop", AREA.mcp),
+  electron("tests/version-history.cjs", "desktop", [
+    ...AREA.mcp,
+    ...isl("history"),
+    "web/version-history.js",
+    "web/version-history-core.js",
+    "web/agent-bridge.js",
+    "desktop/design-files.cjs",
+    "integrations/version-*.mjs",
+  ]),
   unit("tests/dev-server.cjs", "desktop"),
   electron(
     "tests/mcp-shell.cjs",
