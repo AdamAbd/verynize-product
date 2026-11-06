@@ -16,6 +16,8 @@ Org `adamabdrrahman` (US region). The server project tells deployments apart by 
 
 ## Consent
 
+![Settings › Preferences › Privacy, after turning reports on](screenshots/telemetry-privacy-setting.png)
+
 - **Desktop.** The choice is stored in `userData/telemetry.json` (`{enabled}`), read synchronously by main before app
   ready. With it off, or with no DSN, the SDK is never initialised, in main or in the renderer. Turning it on takes
   effect at the next launch, because `@sentry/electron` must start before app ready and the setting says
