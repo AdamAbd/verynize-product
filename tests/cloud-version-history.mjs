@@ -309,8 +309,21 @@ try {
   }
   assert.ok(texts.includes("Bob"), JSON.stringify(texts));
 
+  // Visitors of a public room read the current document, never its history.
+  await data(
+    await send(`/api/rooms/${room.id}/visibility`, {
+      method: "PUT",
+      token: room.token,
+      body: { visibility: "public" },
+    }),
+  );
+  await data(await send(`/api/rooms/${room.id}`));
+  await data(await send(`/api/rooms/${room.id}/versions?artboard=A`), 403);
+  await data(await send(`/api/rooms/${room.id}/versions/${anaVersion.id}`), 403);
+  await data(await send(`/api/rooms/${room.id}/versions?artboard=A`, { token: viewer.token }));
+
   console.log(
-    "PASS room version history: editor-switch captures with authors, viewer list/preview, editor-only capture, restore as ops with two-client convergence, deleted artboard re-created, idle alarm, chunked snapshots, hosted MCP list/restore",
+    "PASS room version history: editor-switch captures with authors, viewer list/preview, editor-only capture, restore as ops with two-client convergence, deleted artboard re-created, idle alarm, chunked snapshots, hosted MCP list/restore, no history for public visitors",
   );
 } finally {
   await mf.dispose();

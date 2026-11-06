@@ -422,7 +422,7 @@ function ignoreLayout(before, after) {
  * fn returns {document, result, reconciled?}: reconciled means fn already re-synced instances itself (component
  * commands), so nothing it changed is marked as an override.
  */
-async function write(backend, ref, fn, options) {
+async function writeAs(backend, ref, fn, options) {
   let pending = [];
   const out = await backend.transact(ref, (document, meta) => {
     ensureShortIds(document);
@@ -462,8 +462,20 @@ const WARNING_NOTE = 'These classes or elements were not applied. Rewrite the af
 // Tool table
 
 /** The tool table for a backend: {name: {description, inputSchema (zod shape), annotations, raw?, run}}. */
+/**
+ * The agent a tool call edits as, for version history: named after the MCP client when known
+ * (backends name an unnamed agent themselves).
+ */
+function agentActor(context) {
+  const client = String(context?.clientName?.() || '').trim();
+  const name = /claude/i.test(client) ? 'Claude' : /codex/i.test(client) ? 'Codex' : client.slice(0, 40);
+  return name ? { kind: 'agent', name } : { kind: 'agent' };
+}
+
 export function toolTable(backend, context = {}) {
   const t = {};
+  // Every edit of this table is an agent edit (version history, docs/version-history.md).
+  const write = (target, ref, fn, options) => writeAs(target, ref, fn, { actor: agentActor(context), ...options });
   t.get_design_context = {
     description: 'Start here. Summarizes the document: pages, active page, current selection (live editor only), open/saved documents, design tokens, artboards on the page, the user\'s saved design preferences, and the design fundamentals that apply to every design (guidelines:"none" leaves the fundamentals out when you already have them).',
     inputSchema: { document: documentArg, pageId: pageArg, guidelines: z.enum(['fundamentals', 'none']).optional().describe('fundamentals (default) appends the design fundamentals; none omits them') }, annotations: { readOnlyHint: true },
@@ -811,7 +823,7 @@ export function toolTable(backend, context = {}) {
         if (id !== found.meta.artboardId) throw new Error(`Version ${version} belongs to another artboard (${found.meta.name}); call list_versions with artboard ${JSON.stringify(artboard)}`);
         const r = restoreVersion(document, found.snapshot, { asCopy });
         return { document: r.document, result: { artboardId: r.artboardId, pageId: r.pageId, renamedIds: r.remapped } };
-      }, { actor: { kind: 'agent', restore: version }, force: asCopy ? undefined : 'restore', artboardId: found.meta.artboardId, label: `Before restoring ${new Date(found.meta.at).toISOString()}` });
+      }, { actor: { ...agentActor(context), restore: version }, force: asCopy ? undefined : 'restore', artboardId: found.meta.artboardId, label: `Before restoring ${new Date(found.meta.at).toISOString()}` });
       const page = getPage((await readPrepared(backend, ref)).document, out.result.pageId); const node = indexPage(page).byId.get(out.result.artboardId);
       if (node) sessionFor(backend).receipts.reset(docKey(out.name, ref), node.shortId);
       return { restored: version, artboard: node?.shortId || out.result.artboardId, asCopy, renamedIds: out.result.renamedIds, note: asCopy ? 'The version was placed as a new artboard.' : 'The replaced state was saved as a version; restore it to undo.', live: out.live, revision: out.revision };
@@ -1206,7 +1218,7 @@ export const TOOL_NAMES = Object.keys(toolTable({}));
  * each validated call to another server (the stdio proxy uses this).
  */
 export function registerDesignTools(server, { backend, forward, context }) {
-  const table = toolTable(backend || {}, context);
+  const table = toolTable(backend || {}, { ...context, clientName: () => server.server?.getClientVersion?.()?.name });
   for (const [name, tool] of Object.entries(table)) {
     server.registerTool(name, { description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations }, async args => {
       try { return forward ? await forward(name, args || {}) : await execute(tool, args || {}); } catch (error) { return failure(error); }
@@ -1270,7 +1282,7 @@ export function createStoreBackend(store, { screenshot, defaultName, fetchImage,
         }
       }
       // Version history sidecar (integrations/version-store.mjs); history problems never fail an edit.
-      await sidecarFor(store.file(name)).observe(before, saved.document, options.actor || { kind: 'agent', name: agentName }, { force: options.force, artboardId: options.artboardId, label: options.label }).catch(() => {});
+      await sidecarFor(store.file(name)).observe(before, saved.document, { kind: 'agent', name: agentName, ...options.actor }, { force: options.force, artboardId: options.artboardId, label: options.label }).catch(() => {});
       return { result, revision: saved.revision, live: false, name };
     },
     versions: {
@@ -1278,7 +1290,7 @@ export function createStoreBackend(store, { screenshot, defaultName, fetchImage,
       get: async (ref, id) => sidecarFor(store.file(await resolveName(ref))).get(id),
       async capture(ref, artboardId, { reason = 'manual', label, actor } = {}) {
         const name = await resolveName(ref); const { document } = await store.read(name);
-        return sidecarFor(store.file(name)).observe(document, document, actor || { kind: 'agent', name: agentName }, { force: reason === 'finish' ? 'finish' : 'manual', artboardId, label });
+        return sidecarFor(store.file(name)).observe(document, document, { kind: 'agent', name: agentName, ...actor }, { force: reason === 'finish' ? 'finish' : 'manual', artboardId, label });
       },
     },
     async create(name, title) { const state = await store.create(name, title); return { name, title, pageId: state.document.pages[0].id, revision: state.revision, live: false, opened: false }; },

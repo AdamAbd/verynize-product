@@ -827,6 +827,9 @@ export class DesignRoom extends DurableObject {
         return json({ unpublished: true });
       }
       // Version history (docs/version-history.md): viewers list and preview, editors capture.
+      // Visitors of a public room see the current document only, not earlier (deleted) content.
+      if ((action === "/versions" || action.startsWith("/versions/")) && publicOnly)
+        fail(403, "Version history needs access to this file");
       if (action === "/versions" && method === "GET") {
         const artboard = url.searchParams.get("artboard");
         return json(
