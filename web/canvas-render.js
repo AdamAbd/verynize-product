@@ -157,6 +157,11 @@
         if (params) el.dataset.shaderParams = params;
         else delete el.dataset.shaderParams;
       }
+      if (n.type === "vector") {
+        const svg = document.createElement("template");
+        svg.innerHTML = window.VerynizeVector.svgMarkup(n, tokens);
+        el.append(svg.content);
+      }
       if (n.type === "image" && n.src) {
         const img = document.createElement(css.svgTint ? "span" : "img");
         if (css.svgTint) {

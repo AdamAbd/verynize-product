@@ -80,6 +80,7 @@ import { ShadowSection } from "./shadows";
 import { FilterSection } from "./filters";
 import { MaskSection } from "./masks";
 import { BorderSection } from "./border-colors";
+import { VectorStrokeSection } from "./vector-stroke";
 import {
   ShaderFill,
   ShaderParameters,
@@ -806,7 +807,9 @@ function FillSection({
             ? "Text Fill"
             : node?.type === "shader"
               ? "Shader Fill"
-              : "Background Fill"}
+              : node?.type === "vector"
+                ? "Fill"
+                : "Background Fill"}
         </h3>
         {node ? <FillTools doc={doc} node={node} selection={selection} /> : null}
       </div>
@@ -820,7 +823,7 @@ function FillSection({
         <ShaderSettings node={node} selection={selection} />
         {node ? <ShaderParameters doc={doc} node={node} selection={selection} /> : null}
         {/* Shader mode (H6): preset dropdown + colours in place of the paint rows (Text Fill has no shader mode). */}
-        {node && node.type !== "text" ? (
+        {node && node.type !== "text" && node.type !== "vector" ? (
           <ShaderFill doc={doc} node={node} selection={selection} />
         ) : null}
         {node ? (
@@ -1108,7 +1111,12 @@ export function PropertiesBody({
         {node?.type === "text" && !fillsMixed ? (
           <TextBackgroundFillSection doc={doc} node={node} selection={selection} />
         ) : null}
-        {plain ? <BorderSection doc={doc} node={plain} selection={selection} /> : null}
+        {/* A vector's stroke follows its path (cap, join, dash) instead of the box border. */}
+        {plain?.type === "vector" ? (
+          <VectorStrokeSection doc={doc} node={plain} selection={selection} />
+        ) : plain ? (
+          <BorderSection doc={doc} node={plain} selection={selection} />
+        ) : null}
         {plain ? <OutlineSection doc={doc} node={plain} selection={selection} /> : null}
         {node && shadowsMixed ? (
           <MixedSection
