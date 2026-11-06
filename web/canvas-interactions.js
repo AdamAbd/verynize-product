@@ -50,7 +50,8 @@
     const sel = () => ed.getSelection();
     const selectedNodes = () => ed.nodes().filter(n => sel().has(n.id));
     const isFlow = n => !!n && n.type === 'frame' && n.layout !== 'free';
-    const elementOf = id => canvas.querySelector('[data-id="' + CSS.escape(id) + '"]');
+    // The renderer's map first: an attribute query walks the canvas (O(page) per call, several calls per pointer move).
+    const elementOf = id => { const el = ed.layerOf?.(id); return el && canvas.contains(el) ? el : canvas.querySelector('[data-id="' + CSS.escape(id) + '"]'); };
     const footer = message => { const f = $('#workspace footer') || $('footer'); if (f) f.textContent = message; };
 
     // ---------- Overlay (screen-space chrome) ----------
@@ -502,10 +503,12 @@
     function select(ids) { ed.setSelection(new Set(ids)); ed.render(); }
     function clearSelection() { drilled.clear(); select([]); }
 
-    // Lazy undo: only record history once a gesture actually changes something.
-    function gesture() {
-      const before = ed.snapshot(); let committed = false;
-      return {commit() { if (!committed) { ed.pushHistory(before); committed = true; } }, get committed() { return committed; }};
+    // Lazy undo: only record history once a gesture actually changes something. A late gesture takes its snapshot
+    // when it commits (the whole document, so a click that never commits does not pay for it); its caller commits
+    // before its first change to the document.
+    function gesture(late = false) {
+      const before = late ? null : ed.snapshot(); let committed = false;
+      return {commit() { if (!committed) { ed.pushHistory(before ?? ed.snapshot()); committed = true; } }, get committed() { return committed; }};
     }
 
     // ---------- Pointer: pan / move / resize / marquee / draw ----------
@@ -815,7 +818,7 @@
     function unfollow(list) { for (const s of list) if (s.el?.isConnected && s.el.style.translate === s.shown) s.el.style.translate = s.base; }
     function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
-      const g = gesture(), start = {x: e.clientX, y: e.clientY};
+      const g = gesture(true), start = {x: e.clientX, y: e.clientY};
       let free = null, flowOnly = false, stacked = [], grab = null, box = null, targets = null, excluded = null, home, origin, drop = null, deferred = false, cancelled = false;
       const onKey = ev => {
         if (ev.key !== 'Escape' || !deferred || cancelled) return;

@@ -553,6 +553,11 @@
           ? el
           : null;
       },
+      // The node's drawn layer element (map lookup), or null when the renderer holds none in the page.
+      layerOf: (id) => {
+        const el = els.get(id);
+        return el?.isConnected ? el : null;
+      },
       node: (id) => byId.get(id),
       stats: () => ({
         elements: els.size,
