@@ -215,6 +215,7 @@ export function parseHtml(source) {
       }
       const m = /^<([a-zA-Z][\w:-]*)/.exec(s.slice(i));
       if (m) {
+        const openingStart = i;
         const tag = m[1].toLowerCase();
         let j = i + m[0].length;
         const attrs = {};
@@ -296,7 +297,7 @@ export function parseHtml(source) {
         if (tag === "svg") {
           // Keep inline SVG as markup: it becomes an image layer.
           const end = findSvgEnd(s, i);
-          el.svg = s.slice(i, end);
+          el.svg = s.slice(openingStart, end);
           const close = s.indexOf(">", end);
           i = close < 0 ? s.length : close + 1;
           continue;
@@ -1396,7 +1397,11 @@ export async function importHtml(html, options = {}) {
       let v = value;
       // Tailwind utilities (author origin, @layer utilities) beat UA defaults and lose to unlayered author CSS.
       const origin = info.origins?.get(property);
-      if (origin === "tw" || (origin === "ua" && twProps.has(property))) continue;
+      if (
+        (origin === "tw" || (origin === "ua" && twProps.has(property))) &&
+        !(property === "background-image" && /url\(/i.test(v))
+      )
+        continue;
       // Preflight resets that equal the canvas defaults add nothing.
       if (
         origin === "preflight" &&
@@ -1411,6 +1416,11 @@ export async function importHtml(html, options = {}) {
         if (text && (v === "inline" || v === "inline-block")) continue;
       }
       if (property === "background-image" && /url\(/i.test(v)) {
+        for (const p of ["background-position", "background-repeat"])
+          if (info.style.has(p))
+            warnings.push(
+              `${p}:${info.style.get(p)} is approximated by a centered cover/contain image fill`,
+            );
         const urls = [...v.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)];
         for (const [, , ref] of urls) {
           const target = (() => {
@@ -1448,7 +1458,15 @@ export async function importHtml(html, options = {}) {
         `[${property}:${toArbitrary(v)}]${origin !== "ua" && twProps.has(property) ? "!" : ""}`,
       );
     }
-    return { classes: [...tw, ...out], fills };
+    return {
+      classes: [
+        ...tw.filter(
+          (cls) => !/\[background(?:-image)?:.*url\(/i.test(cls) && !/^bg-\[url\(/i.test(cls),
+        ),
+        ...out,
+      ],
+      fills,
+    };
   };
 
   const bindingsFor = (info, { text = false } = {}) => {
@@ -1653,8 +1671,13 @@ export async function importHtml(html, options = {}) {
     { root = false, artboardAttrs = "", artboard = false } = {},
   ) => {
     if (++elementCount.n > opts.maxElements) {
-      if (elementCount.n === opts.maxElements + 1)
+      if (elementCount.n === opts.maxElements + 1) {
+        if (!options.allowPartial)
+          throw new Error(
+            `HTML parse stage exceeds ${opts.maxElements} elements; no import committed`,
+          );
         warnings.push(`More than ${opts.maxElements} elements; the rest were skipped`);
+      }
       return;
     }
     if (SKIP.has(el.tag)) return;
@@ -1698,7 +1721,14 @@ export async function importHtml(html, options = {}) {
         info.style.delete(p);
     }
     if (info.display === "contents") {
-      for (const c of el.children || []) if (c.tag) await emit(c, info, indent);
+      for (const c of el.children || []) {
+        if (c.tag) await emit(c, info, indent);
+        else if (c.text?.trim()) {
+          const span = makeElement("span", {}, el);
+          span.children = [c];
+          await emit(span, info, indent);
+        }
+      }
       return;
     }
     stats.elements++;
@@ -1757,8 +1787,16 @@ export async function importHtml(html, options = {}) {
     }
     const designType = el.attrs["data-design-type"];
     let residual = null;
-    const name = label(el);
-    const tag =
+    const name =
+      artboard &&
+      options.placement === "auto" &&
+      !el.attrs["data-name"] &&
+      !el.attrs.id &&
+      !el.attrs["aria-label"] &&
+      label(el) === el.tag[0].toUpperCase() + el.tag.slice(1)
+        ? options.name || options.fallbackName || "Imported page"
+        : label(el);
+    let tag =
       el.tag === "svg"
         ? "img"
         : TAG_MAP[el.tag] || (isSafeTag(el.tag) || el.tag === "img" ? el.tag : "div");
@@ -1771,8 +1809,9 @@ export async function importHtml(html, options = {}) {
       `${extra}${classes.length ? ` className="${escAttr(classes.join(" "))}"` : ""}${residual ? ` ${RESIDUAL_ATTR}='${escSingle(JSON.stringify(residual))}'` : ""}`;
     // Images: <img>, inline <svg>
     if (el.tag === "img" || el.tag === "svg" || (el.tag === "input" && el.attrs.type === "image")) {
-      const { classes } = await classesFor(el, info);
+      const { classes, fills } = await classesFor(el, info);
       let src = "",
+        assetError = "",
         size = null;
       if (el.tag === "svg") {
         const markup = (el.svg || "").replace(/currentColor/g, info.color);
@@ -1780,6 +1819,7 @@ export async function importHtml(html, options = {}) {
           ? markup
           : markup.replace(/^<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
         const clean = sanitizeSvg(`${withNs}</svg>`);
+        if (!clean) warnings.push("Inline SVG was rejected by the sanitizer");
         if (clean) {
           const buf = Buffer.from(clean);
           src = `data:image/svg+xml;base64,${buf.toString("base64")}`;
@@ -1790,13 +1830,25 @@ export async function importHtml(html, options = {}) {
         if (/^data:image\//i.test(ref)) src = ref;
         else if (ref) {
           const target = resolveUrl(ref);
-          if (target?.protocol === "file:" || target?.protocol === "data:") {
+          if (
+            target?.protocol === "file:" ||
+            target?.protocol === "data:" ||
+            (options.allowRemote && /^https?:$/.test(target?.protocol))
+          ) {
             const image = await embedImage(target, "Image");
             if (image) {
               src = image.src;
               size = image.size;
-            }
-          } else if (target) src = target.href;
+            } else assetError = warnings.at(-1) || `Image ${target.href} unavailable`;
+          } else if (target) {
+            src = target.href;
+            warnings.push(
+              `Image pending: ${target.href} (remote fetching requires asset resolution)`,
+            );
+          } else {
+            assetError = `Unresolved relative image: ${ref} (no base URL)`;
+            warnings.push(assetError);
+          }
         }
       }
       const sized = [];
@@ -1813,9 +1865,25 @@ export async function importHtml(html, options = {}) {
           sized.push(`[height:${r2((w * size.height) / size.width)}px]`);
       }
       lines.push(
-        `${indent}<img data-node-label="${escAttr(name)}" src="${escAttr(src)}"${common([...classes, ...sized])} />`,
+        `${indent}<img data-node-label="${escAttr(name)}" src="${escAttr(src)}"${assetError ? ` data-asset-error="${escAttr(assetError)}"` : ""}${common([...classes, ...sized])}${fills.length ? ` data-fills="${escAttr(JSON.stringify(fills))}"` : ""} />`,
       );
       return;
+    }
+    if (["input", "textarea", "select"].includes(el.tag)) {
+      const selected =
+        el.tag === "select"
+          ? el.children.find((c) => c.tag === "option" && "selected" in c.attrs) ||
+            el.children.find((c) => c.tag === "option")
+          : null;
+      const visible =
+        el.tag === "input"
+          ? el.attrs.value || el.attrs.placeholder || ""
+          : el.tag === "textarea"
+            ? el.children.map((c) => c.text || "").join("")
+            : textContent(selected || el);
+      el.children = [{ text: visible }];
+      el.tag = "button";
+      tag = "button";
     }
     if (
       ["hr", "input", "progress", "meter"].includes(el.tag) ||
@@ -1917,11 +1985,13 @@ export async function importHtml(html, options = {}) {
     // A web page: the artboard is the viewport (<html>), with <body> inside it.
     const titleEl = find(htmlEl, "title");
     const title =
+      options.name ||
+      htmlEl.attrs?.["data-name"] ||
       (titleEl ? titleEl.children.map((c) => c.text || "").join("") : "")
         .replace(/\s+/g, " ")
         .trim()
         .slice(0, 200) ||
-      options.name ||
+      options.fallbackName ||
       "Imported page";
     const bodyInfo = computeElement(bodyEl, htmlComputed);
     const canvasBg = htmlComputed.style.get("background-color");
@@ -1949,7 +2019,7 @@ export async function importHtml(html, options = {}) {
       "position",
     ])
       htmlComputed.style.delete(p);
-    const { classes } = await classesFor(
+    const { classes, fills } = await classesFor(
       htmlEl === tree ? makeElement("html", {}, null) : htmlEl,
       htmlComputed,
     );
@@ -1959,7 +2029,7 @@ export async function importHtml(html, options = {}) {
         options.document && options.x === undefined
           ? ""
           : ` data-component-x="${Number(options.x) || 0}" data-component-y="${Number(options.y) || 0}"`
-      } className="${escAttr(classes.join(" "))}">`,
+      } className="${escAttr(classes.join(" "))}"${fills.length ? ` data-fills="${escAttr(JSON.stringify(fills))}"` : ""}>`,
     );
     if (bodyEl !== htmlEl) await emit(bodyEl, htmlComputed, "  ");
     else

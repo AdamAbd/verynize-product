@@ -192,4 +192,11 @@ export const bindings = node => (node.bindings && typeof node.bindings === 'obje
 export const hidden = node => node.hidden === true;
 export const effects = node => ({ shadows: (node.shadows || []).length, hiddenShadows: (node.shadows || []).filter(s => s.hidden).length, filters: (node.filters || []).length, masks: (node.masks || []).length });
 
-export const ACCESSORS = { token, variants, bindings, hidden, effects, padding, radius, gap, fill, ink, strokeColor, strokeWidth, sizing, layout, direction, fontSize, lineHeightPx, fontWeight, fontFamily, letterSpacingPx, gradient, shadow, truncate, positioning, flexGrow, textTransform, box };
+export const type = node => node.type;
+export const w = node => node.w;
+export const src = node => node.src;
+export const outlineWidth = node => node.outlineWidth;
+export const fills = node => node.fills;
+export const svgMarkup = node => /^data:image\/svg\+xml;base64,/.test(node.src || '') ? Buffer.from(node.src.split(',')[1], 'base64').toString() : '';
+
+export const ACCESSORS = { type, w, src, outlineWidth, fills, svgMarkup, token, variants, bindings, hidden, effects, padding, radius, gap, fill, ink, strokeColor, strokeWidth, sizing, layout, direction, fontSize, lineHeightPx, fontWeight, fontFamily, letterSpacingPx, gradient, shadow, truncate, positioning, flexGrow, textTransform, box };

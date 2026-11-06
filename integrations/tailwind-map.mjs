@@ -1,6 +1,7 @@
 // Tailwind classes -> Verynize node properties, using CSS declarations produced by the real
 // Tailwind v4 engine (tailwind-engine.mjs). Every class that cannot be represented is reported
 // with a reason; nothing is dropped silently.
+import { expand } from './codec-css-cascade.mjs';
 import { compileClass, sortClasses, resolveValue } from './tailwind-engine.mjs';
 import { lengthOf, cssColorToHex, normalizeColorsIn, splitTop, matchMedia } from './codec-css.mjs';
 import { BLEND_MODES, FILTERS } from './node-style.mjs';
@@ -96,16 +97,19 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
       if (!applies) { ignore(cls, `variant ${result.variants.join(':')}: is ignored — ${viewport ? 'its condition does not match the import viewport or it is a state variant' : 'responsive, state and dark-mode variants are not represented on the canvas'}; only base classes apply (the class is kept on the layer and written back on export)`); continue; }
     }
     if (result.kind === 'unsupported') { ignore(cls, `produces only ${result.extras.join(', ')} rules, which the canvas does not represent`); continue; }
-    for (const decl of result.decls) {
-      // `hidden` (display:none) hides the layer without discarding its layout class (flex, grid…);
-      // a matching responsive variant that sets a display value shows it again (hidden md:flex).
-      if (decl.property === 'display') {
-        if (decl.value.trim() === 'none') { hiddenBy = cls; continue; }
-        else if (result.kind === 'variant') hiddenBy = null;
+    for (const raw of result.decls) {
+      if (raw.property === 'border-radius' && raw.value.includes('/')) ignore(cls, 'elliptical border radius is approximated by horizontal radii');
+      for (const decl of /^(border(?:-(?:top|right|bottom|left))?|outline|background)$/.test(raw.property) || (raw.property === 'border-radius' && /[\s/]/.test(raw.value.trim())) ? expand(raw) : [raw]) {
+        // `hidden` (display:none) hides the layer without discarding its layout class (flex, grid…);
+        // a matching responsive variant that sets a display value shows it again (hidden md:flex).
+        if (decl.property === 'display') {
+          if (decl.value.trim() === 'none') { hiddenBy = cls; continue; }
+          else if (result.kind === 'variant') hiddenBy = null;
+        }
+        const prev = decls.get(decl.property);
+        if (prev && prev.important && !decl.important) continue;
+        decls.set(decl.property, { ...decl, cls });
       }
-      const prev = decls.get(decl.property);
-      if (prev && prev.important && !decl.important) continue;
-      decls.set(decl.property, { ...decl, cls });
     }
     if (result.childDecls.length) child.push({ cls, decls: result.childDecls });
     fromClass.set(cls, result);
@@ -293,8 +297,12 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
   if ((d = take('background-image'))) {
     let v = d.resolved;
     if (v === 'none') set('gradient', '');
-    else if (/url\s*\(/i.test(v)) ignore(d.cls, 'background images (url) are not supported; use an <img> element');
-    else {
+    else if (/url\s*\(/i.test(v)) {
+      const match = /^url\(\s*(["']?)(.*?)\1\s*\)$/.exec(v);
+      if (match && /^data:image\//.test(match[2])) set('fills', [{ type: 'image', src: match[2], fit: 'cover' }]);
+      else if (match && /^https?:\/\//.test(match[2])) set('backgroundRemote', match[2]);
+      else ignore(d.cls, 'Unresolved background URL; use HTML import with a base URL or an embedded image');
+    } else {
       v = normalizeColorsIn(v.replace(/\s+in\s+(?:oklab|oklch|srgb|hsl)(?:\s+(?:shorter|longer|increasing|decreasing)\s+hue)?/g, '').replace(/\(\s*,\s*/g, '(').replace(/,\s*,/g, ','));
       if (SAFE_CSS(v) && /gradient\(/.test(v)) set('gradient', v); else ignore(d.cls, `background-image ${d.resolved} is not supported`);
     }

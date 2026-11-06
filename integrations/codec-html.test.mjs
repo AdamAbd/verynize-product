@@ -236,10 +236,10 @@ test("remote stylesheets over http: opt-in, size limit and timeout", async () =>
       on.warnings.some((w) => /slow\.css/.test(w) && /abort|timeout|timed out/i.test(w)),
       "time limit",
     );
-    assert.equal(
-      byName(on.document, "Logo").srcRemote,
-      `${url}/logo.png`,
-      "remote images keep their absolute URL for the asset fetcher",
+    assert.match(
+      byName(on.document, "Logo").src,
+      /^data:image\//,
+      "opted-in remote images are embedded during import",
     );
   } finally {
     server.close();
