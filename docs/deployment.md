@@ -72,7 +72,7 @@ Do not rotate `ASSET_SIGNING_SECRET`: every image URL stored in room documents d
 
 ### Crash reports (Sentry)
 
-Optional. Set `SENTRY_DSN_SERVER` as a Worker secret (`npx cf workers secrets update SENTRY_DSN_SERVER --worker verynize --text '<dsn>'`), and export `SENTRY_DSN_WEB` (and `SENTRY_AUTH_TOKEN` for source maps) when running `npm run build`. Without them nothing is reported. See docs/telemetry.md.
+Optional. Put `SENTRY_DSN_WEB` (and `SENTRY_AUTH_TOKEN` for source maps) in the repo-root `.env`, which `npm run build`, `deploy` and `deploy:check` load, or export them. Set `SENTRY_DSN_SERVER` as a Worker secret (`npx cf workers secrets update SENTRY_DSN_SERVER --worker verynize --text '<dsn>'`) or in `.env` to build it in. Without them nothing is reported. See docs/telemetry.md.
 
 ### Transactional email
 
