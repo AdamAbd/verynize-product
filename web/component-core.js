@@ -24,6 +24,8 @@
 //                                 their overrides with ids derived from the new root, copied parts of an instance
 //                                 become plain layers.
 // componentProblems(doc)          mains that contain an instance of themselves (they are never synced).
+// wouldCycle(doc, nodes, parentId) whether placing `nodes` (layers with their descendants, in the document or not)
+//                                 inside `parentId` would make a main contain an instance of itself.
 // live() / editor(api)            renderer glue for web/app.js (baseline tracking and window.design.components).
 //
 // All functions except syncComponents/componentInfo/componentProblems/snapshot mutate the document they are given.
@@ -757,6 +759,12 @@
     }
     return false;
   }
+  function wouldCycle(doc, nodes, parentId) {
+    if (!parentId) return false;
+    const mains = new Set();
+    for (const n of nodes || []) if (n && nonempty(n.instanceOf)) mains.add(n.instanceOf);
+    return [...mains].some((id) => cycleThrough(doc, id, parentId));
+  }
   function createInstance(doc, mainId, options = {}) {
     const ix = indexOf(doc),
       main = ix.get(mainId);
@@ -1119,6 +1127,7 @@
     setSlot,
     componentInfo,
     componentProblems,
+    wouldCycle,
     adoptCopies,
     hasComponents,
     snapshot,

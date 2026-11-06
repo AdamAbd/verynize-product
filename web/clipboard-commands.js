@@ -103,6 +103,13 @@
       for (const [k, v] of Object.entries(data.tokens || {})) if (!candidate.tokens[k]) candidate.tokens[k] = v;
       edit(page.nodes, n => structuredClone(n));
       try { ed.validate(candidate); } catch (error) { c.footer('Unable to paste: ' + error.message); return false; }
+      // A paste never makes a main contain an instance of itself (design/component-audit/README.md "Nested instances").
+      const cycles = d => window.VerynizeComponents?.componentProblems(d).length || 0;
+      if (cycles(candidate) > cycles(ed.design)) {
+        const message = 'A main component cannot contain an instance of itself';
+        c.footer(message); window.dispatchEvent(new CustomEvent('bd:notice', {detail: {message}}));
+        return false;
+      }
       ed.checkpoint();
       for (const [k, v] of Object.entries(data.tokens || {})) if (!ed.design.tokens[k]) ed.design.tokens[k] = v;
       edit(ed.nodes(), n => ({...ed.defaults, ...structuredClone(n)}));

@@ -145,7 +145,7 @@ const nodes = [
     assert.equal(await p.locator('#shortcuts-search').getAttribute('placeholder'), 'Search shortcuts…');
     assert.equal(await p.evaluate(() => document.activeElement?.id), 'shortcuts-search');
     const sections = await p.locator('#shortcuts-drawer [data-shortcut-section]').evaluateAll(list => list.map(s => s.dataset.shortcutSection));
-    assert.deepEqual(sections, ['APPLICATION', 'TOOLS', 'EDIT', 'SELECTION', 'VIEW', 'TRANSFORM', 'ALIGNMENT', 'MOVEMENT', 'TEXT EDITING']);
+    assert.deepEqual(sections, ['APPLICATION', 'TOOLS', 'EDIT', 'SELECTION', 'VIEW', 'TRANSFORM', 'COMPONENTS', 'ALIGNMENT', 'MOVEMENT', 'TEXT EDITING']);
     const row = label => p.locator(`#shortcuts-drawer [data-shortcut-section] [data-shortcut="${label}"]`);
     assert.equal((await row('Command palette').innerText()).replace(/\s+/g, ''), `Commandpalette${MOD_LABEL}K`);
     assert.equal((await row('Eye dropper (alt)').innerText()).replace(/\s+/g, ''), 'Eyedropper(alt)⌃C');
