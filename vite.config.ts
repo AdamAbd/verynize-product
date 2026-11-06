@@ -27,6 +27,11 @@ export default defineConfig({
     ignorePatterns: ["web-start/src/routeTree.gen.ts"],
   },
   lint: {
+    options: { typeAware: true },
+    rules: {
+      "no-dupe-keys": "error",
+      "typescript/no-floating-promises": "warn",
+    },
     ignorePatterns: ["web/dist/**", "web-start/src/routeTree.gen.ts"],
     jsPlugins: ["@shadcn/lint"],
     settings: {

@@ -1411,7 +1411,6 @@
     role: () => role,
     account: () => (account ? { ...account.account } : null),
     // cloud-assets (web/cloud-assets.js): the connected room and authenticated room requests.
-    room: () => (connection ? { server: connection.server, id: connection.id } : null),
     request: (path, options) => request(path, options),
     // Share popover (web/cloud-share.js builds ensureRoom/access/setVisibility/invite/shareLink on these).
     createRoom: (server) => createRoom(server),
