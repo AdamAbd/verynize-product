@@ -69,27 +69,31 @@ test("measure counts asset binaries as URLs and skips text content", () => {
 test("problems: warn at 80 %, over above the limit, worst first, with the page named", () => {
   const ok = L.measure({ pages: [page("a", [text("t", 100 * KiB)])] });
   assert.deepEqual(L.problems(ok), []);
-  const warn = L.measure({ pages: [page("a", [text("t", 1.7 * MiB)]), page("b", [])] });
-  const [w] = L.problems(warn);
+  const warn = L.measure({ pages: [page("a", [text("t", 17 * MiB)]), page("b", [])] });
+  const w = L.problems(warn).find((p) => p.scope === "page");
   assert.equal(w.level, "warn");
   assert.equal(w.scope, "page");
   assert.equal(w.pageId, "a");
-  assert.match(w.message, /Page “Page a” is 1\.7 MB of the 2 MB page limit/);
+  assert.match(w.message, /Page “Page a” is 17 MB of the 20 MB page limit/);
   const over = L.measure({
-    pages: [page("a", [text("t", 1.7 * MiB)]), page("b", [text("u", 2.1 * MiB)])],
+    pages: [page("a", [text("t", 17 * MiB)]), page("b", [text("u", 21 * MiB)])],
   });
   const listed = L.problems(over);
   assert.deepEqual(
     listed.map((p) => [p.level, p.pageId]),
     [
+      ["over", undefined],
       ["over", "b"],
       ["warn", "a"],
     ],
   );
-  assert.match(listed[0].message, /over the 2 MB page limit\. Split it/);
+  assert.match(listed[1].message, /over the 20 MB page limit\. Move content/);
   // Just over the limit never reads as the limit itself.
-  const edge = L.problems(L.measure({ pages: [page("a", [text("t", 2 * MiB + 30 * KiB)])] }));
-  assert.match(edge[0].message, /is 2\.0\d MB, over the 2 MB page limit/);
+  const edge = L.problems(L.measure({ pages: [page("a", [text("t", 20 * MiB + 30 * KiB)])] }));
+  assert.match(
+    edge.find((p) => p.scope === "page").message,
+    /is 20\.0\d MB, over the 20 MB page limit/,
+  );
   assert.equal(L.level(16 * MiB, L.DOCUMENT_LIMIT_BYTES), "warn");
   assert.equal(L.level(21 * MiB, L.DOCUMENT_LIMIT_BYTES), "over");
 });
@@ -122,4 +126,25 @@ test("mapBinaries replaces asset binaries and keeps everything else", () => {
   assert.equal(node.fills[1].src, small);
   assert.equal(node.text, big);
   assert.equal(doc.pages[0].nodes[0].src, big, "the input is not changed");
+});
+
+test("operation batches obey UTF-8 bytes and count with envelope headroom", () => {
+  const R = globalThis.VerynizeRoomLimits;
+  const ops = Array.from({ length: 3 }, (_, i) => ({
+    t: "node",
+    id: String(i),
+    value: "界".repeat(3_000_000),
+  }));
+  const groups = R.batchOps(ops);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.flat(), ops);
+  for (const group of groups)
+    assert.ok(
+      R.bytes({ type: "ops", batch: Number.MAX_SAFE_INTEGER, ops: group }) < R.MESSAGE_BYTES,
+    );
+  assert.deepEqual(
+    R.batchOps(Array.from({ length: 8001 }, () => ({ t: "remove", id: "a" }))).map((b) => b.length),
+    [4000, 4000, 1],
+  );
+  assert.equal(R.batchOps([{ value: "界".repeat(8_000_000) }]), null);
 });

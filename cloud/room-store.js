@@ -224,6 +224,7 @@ export class RoomStore {
       const head = headText(page),
         nodes = JSON.stringify(page.nodes);
       const bytes = byteSize(head) - 4 + byteSize(nodes);
+      // Logical page budget is independent of the bounded physical parts rows.
       if (enforce && bytes > PAGE_BYTES)
         tooLarge(`${pageLabel(page)} exceeds the ${MB(PAGE_BYTES)} page limit`);
       total += bytes;

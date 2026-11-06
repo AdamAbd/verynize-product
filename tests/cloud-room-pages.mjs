@@ -4,6 +4,7 @@
 // page / document limits of cloud/limits.js, the frozen public copy, and the one-time migration of
 // rooms that stored the whole document in one row (tests/fixtures/design-room-whole-document.js).
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -232,7 +233,7 @@ try {
   // ---- limits: per page and per document, instead of one 2 MB room -------------------------
   const filler = (bytes) => "x".repeat(bytes);
   const big = board();
-  big.pages[0].nodes[1].text = filler(1_500_000);
+  big.pages[0].nodes[1].text = "界😀".repeat(500_000);
   big.pages[1].nodes[0].name = filler(1_500_000);
   const bigRoom = await data(
     await call("/api/rooms", { method: "POST", body: { document: big } }),
@@ -242,7 +243,7 @@ try {
     (await data(await call(`/api/rooms/${bigRoom.id}?lazy=1&page=p3`, { token: bigRoom.token })))
       .document.pages[0].nodes.length,
     0,
-    "a 3 MB room joins with only the requested page",
+    "a 5 MB room joins with only the requested page",
   );
   const oversized = board();
   oversized.pages[0].nodes[1].text = filler(PAGE_BYTES);
@@ -264,9 +265,19 @@ try {
     413,
   );
   assert.equal(tooBig.rejected, 1);
+  const receiptClient = await socket(
+    bigUrl + "/socket?token=" + bigRoom.token + "&client=filler&lazy=1",
+  );
+  await receiptClient.next((m) => m.type === "welcome");
+  receiptClient.send({ type: "sync", pages: ["p1"] });
+  const receipt = await receiptClient.next((m) => m.type === "snapshot");
+  assert.deepEqual(receipt.rejectedBatches, [1]);
+  assert.equal(receipt.acked, 1);
+  assert.equal(receipt.document.pages[0].nodes[1].text, big.pages[0].nodes[1].text);
+  receiptClient.ws.close();
   assert.match(tooBig.error, /page limit/);
-  // Fill to the document limit with pages just under the page limit.
-  const pageBody = Math.floor(PAGE_BYTES * 0.9);
+  // Fill to the document limit with bounded pages.
+  const pageBody = 1_800_000;
   let added = 0,
     total = null;
   for (let i = 0; i < 20; i++) {
@@ -290,7 +301,7 @@ try {
   }
   assert.ok(total, "the document limit stops growth");
   assert.match(total.error, /room limit/);
-  assert.equal(added, Math.floor((DOCUMENT_BYTES - 3_000_000) / pageBody));
+  assert.equal(added, Math.floor((DOCUMENT_BYTES - 5_000_000) / pageBody));
   const sizes = (await data(await call(bigUrl + "?lazy=1", { token: bigRoom.token }))).pages;
   assert.ok(sizes.reduce((sum, p) => sum + p.bytes, 0) <= DOCUMENT_BYTES);
   // The stored page records survive a refused batch untouched.
@@ -320,6 +331,33 @@ try {
   assert.deepEqual(
     (await data(await call(`/api/public/${publication.publicId}`))).document,
     expected,
+  );
+  await mf.dispose();
+
+  // Physical rows stay below SQLite's 2 MB limit, including multibyte/surrogate text.
+  let largestPart = 0;
+  for (const file of await fs.readdir(state, { recursive: true })) {
+    if (!file.endsWith(".sqlite")) continue;
+    const db = new DatabaseSync(path.join(state, file), { readOnly: true });
+    try {
+      if (db.prepare("SELECT name FROM sqlite_master WHERE name='parts'").get()) {
+        largestPart = Math.max(
+          largestPart,
+          db.prepare("SELECT max(length(cast(data AS blob))) AS bytes FROM parts").get().bytes || 0,
+        );
+      }
+    } finally {
+      db.close();
+    }
+  }
+  assert.ok(largestPart > 256 * 1024, "Unicode occupies more bytes than UTF-16 units");
+  assert.ok(largestPart < 2_000_000, "every physical parts row is below 2 MB");
+  mf = new Miniflare(await cloudOptions(state));
+  const restartedLarge = await data(await call(bigUrl + "/pages?id=p1", { token: bigRoom.token }));
+  assert.equal(
+    restartedLarge.pages[0].nodes[1].text,
+    big.pages[0].nodes[1].text,
+    "large Unicode page survives actor restart",
   );
   await mf.dispose();
 

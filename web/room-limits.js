@@ -8,8 +8,8 @@
 (function (scope) {
   "use strict";
   const MiB = 1024 * 1024;
-  const PAGE_BYTES = 2 * MiB;
   const DOCUMENT_BYTES = 20 * MiB;
+  const PAGE_BYTES = DOCUMENT_BYTES;
   const META_BYTES = 2 * MiB;
   // Whole-document requests (create, legacy snapshot writes) and socket messages carry up to a
   // whole document plus their envelope.
@@ -18,7 +18,27 @@
   const encoder = new TextEncoder();
   const bytes = (value) =>
     encoder.encode(typeof value === "string" ? value : JSON.stringify(value)).length;
+  // Leave room for message type, batch number and future envelope fields.
+  function batchOps(ops) {
+    const batches = [];
+    let batch = [],
+      size = 2;
+    for (const op of ops) {
+      const length = bytes(op) + 1;
+      if (length > MESSAGE_BYTES - 65536) return null;
+      if (batch.length && (batch.length >= 4000 || size + length > MESSAGE_BYTES - 65536)) {
+        batches.push(batch);
+        batch = [];
+        size = 2;
+      }
+      batch.push(op);
+      size += length;
+    }
+    if (batch.length) batches.push(batch);
+    return batches;
+  }
   scope.VerynizeRoomLimits = Object.freeze({
+    batchOps,
     PAGE_BYTES,
     DOCUMENT_BYTES,
     META_BYTES,

@@ -479,6 +479,8 @@ const integrations = integrationFiles.map((name) => {
   const file = `integrations/${name}`;
   const base = name.replace(/\.test\.mjs$/, "");
   const covers = [`integrations/${base}.mjs`, `integrations/${base}/**`];
+  if (base === "storage-limits")
+    covers.push("web/room-limits.js", "web/storage-limits.js", "cloud/limits.js");
   if (base === "shader-runtime")
     return electron(
       file,
@@ -541,6 +543,7 @@ const ux = [
     ...AREA.document,
     ...isl("storage"),
     "web/storage-limits.js",
+    "web/room-limits.js",
   ]),
   electron(
     "tests/share-popover.cjs",

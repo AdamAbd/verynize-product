@@ -228,8 +228,8 @@
         limit: limits.PAGE_LIMIT_BYTES,
         message:
           state === "over"
-            ? `Page “${page.name}” is ${mb(page.bytes, limits.PAGE_LIMIT_BYTES)}, over the ${mb(limits.PAGE_LIMIT_BYTES)} page limit. Split it into several pages.`
-            : `Page “${page.name}” is ${mb(page.bytes)} of the ${mb(limits.PAGE_LIMIT_BYTES)} page limit. Consider splitting it into several pages.`,
+            ? `Page “${page.name}” is ${mb(page.bytes, limits.PAGE_LIMIT_BYTES)}, over the ${mb(limits.PAGE_LIMIT_BYTES)} page limit. Move content to another file.`
+            : `Page “${page.name}” is ${mb(page.bytes)} of the ${mb(limits.PAGE_LIMIT_BYTES)} page limit. Pages share the file budget.`,
       });
     }
     for (const item of report.inline.tooLarge)
