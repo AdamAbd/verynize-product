@@ -816,7 +816,7 @@
     function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
       const g = gesture(), start = {x: e.clientX, y: e.clientY};
-      let free = null, flowOnly = false, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null, deferred = false, cancelled = false;
+      let free = null, flowOnly = false, stacked = [], grab = null, box = null, targets = null, excluded = null, home, origin, drop = null, deferred = false, cancelled = false;
       const onKey = ev => {
         if (ev.key !== 'Escape' || !deferred || cancelled) return;
         ev.preventDefault(); ev.stopImmediatePropagation();
@@ -836,7 +836,7 @@
         box = union(free.map(s => grab.get(s.n.id))); targets = free.length ? guideTargets(free.map(s => s.n.id)) : [];
         excluded = new Set(nodes.flatMap(n => [...ed.descendants(n.id)]));
         const parents = new Set(nodes.map(n => n.parentId || null));
-        home = parents.size === 1 ? [...parents][0] : undefined;
+        home = origin = parents.size === 1 ? [...parents][0] : undefined;
         // A top-level frame enters a stack by a drag (Wonder R1-row-return-during) but never a free frame (unproven).
         flowOnly = nodes.some(n => !n.parentId && n.type === 'frame');
         workspace.classList.add('moving'); showHover(null);
@@ -862,13 +862,16 @@
         if (drop.parent && free.length && !stacked.length && drop.index === undefined) {
           unfollow(free);
           relocate(free.map(s => s.n), drop.parent.id === '' ? null : drop.parent.id);
-          ed.render();
+          // Canvas only: panels, save and subscribers see the new parent with the release's render (the Layers tree
+          // previews it meanwhile, below), so a drag across frames costs the page, not the whole document.
+          ed.renderCanvas();
           home = free[0].n.parentId || null;
           for (const s of free) { s.x = s.n.x - dx; s.y = s.n.y - dy; s.el = null; s.lx = s.n.x; s.ly = s.n.y; }
           targets = guideTargets(free.map(s => s.n.id));
           drop = {};
         }
-        const previewed = setLayerPreview(drop.parent ? {ids: [...moving], parentId: drop.parent.id || null, ...(drop.index === undefined ? {} : {index: drop.index})} : null);
+        const previewed = setLayerPreview(drop.parent ? {ids: [...moving], parentId: drop.parent.id || null, ...(drop.index === undefined ? {} : {index: drop.index})}
+          : free.length && home !== origin ? {ids: [...moving], parentId: home} : null);
         placeGhosts(stacked, grab, dx, dy);
         if (free.length || stacked.length || previewed) ed.updateMeasurement(); // the name label (and a multi-selection's box) follows the dragged layers
         if (free.some(s => !s.n.parentId && s.n.type === 'frame')) drawFrameLabels(); // artboard labels ride with their frames
