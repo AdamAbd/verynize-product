@@ -443,10 +443,27 @@
       retained = pending.flatMap((b) => b.ops).concat(ops);
       pending = [];
       status("File is too large to sync. Your edits stay on this device.");
-    } else for (const group of groups) pending.push({ n: ++batchNumber, ops: group, sent: false });
+    } else
+      for (const group of groups) {
+        // Edits made while a batch is in flight join the unsent tail, so a drag or typing burst
+        // waits for one round trip instead of one per change.
+        const last = pending[pending.length - 1],
+          size = limits.bytes(group);
+        if (
+          last &&
+          !last.sent &&
+          last.size &&
+          last.ops.length + group.length <= 4000 &&
+          last.size + size <= limits.MESSAGE_BYTES - 65536
+        ) {
+          last.ops.push(...group);
+          last.size += size;
+        } else pending.push({ n: ++batchNumber, ops: group, sent: false, size });
+      }
     clearTimeout(sendTimer);
     sendTimer = setTimeout(sendPending, 40);
-    saveOutbox(true);
+    // sendPending writes the outbox before each send; this only covers edits waiting behind it.
+    saveOutbox();
   }
   function localChange() {
     drawPeers();

@@ -48,7 +48,7 @@ export class DesignRoom extends DurableObject {
       CREATE TABLE IF NOT EXISTS capabilities (id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, role TEXT NOT NULL, label TEXT, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS members (account_id TEXT PRIMARY KEY, email TEXT NOT NULL, handle TEXT, role TEXT NOT NULL, added_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS stamps (path TEXT PRIMARY KEY, stamp TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS rejected_batches (client_id TEXT, batch INTEGER, PRIMARY KEY(client_id,batch));
+      CREATE TABLE IF NOT EXISTS rejected_batches (client_id TEXT, batch INTEGER, reason TEXT NOT NULL, PRIMARY KEY(client_id,batch));
       CREATE TABLE IF NOT EXISTS clients (client_id TEXT PRIMARY KEY, last_batch INTEGER NOT NULL, seen_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS comments (id TEXT PRIMARY KEY, author TEXT NOT NULL, account_id TEXT, page_id TEXT, node_id TEXT, text TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -301,18 +301,22 @@ export class DesignRoom extends DurableObject {
       this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
         ?.last_batch ?? 0;
     if (batch <= last) {
-      const tooLarge = this.rejectedBatches(client).includes(batch);
+      const reason = this.sql
+        .exec("SELECT reason FROM rejected_batches WHERE client_id=? AND batch=?", client, batch)
+        .toArray()[0]?.reason;
       return {
         type: "ops",
         client,
         batch,
         revision,
         ops: [],
-        rejected: tooLarge ? ops.length : 0,
+        rejected: reason ? ops.length : 0,
         duplicate: true,
-        ...(tooLarge ? { tooLarge: true, retained: true, error: "File is too large to sync" } : {}),
+        ...(reason ? { tooLarge: true, retained: true, error: reason } : {}),
       };
     }
+    // Clients send one batch at a time, so every earlier outcome has been received.
+    this.sql.exec("DELETE FROM rejected_batches WHERE client_id=? AND batch<?", client, batch);
     this.sql.exec(
       "INSERT OR REPLACE INTO clients (client_id,last_batch,seen_at) VALUES (?,?,?)",
       client,
@@ -333,7 +337,12 @@ export class DesignRoom extends DurableObject {
     // Large inline binaries never reach room storage (cloud/inline-binaries.js).
     const screened = screenOps(this.env, ops);
     if (screened.rejected.length)
-      this.sql.exec("INSERT OR IGNORE INTO rejected_batches VALUES (?,?)", client, batch);
+      this.sql.exec(
+        "INSERT OR IGNORE INTO rejected_batches VALUES (?,?,?)",
+        client,
+        batch,
+        String(screened.rejected[0]?.reason || "Some edits were rejected"),
+      );
     const stamped = screened.ops.map((op) => {
       const parsed = Ops.decode(op?.s);
       // Missing or far-future stamps would win forever; the server restamps them.
@@ -366,7 +375,12 @@ export class DesignRoom extends DurableObject {
       this.store.commit(state, result.doc);
     } catch (error) {
       if (error?.status !== 413) throw error;
-      this.sql.exec("INSERT OR IGNORE INTO rejected_batches VALUES (?,?)", client, batch);
+      this.sql.exec(
+        "INSERT OR IGNORE INTO rejected_batches VALUES (?,?,?)",
+        client,
+        batch,
+        error.message,
+      );
       return {
         type: "ops",
         client,

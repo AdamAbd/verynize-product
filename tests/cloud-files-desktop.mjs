@@ -286,6 +286,34 @@ try {
   if (await page.locator("#storage-limit-dialog").isVisible())
     await page.getByRole("button", { name: "Close size error" }).click();
 
+  // A burst of edits made while a batch is in flight joins the unsent tail batch instead of
+  // waiting for one round trip per edit.
+  const burst = await page.evaluate(async () => {
+    const id = window.design
+      .getDocument()
+      .pages[0].nodes.find((n) => n.name.startsWith("retained-")).id;
+    const send = WebSocket.prototype.send;
+    let batches = 0;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data === "string" && data.startsWith('{"type":"ops"')) batches++;
+      return send.call(this, data);
+    };
+    try {
+      for (let i = 0; i < 40; i++) {
+        window.design.updateNodes([id], { text: `burst ${i}` });
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      const until = Date.now() + 10000;
+      while (window.cloudWorkspace.pendingCount() && Date.now() < until)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      return { batches, pending: window.cloudWorkspace.pendingCount() };
+    } finally {
+      WebSocket.prototype.send = send;
+    }
+  });
+  assert.equal(burst.pending, 0);
+  assert.ok(burst.batches <= 10, `40 quick edits took ${burst.batches} batches`);
+
   // 6. Disconnect keeps the local copy, marks it detached and forgets the stored outbox.
   await openSharedDesign(page);
   await page.locator("#cloud-leave").click();
