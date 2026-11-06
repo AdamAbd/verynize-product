@@ -670,6 +670,11 @@ const AI = ["cloud/ai*.js", "web-start/**", "server/node.mjs", "tests/helpers/fa
 const web = [
   webBuild("tests/web-cloudflare.mjs", []),
   webBuild("tests/web-node.mjs", []),
+  webBuild("tests/env-build.mjs", [
+    "scripts/env.mjs",
+    "web-start/build/telemetry.mjs",
+    ".env.example",
+  ]),
   webBuild("tests/web-telemetry.mjs", [
     "vite.node.config.ts",
     "web/telemetry-scrub.js",

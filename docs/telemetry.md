@@ -89,6 +89,8 @@ The Worker continues incoming traces through `withSentry`. Sample rates are cons
 ## Configuration
 
 DSNs are public routing keys, but they still come from the environment and are never committed. See `.env.example`.
+`npm run build`, `deploy`, `deploy:check` and `package:mac` also read a git-ignored `.env` at the repo root
+(`scripts/env.mjs`): variables already exported win, and only variable names are printed, never values.
 
 | Variable                                          | Where                                                                                                        | Used by                                                       |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
@@ -98,19 +100,33 @@ DSNs are public routing keys, but they still come from the environment and are n
 | `SENTRY_ENVIRONMENT`                              | any of the above                                                                                             | overrides the default environment                             |
 | `SENTRY_RELEASE`                                  | build/runtime                                                                                                | overrides the web/server release (default: deploy commit SHA) |
 | `SENTRY_SAMPLE_RATE`, `SENTRY_TRACES_SAMPLE_RATE` | any of the above                                                                                             | error and trace sampling (defaults 1 and 0.05)                |
-| `SENTRY_AUTH_TOKEN`                               | CI only                                                                                                      | source-map upload; skipped quietly when unset                 |
-| `SENTRY_ORG`                                      | CI (optional)                                                                                                | defaults to `adamabdrrahman`                                  |
+| `SENTRY_AUTH_TOKEN`                               | `.env` or build environment (local deploys and packaging, CI)                                                | source-map upload; skipped quietly when unset                 |
+| `SENTRY_ORG`                                      | `.env` or build environment (optional)                                                                       | defaults to `adamabdrrahman`                                  |
 
-Set the Worker's DSN as a secret with
-`npx cf workers secrets update SENTRY_DSN_SERVER --worker verynize --text '<dsn>'`, or export it while running
-`npm run build`.
+### Local deploy and packaging
+
+Production is deployed with `npm run deploy` and the desktop app is built with `npm run package:mac`, both on a
+developer Mac. Copy `.env.example` to `.env` and fill in:
+
+- `SENTRY_DSN_WEB`: built into the web client by `npm run build` (which `deploy` and `deploy:check` run).
+- `SENTRY_DSN_DESKTOP`: baked into the app by `npm run package:mac` (`desktop/telemetry-build.json`).
+- `SENTRY_AUTH_TOKEN`: uploads source maps for both (web/server from `npm run build`, desktop from
+  `package:mac`'s UI build), then deletes them.
+- `SENTRY_DSN_SERVER`, either way:
+  - as a Worker secret, read per request and changeable without rebuilding:
+    `npx cf workers secrets update SENTRY_DSN_SERVER --worker verynize --text '<dsn>'`;
+  - or in `.env`, built into the Worker by `npm run build`. A Worker secret wins over the built-in value.
+
+An exported variable beats `.env`, so `SENTRY_DSN_WEB= npm run deploy` deploys without web reporting.
+`tests/env-build.mjs` checks that a `.env` value reaches the build defines.
 
 ## Releases and source maps
 
 - **Desktop:** release `verynize-desktop@<package.json version>`.
 - **Web and servers:** release = the deploy commit, in this order: `SENTRY_RELEASE`, `GITHUB_SHA`,
   `WORKERS_CI_COMMIT_SHA`, `VERCEL_GIT_COMMIT_SHA`, `CF_PAGES_COMMIT_SHA`, `git rev-parse HEAD`.
-- **Without `SENTRY_AUTH_TOKEN`,** no source maps are generated for upload and nothing is uploaded.
+- **Without `SENTRY_AUTH_TOKEN`,** no source maps are generated for upload and nothing is uploaded. (The
+  Cloudflare plugin still writes the Worker bundle's own maps next to `bundle/`; they are not public assets.)
 - **With `SENTRY_AUTH_TOKEN`,** `@sentry/vite-plugin` emits hidden maps, injects debug ids, uploads, then deletes
   every `.map`:
   - `vite.renderer.config.ts` uploads `web/dist` to `verynize-desktop`
