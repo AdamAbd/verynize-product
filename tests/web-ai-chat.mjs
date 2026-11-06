@@ -63,8 +63,16 @@ const fake = await startFakeOpenRouter({
     [{ text: "Let me look at the room." }, { tool: "get_element_tree", args: {} }],
     [{ text: "The room has a Hero artboard." }],
   ],
-  stream: [[{ text: "First part arrives " }, { wait: streamGate.promise }, { text: "and then the rest." }]],
-  drop: [[{ text: "Before the drop " }, { wait: reconnectGate.promise }, { text: "after the reconnect." }]],
+  stream: [
+    [{ text: "First part arrives " }, { wait: streamGate.promise }, { text: "and then the rest." }],
+  ],
+  drop: [
+    [
+      { text: "Before the drop " },
+      { wait: reconnectGate.promise },
+      { text: "after the reconnect." },
+    ],
+  ],
   slow: [[{ text: "Working on it" }, { hang: true }]],
   // One write (create_artboard of a card named by [label:…]), then a closing text that echoes the tool result.
   write: (body) =>
@@ -178,7 +186,10 @@ try {
       );
     };
     await signInWithPassword(page);
-    assert.equal(new URL(page.url()).pathname, "/editor");
+    assert.equal(
+      new URL(page.url()).pathname,
+      await page.evaluate(() => "/editor/" + encodeURIComponent(window.fileLibrary.currentId)),
+    );
 
     // First sign-in of the account: the AI setup steps, OpenRouter not connected yet, Claude Code / Codex desktop-only.
     const setup = page.locator("#onboarding[data-step='ai']");
@@ -334,6 +345,9 @@ try {
 
   // Connect OpenRouter: OAuth PKCE in this tab, through OpenRouter's sign-in page (faked) and the backend's
   // callback, back to the editor with its #room= fragment restored (kept client-side, never sent to the server).
+  const editorPath = await page.evaluate(
+    () => "/editor/" + encodeURIComponent(window.fileLibrary.currentId),
+  );
   const authBefore = fake.authRequests.length;
   const cameBack = page.waitForURL((url) => url.searchParams.get("openrouter") === "connected", {
     timeout: 20000,
@@ -342,7 +356,7 @@ try {
   await cameBack;
   await page.waitForURL(
     (url) =>
-      url.pathname === "/editor" &&
+      url.pathname === editorPath &&
       !url.searchParams.has("openrouter") &&
       url.hash === `#room=${room.id}`,
     { timeout: 20000 },

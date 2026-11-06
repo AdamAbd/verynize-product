@@ -181,7 +181,11 @@ async function appChecks(profile) {
     await page.evaluate(() => history.pushState({}, "", "/editor"));
     await Promise.all([page.waitForEvent("load"), page.evaluate(() => location.reload())]);
     await page.waitForFunction(() => !!window.desktop);
-    assert.equal(page.url(), "app://verynize/editor");
+    // Bare /editor is replaced with the active file's canonical URL (/editor/<fileId>).
+    await page.waitForFunction(
+      () => location.pathname === "/editor/" + encodeURIComponent(window.fileLibrary?.currentId),
+    );
+    assert.match(page.url(), /^app:\/\/verynize\/editor\/[^/?#]+$/);
     assert.ok(await ipcWorks(page), "IPC after reloading app://verynize/editor");
     assert.ok((await stylesLoaded(page)) >= 10, "stylesheets load from a route URL");
     // A nested route loads its root-absolute assets too.

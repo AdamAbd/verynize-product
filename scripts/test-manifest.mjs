@@ -495,6 +495,18 @@ const integrations = integrationFiles.map((name) => {
 });
 
 const ux = [
+  electron("tests/switch-cache.cjs", "ux", [
+    ...AREA.shell,
+    "web/switch-*.js",
+    "web/app.js",
+    "web/document-safety.js",
+    "web/document-lifecycle.js",
+  ]),
+  electron("tests/switch-loading-visuals.cjs", "ux", [
+    ...AREA.shell,
+    "web/page-loader.css",
+    "web/switch-coordinator.js",
+  ]),
   electron("tests/wonder-shell.cjs", "ux", AREA.shell),
   electron("tests/file-tabs.cjs", "ux", [...AREA.shell, "web/cloud-share.js"]),
   electron("tests/settings.cjs", "ux", AREA.settings),
@@ -609,6 +621,12 @@ const web = [
 ];
 
 const e2eCloud = [
+  electron("tests/cloud-switch-cache.mjs", "e2e-cloud", [
+    ...AREA.cloudRenderer,
+    "web/switch-*.js",
+    "web/app.js",
+    "web/wonder-shell.js",
+  ]),
   electron("tests/cloud-desktop.mjs", "e2e-cloud", AREA.cloudRenderer),
   electron("tests/cloud-pages-desktop.mjs", "e2e-cloud", [
     ...AREA.cloudRenderer,

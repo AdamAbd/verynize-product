@@ -156,7 +156,10 @@ try {
   await page.waitForFunction(() => document.documentElement.dataset.uiReady === "true", null, {
     timeout: 20000,
   });
-  assert.equal(await page.evaluate(() => window.shellRouter.state.location.pathname), "/editor");
+  assert.equal(
+    await page.evaluate(() => window.shellRouter.state.location.pathname),
+    await page.evaluate(() => "/editor/" + encodeURIComponent(window.fileLibrary.currentId)),
+  );
   await page.waitForSelector("#canvas .layer");
   const before = await page.locator("#canvas .layer").count();
   await page.locator(".app-menu-trigger:visible").first().click();

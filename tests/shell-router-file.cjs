@@ -43,9 +43,13 @@ const { pathToFileURL } = require("node:url");
       const url = page.url();
       const nativeLength = await page.evaluate(() => history.length);
       const expectView = async (route) => {
+        // The editor's route is the shown file's canonical /editor/<fileId>.
         await page.waitForFunction(
           (route) =>
-            window.shellRouter?.state.location.pathname === route &&
+            window.shellRouter?.state.location.pathname ===
+              (route === "/editor"
+                ? "/editor/" + encodeURIComponent(window.fileLibrary.currentId)
+                : route) &&
             document.body.classList.contains("files-view") === (route === "/"),
           route,
         );
