@@ -16,13 +16,13 @@ Deferred to phase 2: variants and component sets, component properties (text, bo
 
 ## Data model (stored on ordinary nodes, schema in `web/document-core.js`)
 
-| Field | On | Meaning |
-|---|---|---|
-| `component: true` | a frame | This frame is a **main component**. It can be on any page, nested or top-level. |
-| `instanceOf: "<main id>"` | instance root (frame) | The main this instance follows. |
-| `sourceId: "<main node id>"` | every linked node inside an instance, including its root | The node in the main that this node copies. |
-| `overrides: string[]` | any linked node | Keys this node owns locally; the sync never writes them. |
-| `slot: true` (+ optional `slotName`) | a frame that is a descendant of a main | A content region. |
+| Field                                | On                                                       | Meaning                                                                         |
+| ------------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `component: true`                    | a frame                                                  | This frame is a **main component**. It can be on any page, nested or top-level. |
+| `instanceOf: "<main id>"`            | instance root (frame)                                    | The main this instance follows.                                                 |
+| `sourceId: "<main node id>"`         | every linked node inside an instance, including its root | The node in the main that this node copies.                                     |
+| `overrides: string[]`                | any linked node                                          | Keys this node owns locally; the sync never writes them.                        |
+| `slot: true` (+ optional `slotName`) | a frame that is a descendant of a main                   | A content region.                                                               |
 
 ### Rules
 
