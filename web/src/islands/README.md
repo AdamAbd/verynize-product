@@ -89,7 +89,7 @@ every other script, registers a frozen `window.verynizePlatform`; `platform.ts` 
   `#rectangle`, `#undo`, `#save-project`, `#shell-settings`, `#rename-page`, `#import-tokens`, `#icon-kind`).
   Commands must stay reachable by those ids inside the opened menu.
 - **Shell routes** (`web/src/lib/router/shell-router.ts`, docs/spikes/tanstack-router.md): the URL owns the top-level
-  view — `/` (`files-view`), `/editor`, `/code` (`code-mode`), `/settings/<section>` (`settings-open`). Never toggle
+  view — `/` (`files-view`), `/editor/<fileId>` (`/editor` redirects to the active file), `/code` (`code-mode`), `/settings/<section>` (`settings-open`). Never toggle
   those three body classes yourself (on the web only the route areas above set them): navigate with `navigate()` or call the legacy request APIs
   (`fileLibrary.showHome/showEditor`, `appSettings.open/close/select`, `agentWorkspace.setCodeMode`), which update the
   URL and apply the view synchronously. The `apply*` functions on those objects are for the router only. One router

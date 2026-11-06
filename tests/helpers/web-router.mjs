@@ -49,6 +49,8 @@ export async function checkWebRouter(browser, origin, context = browser) {
   const expectShell = async (path, { home = path === "/", code = path === "/code" } = {}) => {
     await page.waitForFunction(
       ({ path, home, code }) => {
+        if (path === "/editor")
+          path = "/editor/" + encodeURIComponent(window.fileLibrary.currentId);
         const routed = window.shellRouter.state.location;
         const settings = path.startsWith("/settings/");
         const body = document.body.classList;
@@ -92,6 +94,61 @@ export async function checkWebRouter(browser, origin, context = browser) {
 
   await page.goto(origin + "/editor");
   await ready();
+
+  // File URLs restore documents through Start's parameter route without remounting the editor.
+  const original = await page.evaluate(() => window.fileLibrary.currentId);
+  const urlFileId = await page.evaluate(() => {
+    const key = "verynize-library-v1";
+    const library = JSON.parse(localStorage.getItem(key));
+    const document = window.design.getDocument();
+    const id = crypto.randomUUID();
+    document.name = "URL route fixture";
+    // Detached records exercise local file routing without asking the Node stub backend to create rooms.
+    const cloud = { server: location.origin, roomId: "route-fixture", detached: true };
+    library.files.find((file) => file.id === library.active).cloud = cloud;
+    library.files.push({
+      id,
+      name: document.name,
+      document,
+      updated: Date.now(),
+      archived: false,
+      folder: null,
+      cloud: { ...cloud, roomId: "route-fixture-two" },
+    });
+    localStorage.setItem(key, JSON.stringify(library));
+    return id;
+  });
+  await page.reload();
+  await ready();
+  await page.evaluate(
+    (id) =>
+      window.shellNavigation.navigate({
+        to: "/editor/$fileId",
+        params: { fileId: id },
+      }),
+    urlFileId,
+  );
+  await expectShell("/editor/" + urlFileId);
+  await page.waitForFunction((id) => window.fileLibrary.currentId === id, urlFileId);
+  await back();
+  await expectShell("/editor/" + original);
+  await page.waitForFunction((id) => window.fileLibrary.currentId === id, original);
+  await page.goForward({ waitUntil: "commit" });
+  await expectShell("/editor/" + urlFileId);
+  await page.waitForFunction((id) => window.fileLibrary.currentId === id, urlFileId);
+  await page.reload();
+  await ready();
+  await expectShell("/editor/" + urlFileId);
+  await page.waitForFunction((id) => window.fileLibrary.currentId === id, urlFileId);
+  assert.equal(await page.evaluate(() => window.fileLibrary.currentId), urlFileId);
+  await page.goto(origin + "/editor/missing-file");
+  await ready();
+  await expectShell("/", { home: true });
+  await page
+    .getByText("This file is unavailable. Choose a file from Files.", { exact: true })
+    .waitFor();
+  await page.evaluate((id) => window.fileLibrary.open(id), original);
+  await expectShell("/editor/" + original);
 
   // One router and one history on the page: the shell router is Start's router.
   assert.equal(
