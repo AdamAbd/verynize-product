@@ -130,10 +130,10 @@ The engine is `web/component-core.js` (`window.VerynizeComponents`; Node: `integ
   - A copy of a main becomes an instance only when that main is in the document. A cut-then-paste of a main, or a main pasted from another file, stays a main.
   - A copied part of an instance becomes plain layers.
   - The "Name 2" renaming of a duplicate is reverted to the main's name by the next sync, because a new node has no overrides.
-- **Not yet covered (phase B):**
-  - Agent duplicates through `design-edit.mjs` `duplicateElements` do not call `adoptCopies`.
-  - The JSX codec does not emit or read the link fields.
-  - There are no dedicated MCP tools yet.
+- **Agents (phase B2):** see "Component tools" in `docs/agent-workflows.md`.
+  - `duplicateElements` calls `adoptCopies`; what the call changes on an instance root (label, classes) becomes an override.
+  - The JSX codec writes and reads the link attributes. A new instance element is materialized from its main, and only its `data-slot` descendants are read (as slot content). Overrides outside slots are not carried by JSX: a whole-page JSX round trip keeps mains, instances and slot content, not other instance edits.
+  - The lossless HTML export leaves the link fields out, so an exported instance imports as plain layers.
 
 ## Implementation notes (phase B1: UI)
 

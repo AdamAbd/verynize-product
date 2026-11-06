@@ -405,13 +405,34 @@ export const isSafeTag = tag => SAFE_TAGS.has(tag);
 export const MAX_INLINE_SRC = 2048;
 
 /**
+ * Component links (web/component-core.js) as attributes, read back by design-edit.mjs:
+ * data-component="true" on a main; data-instance-of="<main short id>" on an instance (the main's long id when it
+ * is on another page); data-slot="<slot name>" on a slot frame, plus data-slot-state="default|modified" on the
+ * copy of a slot inside an instance.
+ */
+export function componentAttrs(node, index) {
+  const out = [];
+  if (node.component === true && node.type === 'frame') out.push('data-component="true"');
+  if (typeof node.instanceOf === 'string' && node.instanceOf) {
+    const main = index.byId?.get(node.instanceOf);
+    out.push(`data-instance-of="${escapeAttr(main ? index.shortId(main) : node.instanceOf)}"`);
+  }
+  if (node.slot === true) {
+    out.push(`data-slot="${escapeAttr(node.slotName || node.name || '')}"`);
+    const inInstance = typeof node.sourceId === 'string' && node.sourceId && node.sourceId !== node.instanceOf;
+    if (inInstance) out.push(`data-slot-state="${Array.isArray(node.overrides) && node.overrides.includes('children') ? 'modified' : 'default'}"`);
+  }
+  return out;
+}
+
+/**
  * Serialize one node (and descendants up to `depth`) as Tailwind JSX.
  * `index` must provide children(id) and shortId(node).
  */
 export function serializeNode(node, index, { depth = Infinity, tokens = {}, indent = '', parent = null, isRoot = !node.parentId, full = false } = {}) {
   const icon = node.type === 'image' && typeof node.icon === 'string' && node.icon;
   const tag = icon ? 'Icon' : node.type !== 'image' && node.type !== 'shader' && node.htmlTag && SAFE_TAGS.has(node.htmlTag) ? node.htmlTag : DEFAULT_TAG[node.type] || 'div';
-  const attrs = [`data-node-id="${escapeAttr(index.shortId(node))}"`, `data-node-label="${escapeAttr(node.name || '')}"`];
+  const attrs = [`data-node-id="${escapeAttr(index.shortId(node))}"`, `data-node-label="${escapeAttr(node.name || '')}"`, ...componentAttrs(node, index)];
   if (isRoot) attrs.push(`data-component-x="${round(node.x)}"`, `data-component-y="${round(node.y)}"`);
   if (icon) {
     attrs.push(`name="${escapeAttr(icon)}"`);
