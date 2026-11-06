@@ -60,6 +60,7 @@ jobs:
       - run: npm run check
       - run: npm run lint
       - run: npm run typecheck:ui
+      - run: npm run typecheck:ratchet
       # The tree predates the formatter (hundreds of unformatted files), so only files a PR adds
       # must be formatted. Run `npm run format:check` locally for the whole tree.
       # The sparse checkout leaves out /design/, so a PR that only adds files there passes paths

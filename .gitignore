@@ -24,3 +24,7 @@ secrets*.json
 
 # macOS metadata
 .DS_Store
+
+.typecheck/
+
+integrations/generated/

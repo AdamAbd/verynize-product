@@ -199,6 +199,10 @@ function installProcessHandlers({ dialog }) {
   });
 }
 
+/**
+ * @param {import("electron").App} app
+ * @param {{dialog?: import("electron").Dialog, env?: NodeJS.ProcessEnv}} [options]
+ */
 function start(app, { dialog, env = process.env } = {}) {
   installProcessHandlers({ dialog });
   state.userData = app.getPath("userData");

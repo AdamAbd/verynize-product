@@ -4,6 +4,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const root = path.join(__dirname, "..");
+execFileSync(process.execPath, [path.join(root, "scripts/build-integrations.mjs")], {
+  cwd: root,
+  stdio: "inherit",
+});
 const all = fs
   .readdirSync(path.join(root, "web/src/islands"))
   .filter((name) => name.endsWith(".tsx"))
