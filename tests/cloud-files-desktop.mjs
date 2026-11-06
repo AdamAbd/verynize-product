@@ -35,6 +35,16 @@ async function launch(profile) {
   page.on("dialog", (dialog) => dialog.accept().catch(() => {}));
   return { app, page };
 }
+// page.waitForFunction does not await a Promise returned by its predicate (a Promise is truthy, so
+// an async predicate passes at once); poll with evaluate instead.
+async function waitForAsync(page, fn, arg, timeout = 30000) {
+  const until = Date.now() + timeout;
+  for (;;) {
+    if (await page.evaluate(fn, arg)) return;
+    if (Date.now() > until) throw Error(`waitForAsync timed out after ${timeout}ms: ${fn}`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
 async function quit(app) {
   await (
     await app.firstWindow()
@@ -100,7 +110,8 @@ try {
   await synced(page);
 
   // 2. Restart the app: the file reopens connected to the same room, with no new copy.
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async ({ server, roomId }) => {
       const saved = await window.cloudWorkspace.storedOutbox(server, roomId);
       return saved && saved.pending.length === 0 && saved.retained.length === 0;
@@ -199,7 +210,8 @@ try {
     window.design.updateNodes([id], (n) => ({ text: n.text + " offline" }));
   }, textId);
   assert.ok(await page.evaluate(() => window.cloudWorkspace.pendingCount() > 0));
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async ({ server, roomId }) => {
       const saved = await window.cloudWorkspace.storedOutbox(server, roomId);
       return saved?.pending.some((batch) => batch.ops.some((op) => op.value?.name === "offline-1"));
@@ -246,14 +258,15 @@ try {
         hidden: true,
       });
   });
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async () => {
       const room = window.cloudWorkspace.room();
       const saved = await window.cloudWorkspace.storedOutbox(room.server, room.id);
       return saved?.retained.length > 0;
     },
     null,
-    { timeout: 60000 },
+    60000,
   );
   apps.delete(app);
   await app.evaluate(({ BrowserWindow }) => {
@@ -318,7 +331,8 @@ try {
   await openSharedDesign(page);
   await page.locator("#cloud-leave").click();
   assert.equal(await page.evaluate(() => window.cloudWorkspace.isConnected()), false);
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async ({ server, roomId }) => !(await window.cloudWorkspace.storedOutbox(server, roomId)),
     { server, roomId },
   );
