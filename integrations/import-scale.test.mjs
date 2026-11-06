@@ -172,6 +172,8 @@ test("splitting retains sibling order and per-page root placement", () => {
     ["Root", "First", "Second", "Next"],
   );
   assert.ok(page.nodes[3].x >= page.nodes[0].x + page.nodes[0].w);
+  assert.equal(page.nodes[0].x, 0, "a new page lays its artboards out from the origin");
+  assert.equal(page.nodes[0].y, 0);
 });
 
 test("CSS pruning includes the HTML root in its selector inventory", async () => {

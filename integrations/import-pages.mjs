@@ -16,7 +16,8 @@ export function distributeImport(document, page, existingCount, roots, split) {
     children.get(key).push(node);
   }
   const assignments = [];
-  let destination = page;
+  let destination = page,
+    nextX = 0;
   for (const root of roots) {
     const nodes = [],
       stack = [root];
@@ -38,6 +39,13 @@ export function distributeImport(document, page, existingCount, roots, split) {
       while (document.pages.some((p) => p.name === `${page.name} ${suffix}`)) suffix++;
       destination = { ...page, id: randomUUID(), name: `${page.name} ${suffix}`, nodes: [] };
       document.pages.push(destination);
+      nextX = 0;
+    }
+    // Positions were chosen against the original page; a new page lays its artboards out from the origin.
+    if (destination !== page && Number.isFinite(root.x)) {
+      root.x = nextX;
+      root.y = 0;
+      nextX += (Number.isFinite(root.w) ? root.w : 0) + 80;
     }
     destination.nodes.push(...nodes);
     assignments.push({ page: destination, root, nodeCount: nodes.length });
