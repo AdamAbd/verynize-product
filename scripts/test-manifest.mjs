@@ -102,6 +102,7 @@ const isl = (area) => [`web/src/islands/${area}.tsx`, `web/src/islands/${area}/*
 const AREA = {
   canvas: [
     "web/canvas-interactions.js",
+    "web/canvas-drop-hits.js",
     "web/selection-chrome.js",
     "web/text-caret.js",
     "web/canvas.css",

@@ -769,6 +769,7 @@
     }
 
     let layerPreview = null; // {ids, parentId, index?} while a drag previews a new parent in the Layers tree
+    const dropHits = window.VerynizeDropHits.create({canvas, wrap, camera: cam, find});
     function guideTargets(moving) {
       const first = find(moving[0]); if (!first) return [];
       const excluded = new Set(moving.flatMap(id => [...ed.descendants(id)]));
@@ -895,11 +896,14 @@
       let target = home;
       if (!excluded || home === undefined) return {};
       if (!(isFlow(homeNode) && stacked.length && (() => { const r = worldRect(home); return r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; })())) {
-        target = null;
-        for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
-          if (!canvas.contains(el) || !el.classList.contains('frame-layer') || excluded.has(el.dataset.id)) continue;
-          const n = find(el.dataset.id); if (n && !n.locked && !n.hidden) { target = n.id; break; }
-        }
+        // The full hit test walks the whole page: web/canvas-drop-hits.js repeats it only when the answer can change.
+        target = dropHits.frameAt(e.clientX, e.clientY, excluded, (x, y) => {
+          for (const el of document.elementsFromPoint(x, y)) {
+            if (!canvas.contains(el) || !el.classList.contains('frame-layer') || excluded.has(el.dataset.id)) continue;
+            const n = find(el.dataset.id); if (n && !n.locked && !n.hidden) return n.id;
+          }
+          return null;
+        });
         if (flowOnly && !isFlow(find(target))) target = home;
         if (target && target !== home && cycleDrop(excluded, target)) target = home;
       }
@@ -1845,6 +1849,7 @@
 
     // ---------- Render integration ----------
     function afterRender() {
+      dropHits.invalidate();
       keepTextEditor();
       syncAnchored();
       const pageId = ed.page().id;
