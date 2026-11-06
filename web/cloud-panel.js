@@ -1187,7 +1187,7 @@
     if (protocol >= 2) saveOutbox(true);
     const hydrated =
       cached && !offline && protocol >= 2
-        ? new Promise((resolve, reject) => {
+        ? new Promise((resolve) => {
             const done = (event) => {
               if (event.detail.epoch === epoch) {
                 clearTimeout(timeout);
@@ -1196,8 +1196,10 @@
               }
             };
             const timeout = setTimeout(() => {
+              // The room is connected and showing fetched state; the socket's own sync
+              // finishes freshness, so a slow snapshot ends the switch instead of failing it.
               window.removeEventListener("cloud-hydrated", done);
-              reject(Error("The room has not finished refreshing."));
+              resolve();
             }, 15000);
             window.addEventListener("cloud-hydrated", done);
           })

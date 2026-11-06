@@ -141,13 +141,22 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     await page.evaluate(() => window.fileLibrary.showHome());
     await clean();
     await page.evaluate(() => window.fileLibrary.showEditor());
+    // A switch that began before the ui bundle mounted must still show its visual.
     await page.addInitScript(() => {
-      window.switchCoordinator = { getState: () => ({ token: 8, kind: "page", phase: "begin" }) };
+      let coordinator;
+      Object.defineProperty(window, "switchCoordinator", {
+        configurable: true,
+        get: () => coordinator,
+        set(value) {
+          coordinator = value;
+          window.__earlySwitch = value.begin({ kind: "page", from: {}, to: {} });
+        },
+      });
     });
     await page.reload();
     await waitForUiReady(page);
     await visible("page");
-    await emit(8, "page", "end");
+    await page.evaluate(() => window.switchCoordinator.finish(window.__earlySwitch));
     await clean();
     console.log(
       "PASS loading visuals: logo/centering, tabs, page blur, input blocking, tokens, failure/cancel/ready/home cleanup, light theme, reduced motion, cache-hit delay, mount recovery",
