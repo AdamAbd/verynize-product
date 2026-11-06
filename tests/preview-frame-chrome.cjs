@@ -59,6 +59,12 @@ const freePort = () => new Promise(resolve => { const s = net.createServer(); s.
     const frame = `.canvas-preview[data-id="${id}"]`;
     await frameView(id);
     await page.frameLocator('#live-frame').locator('#about').waitFor();
+    // A selected preview shows no name label or ⊕ chip (an overlay attribute selection-chrome.js sets, not :has()).
+    await page.evaluate(id => window.design.setSelection([id]), id);
+    assert.deepEqual(await page.evaluate(() => ['#selection-name', '#selection-chat-chip'].map(s => getComputedStyle(document.querySelector(s)).display)), ['none', 'none'], 'no name label or chip on a selected preview');
+    await page.evaluate(() => window.design.setSelection([]));
+    assert.equal(await page.evaluate(() => document.querySelector('#canvas-overlay').hasAttribute('data-preview-selected')), false, 'cleared with the selection');
+    await page.evaluate(id => window.design.setSelection([id]), id);
     const bar = page.locator(`${frame} .pf-bar`);
     const labels = await bar.locator('button:visible, input:visible').evaluateAll(els => els.map(el => el.getAttribute('aria-label')));
     assert.deepEqual(labels, ['Back', 'Forward', 'Reload', 'Preview path', null, 'Stop preview', 'Open in a tab'], 'toolbar order Back, Forward, Reload, path, Publish, Stop, expand');
