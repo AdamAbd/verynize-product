@@ -26,7 +26,7 @@ test("generate_image inserts, fills, preserves other properties and rejects head
     },
   });
   const tool = toolTable(backend).generate_image;
-  assert.equal(SERVER_VERSION, "0.8.0");
+  assert.equal(SERVER_VERSION, "0.9.0");
   assert.equal(tool.inputSchema.provider.parse("openai_gpt_image_2"), "openai_gpt_image_2");
   assert.throws(() => tool.inputSchema.provider.parse("unknown"));
   const inserted = await tool.run({ document: "doc", prompt: "Forest", provider: "codex_plan" });

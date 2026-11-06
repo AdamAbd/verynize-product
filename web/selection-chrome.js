@@ -224,7 +224,11 @@
       // Wonder S2 / CM3: no label on nested or text layers. A drag previewing a new parent labels by that parent
       // (R1-row-drag-far: a stack child dragged onto the page shows its name, R1-row-return-during: one entering a stack not).
       const preview = ctx.previewParent?.(n.id), parentId = preview === undefined ? n.parentId : preview;
-      if (name) { textBox.append(name); if (parentId || n.type === 'text' || editing) name.hidden = true; }
+      if (name) {
+        textBox.append(name); if (parentId || n.type === 'text' || editing) name.hidden = true;
+        const role = n.component === true ? 'main' : n.instanceOf ? 'instance' : ''; // canvas.css colours the label
+        if (role) name.dataset.component = role; else delete name.dataset.component;
+      }
       textBox.append(chip);
       chip.hidden = editing && n.wMode !== 'fixed'; // TX1: a hugging text being typed shows only its caret
       if (badge) { textBox.append(badge); if (editing) badge.hidden = true; }

@@ -58,6 +58,7 @@ import {
   PreviewTemplateSection,
 } from "./preview-frame";
 import { ScaleSection } from "./scale";
+import { ComponentSection } from "./component";
 import { FillTools, PaintStack, hasPaintRows } from "./paints";
 import { parseColor, toHex } from "./color";
 import { fmt, hexLabel, pageNodes, parseHex, patchNodes, setField, type Node } from "./model";
@@ -1076,6 +1077,7 @@ export function PropertiesBody({
       ) : null}
       <div className={scaling ? "hidden" : "contents"}>
         {node && preview ? <PreviewTemplateSection node={node} /> : null}
+        {node && !many && !preview ? <ComponentSection doc={doc} node={node} /> : null}
         {node ? <PositionSection doc={doc} node={node} selection={selection} /> : null}
         {node && preview ? (
           <PreviewLayoutSection doc={doc} node={node} selection={selection} />

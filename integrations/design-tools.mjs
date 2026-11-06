@@ -32,11 +32,13 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { applyOperations, BINDABLE, checkVariableValue } from './design-store.mjs';
+import { syncComponents, componentProblems, hasComponents, componentInfo, createComponent, createInstance, detachInstance, resetOverrides, setSlot } from './component-core.mjs';
 import { setAlias, detachAlias, folderOf, folderMembers, folderRenames } from './variables.mjs';
 import { exportHTML } from './export-html.mjs';
 import { documentToJsx, documentToHtml, importJsxInto, prepareHtmlImport } from './codec-source.mjs';
+import { componentAttrs } from './jsx-codec.mjs';
 import {
-  clone, ensureShortIds, indexPage, getPage, elementCode, runDirectives, createArtboards, duplicateElements, removeSubtree,
+  clone, ensureShortIds, indexPage, getPage, elementCode, runDirectives, createArtboards, duplicateElements, removeSubtree, wrapElements, resolveMain, reflow,
   describeTokens, tokenColor, checkTokenName, renameTokenRefs, unbindToken, syncTokenColors,
   describeVariables, unbindVariable, renameVariableRefs,
 } from './design-edit.mjs';
@@ -51,7 +53,7 @@ import { shellToolTable, SHELL_INSTRUCTIONS } from './shell-tools.mjs'; // bridg
 import { presetIds as shaderPresetIds, COLOR_ROLES as SHADER_COLOR_ROLES, PARAM_KEYS as SHADER_PARAM_KEYS } from './shaders.mjs';
 
 export const SERVER_NAME = 'verynize';
-export const SERVER_VERSION = '0.8.0';
+export const SERVER_VERSION = '0.9.0';
 /**
  * Short fingerprint of the agent-facing tool layer: sha256 over the source of the tools, the
  * editing/codec modules and the design knowledge, first 12 hex chars. Changes whenever behavior an
@@ -105,6 +107,9 @@ Every element has a short page-unique id. A top-level artboard looks like "bok";
 
 ## update_elements directives
 {/* edit ID */} + one element patches the label, classes (merged), text and identified children; {/* replace ID */} + one element rebuilds it in place keeping its id; {/* insert as first child of ID */}, {/* insert as last child of ID */}, {/* insert before ID */}, {/* insert after ID */} + elements; {/* delete ID */}. Each directive applies or fails on its own and the report lists the result.
+
+## Components
+A main component (create_component) is one definition; instances (create_instance) are linked copies that follow it. Edit the main to change every instance; keys edited inside an instance become overrides of that instance (reset_overrides undoes them). Per-instance content goes into slots (set_slot on a frame of the main, then insert into the instance's slot id). In JSX, data-component marks a main, data-instance-of names an instance's main and data-slot a slot. For repeated parts and app shells load get_skills {skill:"components"}; list_components shows what exists.
 
 ## Verification
 take_screenshot returns the PNG (after pending images and fonts load), records a verification receipt bound to the current document revision, and appends a lint report: clipping, overflow, overlap, contrast against the real backdrop, leftover placeholders, missing assets and taste rules. Any edit invalidates receipts. Fix critical problems before finishing; repairs are capped at ${MAX_REPAIRS} blocked finish attempts per artboard, after which finish_artboard reports "unverified".
@@ -212,7 +217,16 @@ const layoutFields = {
   masks: z.array(z.object({ type: z.enum(['linear', 'radial', 'conic', 'image', 'custom', 'shape']), rotation: z.number().finite().optional(), alpha: z.number().finite().min(0).max(100).optional(), invert: z.boolean().optional(), hidden: z.boolean().optional(), src: z.string().max(15e6).describe('image mask: embedded data:image URL').optional(), css: z.string().max(2100).describe('custom mask: a CSS gradient').optional(), shape: z.string().max(120).describe('shape mask: inset(T% R% B% L%) of this layer\'s box (negative = outside), as made by Use as mask').optional(), mode: z.enum(['auto', 'alpha', 'luminance']).optional(), repeat: z.enum(['repeat', 'no-repeat', 'repeat-x', 'repeat-y', 'space', 'round']).optional(), x: z.number().finite().describe('position X %').optional(), y: z.number().finite().describe('position Y %').optional(), size: z.string().max(40).describe('auto, cover, contain, or "<n>%"/"<n>px" (one or two values)').optional(), composite: z.enum(['add', 'subtract', 'intersect', 'exclude']).describe('how this mask combines with the masks below it').optional() }).strict()).max(8).describe('masks: gradient fades, embedded images, custom CSS gradients, shape (inset) masks').optional(),
   textStyle: z.record(z.string().regex(/^[a-zA-Z]{1,40}$/), z.union([z.string().max(400), z.number().finite(), z.boolean()])).refine(v => Object.keys(v).length <= 30, 'At most 30 textStyle keys').optional(),
 };
-const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), shaderFill: z.boolean().describe('Shader mode: a non-shader layer paints its fill with shaderPreset/shaderColors/shaderParams/shaderSpeed').optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields };
+// Components (web/component-core.js): link fields round-trip so agents never drop them.
+const componentFields = {
+  component: z.boolean().describe('main component (frames only)').optional(),
+  instanceOf: z.string().min(1).max(200).describe('instance root: id of its main component').optional(),
+  sourceId: z.string().min(1).max(200).describe('linked layer: id of the node it copies').optional(),
+  overrides: z.array(z.string().min(1).max(120)).max(500).describe('keys this linked layer owns; "children" on a slot = Modified').optional(),
+  slot: z.boolean().describe('slot frame inside a main component').optional(),
+  slotName: z.string().max(100).optional(),
+};
+const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), shaderFill: z.boolean().describe('Shader mode: a non-shader layer paints its fill with shaderPreset/shaderColors/shaderParams/shaderSpeed').optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields, ...componentFields };
 const pageName = z.string().min(1).max(200);
 const operations = z.array(z.discriminatedUnion('type', [
   z.object({ type: z.literal('create_page'), id: z.string().min(1).max(200).optional(), name: pageName }),
@@ -335,15 +349,56 @@ async function waitForAssets(backend, key) {
   return done;
 }
 
+/** The shared component sync (web/component-core.js) for an agent edit; an edit may not make a main contain an
+ * instance of itself. `before` (a copy owned by the caller) is the document before the edit; reconciled skips the
+ * override marking. */
+function syncInstances(before, after, { reconciled = false } = {}) {
+  if (!hasComponents(after)) return after;
+  const was = new Map();
+  for (const page of after.pages) for (const n of page.nodes) if (n.sourceId || n.instanceOf) was.set(n, layoutKey(n));
+  syncComponents(before && !reconciled ? ignoreLayout(before, after) : null, after);
+  // The sync copies the main's values, flow positions included; lay the instances it changed out again (the headless
+  // estimate) so they fit their own content. The live canvas measures them itself.
+  for (const page of after.pages) {
+    const changed = page.nodes.filter(n => (n.sourceId || n.instanceOf) && was.get(n) !== layoutKey(n));
+    if (changed.length) reflow(page, changed, [], after);
+  }
+  const had = new Set(before ? componentProblems(before).map(p => p.id) : []);
+  const added = componentProblems(after).filter(p => !had.has(p.id));
+  if (added.length) throw new Error(added[0].message);
+  return after;
+}
+
+const layoutKey = node => JSON.stringify(node, (key, value) => (key === 'src' && typeof value === 'string' ? value.length : value));
+
+/** The headless reflow positions flow children and flags its estimates; on instance layers that is layout output,
+ * not an edit, so `before` takes those values and the sync does not mark them as overrides. */
+function ignoreLayout(before, after) {
+  const now = new Map();
+  for (const page of after.pages) for (const n of page.nodes) now.set(n.id, n);
+  for (const page of before.pages) for (const p of page.nodes) {
+    const n = typeof p.sourceId === 'string' && p.sourceId ? now.get(p.id) : null;
+    if (!n) continue;
+    if (n.measured === undefined) delete p.measured; else p.measured = n.measured;
+    const parent = now.get(n.parentId);
+    if (parent && parent.layout && parent.layout !== 'free' && n.position !== 'absolute') { p.x = n.x; p.y = n.y; }
+  }
+  return before;
+}
+
 /**
  * Run a write through the backend; ensures ids are persisted and token colors stay in sync,
  * invalidates verification receipts for the document and queues pending remote images.
+ * fn returns {document, result, reconciled?}: reconciled means fn already re-synced instances itself (component
+ * commands), so nothing it changed is marked as an override.
  */
 async function write(backend, ref, fn) {
   let pending = [];
   const out = await backend.transact(ref, (document, meta) => {
     ensureShortIds(document);
+    const before = hasComponents(document) ? clone(document) : null;
     const result = fn(document, meta);
+    syncInstances(before, result.document, { reconciled: result.reconciled });
     ensureShortIds(result.document); syncTokenColors(result.document);
     pending = pendingAssets(result.document);
     return result;
@@ -352,6 +407,16 @@ async function write(backend, ref, fn) {
   sessionFor(backend).receipts.invalidate(key);
   if (pending.length) scheduleAssets(backend, ref ?? out.name ?? undefined, pending, key);
   return { ...out, pendingAssets: pending.length };
+}
+
+/** A main component by short id (on the page, else unique on another page), long id or exact name. */
+function findMain(document, page, ref) {
+  const main = resolveMain(document, page, ref);
+  if (main) return main;
+  const elsewhere = document.pages.filter(p => p !== page).map(p => indexPage(p).resolve(ref)).filter(n => n?.type === 'frame' && n.component === true);
+  if (elsewhere.length === 1) return elsewhere[0];
+  const mains = document.pages.flatMap(p => p.nodes.filter(n => n.type === 'frame' && n.component === true));
+  throw new Error(`No main component ${JSON.stringify(ref)}${mains.length ? `; mains: ${mains.slice(0, 20).map(n => `"${n.name}"`).join(', ')} (list_components shows their ids)` : '; create one with create_component'}`);
 }
 
 /** Codec warnings pulled out of a directive report ("warnings: a; b" lines). */
@@ -397,13 +462,13 @@ export function toolTable(backend, context = {}) {
     run: async ({ document: ref, pageId }) => { const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); return { pageId: page.id, artboards: artboardSummary(page) }; },
   };
   t.get_element_tree = {
-    description: 'Structure only: one line per element with tag, id and label, indented by depth. Omit ids for the whole page.',
+    description: 'Structure only: one line per element with tag, id and label (plus data-component, data-instance-of and data-slot on component layers), indented by depth. Omit ids for the whole page.',
     inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).max(50).optional(), depth: z.number().int().min(0).max(50).optional() }, annotations: { readOnlyHint: true },
     run: async ({ document: ref, pageId, ids, depth = 50 }) => {
       const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
       const lines = [];
       const walk = (node, level) => {
-        lines.push(`${'  '.repeat(level)}<${tagOf(node)} data-node-id="${index.shortId(node)}" data-node-label="${node.name.replace(/"/g, '&quot;')}">`);
+        lines.push(`${'  '.repeat(level)}<${[tagOf(node), `data-node-id="${index.shortId(node)}"`, `data-node-label="${node.name.replace(/"/g, '&quot;')}"`, ...componentAttrs(node, index)].join(' ')}>`);
         const kids = index.children(node.id);
         if (level < depth) for (const child of kids) walk(child, level + 1);
         else if (kids.length) lines.push(`${'  '.repeat(level + 1)}… ${kids.length} more`);
@@ -527,6 +592,121 @@ export function toolTable(backend, context = {}) {
     inputSchema: { document: documentArg, pageId: pageArg, renames: z.array(z.object({ id: elementId, label: z.string().trim().min(1).max(200) })).min(1).max(200) },
     run: async ({ document: ref, pageId, renames }) => {
       const out = await write(backend, ref, document => { const page = getPage(document, pageId); const index = indexPage(page); for (const { id, label } of renames) index.require(id).name = label; return { document, result: { renamed: renames.map(r => r.id) } }; });
+      return { ...out.result, live: out.live, revision: out.revision };
+    },
+  };
+  // Components (web/component-core.js): mains, instances and slots. Each tool is one transaction (one undo step in
+  // the live editor) and the shared sync keeps every instance in step with its main.
+  t.list_components = {
+    description: 'Components of the document: every main component with its slots and instances (on every page), each instance with its override count and slot states (default = shows the main\'s content, modified = holds its own). With id: the component role of one element (main, instance, inherited layer, slot or local layer), its main and its overrides.',
+    inputSchema: { document: documentArg, pageId: pageArg, id: elementId.optional().describe('Describe this element instead of listing') }, annotations: { readOnlyHint: true },
+    run: async ({ document: ref, pageId, id }) => {
+      const state = await readPrepared(backend, ref); const doc = state.document;
+      const where = nodeId => { for (const p of doc.pages) { const n = p.nodes.find(x => x.id === nodeId); if (n) return { page: p, node: n }; } return null; };
+      const short = nodeId => { const at = where(nodeId); return at ? indexPage(at.page).shortId(at.node) : nodeId; };
+      const slotsOut = slots => slots.map(s => ({ id: short(s.id), name: s.name, ...(s.state ? { state: s.state } : {}) }));
+      if (id) {
+        const page = getPage(doc, pageId); const node = indexPage(page).require(id);
+        const info = componentInfo(doc, node.id);
+        if (!info?.role) return { id, role: null, note: 'Not part of a component. create_component turns it into a main component.' };
+        return { id: short(info.id), role: info.role, ...(info.mainId ? { main: { id: short(info.mainId), pageId: where(info.mainId)?.page.id ?? null, name: info.mainName, missing: info.missingMain } } : {}), ...(info.instanceId ? { instance: short(info.instanceId) } : {}), ...(info.cyclic ? { cyclic: true } : {}), overrides: info.overrides, ...(info.role === 'instance' ? { overrideCount: info.overrideCount } : {}), ...(info.role === 'main' ? { instanceCount: info.instanceCount } : {}), slots: slotsOut(info.slots), ...(info.slot ? { slot: slotsOut([info.slot])[0] } : {}) };
+      }
+      const all = doc.pages.flatMap(page => page.nodes.map(node => ({ page, node })));
+      const instances = all.filter(({ node }) => typeof node.instanceOf === 'string' && node.instanceOf && (!node.sourceId || node.sourceId === node.instanceOf));
+      const problems = componentProblems(doc);
+      const components = all.filter(({ node }) => node.type === 'frame' && node.component === true).map(({ page, node }) => {
+        const info = componentInfo(doc, node.id);
+        return {
+          id: indexPage(page).shortId(node), pageId: page.id, name: node.name, slots: slotsOut(info.slots), ...(info.cyclic ? { cyclic: true } : {}),
+          instances: instances.filter(i => i.node.instanceOf === node.id).map(i => { const ii = componentInfo(doc, i.node.id); return { id: indexPage(i.page).shortId(i.node), pageId: i.page.id, name: i.node.name, overrideCount: ii.overrideCount, slots: slotsOut(ii.slots) }; }),
+        };
+      });
+      const orphans = instances.filter(i => where(i.node.instanceOf)?.node.component !== true).map(i => ({ id: indexPage(i.page).shortId(i.node), pageId: i.page.id, name: i.node.name, missingMain: i.node.instanceOf }));
+      return { components, ...(orphans.length ? { instancesWithoutMain: orphans } : {}), ...(problems.length ? { problems: problems.map(p => p.message) } : {}), ...(components.length ? {} : { note: 'No main components yet. create_component turns a frame (or several layers) into one; get_skills {skill:"components"} explains the workflow.' }) };
+    },
+  };
+  t.create_component = {
+    description: 'Make a main component. One frame becomes the main in place; several sibling layers (or one non-frame layer) are first wrapped in a new frame. Then place copies that follow it with create_instance, mark content regions with set_slot, and edit the main to change every instance.',
+    inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).min(1).max(100).describe('One frame, or sibling layers to wrap'), label: z.string().trim().min(1).max(200).optional().describe('Name of the main (default: the frame\'s name, or "Component" for a wrapper)') },
+    run: async ({ document: ref, pageId, ids, label }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page);
+        const nodes = ids.map(id => index.require(id));
+        const single = new Set(nodes).size === 1 && nodes[0].type === 'frame';
+        const frame = single ? nodes[0] : wrapElements(document, page.id, ids, { label: label || 'Component' });
+        createComponent(document, page.id, frame.id);
+        if (label) frame.name = label;
+        ensureShortIds(document);
+        return { document, result: { id: indexPage(page).shortId(frame), pageId: page.id, name: frame.name, wrapped: !single } };
+      });
+      return { ...out.result, next: 'Mark content regions of the main with set_slot, then place copies with create_instance.', live: out.live, revision: out.revision };
+    },
+  };
+  t.create_instance = {
+    description: 'Place an instance of a main component: a linked copy that follows the main, keeps its own overrides and holds its own slot content. Returns the instance id and its slot ids; fill a slot with update_elements {/* insert as last child of SLOT_ID */}. Without parent it becomes an artboard (placed right of the others unless x/y are given).',
+    inputSchema: { document: documentArg, pageId: pageArg, component: z.string().min(1).max(200).describe('The main: its short id ("bok" or "bok.tem"), long id or exact name'), parent: elementId.optional().describe('Frame on pageId to place the instance in'), position: z.enum(['first', 'last']).optional().describe('Child position inside parent (default last)'), x: z.number().finite().optional(), y: z.number().finite().optional(), label: z.string().trim().min(1).max(200).optional().describe('Layer name of the instance (an override)') },
+    run: async ({ document: ref, pageId, component, parent, position = 'last', x, y, label }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page);
+        const main = findMain(document, page, component);
+        const parentNode = parent ? index.require(parent) : null;
+        if (parentNode && parentNode.type !== 'frame') throw new Error(`${parent} is a ${parentNode.type}; an instance goes inside a frame`);
+        const roots = page.nodes.filter(n => !n.parentId);
+        const at = parentNode ? { x: x ?? 0, y: y ?? 0 } : { x: x ?? (roots.length ? Math.ceil(Math.max(...roots.map(n => (n.x || 0) + (n.w || 0))) + 80) : 0), y: y ?? (page.nodes.includes(main) ? main.y || 0 : 0) };
+        const { id } = createInstance(document, main.id, { pageId: page.id, parentId: parentNode?.id || null, ...at });
+        const root = page.nodes.find(n => n.id === id);
+        if (position === 'first' && parentNode) { page.nodes.splice(page.nodes.indexOf(root), 1); const first = page.nodes.findIndex(n => n.parentId === parentNode.id); page.nodes.splice(first < 0 ? page.nodes.length : first, 0, root); }
+        if (label && label !== root.name) { root.name = label; root.overrides = [...new Set([...(root.overrides || []), 'name'])].sort(); }
+        reflow(page, [root], [], document);
+        ensureShortIds(document);
+        const fresh = indexPage(page); const short = node => fresh.shortId(node);
+        const info = componentInfo(document, id);
+        return { document, result: { id: short(root), pageId: page.id, component: { id: indexPage(document.pages.find(p => p.nodes.includes(main))).shortId(main), name: main.name }, slots: info.slots.map(s => ({ id: short(fresh.byId.get(s.id)), name: s.name, state: s.state })), code: capCode(elementCode(document, page, root, 2)) } };
+      });
+      return { ...out.result, live: out.live, revision: out.revision };
+    },
+  };
+  t.detach_instance = {
+    description: 'Detach instances: their layers become ordinary layers that no longer follow the main; slot frames become plain frames and keep their content. Nested instances inside stay instances of their own mains.',
+    inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).min(1).max(50).describe('Instance roots') }, annotations: { destructiveHint: true },
+    run: async ({ document: ref, pageId, ids }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page);
+        for (const id of ids) {
+          const node = index.require(id); const info = componentInfo(document, node.id);
+          if (info?.role !== 'instance') throw new Error(info?.instanceId ? `${id} is inside instance ${index.shortId(index.byId.get(info.instanceId))}; detach that instance` : `${id} is not an instance`);
+          detachInstance(document, node.id);
+        }
+        return { document, result: { detached: ids }, reconciled: true };
+      });
+      return { ...out.result, live: out.live, revision: out.revision };
+    },
+  };
+  t.reset_overrides = {
+    description: 'Reset overrides inside instances: the given layers (or, with all, their whole instances) take the main\'s values again. Resetting a slot frame returns the slot to its default content (its own content is removed).',
+    inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).min(1).max(200).describe('Instance roots or layers inside instances'), all: z.boolean().optional().describe('Reset every layer of each instance') },
+    run: async ({ document: ref, pageId, ids, all = false }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page);
+        const nodes = ids.map(id => index.require(id));
+        for (const [i, node] of nodes.entries()) { const role = componentInfo(document, node.id)?.role; if (!['instance', 'inherited', 'slot'].includes(role) || (role === 'slot' && !node.sourceId)) throw new Error(`${ids[i]} is not part of an instance`); }
+        const count = all ? [...new Set(nodes.map(n => componentInfo(document, n.id).instanceId))].reduce((sum, rootId) => sum + componentInfo(document, rootId).overrideCount, 0) : nodes.reduce((sum, n) => sum + (n.overrides || []).length, 0);
+        resetOverrides(document, nodes.map(n => n.id), { all });
+        return { document, result: { reset: ids, clearedOverrides: count }, reconciled: true };
+      });
+      return { ...out.result, live: out.live, revision: out.revision };
+    },
+  };
+  t.set_slot = {
+    description: 'Mark a frame inside a main component as a slot (a content region each instance fills on its own), rename it, or turn it back into a plain frame (slot:false). Instances show the slot\'s default content until something is inserted into their copy of it.',
+    inputSchema: { document: documentArg, pageId: pageArg, id: elementId.describe('Frame inside a main component'), slot: z.boolean().optional().describe('false removes the slot (default true)'), name: z.string().trim().max(100).optional().describe('Slot name, e.g. "Content" (default: the frame\'s name)') },
+    run: async ({ document: ref, pageId, id, slot = true, name }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const node = indexPage(page).require(id);
+        setSlot(document, node.id, slot, name);
+        const info = componentInfo(document, node.id);
+        return { document, result: { id, slot: !!node.slot, name: node.slot ? node.slotName || node.name : null, ...(info?.mainId ? { main: info.mainName } : {}) }, reconciled: true };
+      });
       return { ...out.result, live: out.live, revision: out.revision };
     },
   };

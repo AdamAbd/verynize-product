@@ -107,5 +107,5 @@
     findCloud:(server,roomId)=>library.files.find(f=>f.cloud?.server===server&&f.cloud.roomId===roomId)?.id||null,cloudOf:id=>{const cloud=fileById(id)?.cloud;return cloud?{...cloud}:null;},
     setCloud:(id,cloud,initializeMetadata=false)=>{const file=fileById(id);if(!file)return false;if(cloud){const account=window.cloudAccount?.get();file.cloud={...cloud,...(account?.server===cloud.server?{accountId:account.account.id}:{})};const meta=Object.fromEntries(window.accountStore?.entries('file:')||[])[cloud.roomId];if(meta){file.folder=meta.folder;file.archived=!!meta.archived;}else if(initializeMetadata)saveMetadata(file);}else delete file.cloud;persist();if(homeOpen)renderFiles();return true;},
     attachView:()=>{islandView=true;refs.files.replaceChildren();refs.crumb.replaceChildren();return()=>{islandView=false;renderFiles();};}};
-  window.addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'){event.preventDefault();showHome();$('library-search').focus();}if(event.key==='Escape'&&homeOpen&&!event.defaultPrevented)showEditor();});
+  window.addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&!event.altKey&&event.key.toLowerCase()==='k'){event.preventDefault();showHome();$('library-search').focus();}if(event.key==='Escape'&&homeOpen&&!event.defaultPrevented)showEditor();});
 })();

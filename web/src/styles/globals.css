@@ -619,3 +619,32 @@ html[data-ui-theme="light"] {
     0 0 0 0.5px color-mix(in srgb, var(--foreground) 10%, var(--background)), 0 12px 32px rgb(0 0 0 / 0.4);
 }
 /* </share-tokens> */
+
+/* <component-tokens> (main components, instances and slots: canvas chrome, layer rows, inspector, Components panel;
+ * design/component-audit/figma 25-instance-variant.png, dark: canvas outline rgb(128,61,236), labels rgb(203,170,249),
+ * slot outline rgb(223,55,172), slot row label rgb(239,160,220)). --component / --slot draw outlines and icons,
+ * the -foreground pair colours text, -muted is an inherited (instance) layer's label. */
+:root {
+  --component: #8f4ff0;
+  --component-foreground: #cbaaf9;
+  --component-muted: #9a8ab4;
+  --slot: #df37ac;
+  --slot-foreground: #efa0dc;
+}
+html[data-ui-theme="light"] {
+  --component: #7c3aed;
+  --component-foreground: #6d28d9;
+  --component-muted: #8a79a8;
+  --slot: #cf2a9c;
+  --slot-foreground: #b51f87;
+}
+@theme inline {
+  --color-component: var(--component);
+  --color-component-foreground: var(--component-foreground);
+  --color-component-muted: var(--component-muted);
+  --color-component-tint: color-mix(in srgb, var(--component) 16%, transparent);
+  --color-slot: var(--slot);
+  --color-slot-foreground: var(--slot-foreground);
+  --color-slot-tint: color-mix(in srgb, var(--slot) 16%, transparent);
+}
+/* </component-tokens> */

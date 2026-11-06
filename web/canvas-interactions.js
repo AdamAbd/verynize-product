@@ -901,12 +901,22 @@
           const n = find(el.dataset.id); if (n && !n.locked && !n.hidden) { target = n.id; break; }
         }
         if (flowOnly && !isFlow(find(target))) target = home;
+        if (target && target !== home && cycleDrop(excluded, target)) target = home;
       }
       const node = target ? find(target) : null, result = {};
       if (target !== home) result.parent = node || {id: ''};
       if (isFlow(node)) result.index = stackIndex(node, ed.nodes().filter(n => n.parentId === node.id && !excluded.has(n.id)), p);
       if (node && (result.parent || stacked.length)) result.frame = node.id;
       return result;
+    }
+    // A drag never enters a main that the dragged instances depend on (one notice per drag; answers cached per frame).
+    let cycleDrops = {moving: null, refused: new Map(), told: false};
+    function cycleDrop(moving, target) {
+      if (cycleDrops.moving !== moving) cycleDrops = {moving, refused: new Map(), told: false};
+      if (!cycleDrops.refused.has(target)) cycleDrops.refused.set(target, !!window.VerynizeComponents?.wouldCycle(ed.design, [...moving].map(find), target));
+      const refused = cycleDrops.refused.get(target);
+      if (refused && !cycleDrops.told) { cycleDrops.told = true; notice('A main component cannot contain an instance of itself'); }
+      return refused;
     }
     // Slot in a stack for a world point: main-axis order for single-line flex, reading order for wrap/grid/inline.
     function stackIndex(parent, kids, p) {
@@ -1192,7 +1202,7 @@
           const el = document.createElement('span'); el.dataset.id = n.id; el.onpointerdown = frameLabelDown;
           frameLabelOf.set(n.id, entry = {el});
         }
-        const el = entry.el, className = 'frame-label' + (selection.has(n.id) ? ' selected' : '') + (n.id === hoverId ? ' hovered' : '');
+        const el = entry.el, className = 'frame-label' + (selection.has(n.id) ? ' selected' : '') + (n.id === hoverId ? ' hovered' : '') + (n.component === true ? ' is-main' : n.instanceOf ? ' is-instance' : '');
         if (el.className !== className) el.className = className;
         if (entry.name !== n.name) { el.textContent = n.name; entry.name = n.name; }
         if (entry.left !== left) { el.style.left = left + 'px'; entry.left = left; }
@@ -1209,6 +1219,7 @@
     function duplicateNodes(ids, offset = 20) {
       const all = new Set(ids.flatMap(id => [...ed.descendants(id)])), mapping = new Map([...all].map(id => [id, ed.uid()]));
       const copies = ed.nodes().filter(n => all.has(n.id)).map(n => ({...structuredClone(n), id: mapping.get(n.id), parentId: mapping.get(n.parentId) || n.parentId, x: n.x + (all.has(n.parentId) ? 0 : offset), y: n.y + (all.has(n.parentId) ? 0 : offset)}));
+      window.VerynizeComponents?.adoptCopies(ed.design, copies, mapping); // a copy of a main is an instance of it
       ed.nodes().push(...copies);
       const result = ids.map(id => mapping.get(id));
       hooks.duplicated?.(result);
@@ -1369,6 +1380,7 @@
       return moveRoots(roots, parentId, position === 'inside' ? 'front' : {target, after: position === 'above'});
     }
     function moveRoots(roots, parentId, where) {
+      if (roots.some(n => (n.parentId || null) !== (parentId || null)) && refusesCycle(subtreeOf(roots), parentId)) return null;
       const before = ed.snapshot(), all = ed.nodes(), parent = find(parentId), origin = contentOrigin(parentId);
       const plan = roots.map(n => {
         const world = layerOrigin(n), next = {x: Math.round((world.x - origin.x) * 100) / 100, y: Math.round((world.y - origin.y) * 100) / 100};
@@ -1489,6 +1501,7 @@
       const ids = new Map(data.nodes.map(n => [n.id, ed.uid()])), roots = new Set(data.roots);
       const target = !inPlace && sel().size === 1 && selectedNodes()[0].type === 'frame' && !roots.has(selectedNodes()[0].id) ? selectedNodes()[0] : null;
       const copies = data.nodes.map(n => ({...structuredClone(n), id: ids.get(n.id), parentId: ids.get(n.parentId) || n.parentId || null}));
+      window.VerynizeComponents?.adoptCopies(ed.design, copies, ids);
       const originalOf = new Map([...ids].map(([from, to]) => [to, from]));
       const placed = copies.filter(n => roots.has(originalOf.get(n.id)));
       for (const n of placed) {
@@ -1502,6 +1515,7 @@
         const b = union(tops.map(n => ({x: n.x, y: n.y, w: n.w, h: n.h})));
         if (!intersects(b, visibleWorld())) { const p = placeInView(b.w, b.h); for (const n of tops) { n.x += p.x - b.x; n.y += p.y - b.y; } }
       }
+      if (target && refusesCycle(copies, target.id)) return false;
       const candidate = structuredClone(ed.design);
       candidate.pages.find(p => p.id === ed.page().id).nodes.push(...structuredClone(copies));
       for (const [k, v] of Object.entries(data.tokens || {})) if (!candidate.tokens[k]) candidate.tokens[k] = v;
@@ -1553,6 +1567,68 @@
       for (const n of selectedNodes()) for (const [k, v] of Object.entries(styleClipboard)) if (v !== undefined) n[k] = structuredClone(v);
       ed.render();
     }
+
+    // ---------- Components (web/component-core.js; spec: design/component-audit/README.md "UI") ----------
+    // The engine work is window.design.components (validated, one undo step each); this adds the canvas parts:
+    // wrapping several layers before Create component, placing new instances, going to a main on another page,
+    // and refusing moves that would make a main contain an instance of itself.
+    const components = () => window.design?.components;
+    const notice = message => { footer(message); window.dispatchEvent(new CustomEvent('bd:notice', {detail: {message}})); };
+    const componentInfo = () => sel().size === 1 ? components()?.info([...sel()][0]) || null : null;
+    const insideMain = n => { for (let p = n && find(n.parentId); p; p = find(p.parentId)) if (p.component === true) return true; return false; };
+    /** Refuses (with a notice) placing the layers and their subtrees inside `parentId` when that makes a cycle. */
+    function refusesCycle(nodes, parentId) {
+      if (!parentId || !window.VerynizeComponents?.wouldCycle(ed.design, nodes, parentId)) return false;
+      notice('A main component cannot contain an instance of itself');
+      return true;
+    }
+    const subtreeOf = roots => roots.flatMap(n => [...ed.descendants(n.id)]).map(find).filter(Boolean);
+    function createComponent() {
+      const list = topSelected().filter(n => !n.locked), api = components(); if (!list.length || !api) return null;
+      try {
+        if (list.length === 1 && list[0].type === 'frame') return api.create(list[0].id);
+        // Several layers, or one that is not a frame: frame them first (Figma), in the same undo step.
+        if (list.some(n => n.sourceId)) throw new Error('Detach the instance before making its layers a component');
+        const frame = frameSelection(); if (!frame) return null;
+        frame.name = list.length === 1 ? list[0].name : 'Component';
+        window.VerynizeComponents.createComponent(ed.design, null, frame.id);
+        ed.render();
+        return frame.id;
+      } catch (error) { notice(error.message); return null; }
+    }
+    function createInstance() {
+      const info = componentInfo(); if (!info?.mainId || info.missingMain || !['main', 'instance'].includes(info.role)) return null;
+      const r = worldRect([...sel()][0]), p = r ? {x: Math.round(r.x + r.w + 40), y: Math.round(r.y)} : placeInView(find(info.mainId)?.w || 100, find(info.mainId)?.h || 100);
+      try { return components().instance(info.mainId, {parentId: null, x: p.x, y: p.y}); } catch (error) { notice(error.message); return null; }
+    }
+    /** Selects the main of the selected instance (switching page when it lives elsewhere) and zooms to it. */
+    function goToMain(mainId = componentInfo()?.mainId) {
+      if (!mainId) return false;
+      const page = ed.design.pages.find(p => p.nodes?.some(n => n.id === mainId));
+      if (!page) { notice('The main component is missing'); return false; }
+      if (page.id !== ed.page().id) window.design.setActivePage(page.id);
+      select([mainId]);
+      requestAnimationFrame(() => zoomToSelection());
+      return true;
+    }
+    function resetOverrides() {
+      const info = componentInfo(); if (!info?.instanceId || !info.overrideCount) return false;
+      components().reset([info.id], {all: info.role === 'instance'});
+      return true;
+    }
+    function detachInstance() {
+      const info = componentInfo(); if (info?.role !== 'instance') return false;
+      components().detach(info.id);
+      return true;
+    }
+    function setSlot(on) {
+      const n = selectedNodes()[0]; if (!n) return false;
+      try { components().setSlot(n.id, on); } catch (error) { notice(error.message); return false; }
+      return true;
+    }
+    const canSlot = () => { const n = sel().size === 1 && selectedNodes()[0]; return !!n && n.type === 'frame' && !n.sourceId && !n.instanceOf && n.component !== true && n.slot !== true && insideMain(n); };
+    const isMainSlot = () => { const n = sel().size === 1 && selectedNodes()[0]; return !!n && n.slot === true && !n.sourceId; };
+    const roleIs = (...roles) => () => roles.includes(componentInfo()?.role);
 
     // ---------- Command registry ----------
     const needsSelection = () => sel().size > 0;
@@ -1611,6 +1687,13 @@
       {id: 'arrange.backward', label: 'Send backward', section: 'Transform', keys: ['mod+['], when: needsSelection, run: () => arrange('backward')},
       {id: 'arrange.front', label: 'Bring to front', section: 'Transform', keys: ['mod+alt+]'], when: needsSelection, run: () => arrange('front')},
       {id: 'arrange.back', label: 'Send to back', section: 'Transform', keys: ['mod+alt+['], when: needsSelection, run: () => arrange('back')},
+      {id: 'component.create', label: 'Create component', section: 'Components', keys: ['mod+alt+k'], when: needsSelection, run: createComponent},
+      {id: 'component.instance', label: 'Create instance', section: 'Components', keys: [], when: () => { const i = componentInfo(); return !!i && ['main', 'instance'].includes(i.role) && !i.missingMain; }, run: createInstance},
+      {id: 'component.goToMain', label: 'Go to main component', section: 'Components', keys: [], when: () => { const i = componentInfo(); return !!i?.instanceId && !i.missingMain; }, run: () => goToMain()},
+      {id: 'component.reset', label: 'Reset overrides', section: 'Components', keys: [], when: () => !!componentInfo()?.overrideCount, run: resetOverrides},
+      {id: 'component.detach', label: 'Detach instance', section: 'Components', keys: ['mod+alt+b'], when: roleIs('instance'), run: detachInstance},
+      {id: 'component.convertToSlot', label: 'Convert to slot', section: 'Components', keys: [], when: canSlot, run: () => setSlot(true)},
+      {id: 'component.removeSlot', label: 'Remove slot', section: 'Components', keys: [], when: isMainSlot, run: () => setSlot(false)},
       {id: 'layer.visibility', label: 'Show/hide', section: 'Edit', keys: ['mod+shift+h'], when: needsSelection, run: () => toggleFlag('hidden')},
       {id: 'layer.lock', label: 'Lock/unlock', section: 'Edit', keys: ['mod+shift+l'], when: needsSelection, run: () => toggleFlag('locked')},
       {id: 'align.left', label: 'Align left', section: 'Alignment', keys: ['alt+a'], when: needsSelection, run: () => ed.align('left')},

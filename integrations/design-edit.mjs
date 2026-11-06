@@ -13,6 +13,7 @@ import { syncAliases, renameAliasRefs, dropAliases, boundValue, writeBoundValue,
 import { applyPaintAttrs, renamePaintTokens, unbindPaintTokens, syncPaintTokens } from './paints.mjs';
 import { applyShaderAttrs } from './shaders.mjs';
 import { applyResidual } from './codec-residual.mjs';
+import { createInstance, createComponent, adoptCopies, componentInfo } from './component-core.mjs';
 
 export { measureText };
 
@@ -347,20 +348,33 @@ function applySvgColor(node, attrs) {
 
 export function buildNodes(elements, { document, page, parent = null, warnings = [], keepRootId = null, reuse = null, viewport = null }) {
   const tokens = document.tokens || {};
-  const nodes = []; const roots = [];
+  const nodes = []; const roots = []; const instances = []; const slots = []; const batch = new Map();
   const make = (el, parentNode, isTop) => {
     const kind = classify(el);
     if (el.tag === 'br') return null;
     const isIcon = kind === 'icon';
     const label = typeof el.attrs['data-node-label'] === 'string' && el.attrs['data-node-label'].trim() ? el.attrs['data-node-label'].trim().slice(0, 200) : null;
     const where = `<${el.tag}${label ? ` "${label}"` : ''}>`;
-    const spec = parseClasses(isIcon ? iconClasses(el.attrs.className ?? el.attrs.class ?? '').className : el.attrs.className ?? el.attrs.class ?? '', { tokens, viewport });
-    if (spec.warnings.length) warnings.push(`Classes on ${where}: ${spec.warnings.slice(0, 12).join('; ')}${spec.warnings.length > 12 ? ' …' : ''}`);
-    if (el.attrs.style !== undefined) warnings.push(`style attributes are not supported on <${el.tag}>; use Tailwind classes`);
     let reused = null;
     if (reuse && typeof el.attrs['data-node-id'] === 'string') reused = reuse(el.attrs['data-node-id']);
     const id = (isTop && keepRootId) ? keepRootId.id : reused?.id || randomUUID();
     const shortId = (isTop && keepRootId) ? keepRootId.shortId : reused?.shortId;
+    // The node this element rewrites (replace): its component links carry over.
+    const old = (isTop && keepRootId) ? keepRootId.node || null : reused;
+    const instanceRef = linkRef(el.attrs['data-instance-of']);
+    if (instanceRef && !(old?.instanceOf && refersTo(document, page, instanceRef, old.instanceOf))) {
+      // A new instance: a placeholder materialized from its main once the batch is on the page (placeBuilt).
+      const node = { ...clone(NODE_DEFAULTS), id, type: 'frame', parentId: parentNode?.id ?? null, name: label || 'Instance', color: 'transparent', layout: 'block' };
+      if (shortId) node.shortId = shortId;
+      node._instance = { ref: instanceRef, el, label, ...instanceContent(el) };
+      if (!parentNode) node._pos = { x: Number(el.attrs['data-component-x']), y: Number(el.attrs['data-component-y']) };
+      if (typeof el.attrs['data-node-id'] === 'string') batch.set(el.attrs['data-node-id'], node);
+      nodes.push(node); instances.push(node);
+      return node;
+    }
+    const spec = parseClasses(isIcon ? iconClasses(el.attrs.className ?? el.attrs.class ?? '').className : el.attrs.className ?? el.attrs.class ?? '', { tokens, viewport });
+    if (spec.warnings.length) warnings.push(`Classes on ${where}: ${spec.warnings.slice(0, 12).join('; ')}${spec.warnings.length > 12 ? ' …' : ''}`);
+    if (el.attrs.style !== undefined) warnings.push(`style attributes are not supported on <${el.tag}>; use Tailwind classes`);
     const boxText = kind === 'text' && (el.tag === 'button' || BOX_KEYS.some(k => spec.has.has(k)) || spec.has.has('layout'));
     const type = boxText ? 'frame' : isIcon ? 'image' : kind;
     const node = { ...clone(NODE_DEFAULTS), id, type, parentId: parentNode?.id ?? null, name: label || (isIcon ? (resolveIcon(iconNameOf(el))?.icon || iconNameOf(el) || 'Icon') : defaultName(type, el)) };
@@ -398,6 +412,9 @@ export function buildNodes(elements, { document, page, parent = null, warnings =
     }
     applyGeometry(node, spec, parentNode, { isNew: true, warnings, label: where });
     applyResidual(node, el.attrs, { tokens, warnings, where });
+    if (old) for (const key of LINK_KEYS) if (old[key] !== undefined) node[key] = clone(old[key]);
+    applyComponentAttrs(node, el.attrs, { warnings, where, old, slots });
+    if (typeof el.attrs['data-node-id'] === 'string') batch.set(el.attrs['data-node-id'], node);
     nodes.push(node);
     if (boxText) {
       const text = { ...clone(NODE_DEFAULTS), id: randomUUID(), type: 'text', parentId: node.id, name: 'Label', color: TEXT_DEFAULTS.color, styleOwn: [] };
@@ -421,7 +438,147 @@ export function buildNodes(elements, { document, page, parent = null, warnings =
     return node;
   };
   for (const el of elements) { const root = make(el, parent, true); if (root) roots.push(root); }
-  return { roots, nodes, warnings };
+  return { roots, nodes, warnings, instances, slots, batch };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Components in JSX (web/component-core.js; attributes written by jsx-codec.mjs componentAttrs).
+//   data-component="true"            the frame is a main component
+//   data-instance-of="<main>"        a new element becomes an instance of the main (short id, long id or name);
+//                                    descendants written as <div data-slot="Name">…</div> fill that slot
+//   data-slot="<name>"               a frame inside a main is a slot
+// Rewriting an existing node (replace) keeps its links; the shared sync then marks what changed as overrides.
+
+const LINK_KEYS = ['component', 'instanceOf', 'sourceId', 'overrides', 'slot', 'slotName'];
+const linkRef = value => (typeof value === 'string' && value.trim() ? value.trim() : null);
+const isMainNode = node => !!node && node.type === 'frame' && node.component === true;
+const isLinkedNode = node => typeof node?.sourceId === 'string' && !!node.sourceId && node.sourceId !== node.instanceOf;
+
+/** The main component a data-instance-of value names: a main built in the same batch, a short or long id on the
+ * page, a long id on another page, or a unique main name. */
+export function resolveMain(document, page, ref, batch = null) {
+  const fromBatch = batch?.get(ref);
+  if (isMainNode(fromBatch)) return fromBatch;
+  const onPage = indexPage(page).resolve(ref);
+  if (isMainNode(onPage)) return onPage;
+  const mains = document.pages.flatMap(p => p.nodes.filter(isMainNode));
+  const byId = mains.find(n => n.id === ref);
+  if (byId) return byId;
+  const named = mains.filter(n => String(n.name).trim().toLowerCase() === ref.toLowerCase());
+  return named.length === 1 ? named[0] : null;
+}
+function refersTo(document, page, ref, mainId) {
+  if (ref === mainId) return true;
+  return resolveMain(document, page, ref)?.id === mainId;
+}
+const mainList = document => document.pages.flatMap(p => p.nodes.filter(isMainNode)).slice(0, 20).map(n => `"${n.name}"`).join(', ') || 'none';
+
+/** Slot fills inside a new instance element: elements carrying data-slot (not data-slot-state="default"), searched
+ * through the serialized structure; anything else written there is reported. */
+function instanceContent(el) {
+  const fills = [], stray = [];
+  const walk = children => {
+    for (const child of children) {
+      if (child.text !== undefined) { if (child.text.trim()) stray.push(`"${child.text.trim().slice(0, 30)}"`); continue; }
+      if (child.tag === 'br') continue;
+      if (Object.hasOwn(child.attrs, 'data-slot')) {
+        if (child.attrs['data-slot-state'] === 'default') continue;
+        const value = child.attrs['data-slot'];
+        const name = typeof value === 'string' && value.trim() && value.trim() !== 'true' ? value.trim() : (typeof child.attrs['data-node-label'] === 'string' ? child.attrs['data-node-label'].trim() : '');
+        fills.push({ name, elements: child.children.filter(c => c.tag || c.text?.trim()).map(c => (c.tag ? c : { tag: 'p', attrs: {}, children: [c], selfClosing: false })) });
+        continue;
+      }
+      if (child.attrs['data-instance-of'] !== undefined) continue;
+      // Copies serialized from an instance carry their ids; they come back from the main.
+      if (typeof child.attrs['data-node-id'] !== 'string') stray.push(`<${child.tag}>`);
+      else walk(child.children);
+    }
+  };
+  walk(el.children);
+  return { fills, stray };
+}
+
+/** data-component / data-slot on a node being built (new or rewritten). */
+function applyComponentAttrs(node, attrs, { warnings, where, old, slots }) {
+  const comp = attrs['data-component'];
+  if (comp === true || comp === 'true' || comp === '') {
+    if (node.type !== 'frame') warnings.push(`data-component on ${where} ignored: only a frame can be a main component`);
+    else if (isLinkedNode(node) || node.instanceOf) { if (!old) warnings.push(`data-component on ${where} ignored: an instance cannot be a main component`); }
+    else node.component = true;
+  } else if (comp === false || comp === 'false') delete node.component;
+  if (!Object.hasOwn(attrs, 'data-slot') || attrs['data-slot'] === false || attrs['data-slot'] === 'false') return;
+  if (node.type !== 'frame') { warnings.push(`data-slot on ${where} ignored: only a frame can be a slot`); return; }
+  const value = attrs['data-slot'];
+  const name = typeof value === 'string' && value.trim() !== 'true' ? value.trim().slice(0, 100) : '';
+  if (isLinkedNode(node)) return; // the copy of a slot inside an instance: set on the main
+  const was = !!old?.slot;
+  node.slot = true;
+  if (name && name !== node.name) node.slotName = name;
+  else if (name === node.name) delete node.slotName;
+  if (!was) slots.push(node);
+}
+
+/**
+ * Finish a built batch once its nodes are on the page: check new slots sit inside a main, then materialize each new
+ * instance from its main (inner ones first), apply its label and classes as overrides and fill its slots.
+ */
+export function placeBuilt(document, page, built, warnings = []) {
+  const parentOf = node => page.nodes.find(n => n.id === node.parentId);
+  for (const slot of built.slots || []) {
+    let inMain = false;
+    for (let cur = parentOf(slot), guard = 0; cur && guard < 10000; cur = parentOf(cur), guard++) if (isMainNode(cur)) { inMain = true; break; }
+    if (!inMain) { delete slot.slot; delete slot.slotName; warnings.push(`data-slot on "${slot.name}" ignored: a slot must be inside a main component (data-component="true")`); }
+  }
+  let pending = [...(built.instances || [])];
+  while (pending.length) {
+    const inside = node => { const seen = new Set(); for (let cur = node; cur && !seen.has(cur); cur = parentOf(cur)) { seen.add(cur); if (isMainNode(cur)) return cur; } return null; };
+    const blocked = new Set(pending.map(inside).filter(Boolean));
+    const ready = pending.filter(ph => { const main = resolveMain(document, page, ph._instance.ref, built.batch); return !main || !blocked.has(main); });
+    if (!ready.length) throw new Error('A main component cannot contain an instance of itself');
+    for (const ph of ready) materialize(document, page, ph, built.batch, warnings);
+    pending = pending.filter(ph => !ready.includes(ph));
+  }
+}
+
+function materialize(document, page, ph, batch, warnings) {
+  const info = ph._instance; delete ph._instance;
+  const main = resolveMain(document, page, info.ref, batch);
+  if (!main) throw new Error(`data-instance-of="${info.ref}": no main component with that id or name (mains: ${mainList(document)})`);
+  const at = page.nodes.indexOf(ph);
+  page.nodes.splice(at, 1);
+  try { createInstance(document, main.id, { pageId: page.id, parentId: ph.parentId || null, id: ph.id, x: Number.isFinite(ph.x) ? ph.x : 0, y: Number.isFinite(ph.y) ? ph.y : 0 }); }
+  catch (error) { page.nodes.splice(at, 0, ph); throw new Error(`data-instance-of="${info.ref}": ${error.message}`); }
+  // Keep the placeholder object (callers hold it) and its place among its siblings.
+  const created = page.nodes.find(n => n.id === ph.id);
+  page.nodes.splice(page.nodes.indexOf(created), 1);
+  for (const key of Object.keys(ph)) if (!key.startsWith('_') && key !== 'shortId') delete ph[key];
+  Object.assign(ph, created);
+  page.nodes.splice(at, 0, ph);
+  const where = `instance of "${main.name}"`;
+  const before = clone(ph);
+  if (info.label && info.label !== main.name) ph.name = info.label;
+  const cls = info.el.attrs.className ?? info.el.attrs.class;
+  if (typeof cls === 'string' && cls.trim()) {
+    const spec = parseClasses(cls, { tokens: document.tokens || {} });
+    if (spec.warnings.length) warnings.push(`Classes on ${where}: ${spec.warnings.slice(0, 12).join('; ')}`);
+    applySpec(ph, spec, document.tokens);
+    applyGeometry(ph, spec, page.nodes.find(n => n.id === ph.parentId) || null, { isNew: false, warnings, label: where });
+  }
+  const changed = [...new Set([...Object.keys(before), ...Object.keys(ph)])].filter(key => !key.startsWith('_') && !['x', 'y', 'id', 'parentId', 'shortId', ...LINK_KEYS].includes(key) && JSON.stringify(before[key]) !== JSON.stringify(ph[key]));
+  if (changed.length) ph.overrides = [...new Set([...(ph.overrides || []), ...changed])].sort();
+  if (info.stray.length) warnings.push(`${where}: ${info.stray.slice(0, 5).join(', ')} ignored; an instance's layers come from its main. Put per-instance content inside a slot: <div data-slot="Name">…</div>`);
+  const slots = componentInfo(document, ph.id)?.slots || [];
+  for (const fill of info.fills) {
+    const want = fill.name.toLowerCase();
+    const slot = slots.find(s => String(s.name).toLowerCase() === want) || (slots.length === 1 && !want ? slots[0] : null);
+    if (!slot) { warnings.push(`${where}: no slot named "${fill.name}" (slots: ${slots.map(s => `"${s.name}"`).join(', ') || 'none'}); its content was not added`); continue; }
+    const frame = page.nodes.find(n => n.id === slot.id);
+    for (const kid of page.nodes.filter(n => n.parentId === frame.id)) removeSubtree(page, kid);
+    frame.overrides = [...new Set([...(frame.overrides || []), 'children'])].sort();
+    const built = buildNodes(fill.elements, { document, page, parent: frame, warnings });
+    page.nodes.push(...built.nodes);
+    placeBuilt(document, page, built, warnings);
+  }
 }
 
 function defaultName(type, el) {
@@ -536,6 +693,7 @@ function editNode(document, page, node, el, warnings) {
   if (node.type === 'image' && !node.icon) applySvgColor(node, el.attrs);
   applyPaintAttrs(node, el.attrs, { fills: node.fills });
   applyResidual(node, el.attrs, { tokens: document.tokens || {}, warnings, where: index.shortId(node) });
+  editComponentAttrs(document, page, node, el.attrs, index);
   if (node.type === 'shader') applyShaderAttrs(node, el.attrs);
   if (node.type === 'text') {
     if (el.children.length) {
@@ -556,11 +714,49 @@ function editNode(document, page, node, el, warnings) {
   }
 }
 
-export function applyDirective(document, page, directive, warnings = []) {
+/** Component attributes on an edit: patches only; links an edit cannot express are refused. */
+function editComponentAttrs(document, page, node, attrs, index) {
+  const ref = index.shortId(node);
+  const instanceRef = linkRef(attrs['data-instance-of']);
+  if (instanceRef && !(node.instanceOf && refersTo(document, page, instanceRef, node.instanceOf))) throw new Error(node.instanceOf ? `${ref} is an instance of another main; an edit cannot re-point it (use replace, or detach_instance and create_instance)` : `${ref} is not an instance; insert <div data-instance-of="${instanceRef}" /> or call create_instance`);
+  const comp = attrs['data-component'];
+  if ((comp === true || comp === 'true' || comp === '') && !isMainNode(node)) createComponent(document, page.id, node.id);
+  else if ((comp === false || comp === 'false') && isMainNode(node)) delete node.component;
+  if (!Object.hasOwn(attrs, 'data-slot') || attrs['data-slot'] === false || attrs['data-slot'] === 'false' || isLinkedNode(node)) return;
+  if (node.type !== 'frame') throw new Error(`${ref} is a ${node.type}; only a frame can be a slot`);
+  if (!node.slot) {
+    let inMain = false;
+    for (const a of index.ancestors(node)) if (isMainNode(a)) inMain = true;
+    if (!inMain || isMainNode(node) || node.instanceOf) throw new Error(`${ref} cannot be a slot: a slot is a frame inside a main component`);
+    node.slot = true;
+  }
+  const value = attrs['data-slot'];
+  const name = typeof value === 'string' && value.trim() !== 'true' ? value.trim().slice(0, 100) : '';
+  if (name && name !== (node.slotName || node.name)) { if (name === node.name) delete node.slotName; else node.slotName = name; }
+}
+
+/** Where an edit lands relative to instances: notes for layers added to or removed from an instance outside its slots. */
+function instanceNote(document, page, parent, verb) {
+  if (!parent) return null;
+  const info = componentInfo(document, parent.id);
+  if (!info || (info.role !== 'instance' && info.role !== 'inherited')) return null;
+  const index = indexPage(page);
+  for (let cur = parent; cur; cur = cur.parentId ? index.byId.get(cur.parentId) : null) {
+    if (cur.slot === true) return null;
+    if (cur.id === info.instanceId) break;
+  }
+  const root = index.byId.get(info.instanceId);
+  return verb === 'delete'
+    ? `${index.shortId(parent)} is inherited from main component "${info.mainName || info.mainId}" in instance ${root ? index.shortId(root) : info.instanceId}: deleting it hides it in this instance only (an override; reset_overrides brings it back). Edit the main to remove it everywhere.`
+    : `${index.shortId(parent)} is an inherited part of instance ${root ? index.shortId(root) : info.instanceId} (main component "${info.mainName || info.mainId}"): the new layers exist in this instance only. For per-instance content, make a frame of the main a slot (set_slot) and insert into the instance's slot; to change every instance, edit the main.`;
+}
+
+export function applyDirective(document, page, directive, warnings = [], notes = []) {
   const index = indexPage(page);
   const target = index.require(directive.target);
   if (directive.kind === 'delete') {
     if (directive.body) throw new Error('delete takes no JSX body');
+    if (isLinkedNode(target)) { const note = instanceNote(document, page, target, 'delete'); if (note) notes.push(note); }
     const parent = target.parentId ? index.byId.get(target.parentId) : null;
     const removed = removeSubtree(page, target);
     return { removed: [...removed].length, affected: [], reflow: parent ? [parent] : [] };
@@ -580,22 +776,28 @@ export function applyDirective(document, page, directive, warnings = []) {
     const reuse = ref => { const found = index.resolve(ref); if (!found || !oldById.has(found.id) || found.id === target.id || used.has(found.id)) return null; used.add(found.id); return found; };
     const parent = target.parentId ? index.byId.get(target.parentId) : null;
     const position = page.nodes.indexOf(target);
-    const { roots, nodes } = buildNodes(elements, { document, page, parent, warnings, keepRootId: { id: target.id, shortId: target.shortId }, reuse });
+    const built = buildNodes(elements, { document, page, parent, warnings, keepRootId: { id: target.id, shortId: target.shortId, node: target }, reuse });
+    const { roots, nodes } = built;
     const root = roots[0]; if (!root) throw new Error('Replacement produced no element');
     if (!parent) { delete root._autoWidth; if (root.wMode === 'hug') { root.wMode = 'fixed'; root.w = target.w; } const cx = Number(elements[0].attrs['data-component-x']), cy = Number(elements[0].attrs['data-component-y']); root.x = Number.isFinite(cx) ? cx : target.x; root.y = Number.isFinite(cy) ? cy : target.y; }
     else if (!parent.layout || parent.layout === 'free') { const spec = parseClasses(elements[0].attrs.className ?? '', { tokens: document.tokens || {} }); if (spec.left === undefined) root.x = target.x; if (spec.top === undefined) root.y = target.y; }
     const before = page.nodes.slice(0, position).filter(n => !oldById.has(n.id)).length;
     page.nodes = page.nodes.filter(n => !oldById.has(n.id));
     page.nodes.splice(before, 0, ...nodes);
+    placeBuilt(document, page, built, warnings);
     return { affected: [root], replaced: oldNodes.length };
   }
   // insert
   let parent, where;
   if (directive.kind === 'first' || directive.kind === 'last') { parent = target; promoteToFrame(parent); where = { parentId: parent.id, [directive.kind]: true }; }
   else { parent = target.parentId ? index.byId.get(target.parentId) : null; where = { [directive.kind]: target }; }
-  const { roots, nodes } = buildNodes(elements, { document, page, parent, warnings });
+  const built = buildNodes(elements, { document, page, parent, warnings });
+  const { roots, nodes } = built;
   if (!parent) for (const root of roots) { root._placing = true; }
   insertNodes(page, nodes, where);
+  placeBuilt(document, page, built, warnings);
+  const note = instanceNote(document, page, parent, 'insert');
+  if (note) notes.push(note);
   return { affected: roots, place: parent ? [] : roots };
 }
 
@@ -605,10 +807,10 @@ export function runDirectives(document, pageId, script) {
   ensureShortIds(working);
   const report = []; let applied = 0;
   directives.forEach((directive, i) => {
-    const attempt = clone(working); const warnings = [];
+    const attempt = clone(working); const warnings = [], notes = [];
     try {
       const page = getPage(attempt, pageId);
-      const result = applyDirective(attempt, page, directive, warnings);
+      const result = applyDirective(attempt, page, directive, warnings, notes);
       const touched = [...result.affected, ...(result.reflow || [])].map(n => n.id);
       reflow(page, touched.map(id => page.nodes.find(n => n.id === id)).filter(Boolean), warnings, attempt);
       for (const root of result.place || []) { const pos = root._pos || {}; delete root._placing; delete root._pos; root.x = Number.isFinite(pos.x) ? pos.x : nextArtboardX(page, root); root.y = Number.isFinite(pos.y) ? pos.y : 0; }
@@ -618,7 +820,7 @@ export function runDirectives(document, pageId, script) {
       const index = indexPage(freshPage);
       const code = result.affected.map(node => elementCode(attempt, freshPage, index.byId.get(node.id), 3)).join('\n');
       working = attempt; applied++;
-      report.push(`OK ${i + 1}. ${directive.header}${result.removed ? ` (removed ${result.removed} element${result.removed === 1 ? '' : 's'})` : ''}${warnings.length ? `\n  warnings: ${warnings.join('; ')}` : ''}${code ? `\n${code}` : ''}`);
+      report.push(`OK ${i + 1}. ${directive.header}${result.removed ? ` (removed ${result.removed} element${result.removed === 1 ? '' : 's'})` : ''}${warnings.length ? `\n  warnings: ${warnings.join('; ')}` : ''}${notes.length ? `\n  notes: ${notes.join('; ')}` : ''}${code ? `\n${code}` : ''}`);
     } catch (error) {
       report.push(`FAIL ${i + 1}. ${directive.header}: ${error instanceof JsxSyntaxError ? 'JSX syntax error: ' : ''}${error.message}`);
     }
@@ -637,11 +839,13 @@ export function createArtboards(document, pageId, code, { viewport = null } = {}
   const { elements, imports } = parseJsx(code);
   if (!elements.length) throw new Error('code must contain at least one root element');
   const warnings = imports.length ? [`Import lines were ignored (${imports.length}); icon components (<Icon name="lucide:…"/>, <ArrowRight/>, <LuX/>, <IconBrandGithub/>) are resolved by name from the bundled lucide, tabler and phosphor sets`] : [];
-  const { roots, nodes } = buildNodes(elements, { document: doc, page, parent: null, warnings, viewport });
+  const built = buildNodes(elements, { document: doc, page, parent: null, warnings, viewport });
+  const { roots, nodes } = built;
   if (!roots.length) throw new Error('No supported elements were found in code');
   const positions = new Map(roots.map(root => [root, root._pos || {}]));
   for (const root of roots) { root._placing = true; delete root._pos; }
   page.nodes.push(...nodes);
+  placeBuilt(doc, page, built, warnings);
   reflow(page, roots, warnings, doc);
   for (const root of roots) {
     const { x, y } = positions.get(root) || {};
@@ -651,6 +855,35 @@ export function createArtboards(document, pageId, code, { viewport = null } = {}
   ensureShortIds(doc);
   const index = indexPage(getPage(doc, pageId));
   return { document: doc, roots: roots.map(r => index.byId.get(r.id)), warnings, page: getPage(doc, pageId) };
+}
+
+/**
+ * Wrap sibling elements in a new frame in place (create_component on several layers). The frame takes the first
+ * element's place; in a free parent (or on the page) it spans their bounds, in a flow parent it flows like them.
+ * Mutates `document` and returns the frame.
+ */
+export function wrapElements(document, pageId, refs, { label = 'Component' } = {}) {
+  const page = getPage(document, pageId), index = indexPage(page);
+  const targets = [...new Set(refs.map(ref => index.require(ref)))];
+  const parentId = targets[0].parentId || null;
+  if (targets.some(n => (n.parentId || null) !== parentId)) throw new Error('Elements to wrap must share one parent');
+  if (targets.some(n => isLinkedNode(n))) throw new Error('Layers inherited from a main component cannot be wrapped; edit the main or detach the instance');
+  const parent = parentId ? index.byId.get(parentId) : null;
+  targets.sort((a, b) => page.nodes.indexOf(a) - page.nodes.indexOf(b));
+  const flow = !!parent && parent.layout && parent.layout !== 'free';
+  const frame = { ...clone(NODE_DEFAULTS), id: randomUUID(), type: 'frame', parentId, name: String(label).slice(0, 200), color: 'transparent', layout: 'free' };
+  if (flow) {
+    Object.assign(frame, { layout: 'flex', direction: parent.layout === 'flex' && isFlexRow(parent) ? 'row' : 'column', gap: parent.gap || 0, alignItems: 'flex-start', wMode: 'hug', hMode: 'hug' });
+  } else {
+    const x0 = Math.min(...targets.map(n => n.x || 0)), y0 = Math.min(...targets.map(n => n.y || 0));
+    Object.assign(frame, { x: x0, y: y0, w: Math.max(1, Math.max(...targets.map(n => (n.x || 0) + (n.w || 0))) - x0), h: Math.max(1, Math.max(...targets.map(n => (n.y || 0) + (n.h || 0))) - y0) });
+    for (const n of targets) { n.x = (n.x || 0) - x0; n.y = (n.y || 0) - y0; }
+  }
+  page.nodes.splice(page.nodes.indexOf(targets[0]), 0, frame);
+  for (const n of targets) n.parentId = frame.id;
+  if (flow) reflow(page, [frame], [], document);
+  ensureShortIds(document);
+  return frame;
 }
 
 export function duplicateElements(document, pageId, ref, { count = 1, newArtboard, label, className } = {}) {
@@ -664,7 +897,11 @@ export function duplicateElements(document, pageId, ref, { count = 1, newArtboar
   for (let copyIndex = 0; copyIndex < count; copyIndex++) {
     const ids = new Map(subtree.map(n => [n.id, randomUUID()]));
     const copies = subtree.map(n => { const c = clone(n); c.id = ids.get(n.id); delete c.shortId; c.parentId = n.id === source.id ? (asArtboard ? null : n.parentId) : ids.get(n.parentId); return c; });
+    // A copy of a main is an instance of it; a copy of an instance keeps its overrides and slot content.
+    adoptCopies(doc, copies, ids);
     const root = copies[0];
+    const linked = typeof root.instanceOf === 'string' && !!root.instanceOf;
+    const plain = linked ? clone(root) : null;
     if (asArtboard) {
       const absolute = (() => { let x = source.x, y = source.y, cur = source; while (cur.parentId) { cur = index.byId.get(cur.parentId); x += cur.x; y += cur.y; } return { x, y }; })();
       const right = Math.max(...page.nodes.filter(n => !n.parentId).map(n => n.x + n.w), absolute.x + source.w);
@@ -682,6 +919,13 @@ export function duplicateElements(document, pageId, ref, { count = 1, newArtboar
       const spec = parseClasses(className, { tokens: doc.tokens || {} });
       applySpec(root, spec, doc.tokens);
       applyGeometry(root, spec, root.parentId ? index.byId.get(root.parentId) : null, { isNew: false, warnings, label: root.name });
+    }
+    if (linked) {
+      // What this call changed on an instance root is the copy's own (the sync would copy the main back otherwise);
+      // the default "copy" label follows the main like any duplicate.
+      const keep = new Set(['x', 'y', 'id', 'parentId', 'shortId', ...LINK_KEYS, ...(label ? [] : ['name'])]);
+      const changed = [...new Set([...Object.keys(plain), ...Object.keys(root)])].filter(key => !keep.has(key) && JSON.stringify(plain[key]) !== JSON.stringify(root[key]));
+      if (changed.length) root.overrides = [...new Set([...(root.overrides || []), ...changed])].sort();
     }
     created.push(root);
   }

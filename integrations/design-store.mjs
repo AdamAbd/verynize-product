@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { eachPaintColor } from './node-style.mjs';
 import { dropAliases } from './variables.mjs';
 import * as core from './document-core.mjs';
+import { syncComponents } from './component-core.mjs';
 
 const LIMIT = 20 * 1024 * 1024;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -38,6 +39,7 @@ export function applyOperations(document, operations) {
     }
   }
   for(const page of d.pages)for(const node of page.nodes)if(node.fontWeight!==undefined)node.fontWeight=String(node.fontWeight);
+  syncComponents(document,d); // instances follow their mains (web/component-core.js)
   return validateDocument(d);
 }
 const revision = bytes => createHash('sha256').update(bytes).digest('hex');
