@@ -19,3 +19,6 @@ secrets*.json
 
 # Node server state (server/node.mjs default DATA_DIR)
 /data/
+
+# macOS metadata
+.DS_Store
