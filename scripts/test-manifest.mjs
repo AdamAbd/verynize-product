@@ -102,6 +102,7 @@ const isl = (area) => [`web/src/islands/${area}.tsx`, `web/src/islands/${area}/*
 const AREA = {
   canvas: [
     "web/canvas-interactions.js",
+    "web/canvas-drop-hits.js",
     "web/selection-chrome.js",
     "web/text-caret.js",
     "web/canvas.css",
@@ -279,6 +280,10 @@ const canvas = [
   electron("tests/canvas-transform.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-interactions.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-incremental-render.cjs", "canvas", AREA.canvas),
+  electron("tests/canvas-drag-scale.cjs", "canvas", [
+    ...AREA.canvas,
+    "eval/canvas-perf/bench-verynize.cjs",
+  ]),
   electron("tests/canvas-clipboard.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/components.cjs", "canvas", [
     ...AREA.canvas,
@@ -552,6 +557,7 @@ const ux = [
   electron("tests/canvas-css-invalidation.cjs", "canvas", [
     "web/src/**",
     "web/*.css",
+    "web/selection-chrome.js",
     "scripts/check-css-has.cjs",
     "eval/canvas-perf/renderer.cjs",
   ]),

@@ -13,11 +13,13 @@
   const CORNERS = ["nw", "ne", "sw", "se"];
   // Fields that move or rename a node without changing how its children are styled.
   const PLACEMENT = new Set(["x", "y", "name"]);
-  // Attributes maintained outside a redraw: shader status, the clip-proof selection ring, and culling (below).
+  // Attributes maintained outside a redraw: shader status, the clip-proof selection ring, a drag in progress
+  // (canvas-interactions.js) and culling (below).
   const KEPT_ATTRIBUTES = new Set([
     "data-shader-status",
     "data-shader-kind",
     "data-clip-ring",
+    "data-dragging",
     "data-culled",
   ]);
   // Culling: grid cell size (world px), boards revealed per camera step during a gesture, settle delay (ms).
@@ -557,6 +559,11 @@
         return el?.isConnected && !(boards.has(top) && !shown.has(top) && !redrawn.has(top))
           ? el
           : null;
+      },
+      // The node's drawn layer element (map lookup), or null when the renderer holds none in the page.
+      layerOf: (id) => {
+        const el = els.get(id);
+        return el?.isConnected ? el : null;
       },
       node: (id) => byId.get(id),
       stats: () => ({

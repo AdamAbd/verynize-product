@@ -207,7 +207,10 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     const editor = page.locator('#canvas [data-text-editing]'); await editor.waitFor();
     assert.deepEqual(await editor.evaluate(e => [getComputedStyle(e).outlineStyle, getComputedStyle(e).color, e.querySelectorAll('.handle').length]), ['none', 'rgb(0, 0, 0)', 0], 'no selection ring or handles; black ink (and caret, text-caret.js) on the white frame');
     for (const sel of ['#selection-name', '#selection-measure', '#selection-chat-chip']) assert.equal(await shown('#canvas-overlay ' + sel), false, sel + ' hidden while typing a click text');
+    const clipChrome = () => page.locator('#canvas-overlay .clipped-selection').evaluate(e => getComputedStyle(e).display);
+    assert.equal(await clipChrome(), 'none', 'no clip-proof ring while typing (overlay attribute, not :has())');
     await page.keyboard.press('Escape'); await editor.waitFor({state: 'detached'});
+    assert.notEqual(await clipChrome(), 'none', 'the clip-proof ring layer returns after typing');
     p = await screen(515, 47);
     await page.evaluate(() => window.design.setTool('text'));
     await page.mouse.move(p.x, p.y); await page.mouse.down(); await page.mouse.move(p.x + 150, p.y + 60, {steps: 6}); await page.mouse.up();
