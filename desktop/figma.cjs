@@ -8,6 +8,8 @@
 //                                                      integrations/figma-kiwi.mjs + figma-scene.mjs)
 //   - File:      figmaFile({bytes}) / figmaFileOpen()   a .fig file (zip with canvas.fig + images, or bare archive)
 // OAuth account connection lives in desktop/figma-oauth.cjs.
+require("../web/document-core.js");
+const { NODE_LIMITS } = globalThis.VerynizeDocument;
 const { randomUUID } = require("node:crypto");
 const fs = require("node:fs/promises");
 require("../web/node-style.js");
@@ -363,7 +365,10 @@ function convertFigma(payload, { nodeId = null, images = {} } = {}) {
     function walk(source, parent = null, depth = 0) {
       if (source.visible === false) return;
       if (depth > 80) throw Error("Figma hierarchy exceeds 80 levels");
-      if (++count > 5000) throw Error("Import exceeds 5,000 layers; select a smaller node");
+      if (++count > NODE_LIMITS.perDocument)
+        throw Error(
+          `Figma import visited ${count} source nodes; limit is ${NODE_LIMITS.perDocument}. Select fewer pages or split into multiple documents.`,
+        );
       const bounds = source.absoluteBoundingBox;
       if (!bounds && !source.children?.length) {
         warn(source, "No drawable bounds; skipped");
@@ -810,8 +815,11 @@ function imageReferences(payload, nodeId) {
   let count = 0;
   function walk(n, depth = 0) {
     if (!n || n.visible === false) return;
-    if (depth > 80 || ++count > 10000)
-      throw Error("Figma document too large; select a smaller node");
+    if (depth > 80) throw Error("Figma hierarchy exceeds 80 levels; select a smaller node");
+    if (++count > NODE_LIMITS.perDocument)
+      throw Error(
+        `Figma import visited ${count} source nodes; limit is ${NODE_LIMITS.perDocument}. Select fewer pages or split into multiple documents.`,
+      );
     for (const p of visibleFills(n))
       if (p.type === "IMAGE" && typeof p.imageRef === "string") refs.add(p.imageRef);
     for (const child of n.children || []) walk(child, depth + 1);

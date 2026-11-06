@@ -73,6 +73,7 @@
     role = null,
     applying = false;
   let confirmed = null,
+    retained = [],
     pending = [],
     batchNumber = 0,
     clientId = "",
@@ -375,6 +376,7 @@
     if (window.cloudAssets?.holding?.()) return;
     let doc = confirmed;
     for (const batch of pending) doc = Ops.apply(doc, batch.ops).doc;
+    if (retained.length) doc = Ops.apply(doc, retained).doc;
     if (Pages.deferredOps().length) doc = Ops.apply(doc, Pages.deferredOps()).doc;
     const current = window.design.getDocument();
     const next = { ...doc };
@@ -391,22 +393,76 @@
       status("Unable to apply shared changes: " + e.message);
     }
   }
-  function sendPending() {
+  // One in-flight batch keeps a rejected prefix from being overtaken by later edits.
+  async function sendPending() {
     clearTimeout(sendTimer);
-    if (socket?.readyState !== WebSocket.OPEN) return;
-    for (const batch of pending)
-      if (!batch.sent) {
-        socket.send(JSON.stringify({ type: "ops", batch: batch.n, ops: batch.ops }));
-        batch.sent = true;
+    if (socket?.readyState !== WebSocket.OPEN || retained.length || pending.some((b) => b.sent))
+      return;
+    const batch = pending[0];
+    if (batch) {
+      batch.sent = true;
+      const epoch = generation;
+      const saved = await saveOutbox(true);
+      if (epoch !== generation || !pending.includes(batch)) return;
+      if (!saved || socket?.readyState !== WebSocket.OPEN) {
+        batch.sent = false;
+        if (!saved) status("Unable to save local edits on this device. Keep this window open.");
+        return;
       }
+      socket.send(JSON.stringify({ type: "ops", batch: batch.n, ops: batch.ops }));
+    }
+  }
+  function retryRetained() {
+    if (!canEdit() || !retained.length || pending.some((b) => b.sent)) return;
+    const desired = Ops.apply(confirmed, retained).doc;
+    const limits = window.VerynizeRoomLimits;
+    if (
+      limits.bytes(desired) > limits.DOCUMENT_BYTES ||
+      desired.pages?.some((page) => limits.bytes(page) > limits.PAGE_BYTES)
+    )
+      return;
+    const ops = Ops.diff(confirmed, desired, { ignore: LOCAL_KEYS });
+    const shrinks = (op) =>
+      ["remove", "removePage"].includes(op.t) ||
+      (op.t === "text" && limits.bytes(op.value) < limits.bytes(op.base));
+    ops.sort((a, b) => Number(!shrinks(a)) - Number(!shrinks(b)));
+    retained = [];
+    queueOps(ops);
   }
   function queueOps(ops) {
-    const stamped = ops.map((op) => ({ ...op, s: clock.next() }));
-    const last = pending[pending.length - 1];
-    if (last && !last.sent && last.ops.length + stamped.length <= 4000) last.ops.push(...stamped);
-    else pending.push({ n: ++batchNumber, ops: stamped, sent: false });
+    if (retained.length) {
+      const desired = Ops.apply(Ops.apply(confirmed, retained).doc, ops).doc;
+      retained = Ops.diff(confirmed, desired, { ignore: LOCAL_KEYS });
+      retryRetained();
+      saveOutbox(true);
+      return;
+    }
+    const limits = window.VerynizeRoomLimits;
+    const groups = limits.batchOps(ops.map((op) => ({ ...op, s: clock.next() })));
+    if (!groups) {
+      retained = pending.flatMap((b) => b.ops).concat(ops);
+      pending = [];
+      status("File is too large to sync. Your edits stay on this device.");
+    } else
+      for (const group of groups) {
+        // Edits made while a batch is in flight join the unsent tail, so a drag or typing burst
+        // waits for one round trip instead of one per change.
+        const last = pending[pending.length - 1],
+          size = limits.bytes(group);
+        if (
+          last &&
+          !last.sent &&
+          last.size &&
+          last.ops.length + group.length <= 4000 &&
+          last.size + size <= limits.MESSAGE_BYTES - 65536
+        ) {
+          last.ops.push(...group);
+          last.size += size;
+        } else pending.push({ n: ++batchNumber, ops: group, sent: false, size });
+      }
     clearTimeout(sendTimer);
     sendTimer = setTimeout(sendPending, 40);
+    // sendPending writes the outbox before each send; this only covers edits waiting behind it.
     saveOutbox();
   }
   function localChange() {
@@ -561,6 +617,7 @@
   };
   let pageGenerations = new Map();
   function receiveOps(message) {
+    let retryAfterRejection = false;
     for (const page of confirmed?.pages || [])
       if (message.ops?.some((op) => !op.page || op.page === page.id))
         pageGenerations.set(page.id, (pageGenerations.get(page.id) || 0) + 1);
@@ -574,18 +631,39 @@
     }
     if (Number.isSafeInteger(message.revision)) revision = Math.max(revision, message.revision);
     if (message.client === clientId) {
-      pending = pending.filter((batch) => batch.n > message.batch);
       const sizeReason = message.reasons?.find((r) => window.storageLimits?.isSizeError(r?.reason));
+      if (
+        sizeReason ||
+        message.tooLarge ||
+        (message.error && window.storageLimits?.isSizeError(message.error))
+      ) {
+        // A correction may arrive while the rejected batch is still in flight.
+        retryAfterRejection = pending.some((batch) => batch.n > message.batch);
+        retained = pending.flatMap((batch) => batch.ops).concat(retained);
+        pending = [];
+      } else pending = pending.filter((batch) => batch.n > message.batch);
       if (message.error) status(message.error);
       else if (sizeReason) status(sizeReason.reason);
       else if (message.rejected)
         status(
           `${message.rejected} change${message.rejected === 1 ? " was" : "s were"} superseded by newer edits`,
         );
-      else status(`Saved shared revision ${revision}`);
-    } else if (message.ops?.length) status(`Synced revision ${revision}`);
+      else
+        status(
+          retained.length
+            ? "Edits are not synced; kept on this device until the file fits."
+            : `Saved shared revision ${revision}`,
+        );
+    } else if (message.ops?.length)
+      status(
+        retained.length
+          ? "Edits are not synced; kept on this device."
+          : `Synced revision ${revision}`,
+      );
     rebuild();
-    saveOutbox();
+    if (retryAfterRejection) retryRetained();
+    saveOutbox(true);
+    sendPending();
   }
   /**
    * Pages fetched on the socket (lazy rooms): each replaces its stub in the confirmed document and
@@ -625,6 +703,8 @@
       : [];
   /** Make sure local operations reached the server (used before publishing). */
   async function flushOps() {
+    if (retained.length)
+      throw Error("Edits are kept on this device and will sync once the file fits.");
     if (!pending.length || !connection) return;
     const epoch = generation,
       info = connection;
@@ -633,6 +713,8 @@
       const until = Date.now() + 5000;
       while (pending.length && Date.now() < until && epoch === generation)
         await new Promise((resolve) => setTimeout(resolve, 50));
+      if (retained.length)
+        throw Error("Edits are kept on this device and will sync once the file fits.");
       if (!pending.length || epoch !== generation) return;
     }
     for (const batch of pending.slice()) {
@@ -668,9 +750,7 @@
   // applied; the rest are resent. Beyond the limits only the confirmed document is kept and the
   // file's own document is diffed against it again (whole-document fallback).
   const OUTBOX_DB = "verynize-cloud",
-    OUTBOX_STORE = "outbox",
-    OUTBOX_OPS = 4000,
-    OUTBOX_BYTES = 1500000;
+    OUTBOX_STORE = "outbox";
   let outboxDb = null,
     outboxTimer = null;
   const roomKey = (info) => `${info.server}|${info.id}`;
@@ -701,17 +781,15 @@
   const clearOutbox = (key) => outbox("readwrite", (store) => store.delete(key));
   function outboxState() {
     if (!connection || protocol < 2 || !confirmed || !clientId) return null;
-    let batches = pending.map((batch) => ({ n: batch.n, ops: batch.ops }));
-    const count = batches.reduce((sum, batch) => sum + batch.ops.length, 0);
-    const overflow = count > OUTBOX_OPS || JSON.stringify(batches).length > OUTBOX_BYTES;
-    if (overflow) batches = [];
+    const batches = pending.map((batch) => ({ n: batch.n, ops: batch.ops }));
     return {
       server: connection.server,
       id: connection.id,
       clientId,
       batch: batchNumber,
       pending: batches,
-      overflow,
+      retained,
+      overflow: false,
       confirmed,
       revision,
       role,
@@ -724,18 +802,12 @@
     clearTimeout(outboxTimer);
     outboxTimer = null;
     if (!connection) return;
-    // Signed-in files live in the database. Pending operations stay in memory; navigation
-    // waits for acknowledgement instead of relying on a second document on this device.
-    if (sessionFor(connection.server)) {
-      clearOutbox(roomKey(connection));
-      return;
-    }
     const write = () => {
       outboxTimer = null;
       const state = outboxState();
-      if (state) outbox("readwrite", (store) => store.put(state, roomKey(state)));
+      if (state) return outbox("readwrite", (store) => store.put(state, roomKey(state)));
     };
-    if (now) write();
+    if (now) return write();
     else outboxTimer = setTimeout(write, 150);
   }
   window.addEventListener("pagehide", () => {
@@ -745,7 +817,9 @@
   /** Mark the room's library record as detached (left, revoked) and forget its stored outbox. */
   function forgetRoom(info) {
     if (!info) return;
-    clearOutbox(roomKey(info));
+    // Leaving or losing access must not erase the only durable copy of rejected edits.
+    if (retained.length || pending.length) saveOutbox(true);
+    else clearOutbox(roomKey(info));
     const lib = library(),
       id = info.fileId || lib?.findCloud?.(info.server, info.id),
       cloud = id && lib?.cloudOf?.(id);
@@ -763,7 +837,7 @@
           revision,
           pageGenerations: Object.fromEntries(pageGenerations),
           unloaded: Pages.unloadedIds(),
-          pinned: pending.length > 0 || Pages.deferredOps().length > 0,
+          pinned: retained.length > 0 || pending.length > 0 || Pages.deferredOps().length > 0,
         });
     }
     if (outboxTimer && !leave) saveOutbox(true);
@@ -792,6 +866,7 @@
     confirmed = null;
     pageGenerations.clear();
     pending = [];
+    retained = [];
     drawPeers();
     legacyPending = false;
     inflight = null;
@@ -905,11 +980,26 @@
             released = Pages.reset(message.unloaded || [], message.pages);
           }
           revision = message.revision;
+          // New servers report rejected receipts durably. With older servers an unknown
+          // acknowledged outcome is conservatively retained rather than losing authored work.
+          const rejected = message.rejectedBatches;
+          const uncertain = pending.filter(
+            (b) =>
+              b.n <= (message.acked || 0) && (!Array.isArray(rejected) || rejected.includes(b.n)),
+          );
+          retained = uncertain.flatMap((b) => b.ops).concat(retained);
           pending = pending.filter((batch) => batch.n > (message.acked || 0));
+          if (retained.length) {
+            retained = retained.concat(pending.flatMap((b) => b.ops));
+            pending = [];
+          }
           for (const batch of pending) batch.sent = false;
           if (released.length && canEdit()) queueOps(released);
           rebuild();
           window.dispatchEvent(new CustomEvent("cloud-hydrated", { detail: { epoch } }));
+          retryRetained();
+          if (retained.length)
+            status("Edits are not synced; kept on this device until the file fits.");
           sendPending();
           Pages.resume();
           saveOutbox();
@@ -1134,13 +1224,14 @@
     // Active authority lives outside the disposable inactive-room LRU.
     window.switchCache.remove(window.switchCache.key(info));
     protocol = Number.isSafeInteger(current.protocol) && Ops ? current.protocol : 1;
-    const restore = restoreFile && protocol >= 2 && stored?.clientId ? stored : null;
+    const restore = protocol >= 2 && stored?.clientId ? stored : null;
     if (restoreFile && !restore && current.document) load = true;
     clientId = restore ? restore.clientId : randomId();
     clock = Ops ? Ops.createClock(clientId) : null;
     pending = restore
       ? (restore.pending || []).map((batch) => ({ n: batch.n, ops: batch.ops, sent: false }))
       : [];
+    retained = restore?.retained || [];
     batchNumber = restore ? restore.batch || 0 : 0;
     for (const batch of pending) for (const op of batch.ops) if (op.s) clock.observe(op.s);
     resetHistory();
@@ -1291,7 +1382,7 @@
     /** True when a session for `server` exists (a room link without a token can open). */
     hasSession: (server) => !!sessionFor(server),
     /** Unacknowledged local batches of the open room. */
-    pendingCount: () => pending.length,
+    pendingCount: () => pending.length + Number(retained.length > 0),
     /** Lazy pages of the open room: {unloaded, requested, deferred} (web/page-loader.js). */
     pages: () => Pages.state(),
     /** The stored outbox of a room (client id, batches, confirmed document), for diagnostics. */
@@ -1489,7 +1580,7 @@
     if (epoch !== generation) return;
     if (inflight) await inflight;
     if (epoch !== generation) return;
-    if (legacyPending || conflict || pending.length)
+    if (legacyPending || conflict || pending.length || retained.length)
       throw Error("Resolve pending edits before publishing");
     const result = await request(`/api/rooms/${info.id}/publish`, { method: "POST" }, info);
     if (epoch !== generation) return;
@@ -1538,6 +1629,7 @@
     if (epoch !== generation) return;
     legacyPending = false;
     pending = [];
+    retained = [];
     confirmed = current.document;
     revision = current.revision;
     apply(current.document);
@@ -1560,6 +1652,7 @@
     if (protocol >= 2) {
       confirmed = current.document;
       pending = [];
+      retained = [];
       const ops = Ops.diff(current.document, window.design.getDocument(), { ignore: LOCAL_KEYS });
       if (ops.length) queueOps(ops);
       await flushOps();

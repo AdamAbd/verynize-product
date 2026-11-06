@@ -1,5 +1,7 @@
 # Canvas performance: research synthesis (2026-11-04)
 
+See [node-cap-2026-11-06.md](node-cap-2026-11-06.md) for the larger-document measurements, page/document limits, and tiles re-evaluation.
+
 Question: is Verynize's DOM-based canvas "the brutal mistake" described on X, and what is the real, measured performance gain from each way of fixing it, including FigCraft's approach?
 
 All numbers are from one Apple M1 (8 GiB, DPR 2), Electron 42 / Chromium 148, unless marked otherwise. "Measured" means a run in this worktree; everything else is labelled.

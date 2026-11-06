@@ -16,10 +16,12 @@
 // such a room on first open, inside the constructor's synchronous turn (atomic), and records
 // `layout` in the `meta` table, so it runs once.
 import "../web/cloud-ops.js";
+import "../web/document-core.js";
 import { fail } from "./http.js";
 import { DOCUMENT_BYTES, META_BYTES, PAGE_BYTES, byteSize } from "./limits.js";
 
 const Ops = globalThis.VerynizeOps;
+const { NODE_LIMITS, nodeLimitMessage } = globalThis.VerynizeDocument;
 const PART_CHARS = 256 * 1024;
 const MB = (bytes) => `${Math.round((bytes / 1024 / 1024) * 10) / 10} MB`;
 // `null` keeps the key's position, so assembled documents serialize like the stored ones.
@@ -210,20 +212,26 @@ export class RoomStore {
       replace
         ? []
         : this.sql
-            .exec("SELECT id,position,bytes FROM pages")
+            .exec("SELECT id,position,bytes,nodes FROM pages")
             .toArray()
             .map((row) => [row.id, row]),
     );
     const writes = [];
     let total = metaBytes;
+    let nodeCount = 0;
     for (const page of after.pages) {
       if (stored.has(page.id) && state.stubs.has(page.id)) {
         total += stored.get(page.id).bytes;
+        nodeCount += stored.get(page.id).nodes;
         continue;
       }
+      nodeCount += page.nodes.length;
+      if (enforce && page.nodes.length > NODE_LIMITS.perPage)
+        tooLarge(nodeLimitMessage(page.nodes.length, NODE_LIMITS.perPage, page.name));
       const head = headText(page),
         nodes = JSON.stringify(page.nodes);
       const bytes = byteSize(head) - 4 + byteSize(nodes);
+      // Logical page budget is independent of the bounded physical parts rows.
       if (enforce && bytes > PAGE_BYTES)
         tooLarge(`${pageLabel(page)} exceeds the ${MB(PAGE_BYTES)} page limit`);
       total += bytes;
@@ -231,6 +239,8 @@ export class RoomStore {
       if (previous && previous.head === head && previous.nodes === nodes) continue;
       writes.push({ page, head, nodes, bytes, previous });
     }
+    if (enforce && nodeCount > NODE_LIMITS.perDocument)
+      tooLarge(nodeLimitMessage(nodeCount, NODE_LIMITS.perDocument));
     if (enforce && total > DOCUMENT_BYTES)
       tooLarge(`The document exceeds the ${MB(DOCUMENT_BYTES)} room limit`);
 

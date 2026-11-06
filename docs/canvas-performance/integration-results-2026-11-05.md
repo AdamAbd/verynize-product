@@ -1,5 +1,7 @@
 # Integrated results: fixes 1–5 together (2026-11-05)
 
+> Historical measurement. The node-cap follow-up and current decision are in [node-cap-2026-11-06.md](node-cap-2026-11-06.md).
+
 All five fixes merged on `perf/canvas-integration` (PRs #13–#17 on top of #12) and measured **sequentially on an idle machine** (Apple M1, 8 GiB; 1-min load 3.1–5.0 during the run). Same harness and fixture as the baseline: `node eval/canvas-perf/bench-verynize.cjs --sizes 100,500,1000,2000,5000 --runs 5 --no-profile`. Raw: [results/verynize-integration-2026-11-05.json](../../eval/canvas-perf/results/verynize-integration-2026-11-05.json); before: [results/verynize-2026-11-04-sequential.json](../../eval/canvas-perf/results/verynize-2026-11-04-sequential.json). Medians of five fresh app launches. Handler = main-thread time per input; frame = rAF interval (vsync-capped, 16.7 ms is on time at 60 Hz).
 
 ## Before → after

@@ -20,9 +20,16 @@ const quantile = (a, q) =>
   for (const n of process.argv.includes("--sizes")
     ? process.argv[process.argv.indexOf("--sizes") + 1].split(",").map(Number)
     : [1000, 5000, 13000, 50000])
-    for (const flag of [false, true]) {
+    for (
+      let run = 0;
+      run <
+      Number(
+        process.argv.includes("--runs") ? process.argv[process.argv.indexOf("--runs") + 1] : 1,
+      );
+      run++
+    ) for (const flag of [false, true]) {
       const profile = await fs.mkdtemp(`${os.tmpdir()}/tiles-bench-`);
-      const row = { n, flag, loadAverage: os.loadavg(), freeBytes: os.freemem() };
+      const row = { n, run, flag, loadAverage: os.loadavg(), freeBytes: os.freemem() };
       report.samples.push(row);
       let app,
         failed = false;

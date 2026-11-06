@@ -5,7 +5,7 @@
 import { DurableObject, acceptWebSocket } from "#cloud-runtime";
 import "../web/cloud-ops.js";
 import { RoomStore } from "./room-store.js";
-import { MESSAGE_BYTES, REQUEST_BYTES } from "./limits.js";
+import { MESSAGE_BYTES, REQUEST_BYTES, byteSize } from "./limits.js";
 import {
   json,
   fail,
@@ -48,6 +48,7 @@ export class DesignRoom extends DurableObject {
       CREATE TABLE IF NOT EXISTS capabilities (id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, role TEXT NOT NULL, label TEXT, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS members (account_id TEXT PRIMARY KEY, email TEXT NOT NULL, handle TEXT, role TEXT NOT NULL, added_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS stamps (path TEXT PRIMARY KEY, stamp TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS rejected_batches (client_id TEXT, batch INTEGER, reason TEXT NOT NULL, PRIMARY KEY(client_id,batch));
       CREATE TABLE IF NOT EXISTS clients (client_id TEXT PRIMARY KEY, last_batch INTEGER NOT NULL, seen_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS comments (id TEXT PRIMARY KEY, author TEXT NOT NULL, account_id TEXT, page_id TEXT, node_id TEXT, text TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -280,6 +281,13 @@ export class DesignRoom extends DurableObject {
     return json(result);
   }
 
+  rejectedBatches(client) {
+    return this.sql
+      .exec("SELECT batch FROM rejected_batches WHERE client_id=?", client || "")
+      .toArray()
+      .map((row) => row.batch);
+  }
+
   /** Apply one client batch of operations. Returns the message describing the outcome. */
   applyBatch(data, role) {
     const client = data?.client,
@@ -292,8 +300,23 @@ export class DesignRoom extends DurableObject {
     const last =
       this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
         ?.last_batch ?? 0;
-    if (batch <= last)
-      return { type: "ops", client, batch, revision, ops: [], rejected: 0, duplicate: true };
+    if (batch <= last) {
+      const reason = this.sql
+        .exec("SELECT reason FROM rejected_batches WHERE client_id=? AND batch=?", client, batch)
+        .toArray()[0]?.reason;
+      return {
+        type: "ops",
+        client,
+        batch,
+        revision,
+        ops: [],
+        rejected: reason ? ops.length : 0,
+        duplicate: true,
+        ...(reason ? { tooLarge: true, retained: true, error: reason } : {}),
+      };
+    }
+    // Clients send one batch at a time, so every earlier outcome has been received.
+    this.sql.exec("DELETE FROM rejected_batches WHERE client_id=? AND batch<?", client, batch);
     this.sql.exec(
       "INSERT OR REPLACE INTO clients (client_id,last_batch,seen_at) VALUES (?,?,?)",
       client,
@@ -313,6 +336,13 @@ export class DesignRoom extends DurableObject {
     const limit = Date.now() + FUTURE_SKEW;
     // Large inline binaries never reach room storage (cloud/inline-binaries.js).
     const screened = screenOps(this.env, ops);
+    if (screened.rejected.length)
+      this.sql.exec(
+        "INSERT OR IGNORE INTO rejected_batches VALUES (?,?,?)",
+        client,
+        batch,
+        String(screened.rejected[0]?.reason || "Some edits were rejected"),
+      );
     const stamped = screened.ops.map((op) => {
       const parsed = Ops.decode(op?.s);
       // Missing or far-future stamps would win forever; the server restamps them.
@@ -345,6 +375,12 @@ export class DesignRoom extends DurableObject {
       this.store.commit(state, result.doc);
     } catch (error) {
       if (error?.status !== 413) throw error;
+      this.sql.exec(
+        "INSERT OR IGNORE INTO rejected_batches VALUES (?,?,?)",
+        client,
+        batch,
+        error.message,
+      );
       return {
         type: "ops",
         client,
@@ -354,6 +390,7 @@ export class DesignRoom extends DurableObject {
         rejected: ops.length,
         error: error.message,
         tooLarge: true,
+        retained: true,
       };
     }
     store.flush();
@@ -616,7 +653,15 @@ export class DesignRoom extends DurableObject {
             ...(lazy ? { lazyPages: true } : {}),
           }),
         );
-        if (!lazy) server.send(JSON.stringify({ type: "snapshot", ...this.snapshot(), acked }));
+        if (!lazy)
+          server.send(
+            JSON.stringify({
+              type: "snapshot",
+              ...this.snapshot(),
+              acked,
+              rejectedBatches: this.rejectedBatches(client),
+            }),
+          );
         this.broadcast({ type: "presence", peers: this.peers() });
         return response;
       }
@@ -843,7 +888,7 @@ export class DesignRoom extends DurableObject {
 
   async webSocketMessage(ws, message) {
     try {
-      if (typeof message !== "string" || message.length > MESSAGE_BYTES)
+      if (typeof message !== "string" || byteSize(message) > MESSAGE_BYTES)
         throw Error("Invalid message size");
       const data = JSON.parse(message);
       const state = ws.deserializeAttachment() || {};
@@ -874,8 +919,20 @@ export class DesignRoom extends DurableObject {
         ws.send(
           JSON.stringify(
             Number.isSafeInteger(data.revision) && data.revision === revision
-              ? { type: "snapshot", same: true, revision, acked, pages: this.store.index() }
-              : { type: "snapshot", ...this.lazySnapshot(pages), acked },
+              ? {
+                  type: "snapshot",
+                  same: true,
+                  revision,
+                  acked,
+                  rejectedBatches: this.rejectedBatches(state.client),
+                  pages: this.store.index(),
+                }
+              : {
+                  type: "snapshot",
+                  ...this.lazySnapshot(pages),
+                  acked,
+                  rejectedBatches: this.rejectedBatches(state.client),
+                },
           ),
         );
       } else if (data.type === "pages") {

@@ -36,7 +36,7 @@
     const zoom = Number(editor().getCamera?.().zoom) || 1;
     const base = root.getBoundingClientRect();
     const out = {};
-    for (const el of [root, ...root.querySelectorAll('[data-id]')].slice(0, 5000)) {
+    for (const el of [root, ...root.querySelectorAll('[data-id]')].slice(0, window.VerynizeDocument.NODE_LIMITS.perPage)) {
       const r = el.getBoundingClientRect();
       const box = { x: (r.left - base.left) / zoom, y: (r.top - base.top) / zoom, w: r.width / zoom, h: r.height / zoom };
       if (el.dataset.designType === 'text') Object.assign(box, { scrollWidth: el.scrollWidth, scrollHeight: el.scrollHeight, clientWidth: el.clientWidth, clientHeight: el.clientHeight });

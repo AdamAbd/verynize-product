@@ -14,6 +14,8 @@ const arg = (name, fallback) => {
   return i < 0 ? fallback : process.argv[i + 1];
 };
 const sizes = arg("--sizes", "100,500,1000,2000,5000,13000,50000").split(",").map(Number);
+const requestedPages = Number(arg("--pages", "1"));
+const nodesPerPage = Number(arg("--nodes-per-page", "0"));
 const runs = Number(arg("--runs", "5"));
 const ceilingMs = Number(arg("--ceiling-ms", "60000"));
 // --skip selectAll (comma list of render,edit,pan,zoom,drag,selectAll): leave operations out, e.g. one that hits the
@@ -192,6 +194,8 @@ async function main() {
     node: process.version,
     sizes,
     runs,
+    requestedPages,
+    nodesPerPage,
     ceilingMs,
     skipped: [...skip],
     storage,
@@ -213,6 +217,16 @@ async function main() {
   for (const n of sizes) {
     if (stop) break;
     const doc = synthetic(n, { clip: clipBoards });
+    const pageCount = nodesPerPage ? Math.ceil(n / nodesPerPage) : requestedPages;
+    if (pageCount > 1) {
+      const nodes = doc.pages[0].nodes;
+      const chunk = Math.ceil(n / pageCount / 20) * 20;
+      doc.pages = Array.from({ length: pageCount }, (_, i) => ({
+        id: i ? `p${i}` : "p",
+        name: `Page ${i + 1}`,
+        nodes: nodes.slice(i * chunk, (i + 1) * chunk),
+      }));
+    }
     validateDocument(doc);
     const rows = [];
     for (let run = 0; run < runs; run++) {

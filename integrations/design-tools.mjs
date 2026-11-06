@@ -305,6 +305,24 @@ function pendingAssets(document) {
   return out;
 }
 
+async function retryAssetTransaction(backend, ref, fn) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await backend.transact(ref, fn); }
+    catch (error) {
+      if (!/locked|conflict/i.test(error.message) || attempt >= 8) throw error;
+      await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
+async function imageWarnings(backend, ref, out) {
+  const key = docKey(out.name, ref);
+  await waitForAssets(backend, key);
+  const state = await backend.read(ref);
+  out.revision = state.revision;
+  const images = state.document.pages.flatMap(p => p.nodes).filter(n => ['missing', 'pending'].includes(n.assetStatus));
+  return [...(sessionFor(backend).warnings.get(key) || []), ...(images.length ? [`${images.length} image(s) missing/pending: ${images.map(n => `${n.name}: ${n.assetError || 'download pending'}`).join('; ')}`] : [])];
+}
+
 /** Resolve pending remote images in the background: download, embed as data URL, mark ready|missing. */
 function scheduleAssets(backend, docRef, items, key = docKey(docRef)) {
   const session = sessionFor(backend);
@@ -317,12 +335,12 @@ function scheduleAssets(backend, docRef, items, key = docKey(docRef)) {
     for (let i = 0; i < fresh.length; i += 4) {
       results.push(...await Promise.all(fresh.slice(i, i + 4).map(async item => ({ ...item, result: await Promise.resolve(fetchImage(item.url)).catch(error => ({ ok: false, error: error?.message || String(error) })) }))));
     }
-    await backend.transact(docRef, document => {
+    await retryAssetTransaction(backend, docRef, document => {
       let changed = 0;
       for (const { pageId, nodeId, url, result } of results) {
         const node = document.pages.find(p => p.id === pageId)?.nodes.find(n => n.id === nodeId);
         if (!node || node.srcRemote !== url || node.assetStatus !== 'pending') continue;
-        if (result?.ok && result.dataUrl) { node.src = result.dataUrl; node.assetStatus = 'ready'; delete node.assetError; }
+        if (result?.ok && result.dataUrl) { if (node.type === 'image') node.src = result.dataUrl; else node.fills = [{ type: 'image', src: result.dataUrl, fit: 'cover' }]; node.assetStatus = 'ready'; delete node.assetError; }
         else { node.assetStatus = 'missing'; node.assetError = String(result?.error || 'download failed').slice(0, 300); }
         changed++;
       }
@@ -330,7 +348,17 @@ function scheduleAssets(backend, docRef, items, key = docKey(docRef)) {
     });
     session.receipts.invalidate(key);
     for (const { url, result } of results) { const photo = session.photos.get(url); if (result?.ok && photo) trackUnsplashDownload(photo).catch(() => {}); }
-  })().catch(() => {}).finally(() => {
+  })().catch(async error => {
+    const message = `Asset completion failed: ${error.message}`;
+    session.warnings.set(key, [message]);
+    await retryAssetTransaction(backend, docRef, document => {
+      for (const item of fresh) {
+        const node = document.pages.find(p => p.id === item.pageId)?.nodes.find(n => n.id === item.nodeId);
+        if (node?.srcRemote === item.url && node.assetStatus === 'pending') { node.assetStatus = 'missing'; node.assetError = message.slice(0, 300); }
+      }
+      return { document, result: null };
+    }).catch(failure => session.warnings.set(key, [message, `Could not persist asset error: ${failure.message}`]));
+  }).finally(() => {
     for (const item of fresh) session.inflight.delete(item.nodeId + '\u0000' + item.url);
     session.pending.get(key)?.delete(job);
   });
@@ -1072,10 +1100,14 @@ export function toolTable(backend, context = {}) {
     run: async ({ name, pageId }) => { const state = await backend.read(name); return { code: documentToJsx(state.document, pageId), revision: state.revision }; },
   };
   const viewportArg = z.object({ width: z.number().int().min(200).max(8000), height: z.number().int().min(200).max(8000), colorScheme: z.enum(['light', 'dark']).optional() }).strict().optional().describe('Viewport for @media, vw/vh and responsive Tailwind variants (default 1440x900, light)');
+  const importOptions = {
+    name: z.string().min(1).max(200).optional().describe('Artboard name; defaults to title, file basename, or a unique Imported page N'),
+    placement: z.enum(['auto', 'preserve']).optional().describe('auto (default) places new roots beside existing roots; preserve keeps source coordinates'),
+  };
   t.import_html = {
-    description: 'Import HTML as new artboards: inline html, a local .html file path (its <link>/@import stylesheets and images resolve relative to it, inside its folder), or an http(s) url (needs allowRemote). Computes the CSS cascade for the viewport, turns :root custom properties into colour tokens and typed variables, keeps Tailwind classes. Also reads export_css output losslessly. Returns warnings for CSS that has no canvas equivalent.',
-    inputSchema: { document: documentArg, pageId: pageArg, html: z.string().min(1).max(5_000_000).optional(), path: z.string().min(1).max(4096).optional(), url: z.string().url().max(4096).optional(), viewport: viewportArg, allowRemote: z.boolean().optional().describe('Fetch http(s) stylesheets and images (default false)') },
-    run: async ({ document: ref, pageId, html, path: file, url, viewport, allowRemote = false }) => {
+    description: 'Import HTML as new artboards: inline html, a local .html file path (its <link>/@import stylesheets and images resolve relative to it, inside its folder), or an http(s) url (needs allowRemote). Computes the CSS cascade for the viewport, turns :root custom properties into colour tokens and typed variables, keeps Tailwind classes. Also reads export_css output losslessly. Supports sanitized inline SVG and URL backgrounds. allowRemote explicitly permits local HTTP images for this local HTML import. Returns warnings for unavailable images and CSS that has no canvas equivalent.',
+    inputSchema: { ...importOptions, document: documentArg, pageId: pageArg, html: z.string().min(1).max(5_000_000).optional(), path: z.string().min(1).max(4096).optional(), url: z.string().url().max(4096).optional(), viewport: viewportArg, allowRemote: z.boolean().optional().describe('Fetch http(s) stylesheets and images (default false)') },
+    run: async ({ document: ref, pageId, html, path: file, url, viewport, allowRemote = false, name, placement = 'auto' }) => {
       if ([html, file, url].filter(v => v !== undefined).length !== 1) throw new Error('Pass exactly one of html, path or url');
       const { readFile, stat } = await import('node:fs/promises');
       const nodePath = await import('node:path');
@@ -1097,19 +1129,20 @@ export function toolTable(backend, context = {}) {
       }
       const state = await backend.read(ref);
       const page = getPage(state.document, pageId);
-      const prepared = await prepareHtmlImport(source, state.document, page.id, { baseUrl, root, allowFiles: file !== undefined, allowRemote, viewport });
-      let created = [];
-      const out = await write(backend, ref, document => { const r = prepared.apply(document); created = r.roots.map(root => indexPage(r.page).shortId(root)); return { document: r.document, result: null }; });
-      const warnings = warningText([...prepared.warnings]);
+      const prepared = await prepareHtmlImport(source, state.document, page.id, { baseUrl, root, allowFiles: file !== undefined, allowRemote, viewport, name, fallbackName: file ? nodePath.basename(file, nodePath.extname(file)) : undefined, placement });
+      let created = [], appliedWarnings = [];
+      const out = await write(backend, ref, document => { const r = prepared.apply(document); appliedWarnings = r.warnings; created = r.roots.map(root => indexPage(r.page).shortId(root)); return { document: r.document, result: null }; });
+      const warnings = warningText([...new Set([...prepared.warnings.filter(w => !w.startsWith('Image pending:')), ...appliedWarnings, ...(await imageWarnings(backend, ref, out))])]);
       return { artboards: created, stats: { elements: prepared.stats.elements, stylesheets: prepared.stats.stylesheets, rules: prepared.stats.rules, tokens: prepared.stats.tokens, variables: prepared.stats.variables, bindings: prepared.stats.bindings, restored: prepared.stats.restored }, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
     },
   };
   t.import_jsx = {
     description: 'Import Tailwind JSX with any number of root elements as new artboards: export_jsx output, an exported React component (Code export), or create_artboard JSX. Variables in the @verynize header are added when missing.',
-    inputSchema: { document: documentArg, pageId: pageArg, code: z.string().min(1).max(5_000_000), viewport: viewportArg },
-    run: async ({ document: ref, pageId, code, viewport }) => {
+    inputSchema: { ...importOptions, document: documentArg, pageId: pageArg, code: z.string().min(1).max(5_000_000), viewport: viewportArg },
+    run: async ({ document: ref, pageId, code, viewport, name, placement = 'auto' }) => {
       let created = [], warnings = [];
-      const out = await write(backend, ref, document => { const r = importJsxInto(document, getPage(document, pageId).id, code, { viewport: viewport || null }); created = r.roots.map(root => indexPage(r.page).shortId(root)); warnings = warningText(r.warnings || []); return { document: r.document, result: null }; });
+      const out = await write(backend, ref, document => { const r = importJsxInto(document, getPage(document, pageId).id, code, { viewport: viewport || null, name, placement }); created = r.roots.map(root => indexPage(r.page).shortId(root)); warnings = warningText(r.warnings || []); return { document: r.document, result: null }; });
+      warnings.push(...(await imageWarnings(backend, ref, out)));
       return { artboards: created, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
     },
   };
@@ -1177,7 +1210,16 @@ export function createStoreBackend(store, { screenshot, defaultName, fetchImage,
     async read(ref) { const name = await resolveName(ref); const state = await store.read(name); return { ...state, name, live: false, selection: [] }; },
     async transact(ref, fn) {
       const name = await resolveName(ref); let result;
-      const saved = await store.mutate(name, async () => { const current = await store.read(name); const out = fn(clone(current.document), { revision: current.revision }); result = out.result; return out.document; });
+      let saved;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          saved = await store.mutate(name, async () => { const current = await store.read(name); const out = fn(clone(current.document), { revision: current.revision }); result = out.result; return out.document; });
+          break;
+        } catch (error) {
+          if (!/Document is locked/.test(error.message) || attempt >= 40) throw error;
+          await new Promise(resolve => setTimeout(resolve, 25 + attempt * 5));
+        }
+      }
       return { result, revision: saved.revision, live: false, name };
     },
     async create(name, title) { const state = await store.create(name, title); return { name, title, pageId: state.document.pages[0].id, revision: state.revision, live: false, opened: false }; },

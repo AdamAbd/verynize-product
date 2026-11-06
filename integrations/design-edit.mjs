@@ -2,11 +2,12 @@
 // JSX -> node construction (Tailwind v4 classes, CSS-like flow layout with hug/fill sizing and
 // text inheritance), and the update_elements directive script. Everything here operates on plain
 // version-2 document objects.
+import { NODE_LIMITS } from './document-core.mjs';
 import { randomUUID } from 'node:crypto';
 import { NODE_DEFAULTS, parseJsx, parseClasses, collectText, isTextOnly, isSafeTag, serializeNode, cssVarForToken, normalizeColor, JsxSyntaxError, defaultSizing, isFlexRow } from './jsx-codec.mjs';
 import { layoutPage, measureText } from './codec-layout.mjs';
 import { cascadeText, styleFromSpec, mergeStyle, TEXT_DEFAULTS, baselineTextStyle } from './codec-text.mjs';
-import { resolveIcon, iconToNodeImage, isSafeColor } from './assets.mjs';
+import { resolveIcon, iconToNodeImage, isSafeColor, sanitizeSvg } from './assets.mjs';
 import { cssColorToHex } from './codec-css.mjs';
 import { BINDABLE, checkVariableValue } from './design-store.mjs';
 import { syncAliases, renameAliasRefs, dropAliases, boundValue, writeBoundValue, bindingOrder } from './variables.mjs';
@@ -135,6 +136,8 @@ function mergeFour(current, next) { return next.map((v, i) => (v === null || v =
 /** Apply parsed class props (not geometry) to a node of known type. Text keys become own (text) or inherited declarations (frames). */
 export function applySpec(node, spec, tokens) {
   const p = spec.props;
+  if (p.fills) node.fills = p.fills;
+  if (p.backgroundRemote) { node.srcRemote = p.backgroundRemote; node.assetStatus = 'pending'; }
   for (const key of COMMON_KEYS) if (key in p) node[key] = p[key];
   // Structured effects: a class that states a kind of effect replaces that kind; other kinds are kept.
   // Box shadows round-trip through `shadow` (shadow-[…]), drop/text shadows and filters stay structured.
@@ -350,6 +353,21 @@ export function buildNodes(elements, { document, page, parent = null, warnings =
   const tokens = document.tokens || {};
   const nodes = []; const roots = []; const instances = []; const slots = []; const batch = new Map();
   const make = (el, parentNode, isTop) => {
+    if (el.tag === 'svg') {
+      const escape = value => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      const serialize = e => e.text !== undefined ? escape(e.text) : `<${e.tag}${Object.entries(e.attrs).filter(([k]) => !/^on/i.test(k)).map(([k, v]) => ` ${k === 'className' ? 'class' : k.replace(/^(stroke|fill|clip)([A-Z])/g, (_, a, b) => a + '-' + b.toLowerCase())}="${escape(v)}"`).join('')}>${e.children.map(serialize).join('')}</${e.tag}>`;
+      const clean = sanitizeSvg(serialize({ ...el, attrs: { xmlns: 'http://www.w3.org/2000/svg', ...el.attrs } }));
+      if (!clean) warnings.push('Inline SVG was rejected by the sanitizer');
+      el = {
+        ...el, tag: 'img', children: [],
+        attrs: {
+          ...el.attrs,
+          src: clean ? `data:image/svg+xml;base64,${Buffer.from(clean).toString('base64')}` : '',
+          className: `${el.attrs.className || el.attrs.class || ''} ${Number(el.attrs.width) > 0 ? `[width:${Number(el.attrs.width)}px]` : ''} ${Number(el.attrs.height) > 0 ? `[height:${Number(el.attrs.height)}px]` : ''}`,
+        },
+      };
+    }
+    if (!el.attrs['data-node-label'] && el.attrs['data-name']) el.attrs['data-node-label'] = el.attrs['data-name'];
     const kind = classify(el);
     if (el.tag === 'br') return null;
     const isIcon = kind === 'icon';
@@ -394,6 +412,7 @@ export function buildNodes(elements, { document, page, parent = null, warnings =
         else { node.srcRemote = src; node.assetStatus = 'pending'; }
       } else if (reused?.src && !src) node.src = reused.src;
       else if (src) warnings.push(`Image ${label || ''} src must be an embedded data:image URL or an http(s) URL; created an empty image placeholder`);
+      if (el.attrs['data-asset-error']) { node.assetStatus = 'missing'; node.assetError = String(el.attrs['data-asset-error']).slice(0, 300); }
       applySvgColor(node, el.attrs);
     }
     if (type === 'text') { const { text, runs } = collectText(el, { tokens }); node.text = text; node.textRuns = runs; }
@@ -526,7 +545,7 @@ export function placeBuilt(document, page, built, warnings = []) {
   const parentOf = node => page.nodes.find(n => n.id === node.parentId);
   for (const slot of built.slots || []) {
     let inMain = false;
-    for (let cur = parentOf(slot), guard = 0; cur && guard < 10000; cur = parentOf(cur), guard++) if (isMainNode(cur)) { inMain = true; break; }
+    for (let cur = parentOf(slot), guard = 0; cur && guard < NODE_LIMITS.perPage; cur = parentOf(cur), guard++) if (isMainNode(cur)) { inMain = true; break; }
     if (!inMain) { delete slot.slot; delete slot.slotName; warnings.push(`data-slot on "${slot.name}" ignored: a slot must be inside a main component (data-component="true")`); }
   }
   let pending = [...(built.instances || [])];
@@ -833,11 +852,20 @@ export function runDirectives(document, pageId, script) {
 // ---------------------------------------------------------------------------------------------
 // Higher-level operations shared by the tools
 
-export function createArtboards(document, pageId, code, { viewport = null } = {}) {
+export function preflightImportNodes(document, pageId, incoming) {
+  const existing = getPage(document, pageId).nodes.length;
+  const total = document.pages.reduce((sum, p) => sum + p.nodes.length, 0);
+  const { perPage: pageLimit, perDocument: documentLimit } = NODE_LIMITS;
+  if (existing + incoming > pageLimit || total + incoming > documentLimit)
+    throw new Error(`Import node preflight: page existing=${existing}, incoming=${incoming}, limit=${pageLimit}; document existing=${total}, incoming=${incoming}, limit=${documentLimit}. Nothing was imported; import into another page or split the source into smaller artboards.`);
+}
+
+export function createArtboards(document, pageId, code, { viewport = null, name, placement = 'preserve', importNames = false } = {}) {
   const doc = clone(document); ensureShortIds(doc);
   const page = getPage(doc, pageId);
   const { elements, imports } = parseJsx(code);
   if (!elements.length) throw new Error('code must contain at least one root element');
+  if (importNames) for (const el of elements) if (!el.attrs['data-node-label'] && !el.attrs['data-name']) el.attrs['data-node-label'] = 'Imported page';
   const warnings = imports.length ? [`Import lines were ignored (${imports.length}); icon components (<Icon name="lucide:…"/>, <ArrowRight/>, <LuX/>, <IconBrandGithub/>) are resolved by name from the bundled lucide, tabler and phosphor sets`] : [];
   const built = buildNodes(elements, { document: doc, page, parent: null, warnings, viewport });
   const { roots, nodes } = built;
@@ -846,11 +874,19 @@ export function createArtboards(document, pageId, code, { viewport = null } = {}
   for (const root of roots) { root._placing = true; delete root._pos; }
   page.nodes.push(...nodes);
   placeBuilt(doc, page, built, warnings);
+  const incoming = page.nodes.length - getPage(document, pageId).nodes.length;
+  preflightImportNodes(document, pageId, incoming);
   reflow(page, roots, warnings, doc);
   for (const root of roots) {
     const { x, y } = positions.get(root) || {};
     delete root._placing;
-    root.x = Number.isFinite(x) ? x : nextArtboardX(page, root); root.y = Number.isFinite(y) ? y : 0;
+    root.x = placement === 'preserve' && Number.isFinite(x) ? x : nextArtboardX(page, root); root.y = placement === 'preserve' && Number.isFinite(y) ? y : 0;
+    if (name) root.name = name;
+    if (root.name === 'Imported page') {
+      let n = 1;
+      while (page.nodes.some(other => other !== root && other.name === `Imported page ${n}`)) n++;
+      root.name = `Imported page ${n}`;
+    }
   }
   ensureShortIds(doc);
   const index = indexPage(getPage(doc, pageId));
