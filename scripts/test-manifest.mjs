@@ -385,6 +385,7 @@ const desktop = [
     ".identity-allow",
   ]),
   unit("tests/window-cleanup.cjs", "desktop"),
+  unit("tests/ipc-contract.cjs", "desktop", ["desktop/*.cjs", "desktop/ipc-contract.ts"]),
   unit(
     "tests/platform-contract.cjs",
     "desktop",
