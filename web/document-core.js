@@ -315,11 +315,39 @@
         throw new Error("Invalid preview URL");
     }
   }
+  // Components (web/component-core.js, spec design/component-audit/README.md): only the types are checked. A
+  // dangling instanceOf/sourceId is not an error (lazy cloud pages, partial documents) and component cycles are
+  // ignored by the sync, never rejected here.
+  const LINK_ID = (value) => typeof value === "string" && value.length > 0 && value.length <= 200;
+  function componentError(node) {
+    for (const key of ["component", "slot"])
+      if (node[key] !== undefined && typeof node[key] !== "boolean") return `Invalid node ${key}`;
+    for (const key of ["instanceOf", "sourceId"])
+      if (node[key] !== undefined && !LINK_ID(node[key])) return `Invalid node ${key}`;
+    if (
+      node.overrides !== undefined &&
+      (!Array.isArray(node.overrides) ||
+        node.overrides.length > 500 ||
+        node.overrides.some((k) => typeof k !== "string" || !k || k.length > 120))
+    )
+      return "Invalid node overrides";
+    if (node.slot !== undefined && node.type !== "frame") return "Only frames can be slots";
+    if (
+      node.slotName !== undefined &&
+      (typeof node.slotName !== "string" || node.slotName.length > 100)
+    )
+      return "Invalid node slotName";
+    return null;
+  }
   function validateNode(node) {
     const S = nodeStyle(),
       shader = shaders();
     if (!NODE_TYPES.includes(node.type)) throw new Error("Unsupported node type");
     requireString(node.name, "Node name");
+    {
+      const ce = componentError(node);
+      if (ce) throw new Error(ce);
+    }
     for (const key of ["x", "y", "w", "h"])
       if (
         !Number.isFinite(node[key]) ||
@@ -597,6 +625,15 @@
       if (n.animated !== undefined) record(path + ".animated", n.animated, "");
       n.animated = "";
     }
+    // Component link fields of the wrong type are dropped, so a stored document never fails on them.
+    if (lossy && componentError(n))
+      for (const key of ["component", "slot", "slotName", "instanceOf", "sourceId", "overrides"]) {
+        if (n[key] === undefined) continue;
+        const kept = { type: n.type, [key]: n[key] };
+        if (!componentError(kept)) continue;
+        record(`${path}.${key}`, n[key], undefined);
+        delete n[key];
+      }
   }
 
   /** Fills editor defaults and repairs what the canvas renders the same either way (blank names, unknown font

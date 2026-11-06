@@ -25,6 +25,7 @@ export const CORE_ELECTRON = [
   "web/app.js",
   "web/canvas-render.js",
   "web/document-core.js",
+  "web/component-core.js",
   "web/document-safety.js",
   "web/node-index.js",
   "web/index.html",
@@ -279,6 +280,11 @@ const canvas = [
   electron("tests/canvas-interactions.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-incremental-render.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-clipboard.cjs", "canvas", AREA.canvas, CLIP),
+  electron("tests/components.cjs", "canvas", [
+    ...AREA.canvas,
+    "web/component-core.js",
+    "integrations/component-core.mjs",
+  ]),
   electron("tests/canvas-image-drop.cjs", "canvas", [...AREA.canvas, "web/image-drop.js"], CLIP),
   electron("tests/canvas-context-menu.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/file-thumbnail.cjs", "canvas", [

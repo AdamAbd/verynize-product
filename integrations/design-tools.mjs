@@ -32,6 +32,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { applyOperations, BINDABLE, checkVariableValue } from './design-store.mjs';
+import { syncComponents, componentProblems, hasComponents } from './component-core.mjs';
 import { setAlias, detachAlias, folderOf, folderMembers, folderRenames } from './variables.mjs';
 import { exportHTML } from './export-html.mjs';
 import { documentToJsx, documentToHtml, importJsxInto, prepareHtmlImport } from './codec-source.mjs';
@@ -212,7 +213,16 @@ const layoutFields = {
   masks: z.array(z.object({ type: z.enum(['linear', 'radial', 'conic', 'image', 'custom', 'shape']), rotation: z.number().finite().optional(), alpha: z.number().finite().min(0).max(100).optional(), invert: z.boolean().optional(), hidden: z.boolean().optional(), src: z.string().max(15e6).describe('image mask: embedded data:image URL').optional(), css: z.string().max(2100).describe('custom mask: a CSS gradient').optional(), shape: z.string().max(120).describe('shape mask: inset(T% R% B% L%) of this layer\'s box (negative = outside), as made by Use as mask').optional(), mode: z.enum(['auto', 'alpha', 'luminance']).optional(), repeat: z.enum(['repeat', 'no-repeat', 'repeat-x', 'repeat-y', 'space', 'round']).optional(), x: z.number().finite().describe('position X %').optional(), y: z.number().finite().describe('position Y %').optional(), size: z.string().max(40).describe('auto, cover, contain, or "<n>%"/"<n>px" (one or two values)').optional(), composite: z.enum(['add', 'subtract', 'intersect', 'exclude']).describe('how this mask combines with the masks below it').optional() }).strict()).max(8).describe('masks: gradient fades, embedded images, custom CSS gradients, shape (inset) masks').optional(),
   textStyle: z.record(z.string().regex(/^[a-zA-Z]{1,40}$/), z.union([z.string().max(400), z.number().finite(), z.boolean()])).refine(v => Object.keys(v).length <= 30, 'At most 30 textStyle keys').optional(),
 };
-const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), shaderFill: z.boolean().describe('Shader mode: a non-shader layer paints its fill with shaderPreset/shaderColors/shaderParams/shaderSpeed').optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields };
+// Components (web/component-core.js): link fields round-trip so agents never drop them.
+const componentFields = {
+  component: z.boolean().describe('main component (frames only)').optional(),
+  instanceOf: z.string().min(1).max(200).describe('instance root: id of its main component').optional(),
+  sourceId: z.string().min(1).max(200).describe('linked layer: id of the node it copies').optional(),
+  overrides: z.array(z.string().min(1).max(120)).max(500).describe('keys this linked layer owns; "children" on a slot = Modified').optional(),
+  slot: z.boolean().describe('slot frame inside a main component').optional(),
+  slotName: z.string().max(100).optional(),
+};
+const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), shaderFill: z.boolean().describe('Shader mode: a non-shader layer paints its fill with shaderPreset/shaderColors/shaderParams/shaderSpeed').optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields, ...componentFields };
 const pageName = z.string().min(1).max(200);
 const operations = z.array(z.discriminatedUnion('type', [
   z.object({ type: z.literal('create_page'), id: z.string().min(1).max(200).optional(), name: pageName }),
@@ -335,6 +345,17 @@ async function waitForAssets(backend, key) {
   return done;
 }
 
+/** The shared component sync (web/component-core.js) for an agent edit; an edit may not make a main contain an
+ * instance of itself. */
+function syncInstances(before, after) {
+  if (!hasComponents(after)) return after;
+  syncComponents(before, after);
+  const had = new Set(before ? componentProblems(before).map(p => p.id) : []);
+  const added = componentProblems(after).filter(p => !had.has(p.id));
+  if (added.length) throw new Error(added[0].message);
+  return after;
+}
+
 /**
  * Run a write through the backend; ensures ids are persisted and token colors stay in sync,
  * invalidates verification receipts for the document and queues pending remote images.
@@ -343,7 +364,9 @@ async function write(backend, ref, fn) {
   let pending = [];
   const out = await backend.transact(ref, (document, meta) => {
     ensureShortIds(document);
+    const before = hasComponents(document) ? clone(document) : null;
     const result = fn(document, meta);
+    syncInstances(before, result.document);
     ensureShortIds(result.document); syncTokenColors(result.document);
     pending = pendingAssets(result.document);
     return result;

@@ -71,6 +71,7 @@
         const subtree = ed.descendants(top.id), mapping = new Map([...subtree].map(id => [id, ed.uid()]));
         const dx = c.inStack(top) ? 0 : offsets.get(top.parentId || null) || 0;
         const copies = list.filter(n => subtree.has(n.id)).map(n => ({...structuredClone(n), id: mapping.get(n.id), parentId: mapping.get(n.parentId) || n.parentId || null}));
+        window.VerynizeComponents?.adoptCopies(ed.design, copies, mapping); // a copy of a main is an instance of it
         const root = copies.find(n => n.id === mapping.get(top.id));
         root.x = r2((Number(top.x) || 0) + dx);
         list.splice(subtreeEnd(list, top.id), 0, ...copies);
@@ -88,6 +89,7 @@
     function materialize(data) {
       const ids = new Map(data.nodes.map(n => [n.id, ed.uid()])), roots = data.roots.filter(id => ids.has(id)), rootSet = new Set(roots);
       const copies = data.nodes.map(n => ({...structuredClone(n), id: ids.get(n.id), parentId: rootSet.has(n.id) ? null : ids.get(n.parentId) || null}));
+      window.VerynizeComponents?.adoptCopies(ed.design, copies, ids);
       const source = new Map(data.nodes.map(n => [n.id, n]));
       const boxes = roots.map(id => { const n = source.get(id), w = data.world?.[id]; return {x: w ? w.x : Number(n.x) || 0, y: w ? w.y : Number(n.y) || 0, w: Number(n.w) || 0, h: Number(n.h) || 0}; });
       const bounds = c.union(boxes) || {x: 0, y: 0, w: 0, h: 0};

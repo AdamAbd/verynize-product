@@ -1209,6 +1209,7 @@
     function duplicateNodes(ids, offset = 20) {
       const all = new Set(ids.flatMap(id => [...ed.descendants(id)])), mapping = new Map([...all].map(id => [id, ed.uid()]));
       const copies = ed.nodes().filter(n => all.has(n.id)).map(n => ({...structuredClone(n), id: mapping.get(n.id), parentId: mapping.get(n.parentId) || n.parentId, x: n.x + (all.has(n.parentId) ? 0 : offset), y: n.y + (all.has(n.parentId) ? 0 : offset)}));
+      window.VerynizeComponents?.adoptCopies(ed.design, copies, mapping); // a copy of a main is an instance of it
       ed.nodes().push(...copies);
       const result = ids.map(id => mapping.get(id));
       hooks.duplicated?.(result);
@@ -1489,6 +1490,7 @@
       const ids = new Map(data.nodes.map(n => [n.id, ed.uid()])), roots = new Set(data.roots);
       const target = !inPlace && sel().size === 1 && selectedNodes()[0].type === 'frame' && !roots.has(selectedNodes()[0].id) ? selectedNodes()[0] : null;
       const copies = data.nodes.map(n => ({...structuredClone(n), id: ids.get(n.id), parentId: ids.get(n.parentId) || n.parentId || null}));
+      window.VerynizeComponents?.adoptCopies(ed.design, copies, ids);
       const originalOf = new Map([...ids].map(([from, to]) => [to, from]));
       const placed = copies.filter(n => roots.has(originalOf.get(n.id)));
       for (const n of placed) {
