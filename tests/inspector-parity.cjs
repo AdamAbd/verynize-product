@@ -17,6 +17,8 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
  await fs.writeFile(path.join(fontCache,'meta','catalog.json'),JSON.stringify([
   {id:'lora',family:'Lora',category:'serif',weights:[400,500,600,700],styles:['normal','italic'],kind:'web'},
   {id:'zilla-slab',family:'Zilla Slab',category:'serif',weights:[300,400,500,600,700],styles:['normal'],kind:'web'},
+  // Enough families for the picker's infinite scroll to need more than one page.
+  ...Array.from({length:90},(_,i)=>({id:`scroll-test-${i}`,family:`Scroll Test ${String(i).padStart(2,'0')}`,category:'sans-serif',weights:[400],styles:['normal'],kind:'web'})),
  ]));
  const env={...process.env,VERYNIZE_FONT_CACHE:fontCache};delete env.ELECTRON_RUN_AS_NODE;env.VERYNIZE_SKIP_ONBOARDING='1';
  const app=await _electron.launch({env,args:['.',`--user-data-dir=${path.join(dir,'profile')}`],timeout:20000});
@@ -129,6 +131,25 @@ const pngSize=bytes=>({width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20
   await page.waitForFunction(()=>window.design.getDocument().pages[0].nodes[1].bindings?.fontWeight==='weight/strong');
   await page.locator('[data-variable="weight/strong"] select').selectOption('800');
   await page.waitForFunction(()=>window.design.getDocument().pages[0].nodes[1].fontWeight==='800');
+  // Font source tabs: All (Google + system), Custom (installed), Variable (font family variables, detach).
+  await closed();await page.getByRole('button',{name:'Font family'}).click();
+  const tabs=page.locator('#font-family-picker [role=tab]');
+  assert.deepEqual(await tabs.allInnerTexts(),['All','Custom','Variable']);
+  assert.equal(await page.locator('#font-family-list [data-family]').filter({hasText:'Installed'}).count(),0,'All lists no installed fonts');
+  // Infinite scroll: one page of 40, then the next page loads (spinner row) when the bottom is reached.
+  const options=page.locator('#font-family-list [data-family]');
+  assert.equal(await options.count(),40,'first page');
+  await page.locator('#font-family-list [data-font-list-more] [role=status]').waitFor();
+  await page.locator('#font-family-list').evaluate(el=>el.scrollTo(0,el.scrollHeight));
+  await page.waitForFunction(()=>document.querySelectorAll('#font-family-list [data-family]').length===80,null,{timeout:15000});
+  await tabs.filter({hasText:'Variable'}).click();
+  assert.equal(await page.locator('#font-family-list [data-font-list-more]').count(),0,'no spinner under variables');
+  await page.locator('#font-family-list [data-variable="font/body"]').click();
+  await page.waitForFunction(()=>window.design.getDocument().pages[0].nodes[1].bindings?.fontFamily==='font/body');
+  await closed();await page.getByRole('button',{name:'Font family'}).click();
+  assert.equal(await tabs.filter({hasText:'Variable'}).getAttribute('aria-selected'),'true','a bound family opens on Variable');
+  await page.locator('#font-family-list').getByRole('button',{name:'Detach variable'}).click();
+  await page.waitForFunction(()=>!window.design.getDocument().pages[0].nodes[1].bindings?.fontFamily);
   console.log('PASS font catalog picker, family-limited weights, font family/weight variables');
 
   // --- Export: 0.5× / 4× PNG and PDF through the native save dialog, success toast --------------------------
