@@ -166,6 +166,14 @@ const hitDocument = {
     // ---------- A drag in a large document ----------
     await load(largeDocument(), ["n1"]);
     await page.waitForTimeout(800); // the idle save of the load is done
+    // Style work of the first move (drag start + re-parent), from a trace: how many elements Blink restyled.
+    const cdp = await page.context().newCDPSession(page);
+    const trace = [];
+    cdp.on("Tracing.dataCollected", (e) => trace.push(...e.value));
+    await cdp.send("Tracing.start", {
+      categories: "devtools.timeline,blink.user_timing",
+      transferMode: "ReportEvents",
+    });
     const drag = await page.evaluate(async () => {
       const counts = {
         stringify: 0,
@@ -242,7 +250,10 @@ const hitDocument = {
       counting = false;
       const down = { stringify: counts.stringify, clone: counts.clone };
       // n1 starts under the nested frame n10: the first move re-parents it there.
+      target.getBoundingClientRect(); // style the press dirtied is not the move's
+      performance.mark("first-move-start");
       await move(x0 + 40, y0 + 30);
+      performance.measure("first-move", "first-move-start");
       const parentAfterFirst = getDocument().pages[0].nodes.find((n) => n.id === "n1").parentId;
       // Thirty moves well inside n10 (and n0): the frame set under the pointer does not change.
       const hitsBefore = counts.hitTests;
@@ -285,6 +296,21 @@ const hitDocument = {
         canUndo,
       };
     });
+    const ended = new Promise((resolve) => cdp.once("Tracing.tracingComplete", resolve));
+    await cdp.send("Tracing.end");
+    await ended;
+    const span = trace.filter((e) => e.name === "first-move" && (e.ph === "b" || e.ph === "e"));
+    assert.equal(span.length, 2, "the trace has the first move");
+    const [from, to] = span.map((e) => e.ts).sort((a, b) => a - b);
+    const restyled = trace
+      .filter((e) => e.name === "UpdateLayoutTree" && e.ts >= from && e.ts <= to)
+      .reduce((sum, e) => sum + (e.args?.elementCount || 0), 0);
+    // A state class on an ancestor of the canvas with rules for layers (`.moving #canvas .layer…`) restyled every
+    // layer of the page when a drag started.
+    assert.ok(
+      restyled < 500,
+      `${restyled} elements restyled by the first move of a 5,000-layer page`,
+    );
     assert.equal(drag.click.stringify, 0, "a click does not snapshot the document");
     assert.equal(drag.down.stringify, 0, "nor does the press that starts a drag");
     assert.deepEqual(drag.parents, ["n10", "n0", "n10"], "drop targets follow the pointer");
@@ -319,7 +345,7 @@ const hitDocument = {
     assert.deepEqual(undone, drag.before, "one undo step undoes the whole drag");
     assert.deepEqual(errors, []);
     console.log(
-      `canvas-drag-scale: ok (${grid.full}/${grid.points} full hit tests on the grid, ${grid.fullInA}/${grid.inA} in A; median move ${sorted[sorted.length >> 1].toFixed(1)} ms)`,
+      `canvas-drag-scale: ok (${grid.full}/${grid.points} full hit tests on the grid, ${grid.fullInA}/${grid.inA} in A; median move ${sorted[sorted.length >> 1].toFixed(1)} ms; ${restyled} elements restyled by the first move)`,
     );
   } finally {
     if (app) await app.close();

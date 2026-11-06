@@ -816,6 +816,16 @@
     }
     // Back to the layer's own translate before the render that commits the drag.
     function unfollow(list) { for (const s of list) if (s.el?.isConnected && s.el.style.translate === s.shown) s.el.style.translate = s.base; }
+    // While a drag runs the overlay and the selected layers carry the state its chrome reads (selection-chrome.js). Not
+    // a class on #workspace: rules under one restyle every layer of the page when it toggles (1 s at 50,000 layers).
+    let dragMarked = [];
+    function markDrag(on) {
+      workspace.classList.toggle('moving', on);
+      overlay.toggleAttribute('data-moving', on);
+      for (const el of dragMarked) el.removeAttribute('data-dragging');
+      dragMarked = on ? [...sel()].map(elementOf).filter(Boolean) : [];
+      for (const el of dragMarked) el.setAttribute('data-dragging', '');
+    }
     function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
       const g = gesture(true), start = {x: e.clientX, y: e.clientY};
@@ -825,7 +835,7 @@
         ev.preventDefault(); ev.stopImmediatePropagation();
         cancelled = true; window.removeEventListener('keydown', onKey, true);
         clearGhosts(stacked); drawGuides([]); drawDrop(null); setLayerPreview(null);
-        workspace.classList.remove('moving'); ed.updateMeasurement();
+        markDrag(false); ed.updateMeasurement();
       };
       const begin = ev => {
         const picked = moving.map(find).filter(Boolean);
@@ -842,7 +852,7 @@
         home = origin = parents.size === 1 ? [...parents][0] : undefined;
         // A top-level frame enters a stack by a drag (Wonder R1-row-return-during) but never a free frame (unproven).
         flowOnly = nodes.some(n => !n.parentId && n.type === 'frame');
-        workspace.classList.add('moving'); showHover(null);
+        markDrag(true); showHover(null);
       };
       track(e, ev => {
         if (!moving.length || cancelled) return;
@@ -867,7 +877,7 @@
           relocate(free.map(s => s.n), drop.parent.id === '' ? null : drop.parent.id);
           // Canvas only: panels, save and subscribers see the new parent with the release's render (the Layers tree
           // previews it meanwhile, below), so a drag across frames costs the page, not the whole document.
-          ed.renderCanvas();
+          ed.renderCanvas(); markDrag(true); // the render may have replaced the dragged layers' elements
           home = free[0].n.parentId || null;
           for (const s of free) { s.x = s.n.x - dx; s.y = s.n.y - dy; s.el = null; s.lx = s.n.x; s.ly = s.n.y; }
           targets = guideTargets(free.map(s => s.n.id));
@@ -882,7 +892,7 @@
       }, () => {
         window.removeEventListener('keydown', onKey, true);
         if (cancelled) return;
-        workspace.classList.remove('moving');
+        markDrag(false);
         if (!free) { onClick?.(); return; }
         unfollow(free);
         drawGuides([]); drawDrop(null); setLayerPreview(null);
