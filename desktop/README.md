@@ -160,9 +160,9 @@ Legacy public fields describe the custom endpoint; legacy writes select `custom`
 `defaultProvider` accompanies them. An omitted key vendor means `custom`. Empty keys leave the key
 unchanged; `clearKey` removes it. `configured` is true for a selected custom endpoint or a default
 vendor with a key. `available` means a key is present (or custom HTTP needs none), not vendor reachability.
-Fresh profiles default to `nano_banana_lite`. V1 records migrate to `custom`, preserving their model,
+Fresh profiles use `codex_plan` when the system Codex CLI is signed in with ChatGPT, otherwise `nano_banana_lite`. Explicit selections are preserved; old v2 records are treated conservatively as explicit. `providerChosen` distinguishes automatic defaults in new records. The Codex entry reports `status` (Connected / Sign in needed / Codex not installed), has vendor `codex`, and needs no image API key. SIWC alone does not enable it. V1 records migrate to `custom`, preserving their model,
 size, URL and ciphertext; official OpenAI endpoint keys also populate the OpenAI slot. V2 disk records
-are `{version:2,defaultProvider,keys:{openai?,google?,custom?},custom}` with ciphertext only. Unavailable
+are `{version:2,defaultProvider,providerChosen,keys:{openai?,google?,custom?},custom}` with ciphertext only. Unavailable
 OS encryption (including Linux basic_text) uses session memory. Settings updates are serialized.
 
 Desktop IPC and MCP share one generator and concurrency guard. `generate_image` accepts

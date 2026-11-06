@@ -5,7 +5,8 @@ export type KeyState = { hasKey: boolean; keyStorage: string };
 export type Provider = {
   id: string;
   label: string;
-  vendor: Vendor;
+  vendor: Vendor | "codex";
+  status?: string;
   model: string;
   hasKey: boolean;
   available: boolean;

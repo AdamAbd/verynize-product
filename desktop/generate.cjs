@@ -8,6 +8,7 @@ const { isEncryptionAvailable } = require("./secure-storage.cjs");
 const { pathToFileURL } = require("node:url");
 const exec = require("node:util").promisify(execFile);
 const agents = require("./agents.cjs");
+const codexImage = require("./codex-image.cjs");
 function registerGeneration(handle, parent) {
   let active = null;
   onWindowClosed(parent, () => {
@@ -115,6 +116,14 @@ function createImageGenerator() {
     const engine = await load();
     const saved = engine.migrateSettings(raw);
     if (raw?.version !== 2) await save(saved);
+    if (
+      !saved.providerChosen &&
+      !Object.values(saved.keys).some(Boolean) &&
+      !Object.values(sessionKeys).some(Boolean)
+    )
+      saved.defaultProvider = (await codexImage.status()).available
+        ? "codex_plan"
+        : engine.DEFAULT_IMAGE_PROVIDER;
     return saved;
   }
   function key(saved, vendor) {
@@ -138,6 +147,7 @@ function createImageGenerator() {
         ];
       }),
     );
+    const codex = await codexImage.status();
     return {
       defaultProvider: saved.defaultProvider,
       providers: engine.IMAGE_PROVIDERS.map((p) => ({
@@ -145,9 +155,12 @@ function createImageGenerator() {
         label: p.label,
         vendor: p.vendor,
         model: p.vendor === "custom" ? saved.custom.model : p.model,
-        hasKey: keys[p.vendor].hasKey,
+        hasKey: keys[p.vendor]?.hasKey || false,
+        ...(p.vendor === "codex" ? { status: codex.status } : {}),
         available:
-          keys[p.vendor].hasKey || (p.vendor === "custom" && saved.custom.provider === "http"),
+          p.vendor === "codex"
+            ? codex.available
+            : keys[p.vendor].hasKey || (p.vendor === "custom" && saved.custom.provider === "http"),
       })),
       keys,
       custom: saved.custom,
@@ -156,8 +169,10 @@ function createImageGenerator() {
       ...saved.custom,
       ...keys.custom,
       configured:
-        saved.defaultProvider === "custom" ||
-        keys[engine.IMAGE_PROVIDERS.find((p) => p.id === saved.defaultProvider).vendor].hasKey,
+        saved.defaultProvider === "codex_plan"
+          ? codex.available
+          : saved.defaultProvider === "custom" ||
+            keys[engine.IMAGE_PROVIDERS.find((p) => p.id === saved.defaultProvider).vendor].hasKey,
     };
   }
   function locked(fn) {
@@ -194,6 +209,8 @@ function createImageGenerator() {
         }
         const next = engine.migrateSettings({
           ...saved,
+          providerChosen:
+            saved.providerChosen || !!options.defaultProvider || !!Object.keys(legacy).length,
           defaultProvider:
             options.defaultProvider ??
             (Object.keys(legacy).length ? "custom" : saved.defaultProvider),
@@ -229,7 +246,7 @@ function createImageGenerator() {
         const now = Date.now();
         while (mcpAttempts.length && mcpAttempts[0] <= now - 3600000) mcpAttempts.shift();
         if (mcpAttempts.length >= 5)
-          throw Error("Paid image generation limit reached (5 attempts per hour)");
+          throw Error("Image generation limit reached (5 attempts per hour)");
         mcpAttempts.push(now);
       }
       const imageAbort = new AbortController();
@@ -263,6 +280,7 @@ function createImageGenerator() {
           apiKey: key(saved, entry.vendor),
           prompt: options.prompt,
           signal,
+          codex: codexImage.generate,
         });
       } finally {
         imageAborts.delete(caller);

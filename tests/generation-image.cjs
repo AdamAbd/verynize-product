@@ -112,6 +112,7 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
     await page.locator("#generate-art").click();
     await page.locator("#generate-dialog").waitFor({ state: "visible" });
     await page.locator("#generate-engine").selectOption("image");
+    await page.waitForFunction(() => !document.getElementById("generate-image-settings").disabled);
   };
   const imageNodes = (page) =>
     page.evaluate(() =>
@@ -128,7 +129,12 @@ const WRONG = "sk-wrong-fixture-key-55aa11";
     );
     await fs.writeFile(path.join(dir, "image-provider.json"), "{broken");
     const recovered = await page.evaluate(() => window.desktop.imageProvider.get());
-    assert.equal(recovered.defaultProvider, "nano_banana_lite");
+    assert.equal(
+      recovered.defaultProvider,
+      recovered.providers.find((provider) => provider.id === "codex_plan").available
+        ? "codex_plan"
+        : "nano_banana_lite",
+    );
     assert.equal(await fs.readFile(path.join(dir, "image-provider.json.bak"), "utf8"), "{broken");
     // Engine switch shows provider settings, hides agent-only fields.
     await openDialog(page);

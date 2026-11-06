@@ -255,11 +255,11 @@ test("catalog, fresh default, migration and vendor routing", () => {
   assert.equal(new Set(IMAGE_PROVIDERS.map((p) => p.id)).size, IMAGE_PROVIDERS.length);
   for (const p of IMAGE_PROVIDERS) {
     assert.ok(p.label);
-    assert.ok(["google", "openai", "custom"].includes(p.vendor));
-    if (p.vendor !== "custom") assert.ok(p.model);
+    assert.ok(["codex", "google", "openai", "custom"].includes(p.vendor));
+    if (!["custom", "codex"].includes(p.vendor)) assert.ok(p.model);
   }
   assert.deepEqual(IMAGE_FILL_TYPES, ["frame", "rectangle"]);
-  assert.equal(IMAGE_PROVIDERS[0].label, "Nano Banana 2 Lite");
+  assert.equal(IMAGE_PROVIDERS[0].label, "Codex · ChatGPT plan");
   const fresh = migrateSettings();
   assert.equal(fresh.defaultProvider, DEFAULT_IMAGE_PROVIDER);
   assert.equal(providerSettings(fresh).model, "gemini-3.1-flash-lite-image");
@@ -369,4 +369,27 @@ test("provider output respects the renderer's 8 MB limit", async () => {
   });
   assert.equal(saved.keys.custom, "custom-cipher");
   assert.equal(saved.keys.openai, undefined);
+});
+
+test("Codex provider uses shared validation and preserves explicit choices", async () => {
+  const fresh = migrateSettings();
+  assert.equal(fresh.providerChosen, false);
+  assert.equal(
+    migrateSettings({ version: 2, defaultProvider: "nano_banana_lite" }).providerChosen,
+    true,
+  );
+  assert.equal(
+    migrateSettings({ ...fresh, defaultProvider: "codex_plan", providerChosen: true })
+      .defaultProvider,
+    "codex_plan",
+  );
+  const settings = providerSettings(fresh, "codex_plan");
+  const result = await generateImage({ settings, prompt: "Teapot", codex: async () => photo });
+  assert.equal(result.width, 64);
+  assert.equal(result.provider, "codex");
+  await assert.rejects(
+    generateImage({ settings, prompt: "Teapot", codex: async () => Buffer.from("invalid") }),
+    /PNG, JPEG or WebP/,
+  );
+  await assert.rejects(generateImage({ settings, prompt: "Teapot" }), /sign in to Codex/);
 });

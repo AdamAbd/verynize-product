@@ -8,7 +8,7 @@ const { png } = require("./fixtures/png.cjs");
 const { waitForUiReady } = require("./helpers/ui-ready.cjs");
 
 (async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "settings-image-"));
+  const dir = await fs.mkdtemp(path.join(os.homedir(), ".cache", "settings-image-"));
   const photo = png(96, 64, [60, 120, 180]);
   const requests = [];
   const server = http.createServer((req, res) => {
@@ -27,7 +27,10 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
   delete env.ELECTRON_RUN_AS_NODE;
   let app, page;
   const launch = async () => {
-    app = await _electron.launch({ env, args: [".", `--user-data-dir=${dir}`] });
+    app = await _electron.launch({
+      env,
+      args: ["--use-mock-keychain", ".", `--user-data-dir=${dir}`],
+    });
     page = await app.firstWindow();
     await waitForUiReady(page);
     await app.evaluate(({ BrowserWindow }) =>
@@ -75,6 +78,10 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
         (id) => window.desktop.imageProvider.get().then((s) => s.defaultProvider === id),
         custom.id,
       );
+    assert.ok(catalog.some((provider) => provider.id === "codex_plan"));
+    const apiKeys = page.getByText("Use your own API key", { exact: true });
+    assert.equal(await page.locator("#settings-image-key-google").isVisible(), false);
+    await apiKeys.click();
     // Exercise every key row the real backend supports, without sending a vendor request.
     const vendors = initial.keys ? ["google", "openai", "custom"] : ["custom"];
     for (const vendor of vendors) {

@@ -65,3 +65,21 @@ Directory: ../pen-research/verynize/ (relative to the worktree root)
 - find-light.png
 - settings-provider-open.png
 - generate-dialog.png
+
+### Codex plan image provider (2026-11-06)
+
+Live verification on this Mac with system Codex CLI 0.166.0: `account/read`
+identified `chatgpt`; an ephemeral read-only thread with approval policy `never`
+and `features.image_generation=true` generated one blue teapot image. No shell
+or file-write tool was invoked. `item/completed` carried:
+`{type:"imageGeneration",id:"exec-…",status:"completed",revisedPrompt:"…",
+result:<1818872 base64 characters>,transparentBackground:false,failure:null,
+savedPath:"<CODEX_HOME>/generated_images/<threadId>/exec-….png",
+generationId:"…",startedAtMs:<number>,completedAtMs:<number>}`.
+The turn completed successfully. The generated schema has no attachment download
+RPC for `fileId`; the implementation tries the thread's generated-images folder
+then gives an explicit unsupported-attachment error. The exec fallback is only
+used when app-server is explicitly unsupported, never after a submitted turn.
+Existing v2 records lack a choice marker; conservatively preserve their provider
+rather than overriding a potentially explicit selection. New automatic records
+persist `providerChosen:false`, allowing Codex to become the default on sign-in.
