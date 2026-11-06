@@ -557,6 +557,7 @@ const ux = [
 export const CLOUD_SCENARIOS = [
   "tests/cloud-rooms.mjs",
   "tests/cloud-room-pages.mjs",
+  "tests/cloud-version-history.mjs",
   "tests/cloud-auth.mjs",
   "tests/cloud-web-access.mjs",
   "tests/cloud-auth-bridge.mjs",

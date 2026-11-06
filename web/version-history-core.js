@@ -15,7 +15,7 @@
 // idle(state, now, current, idleMs)
 //                          versions for artboards whose last edit is older than idleMs and differs
 //                          from their newest version (`current(id)` returns the live snapshot).
-// changes(beforeDoc, afterDoc, pageIds?)
+// changes(beforeDoc, afterDoc, {pages?, nodes?})
 //                          the artboards whose subtree differs: [{artboardId, before, after}].
 // prune(metas, options)    ids of the versions to delete so that at most `max` remain per artboard.
 // restore(doc, snapshot, {asCopy, newId})
@@ -103,45 +103,50 @@
 
   const snapshotHash = (snap) => (snap ? hash(JSON.stringify(snap.nodes)) : null);
 
-  /** Artboards whose subtree differs between two documents (only `pageIds` when given). */
-  function changes(beforeDoc, afterDoc, pageIds = null) {
+  /**
+   * Artboards whose subtree differs between two documents. `options.pages` limits the comparison
+   * to some pages; `options.nodes` (node ids) to the artboards holding one of them, before or after.
+   */
+  function changes(beforeDoc, afterDoc, options = null) {
+    const { pages: pageIds = null, nodes: nodeIds = null } = Array.isArray(options)
+      ? { pages: options }
+      : options || {};
     const wanted = pageIds ? new Set(pageIds) : null;
+    const touched = nodeIds ? new Set(nodeIds) : null;
     const pagesOf = (doc) =>
       new Map((doc?.pages || []).filter((p) => !wanted || wanted.has(p.id)).map((p) => [p.id, p]));
     const before = pagesOf(beforeDoc),
       after = pagesOf(afterDoc);
     const out = [];
-    const texts = (page) => {
+    const boards = (page) => {
       const map = new Map();
-      for (const [id, nodes] of groups(page)) map.set(id, { nodes, text: JSON.stringify(nodes) });
+      for (const [id, nodes] of groups(page))
+        if (!touched || nodes.some((node) => touched.has(node.id))) map.set(id, nodes);
       return map;
     };
-    // Artboards that moved between pages count once, on the page that now holds them.
+    const describe = (id, nodes, page) => ({
+      artboardId: id,
+      pageId: page.id,
+      index: page.nodes.indexOf(nodes[0]),
+      name: typeof nodes[0].name === "string" ? nodes[0].name : "Artboard",
+      nodes: clone(nodes),
+    });
+    // Artboards that moved between pages count once.
     const seen = new Set();
     for (const id of new Set([...before.keys(), ...after.keys()])) {
       const a = before.get(id),
         b = after.get(id);
       if (a && b && a.nodes === b.nodes) continue;
-      const left = texts(a),
-        right = texts(b);
+      const left = boards(a),
+        right = boards(b);
       for (const boardId of new Set([...left.keys(), ...right.keys()])) {
+        if (seen.has(boardId)) continue;
         const l = left.get(boardId),
           r = right.get(boardId);
-        if (l && r && l.text === r.text) continue;
-        if (seen.has(boardId)) continue;
+        if (l && r && JSON.stringify(l) === JSON.stringify(r)) continue;
         seen.add(boardId);
-        const describe = (entry, page) =>
-          entry
-            ? {
-                artboardId: boardId,
-                pageId: page.id,
-                index: page.nodes.indexOf(entry.nodes[0]),
-                name: typeof entry.nodes[0].name === "string" ? entry.nodes[0].name : "Artboard",
-                nodes: clone(entry.nodes),
-              }
-            : null;
-        const beforeSnap = l ? describe(l, a) : snapshot(beforeDoc, boardId);
-        const afterSnap = r ? describe(r, b) : snapshot(afterDoc, boardId);
+        const beforeSnap = l ? describe(boardId, l, a) : snapshot(beforeDoc, boardId);
+        const afterSnap = r ? describe(boardId, r, b) : snapshot(afterDoc, boardId);
         if (
           beforeSnap &&
           afterSnap &&
