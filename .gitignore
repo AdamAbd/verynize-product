@@ -24,3 +24,5 @@ secrets*.json
 .DS_Store
 
 .typecheck/
+
+integrations/generated/

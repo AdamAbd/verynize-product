@@ -32,7 +32,7 @@ export default defineConfig({
       "no-dupe-keys": "error",
       "typescript/no-floating-promises": "warn",
     },
-    ignorePatterns: ["web/dist/**", "web-start/src/routeTree.gen.ts"],
+    ignorePatterns: ["web/dist/**", "web-start/src/routeTree.gen.ts", "integrations/generated/**"],
     jsPlugins: ["@shadcn/lint"],
     settings: {
       shadcn: {

@@ -60,6 +60,7 @@ export const FULL_SUITE = [
   "vite*.config.ts",
   "tsconfig*.json",
   "scripts/run-tests.mjs",
+  "scripts/build-integrations.mjs",
   "scripts/test-build-plan.mjs",
   "scripts/test-manifest.mjs",
 ];
@@ -508,6 +509,9 @@ const integrations = integrationFiles.map((name) => {
   const file = `integrations/${name}`;
   const base = name.replace(/\.test\.mjs$/, "");
   const covers = [`integrations/${base}.mjs`, `integrations/${base}/**`];
+  if (base === "typed-state") covers.push("integrations/src/**", "scripts/run-tests.mjs");
+  if (base === "typecheck-ratchet")
+    covers.push("scripts/typecheck-ratchet.mjs", "typecheck-baseline.json", "tsconfig*.json");
   if (base === "storage-limits")
     covers.push("web/room-limits.js", "web/storage-limits.js", "cloud/limits.js");
   if (base === "shader-runtime")

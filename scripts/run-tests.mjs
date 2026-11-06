@@ -195,7 +195,7 @@ function changedFiles(base, head) {
 
 // ---------------------------------------------------------------- import graph
 
-const SOURCE = /\.(c?js|mjs|ts|tsx)$/;
+const SOURCE = /\.(c?js|mjs|mts|cts|ts|tsx)$/;
 const SCAN_DIRS = [
   "desktop",
   "web",
@@ -223,7 +223,7 @@ function listSources() {
   return out;
 }
 
-function resolveImport(from, spec) {
+export function resolveImport(from, spec) {
   let target;
   if (spec.startsWith("@/")) target = "web/src/" + spec.slice(2);
   else if (spec === "#cloud-runtime")
@@ -232,9 +232,15 @@ function resolveImport(from, spec) {
   else if (spec.startsWith("."))
     target = path.posix.normalize(path.posix.join(path.posix.dirname(from), spec));
   else return [];
+  // Runtime wrappers load emitted ESM; test selection must follow its authoring source,
+  // including on clean checkouts before the integration build has run.
+  if (target.startsWith("integrations/generated/") && target.endsWith(".mjs"))
+    return [
+      target.replace("integrations/generated/", "integrations/src/").replace(/\.mjs$/, ".mts"),
+    ];
   for (const candidate of [
     target,
-    ...[".ts", ".tsx", ".js", ".mjs", ".cjs"].map((e) => target + e),
+    ...[".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"].map((e) => target + e),
     ...["ts", "tsx", "js"].map((e) => `${target}/index.${e}`),
   ])
     if (
@@ -603,6 +609,7 @@ async function prepare(selected, opts, env, results) {
       throw new Error(`build ${name} failed`);
     }
   };
+  await step("integrations", ["scripts/build-integrations.mjs"]);
   if (plan.ui) await step("ui", ["scripts/build-ui.cjs"]);
   // One Worker build for every cloud test (tests/cloud-harness.mjs reads CLOUD_WORKER_BUNDLE),
   // copied out of .cloudflare/output because tests/web-cloudflare.mjs and `vp dev` rewrite it.

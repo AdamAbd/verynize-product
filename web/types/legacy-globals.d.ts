@@ -72,7 +72,7 @@ declare global {
     };
     cloudWorkspace: CloudWorkspace;
     embeddedFontCss(markup?: string): string;
-    sanitizeSvg(source: string): HTMLElement | null;
+    sanitizeSvg(source: string): Element | null;
     previewTabTarget(): string | null;
     webCapture: { open(): void };
     verynizeTools: Readonly<{ toolsVersion: string; serverVersion: string }>;

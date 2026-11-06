@@ -12,6 +12,22 @@ const baseline = JSON.parse(readFileSync(baselineFile, "utf8"));
 const current = {};
 let failed = false;
 mkdirSync(new URL("../.typecheck/", import.meta.url), { recursive: true });
+// Migrated source has no baseline allowance, including during --update.
+const strict = spawnSync(
+  process.execPath,
+  [
+    "node_modules/typescript/bin/tsc",
+    "-p",
+    "tsconfig.integrations-build.json",
+    "--pretty",
+    "false",
+  ],
+  { cwd: root, encoding: "utf8" },
+);
+if (strict.error || strict.status !== 0)
+  throw Error(
+    `Strict integrations check failed: ${strict.error || strict.stdout || strict.stderr}`,
+  );
 for (const area of areas) {
   const run = spawnSync(
     process.execPath,
@@ -27,7 +43,7 @@ for (const area of areas) {
   for (const line of output.split("\n")) {
     if (!line.includes("error TS")) continue;
     const match = /^(.*?)\(\d+,\d+\): error TS(\d+):/.exec(line);
-    if (!match) throw Error(`Configuration error in ${area}: ${line}`);
+    if (!match || /\.json$/i.test(match[1])) throw Error(`Configuration error in ${area}: ${line}`);
     const key = `${match[1].replaceAll("\\", "/")} TS${match[2]}`;
     files[key] = (files[key] || 0) + 1;
     total++;

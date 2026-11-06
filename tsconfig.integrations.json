@@ -16,5 +16,5 @@
     }
   },
   "include": ["integrations/**/*.mjs"],
-  "exclude": ["integrations/**/*.test.mjs"]
+  "exclude": ["integrations/**/*.test.mjs", "integrations/generated/**"]
 }

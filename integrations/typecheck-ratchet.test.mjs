@@ -23,6 +23,14 @@ test("ratchet rejects increases and configuration errors; updates only decrease 
   };
   for (const area of areas)
     await writeFile(path.join(dir, `tsconfig.${area}.json`), JSON.stringify(config));
+  await writeFile(path.join(dir, "checked.ts"), "export const checked = true;\n");
+  await writeFile(
+    path.join(dir, "tsconfig.integrations-build.json"),
+    JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true, types: [], skipLibCheck: true },
+      files: ["checked.ts"],
+    }),
+  );
   const baselinePath = path.join(dir, "typecheck-baseline.json");
   const empty = JSON.stringify(
     Object.fromEntries(areas.map((area) => [area, { total: 0, files: {} }])),
@@ -55,4 +63,10 @@ test("ratchet rejects increases and configuration errors; updates only decrease 
   const badConfig = run();
   assert.equal(badConfig.status, 1);
   assert.match(badConfig.stderr, /Configuration error/);
+  await writeFile(path.join(dir, "tsconfig.desktop.json"), JSON.stringify(config));
+  await writeFile(path.join(dir, "checked.ts"), "export const bad: string = 42;\n");
+  const strictError = run("--update");
+  assert.equal(strictError.status, 1);
+  assert.match(strictError.stderr, /Strict integrations check failed/);
+  assert.deepEqual(JSON.parse(await readFile(baselinePath, "utf8")), JSON.parse(empty));
 });

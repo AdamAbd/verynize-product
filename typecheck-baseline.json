@@ -1,6 +1,6 @@
 {
   "desktop": {
-    "total": 823,
+    "total": 818,
     "files": {
       "desktop/agent-access.cjs TS2339": 4,
       "desktop/agent-auth.cjs TS18047": 2,
@@ -101,7 +101,7 @@
       "integrations/design-knowledge/skills.mjs TS2322": 1,
       "integrations/design-knowledge/skills.mjs TS2353": 1,
       "integrations/design-tools.mjs TS2339": 12,
-      "integrations/design-tools.mjs TS2353": 6,
+      "integrations/design-tools.mjs TS2353": 5,
       "integrations/export-code.mjs TS2339": 1,
       "integrations/export-html.mjs TS2339": 1,
       "integrations/figma-scene.mjs TS2339": 1,
@@ -113,7 +113,6 @@
       "integrations/variables.mjs TS2363": 1,
       "integrations/vector-jsx.mjs TS2339": 6,
       "integrations/vector-jsx.mjs TS2353": 1,
-      "integrations/verification.mjs TS2339": 4,
       "integrations/version-store.mjs TS2339": 4,
       "web/component-core.js TS2304": 1,
       "web/component-core.js TS2362": 1,
@@ -241,7 +240,7 @@
     }
   },
   "integrations": {
-    "total": 161,
+    "total": 156,
     "files": {
       "integrations/assets-live-smoke.mjs TS2353": 3,
       "integrations/assets.mjs TS2339": 2,
@@ -263,7 +262,7 @@
       "integrations/design-knowledge/skills.mjs TS2322": 1,
       "integrations/design-knowledge/skills.mjs TS2353": 1,
       "integrations/design-tools.mjs TS2339": 12,
-      "integrations/design-tools.mjs TS2353": 6,
+      "integrations/design-tools.mjs TS2353": 5,
       "integrations/export-code.mjs TS2339": 1,
       "integrations/export-html.mjs TS2339": 1,
       "integrations/figma-scene.mjs TS2339": 1,
@@ -279,7 +278,6 @@
       "integrations/variables.mjs TS2363": 1,
       "integrations/vector-jsx.mjs TS2339": 6,
       "integrations/vector-jsx.mjs TS2353": 1,
-      "integrations/verification.mjs TS2339": 4,
       "integrations/version-store.mjs TS2339": 4,
       "web/component-core.js TS2304": 1,
       "web/component-core.js TS2362": 1,
@@ -298,7 +296,7 @@
     }
   },
   "cloud": {
-    "total": 374,
+    "total": 369,
     "files": {
       "cloud/ai-executor.js TS2322": 2,
       "cloud/ai-executor.js TS2339": 38,
@@ -361,7 +359,7 @@
       "integrations/design-knowledge/skills.mjs TS2322": 1,
       "integrations/design-knowledge/skills.mjs TS2353": 1,
       "integrations/design-tools.mjs TS2339": 12,
-      "integrations/design-tools.mjs TS2353": 6,
+      "integrations/design-tools.mjs TS2353": 5,
       "integrations/export-code.mjs TS2339": 1,
       "integrations/export-html.mjs TS2339": 1,
       "integrations/fonts.mjs TS2339": 6,
@@ -372,7 +370,6 @@
       "integrations/variables.mjs TS2363": 1,
       "integrations/vector-jsx.mjs TS2339": 6,
       "integrations/vector-jsx.mjs TS2353": 1,
-      "integrations/verification.mjs TS2339": 4,
       "integrations/version-store.mjs TS2339": 4,
       "web/component-core.js TS2304": 1,
       "web/component-core.js TS2362": 1,
