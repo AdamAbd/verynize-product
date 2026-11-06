@@ -78,6 +78,14 @@ const path=require('node:path');
     assert.equal(list.editor.document,'offline');assert.deepEqual(list.documents.map(d=>d.name),['offline']);
     const liveAgain=await json('create_artboard',{document:'offline',code:'<div data-node-label="Now live" className="w-[80px] h-[80px]" />'});
     assert.equal(liveAgain.live,true,'the open saved document is edited live');
+    const scaleBefore=await page.evaluate(()=>window.verynize.getDocument().pages.reduce((n,p)=>n+p.nodes.length,0));
+    const scaleBoard=name=>'<div data-name="'+name+'">'+'<div/>'.repeat(2999)+'</div>';
+    const scaled=await json('import_jsx',{document:'offline',code:scaleBoard('Scale A')+scaleBoard('Scale B')});
+    assert.equal(scaled.live,true);
+    assert.equal(scaled.pages.length,2,'whole artboards split through the real live bridge');
+    const scaleDocument=await page.evaluate(()=>window.verynize.getDocument());
+    assert.equal(scaleDocument.pages.reduce((n,p)=>n+p.nodes.length,0),scaleBefore+6000);
+    assert.ok(scaleDocument.pages.every(p=>p.nodes.length<=5000));
     console.log('PASS live MCP bridge: auth, live create/edit/undo, measured screenshot + receipt + lint, verified finish, headless fallback and open_document');
   }finally{
     await client?.close().catch(()=>{});

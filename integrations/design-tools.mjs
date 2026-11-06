@@ -1119,13 +1119,14 @@ export function toolTable(backend, context = {}) {
   };
   const viewportArg = z.object({ width: z.number().int().min(200).max(8000), height: z.number().int().min(200).max(8000), colorScheme: z.enum(['light', 'dark']).optional() }).strict().optional().describe('Viewport for @media, vw/vh and responsive Tailwind variants (default 1440x900, light)');
   const importOptions = {
+    split: z.enum(['pages', 'none']).optional().describe('pages (default) distributes whole artboards across pages; none fails atomically on page overflow'),
     name: z.string().min(1).max(200).optional().describe('Artboard name; defaults to title, file basename, or a unique Imported page N'),
     placement: z.enum(['auto', 'preserve']).optional().describe('auto (default) places new roots beside existing roots; preserve keeps source coordinates'),
   };
   t.import_html = {
     description: 'Import HTML as new artboards: inline html, a local .html file path (its <link>/@import stylesheets and images resolve relative to it, inside its folder), or an http(s) url (needs allowRemote). Computes the CSS cascade for the viewport, turns :root custom properties into colour tokens and typed variables, keeps Tailwind classes. Also reads export_css output losslessly. Supports sanitized inline SVG and URL backgrounds. allowRemote explicitly permits local HTTP images for this local HTML import. Returns warnings for unavailable images and CSS that has no canvas equivalent.',
     inputSchema: { ...importOptions, document: documentArg, pageId: pageArg, html: z.string().min(1).max(5_000_000).optional(), path: z.string().min(1).max(4096).optional(), url: z.string().url().max(4096).optional(), viewport: viewportArg, allowRemote: z.boolean().optional().describe('Fetch http(s) stylesheets and images (default false)') },
-    run: async ({ document: ref, pageId, html, path: file, url, viewport, allowRemote = false, name, placement = 'auto' }) => {
+    run: async ({ document: ref, pageId, html, path: file, url, viewport, allowRemote = false, name, placement = 'auto', split = 'pages' }) => {
       if ([html, file, url].filter(v => v !== undefined).length !== 1) throw new Error('Pass exactly one of html, path or url');
       const { readFile, stat } = await import('node:fs/promises');
       const nodePath = await import('node:path');
@@ -1147,21 +1148,21 @@ export function toolTable(backend, context = {}) {
       }
       const state = await backend.read(ref);
       const page = getPage(state.document, pageId);
-      const prepared = await prepareHtmlImport(source, state.document, page.id, { baseUrl, root, allowFiles: file !== undefined, allowRemote, viewport, name, fallbackName: file ? nodePath.basename(file, nodePath.extname(file)) : undefined, placement });
-      let created = [], appliedWarnings = [];
-      const out = await write(backend, ref, document => { const r = prepared.apply(document); appliedWarnings = r.warnings; created = r.roots.map(root => indexPage(r.page).shortId(root)); return { document: r.document, result: null }; });
+      const prepared = await prepareHtmlImport(source, state.document, page.id, { baseUrl, root, allowFiles: file !== undefined, allowRemote, viewport, name, fallbackName: file ? nodePath.basename(file, nodePath.extname(file)) : undefined, placement, split });
+      let created = [], appliedWarnings = [], pages = [];
+      const out = await write(backend, ref, document => { const r = prepared.apply(document); appliedWarnings = r.warnings; pages = r.pages; created = pages.flatMap(p => p.artboards.map(a => a.id)); return { document: r.document, result: null }; });
       const warnings = warningText([...new Set([...prepared.warnings.filter(w => !w.startsWith('Image pending:')), ...appliedWarnings, ...(await imageWarnings(backend, ref, out))])]);
-      return { artboards: created, stats: { elements: prepared.stats.elements, stylesheets: prepared.stats.stylesheets, rules: prepared.stats.rules, tokens: prepared.stats.tokens, variables: prepared.stats.variables, bindings: prepared.stats.bindings, restored: prepared.stats.restored }, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
+      return { artboards: created, pages, stats: { elements: prepared.stats.elements, stylesheets: prepared.stats.stylesheets, rules: prepared.stats.rules, prunedRules: prepared.stats.prunedRules, tokens: prepared.stats.tokens, variables: prepared.stats.variables, bindings: prepared.stats.bindings, restored: prepared.stats.restored }, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
     },
   };
   t.import_jsx = {
     description: 'Import Tailwind JSX with any number of root elements as new artboards: export_jsx output, an exported React component (Code export), or create_artboard JSX. Variables in the @verynize header are added when missing.',
     inputSchema: { ...importOptions, document: documentArg, pageId: pageArg, code: z.string().min(1).max(5_000_000), viewport: viewportArg },
-    run: async ({ document: ref, pageId, code, viewport, name, placement = 'auto' }) => {
-      let created = [], warnings = [];
-      const out = await write(backend, ref, document => { const r = importJsxInto(document, getPage(document, pageId).id, code, { viewport: viewport || null, name, placement }); created = r.roots.map(root => indexPage(r.page).shortId(root)); warnings = warningText(r.warnings || []); return { document: r.document, result: null }; });
+    run: async ({ document: ref, pageId, code, viewport, name, placement = 'auto', split = 'pages' }) => {
+      let created = [], warnings = [], pages = [];
+      const out = await write(backend, ref, document => { const r = importJsxInto(document, getPage(document, pageId).id, code, { viewport: viewport || null, name, placement, split }); pages = r.pages; created = pages.flatMap(p => p.artboards.map(a => a.id)); warnings = warningText(r.warnings || []); return { document: r.document, result: null }; });
       warnings.push(...(await imageWarnings(backend, ref, out)));
-      return { artboards: created, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
+      return { artboards: created, pages, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
     },
   };
   Object.assign(t, shellToolTable(backend, context, { readPrepared, write, getPage, indexPage, invalidate: name => sessionFor(backend).receipts.invalidate(docKey(name)) }));

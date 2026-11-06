@@ -1,3 +1,4 @@
+import { distributeImport, importPageReport } from "./import-pages.mjs";
 // Pure document transforms used by the MCP tools: stable short element ids, page indexing,
 // JSX -> node construction (Tailwind v4 classes, CSS-like flow layout with hug/fill sizing and
 // text inheritance), and the update_elements directive script. Everything here operates on plain
@@ -860,7 +861,7 @@ export function preflightImportNodes(document, pageId, incoming) {
     throw new Error(`Import node preflight: page existing=${existing}, incoming=${incoming}, limit=${pageLimit}; document existing=${total}, incoming=${incoming}, limit=${documentLimit}. Nothing was imported; import into another page or split the source into smaller artboards.`);
 }
 
-export function createArtboards(document, pageId, code, { viewport = null, name, placement = 'preserve', importNames = false } = {}) {
+export function createArtboards(document, pageId, code, { viewport = null, name, placement = 'preserve', importNames = false, split = 'none' } = {}) {
   const doc = clone(document); ensureShortIds(doc);
   const page = getPage(doc, pageId);
   const { elements, imports } = parseJsx(code);
@@ -875,9 +876,11 @@ export function createArtboards(document, pageId, code, { viewport = null, name,
   page.nodes.push(...nodes);
   placeBuilt(doc, page, built, warnings);
   const incoming = page.nodes.length - getPage(document, pageId).nodes.length;
-  preflightImportNodes(document, pageId, incoming);
-  reflow(page, roots, warnings, doc);
-  for (const root of roots) {
+  if (split !== 'pages') preflightImportNodes(document, pageId, incoming);
+  const assignments = distributeImport(doc, page, getPage(document, pageId).nodes.length, roots, split);
+  for (const destination of new Set(assignments.map(a => a.page)))
+    reflow(destination, assignments.filter(a => a.page === destination).map(a => a.root), warnings, doc);
+  for (const { root, page } of assignments) {
     const { x, y } = positions.get(root) || {};
     delete root._placing;
     root.x = placement === 'preserve' && Number.isFinite(x) ? x : nextArtboardX(page, root); root.y = placement === 'preserve' && Number.isFinite(y) ? y : 0;
@@ -889,8 +892,7 @@ export function createArtboards(document, pageId, code, { viewport = null, name,
     }
   }
   ensureShortIds(doc);
-  const index = indexPage(getPage(doc, pageId));
-  return { document: doc, roots: roots.map(r => index.byId.get(r.id)), warnings, page: getPage(doc, pageId) };
+  return { document: doc, roots, pages: importPageReport(assignments), warnings, page: getPage(doc, pageId) };
 }
 
 /**
