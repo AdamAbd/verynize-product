@@ -328,3 +328,8 @@ PASS typography: Wonder layout, line height Auto, vertical alignment, Type setti
 
 Thus the final canvas and UX suite runs pass. The initial toast timeout and the
 repository-wide formatting failure remain explicitly recorded above.
+
+Editor files use `/editor/<fileId>` with stable library IDs. Tab switches push history; bare
+`/editor` and known cloud-room ID aliases replace to the local file URL. Unknown or unavailable
+files return to Files with a non-blocking notice. Settings history retains the full file path;
+cloud capabilities remain exclusively in the existing fragments.

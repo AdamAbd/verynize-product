@@ -27,10 +27,18 @@ function read(): string[] {
 let ids: string[] = read();
 // The shown file whose tab was closed (the last tab, Files took over): no tab until it is opened again.
 let closedShown: string | null = null;
-let snapshot: { tabs: FileSummary[]; currentId: string | null; hidden: boolean } = {
+// The file a tab switch is loading (web/switch-coordinator.js): its tab looks active at once, like Pen.
+let pendingId: string | null = null;
+let snapshot: {
+  tabs: FileSummary[];
+  currentId: string | null;
+  hidden: boolean;
+  pendingId: string | null;
+} = {
   tabs: [],
   currentId: null,
   hidden: false,
+  pendingId: null,
 };
 let snapshotKey = "";
 const listeners = new Set<() => void>();
@@ -58,10 +66,11 @@ function update() {
   }
   const tabs = ids.map((id) => files.get(id)!);
   const hidden = !currentId || !ids.includes(currentId);
-  const key = JSON.stringify([currentId, hidden, tabs.map((tab) => [tab.id, tab.name])]);
+  const pending = pendingId !== currentId && files.has(pendingId ?? "") ? pendingId : null;
+  const key = JSON.stringify([currentId, hidden, pending, tabs.map((tab) => [tab.id, tab.name])]);
   if (key === snapshotKey) return;
   snapshotKey = key;
-  snapshot = { tabs, currentId, hidden };
+  snapshot = { tabs, currentId, hidden, pendingId: pending };
   listeners.forEach((fn) => fn());
 }
 
@@ -72,6 +81,12 @@ function install() {
   if (!lib?.subscribe) return;
   installed = true;
   lib.subscribe(update);
+  window.addEventListener("switch-loading-change", (event) => {
+    const { kind, phase, to } = (event as CustomEvent).detail ?? {};
+    if (kind !== "file") return;
+    pendingId = phase === "begin" ? (to?.fileKey ?? null) : null;
+    update();
+  });
   window.addEventListener("library-file-opened", () => {
     // Opening a file always gives it a tab, even the one whose tab was just closed.
     closedShown = null;

@@ -46,7 +46,7 @@ export function TitleBar() {
     nameRef.current?.select();
   }, [renaming]);
   const { tabs: previewTabs } = usePreviewTabs();
-  const { tabs: fileTabs, currentId, hidden: currentHidden } = useFileTabs();
+  const { tabs: fileTabs, currentId, hidden: currentHidden, pendingId } = useFileTabs();
   // The repositories / chats sidebar lists local repositories: desktop only.
   const repositories = can("projects");
 
@@ -158,7 +158,7 @@ export function TitleBar() {
       className={cn(
         tab,
         "group/document-tab min-w-0 shrink gap-0 pr-1 data-dragging:opacity-50",
-        documentActive && tabActive,
+        documentActive && !pendingId && tabActive,
         currentHidden && "hidden",
       )}
       onClick={() => {
@@ -294,7 +294,12 @@ export function TitleBar() {
                 <div
                   data-file-tab={file.id}
                   {...dragProps(file.id)}
-                  className={cn(tab, "group/file-tab min-w-0 shrink gap-0 pr-1 data-dragging:opacity-50")}
+                  data-switch-pending={file.id === pendingId ? "" : undefined}
+                  className={cn(
+                    tab,
+                    "group/file-tab min-w-0 shrink gap-0 pr-1 data-dragging:opacity-50",
+                    file.id === pendingId && tabActive,
+                  )}
                   onClick={() => showFile(file.id)}
                 >
                   <File className="mr-1.5" />

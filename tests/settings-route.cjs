@@ -33,6 +33,8 @@ const os = require("node:os");
     const expectShell = async (path, { home = false } = {}) => {
       await page.waitForFunction(
         ({ path, home }) => {
+          if (path === "/editor")
+            path = "/editor/" + encodeURIComponent(window.fileLibrary.currentId);
           const settings = path.startsWith("/settings/");
           return (
             location.pathname === path &&

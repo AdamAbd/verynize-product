@@ -559,10 +559,17 @@
       return true;
     },
   };
+  let pageGenerations = new Map();
   function receiveOps(message) {
+    for (const page of confirmed?.pages || [])
+      if (message.ops?.some((op) => !op.page || op.page === page.id))
+        pageGenerations.set(page.id, (pageGenerations.get(page.id) || 0) + 1);
     if (message.client !== clientId && message.ops?.length) markRemote(message.ops);
     if (message.ops?.length) {
       confirmed = Ops.apply(confirmed, Pages.filterRemote(message.ops)).doc;
+      pageGenerations = new Map(
+        (confirmed?.pages || []).map((page) => [page.id, pageGenerations.get(page.id) || 1]),
+      );
       for (const op of message.ops) if (op.s) clock.observe(op.s);
     }
     if (Number.isSafeInteger(message.revision)) revision = Math.max(revision, message.revision);
@@ -597,6 +604,7 @@
         continue;
       }
       confirmed = Pages.fill(confirmed, { ...page, nodes: page.nodes || [] });
+      pageGenerations.set(page.id, (pageGenerations.get(page.id) || 0) + 1);
       for (const step of undoStack.concat(redoStack)) {
         step.from = Pages.fill(step.from, page);
         step.to = Pages.fill(step.to, page);
@@ -747,6 +755,17 @@
   // ---- connection -----------------------------------------------------------------------------
   /** `leave` ends this file's link to the room (Disconnect, revocation); otherwise the file stays cloud-backed. */
   function disconnect(message = "Disconnected. Local design retained.", leave = false) {
+    if (connection && confirmed) {
+      const cacheKey = window.switchCache.key(connection);
+      if (leave) window.switchCache.remove(cacheKey);
+      else
+        window.switchCache.put(cacheKey, confirmed, {
+          revision,
+          pageGenerations: Object.fromEntries(pageGenerations),
+          unloaded: Pages.unloadedIds(),
+          pinned: pending.length > 0 || Pages.deferredOps().length > 0,
+        });
+    }
     if (outboxTimer && !leave) saveOutbox(true);
     if (leave) forgetRoom(connection);
     // Leaving drops a matching #room= invite fragment, which the shell router otherwise keeps.
@@ -771,6 +790,7 @@
     selfId = null;
     role = null;
     confirmed = null;
+    pageGenerations.clear();
     pending = [];
     drawPeers();
     legacyPending = false;
@@ -876,6 +896,12 @@
             if (confirmed)
               markRemote(Ops.diff(confirmed, message.document, { ignore: LOCAL_KEYS }));
             confirmed = message.document;
+            pageGenerations = new Map(
+              (confirmed?.pages || []).map((page) => [
+                page.id,
+                (pageGenerations.get(page.id) || 0) + 1,
+              ]),
+            );
             released = Pages.reset(message.unloaded || [], message.pages);
           }
           revision = message.revision;
@@ -883,6 +909,7 @@
           for (const batch of pending) batch.sent = false;
           if (released.length && canEdit()) queueOps(released);
           rebuild();
+          window.dispatchEvent(new CustomEvent("cloud-hydrated", { detail: { epoch } }));
           sendPending();
           Pages.resume();
           saveOutbox();
@@ -927,7 +954,40 @@
    * A stored outbox is restored, and when the server is unreachable the file opens offline.
    */
   async function connect(info, load = true, expected, baseline = null) {
+    if (connection?.id === info.id && connection?.server === info.server && expected === undefined)
+      return;
+    const coordinator = window.switchCoordinator;
+    const own = !info.switchToken;
+    const switchToken =
+      info.switchToken ||
+      coordinator.begin({
+        kind: "file",
+        from: { fileKey: library()?.currentId, pageId: window.design.getView().page },
+        to: { fileKey: library()?.findCloud?.(info.server, info.id), pageId: null },
+      });
+    try {
+      await connectCore({ ...info, switchToken }, load, expected, baseline);
+      if (
+        coordinator.getState()?.token === switchToken &&
+        coordinator.getState()?.info?.freshness !== "confirmed"
+      )
+        coordinator.rendered(switchToken, {
+          fileKey: library()?.currentId,
+          pageId: window.design.getView().page,
+          freshness: "confirmed",
+        });
+    } catch (error) {
+      coordinator.fail(switchToken, error);
+      throw error;
+    } finally {
+      if (own) coordinator.finish(switchToken);
+    }
+  }
+  async function connectCore(info, load = true, expected, baseline = null) {
+    const switchToken = info.switchToken;
     const requestId = ++joinRequest;
+    if (info.storeOutgoing && account)
+      await window.cloudWorkspace.storeFile?.(library()?.currentId);
     if (expected === undefined) await flushBeforeSwitch();
     if (requestId !== joinRequest) return;
     const u = new URL(info.server);
@@ -951,20 +1011,59 @@
     // Joining loads the active page first (the rest arrives on the socket). Create room keeps the
     // open document, and a detached copy is compared with the whole room, so both read it all.
     const lazy = load && !record?.detached;
-    const [stored, fetched] = await Promise.all([
+    window.switchCoordinator.phase(switchToken, "flush");
+    const cached =
+      load && !record?.detached ? window.switchCache.get(window.switchCache.key(info)) : null;
+    let releasePresentation = null;
+    if (cached) {
+      releasePresentation = window.design.presentDocument(cached.document);
+      document.getElementById("workspace").inert = true;
+      window.switchCoordinator.rendered(switchToken, {
+        fileKey: fileId,
+        pageId: cached.document.activePage,
+        freshness: "provisional",
+      });
+    }
+    const cancelPresentation = (event) => {
+      if (event.detail.token === switchToken && event.detail.phase === "cancel") {
+        releasePresentation?.();
+        document.getElementById("workspace").inert = false;
+      }
+    };
+    window.addEventListener("switch-loading-change", cancelPresentation);
+    const fetching = Promise.all([
       readOutbox(roomKey(info)),
       request(`/api/rooms/${info.id}${lazy ? "?lazy=1" : ""}`, {}, info).then(
         (value) => ({ value }),
         (error) => ({ error }),
       ),
     ]);
-    if (epoch !== generation || requestId !== joinRequest) return;
+    let stored, fetched;
+    try {
+      if (cached) {
+        await window.switchCoordinator.paint();
+        window.switchCoordinator.phase(switchToken, "cachePaint");
+      }
+      [stored, fetched] = await fetching;
+    } finally {
+      window.removeEventListener("switch-loading-change", cancelPresentation);
+      releasePresentation?.();
+      if (window.switchCoordinator.getState()?.token === switchToken)
+        document.getElementById("workspace").inert = false;
+    }
+    if (
+      epoch !== generation ||
+      requestId !== joinRequest ||
+      window.switchCoordinator.getState()?.token !== switchToken
+    )
+      return;
     let current = fetched.value,
       offline = false;
     if (fetched.error) {
       const e = fetched.error;
       if (fileId && [401, 403, 404].includes(e.status)) {
         // Access ended (revoked, removed, deleted): the local copy stays, detached.
+        window.switchCache.remove(window.switchCache.key(info));
         accessEnded("removed", fileId)();
         forgetRoom({ ...info, fileId });
         throw Object.assign(Error(`${e.message}. The local copy of this file is kept.`), {
@@ -1005,6 +1104,7 @@
       if (lib.currentId !== fileId) {
         await lib.open(fileId, {
           cloudJoinEpoch: epoch,
+          switchToken,
           isCurrent: () => epoch === generation && requestId === joinRequest,
         });
         if (epoch !== generation || requestId !== joinRequest) return;
@@ -1016,6 +1116,7 @@
     } else if (load && lib?.createFromDocument) {
       fileId = await lib.createFromDocument(current.document, {
         cloudJoinEpoch: epoch,
+        switchToken,
         isCurrent: () => epoch === generation && requestId === joinRequest,
         cloud,
       });
@@ -1030,6 +1131,8 @@
       lib.setCloud(fileId, cloud);
     }
     connection = { ...info, fileId };
+    // Active authority lives outside the disposable inactive-room LRU.
+    window.switchCache.remove(window.switchCache.key(info));
     protocol = Number.isSafeInteger(current.protocol) && Ops ? current.protocol : 1;
     const restore = restoreFile && protocol >= 2 && stored?.clientId ? stored : null;
     if (restoreFile && !restore && current.document) load = true;
@@ -1070,7 +1173,8 @@
       lastLocal = shared(confirmed);
       localChange();
     }
-    if (restore) {
+    if (restore && (record?.detached || restore.overflow)) {
+      // Only an explicitly detached copy or overflow recovery is an authored file baseline.
       // Edits the file holds beyond confirmed + pending (made while the room was closed, or not yet
       // stored when the app quit) become one more batch.
       let base = confirmed;
@@ -1079,7 +1183,27 @@
       const ops = Pages.splitLocal(Ops.diff(base, lastLocalDoc, { ignore: LOCAL_KEYS }));
       if (ops.length && canEdit()) queueOps(ops);
     }
+    if (restore && !record?.detached && !restore.overflow) rebuild();
     if (protocol >= 2) saveOutbox(true);
+    const hydrated =
+      cached && !offline && protocol >= 2
+        ? new Promise((resolve) => {
+            const done = (event) => {
+              if (event.detail.epoch === epoch) {
+                clearTimeout(timeout);
+                window.removeEventListener("cloud-hydrated", done);
+                resolve();
+              }
+            };
+            const timeout = setTimeout(() => {
+              // The room is connected and showing fetched state; the socket's own sync
+              // finishes freshness, so a slow snapshot ends the switch instead of failing it.
+              window.removeEventListener("cloud-hydrated", done);
+              resolve();
+            }, 15000);
+            window.addEventListener("cloud-hydrated", done);
+          })
+        : null;
     openSocket(epoch);
     roomChanged();
     status(
@@ -1087,6 +1211,7 @@
         ? "Offline. Edits stay on this device and are sent when the room is reachable."
         : `Connected · revision ${revision}`,
     );
+    if (hydrated) await hydrated;
   }
   /** Reconnect a cloud-backed file that was just opened (or reopened after a restart). */
   function reconnectFile(id, cloud) {
@@ -1151,12 +1276,13 @@
      * public room without a token or session (read-only).
      */
     openRoom: async (info) => {
-      if (account) await window.cloudWorkspace.storeFile?.(library()?.currentId);
       return connect({
+        storeOutgoing: true,
         server: info.server,
         id: info.id,
         token: info.token,
         anonymous: !!info.anonymous,
+        switchToken: info.switchToken,
       });
     },
     /** Room state for the presence UI (web/src/islands/collab), and a presence update after a local change. */
