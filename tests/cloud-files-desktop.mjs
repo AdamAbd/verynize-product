@@ -101,7 +101,10 @@ try {
 
   // 2. Restart the app: the file reopens connected to the same room, with no new copy.
   await page.waitForFunction(
-    async ({ server, roomId }) => !(await window.cloudWorkspace.storedOutbox(server, roomId)),
+    async ({ server, roomId }) => {
+      const saved = await window.cloudWorkspace.storedOutbox(server, roomId);
+      return saved && saved.pending.length === 0 && saved.retained.length === 0;
+    },
     { server, roomId },
   );
   await quit(app);
@@ -196,12 +199,12 @@ try {
     window.design.updateNodes([id], (n) => ({ text: n.text + " offline" }));
   }, textId);
   assert.ok(await page.evaluate(() => window.cloudWorkspace.pendingCount() > 0));
-  assert.equal(
-    await page.evaluate(
-      ({ server, roomId }) => window.cloudWorkspace.storedOutbox(server, roomId),
-      { server, roomId },
-    ),
-    null,
+  await page.waitForFunction(
+    async ({ server, roomId }) => {
+      const saved = await window.cloudWorkspace.storedOutbox(server, roomId);
+      return saved?.pending.some((batch) => batch.ops.some((op) => op.value?.name === "offline-1"));
+    },
+    { server, roomId },
   );
   await assert.rejects(page.evaluate((id) => window.fileLibrary.open(id), newId));
   assert.equal(await page.evaluate(() => window.fileLibrary.currentId), fileId);
@@ -234,6 +237,55 @@ try {
     window.design.getDocument().pages[0].nodes.some((n) => n.name === "from-b"),
   );
 
+  // Signed-in rejected work is also durable, including a complete process restart.
+  await page.evaluate(() => {
+    for (let i = 0; i < 23; i++)
+      window.design.addNode("text", {
+        name: `retained-${i}`,
+        text: "x".repeat(950000),
+        hidden: true,
+      });
+  });
+  await page.waitForFunction(
+    async () => {
+      const room = window.cloudWorkspace.room();
+      const saved = await window.cloudWorkspace.storedOutbox(room.server, room.id);
+      return saved?.retained.length > 0;
+    },
+    null,
+    { timeout: 60000 },
+  );
+  apps.delete(app);
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const win of BrowserWindow.getAllWindows()) win.destroy();
+  });
+  await app.close();
+  ({ app, page } = await launch("a"));
+  await page.waitForFunction((id) => window.cloudWorkspace.room()?.id === id, roomId);
+  await page.waitForFunction(
+    () =>
+      window.design.getDocument().pages[0].nodes.filter((n) => n.name.startsWith("retained-"))
+        .length === 23,
+  );
+  await page.evaluate(() => {
+    const ids = window.design
+      .getDocument()
+      .pages[0].nodes.filter((n) => n.name.startsWith("retained-"))
+      .map((n) => n.id);
+    window.design.updateNodes(ids, { text: "small" });
+  });
+  await synced(page);
+  const recovered = await api(`/api/rooms/${roomId}`, ana);
+  assert.equal(
+    recovered.document.pages[0].nodes.filter(
+      (n) => n.name.startsWith("retained-") && n.text === "small",
+    ).length,
+    23,
+  );
+
+  if (await page.locator("#storage-limit-dialog").isVisible())
+    await page.getByRole("button", { name: "Close size error" }).click();
+
   // 6. Disconnect keeps the local copy, marks it detached and forgets the stored outbox.
   await openSharedDesign(page);
   await page.locator("#cloud-leave").click();
@@ -246,7 +298,7 @@ try {
   assert.equal(detached.detached, true);
   assert.equal(await page.evaluate(() => window.fileLibrary.currentId), fileId);
   console.log(
-    "PASS cloud files: create room marks the file, restart reconnects without copies, Files home lists workspace and shared rooms and joins once, in-memory offline edits block switching and reach the database exactly once, second device sees them, disconnect detaches and clears the outbox",
+    "PASS cloud files: create room marks the file, restart reconnects without copies, Files home lists workspace and shared rooms and joins once, in-memory offline edits block switching and reach the database exactly once, second device sees them, signed-in rejected edits survive process restart and sync after shrinking, disconnect detaches and clears the outbox",
   );
 } finally {
   await Promise.all(

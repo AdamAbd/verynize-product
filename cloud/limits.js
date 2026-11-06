@@ -3,7 +3,7 @@
 import "../web/room-limits.js";
 
 const Limits = globalThis.VerynizeRoomLimits;
-/** Largest page (its properties and nodes as JSON), in bytes: 2 MiB. */
+/** Largest page (its properties and nodes as JSON), in bytes: the full 20 MiB document budget. */
 export const PAGE_BYTES = Limits.PAGE_BYTES;
 /** Largest document (metadata plus every page), in bytes: 20 MiB, like a desktop file. */
 export const DOCUMENT_BYTES = Limits.DOCUMENT_BYTES;
