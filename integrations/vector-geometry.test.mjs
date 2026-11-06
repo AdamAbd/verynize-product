@@ -30,7 +30,9 @@ const closeAll = (a, b, eps = 1e-6) => {
 };
 
 test("every command letter normalizes to absolute M/L/C/Z", () => {
-  const segs = parsePath("M10 10 h20 v20 H10 z m5 5 l1 1 L2 2 c1 1 2 2 3 3 s4 4 5 5 q5 5 10 0 t10 0 Q1 1 2 2 T3 3 S1 1 2 2");
+  const segs = parsePath(
+    "M10 10 h20 v20 H10 z m5 5 l1 1 L2 2 c1 1 2 2 3 3 s4 4 5 5 q5 5 10 0 t10 0 Q1 1 2 2 T3 3 S1 1 2 2",
+  );
   assert.deepEqual(
     segs.map((s) => s[0]).join(""),
     "MLLLZMLLCCCCCCC",
@@ -38,15 +40,33 @@ test("every command letter normalizes to absolute M/L/C/Z", () => {
   );
   assert.deepEqual(segs[1], ["L", 30, 10]);
   assert.deepEqual(segs[2], ["L", 30, 30]);
-  assert.deepEqual(segs[5], ["M", 15, 15], "a relative moveto after Z starts at the closed subpath's start");
+  assert.deepEqual(
+    segs[5],
+    ["M", 15, 15],
+    "a relative moveto after Z starts at the closed subpath's start",
+  );
   assert.deepEqual(segs[6], ["L", 16, 16]);
   // c from (2,2): (3,3) (4,4) (5,5); s reflects (4,4) about (5,5) → (6,6), then (9,9) (10,10).
   assert.deepEqual(segs[8], ["C", 3, 3, 4, 4, 5, 5]);
   assert.deepEqual(segs[9], ["C", 6, 6, 9, 9, 10, 10]);
   // q from (10,10) control (15,15) to (20,10) raised to a cubic: controls at 2/3 of the way to the quad control.
-  closeAll(segs[10].slice(1), [10 + (2 / 3) * 5, 10 + (2 / 3) * 5, 20 - (2 / 3) * 5, 10 + (2 / 3) * 5, 20, 10]);
+  closeAll(segs[10].slice(1), [
+    10 + (2 / 3) * 5,
+    10 + (2 / 3) * 5,
+    20 - (2 / 3) * 5,
+    10 + (2 / 3) * 5,
+    20,
+    10,
+  ]);
   // t reflects (15,15) about (20,10) → (25,5).
-  closeAll(segs[11].slice(1), [20 + (2 / 3) * 5, 10 - (2 / 3) * 5, 30 - (2 / 3) * 5, 10 - (2 / 3) * 5, 30, 10]);
+  closeAll(segs[11].slice(1), [
+    20 + (2 / 3) * 5,
+    10 - (2 / 3) * 5,
+    30 - (2 / 3) * 5,
+    10 - (2 / 3) * 5,
+    30,
+    10,
+  ]);
   // S without a preceding cubic: its first control is the current point.
   const s = parsePath("M0 0 L5 5 S10 10 20 0");
   assert.deepEqual(s[2], ["C", 5, 5, 10, 10, 20, 0]);
@@ -100,7 +120,10 @@ test("arcs become cubics of at most 90° that stay on the ellipse", () => {
   for (const s of segs) {
     const p0 = prev,
       [x1, y1, x2, y2, x, y] = s.slice(1);
-    const mid = [0.125 * p0[0] + 0.375 * x1 + 0.375 * x2 + 0.125 * x, 0.125 * p0[1] + 0.375 * y1 + 0.375 * y2 + 0.125 * y];
+    const mid = [
+      0.125 * p0[0] + 0.375 * x1 + 0.375 * x2 + 0.125 * x,
+      0.125 * p0[1] + 0.375 * y1 + 0.375 * y2 + 0.125 * y,
+    ];
     close(Math.hypot(mid[0] - 10, mid[1]), 10, 0.01);
     prev = [x, y];
   }
@@ -133,7 +156,10 @@ test("bounds include cubic extrema, not only control points", () => {
 test("serialize rounds to 3 decimals and round-trips", () => {
   const d = "M0.12345 1L2.5 3.0001C1 2 3 4 5 6Z";
   assert.equal(serializePath(parsePath(d)), "M0.123 1L2.5 3C1 2 3 4 5 6Z");
-  assert.deepEqual(parsePath(serializePath(parsePath(d))), parsePath("M0.123 1L2.5 3C1 2 3 4 5 6Z"));
+  assert.deepEqual(
+    parsePath(serializePath(parsePath(d))),
+    parsePath("M0.123 1L2.5 3C1 2 3 4 5 6Z"),
+  );
   assert.equal(serializePath([["M", -0.0001, 0]]), "M0 0", "no negative zero");
 });
 
@@ -148,7 +174,10 @@ test("matrices: transform syntax, composition and inversion", () => {
   closeAll(applyPoint(multiply(m, inv), 7, -3), [7, -3]);
   assert.equal(invert([0, 0, 0, 0, 1, 1]), null);
   assert.throws(() => parseTransform("translate(1) bogus(2)"), /Invalid transform/);
-  assert.deepEqual(transformSegments([["M", 1, 1], ["Z"]], [2, 0, 0, 2, 1, 0]), [["M", 3, 2], ["Z"]]);
+  assert.deepEqual(transformSegments([["M", 1, 1], ["Z"]], [2, 0, 0, 2, 1, 0]), [
+    ["M", 3, 2],
+    ["Z"],
+  ]);
 });
 
 test("contours: anchors with handles, closing curves merge into the first anchor", () => {
@@ -164,7 +193,10 @@ test("contours: anchors with handles, closing curves merge into the first anchor
   assert.equal(open[0].closed, false);
   assert.equal(serializePath(fromContours(open)), "M0 0L10 0L10 10");
   // A closed polygon keeps its implicit closing line.
-  assert.equal(serializePath(fromContours(toContours(parsePath("M0 0H10V10Z")))), "M0 0L10 0L10 10Z");
+  assert.equal(
+    serializePath(fromContours(toContours(parsePath("M0 0H10V10Z")))),
+    "M0 0L10 0L10 10Z",
+  );
   assert.equal(smooth(contours[0].points[0]), true);
   assert.equal(smooth(open[0].points[1]), false);
 });
@@ -204,7 +236,10 @@ test("fitBox hugs the geometry and keeps points in place under rotation and flip
       r = ((n.rotation || 0) * Math.PI) / 180;
     const vx = lx * fx,
       vy = ly * fy;
-    return [n.x + n.w / 2 + Math.cos(r) * vx - Math.sin(r) * vy, n.y + n.h / 2 + Math.sin(r) * vx + Math.cos(r) * vy];
+    return [
+      n.x + n.w / 2 + Math.cos(r) * vx - Math.sin(r) * vy,
+      n.y + n.h / 2 + Math.sin(r) * vx + Math.cos(r) * vy,
+    ];
   };
   for (const extra of [{ rotation: 33 }, { rotation: -120, flipX: true }, { flipY: true }]) {
     const n = { ...node, ...extra };
@@ -216,7 +251,9 @@ test("fitBox hugs the geometry and keeps points in place under rotation and flip
       closeAll(world(f, ux, uy), world(n, ux, uy), 1e-6);
   }
   // A straight horizontal line keeps one layer pixel of height.
-  const flat = fitBox({ x: 0, y: 0, w: 100, h: 100, viewBox: [0, 0, 100, 100] }, [{ d: "M0 50H80" }]);
+  const flat = fitBox({ x: 0, y: 0, w: 100, h: 100, viewBox: [0, 0, 100, 100] }, [
+    { d: "M0 50H80" },
+  ]);
   assert.deepEqual([flat.w, flat.h], [80, 1]);
   close(flat.y, 49.5);
 });
@@ -238,13 +275,36 @@ test("svgMarkup draws fills under the stroke, non-scaling, with the paint model"
   };
   const svg = svgMarkup(n, { brand: "#00ff00" });
   assert.match(svg, /viewBox="0 0 24 12" preserveAspectRatio="none"/);
-  assert.match(svg, /<path d="M0 0H24V12Z" fill="#00ff00" fill-rule="evenodd"\/>/, "token wins over color");
-  assert.match(svg, /stroke="#000000" stroke-opacity="0.502" stroke-width="2" stroke-linecap="round" stroke-linejoin="bevel" stroke-dasharray="4 2" vector-effect="non-scaling-stroke"/);
+  assert.match(
+    svg,
+    /<path d="M0 0H24V12Z" fill="#00ff00" fill-rule="evenodd"\/>/,
+    "token wins over color",
+  );
+  assert.match(
+    svg,
+    /stroke="#000000" stroke-opacity="0.502" stroke-width="2" stroke-linecap="round" stroke-linejoin="bevel" stroke-dasharray="4 2" vector-effect="non-scaling-stroke"/,
+  );
   assert.equal(svg.match(/<path /g).length, 4, "two fill paths, two stroke paths");
   // fills: [] is no fill; gradients become userSpaceOnUse defs with ids derived from the node id.
   assert.doesNotMatch(svgMarkup({ ...n, fills: [] }), /fill="#/);
-  const gradient = svgMarkup({ ...n, strokeWidth: 0, fills: [{ type: "linear", angle: 90, stops: [{ position: 0, color: "#000000" }, { position: 100, color: "#ffffff" }] }] });
-  assert.match(gradient, /<linearGradient id="vg-v_1-f0" gradientUnits="userSpaceOnUse" x1="0" y1="6" x2="24" y2="6">/);
+  const gradient = svgMarkup({
+    ...n,
+    strokeWidth: 0,
+    fills: [
+      {
+        type: "linear",
+        angle: 90,
+        stops: [
+          { position: 0, color: "#000000" },
+          { position: 100, color: "#ffffff" },
+        ],
+      },
+    ],
+  });
+  assert.match(
+    gradient,
+    /<linearGradient id="vg-v_1-f0" gradientUnits="userSpaceOnUse" x1="0" y1="6" x2="24" y2="6">/,
+  );
   assert.match(gradient, /fill="url\(#vg-v_1-f0\)"/);
   // Invalid path data is never written out, and attribute text is escaped.
   assert.doesNotMatch(svgMarkup({ ...n, paths: [{ d: 'M0 0"/><script>' }] }), /script/);

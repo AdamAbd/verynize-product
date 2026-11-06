@@ -100,7 +100,7 @@ const isText = node => node.type === 'text';
 const textOf = node => String(node.text ?? '');
 /** Solid fill of a box node (frame/rectangle) or null. */
 function fillOf(document, node) {
-  if (isText(node) || node.type === 'image') return null;
+  if (isText(node) || node.type === 'image' || node.type === 'vector') return null; // a vector paints its shape, not its box
   const raw = node.fill ?? node.background ?? node.color;
   const value = Array.isArray(raw) ? raw[raw.length - 1] : raw;
   const color = resolveColor(document, value, node.fillToken || (node.fill === undefined ? node.token : ''));
@@ -303,7 +303,7 @@ export function lintArtboard(document, pageId, rootId, options = {}) {
     const before = order.slice(0, order.indexOf(node)).filter(n => !isText(n) && (ancestors.includes(n) || contains(boxes.get(n.id) || { x: 0, y: 0, w: 0, h: 0 }, center)));
     let backdrops = [{ r: 255, g: 255, b: 255, a: 1 }], unknown = false;
     for (const layer of before) {
-      if (layer.type === 'image' || layer.type === 'shader' || (layer.animated && layer.animated !== '')) { unknown = true; backdrops = []; continue; }
+      if (layer.type === 'image' || layer.type === 'shader' || layer.type === 'vector' || (layer.animated && layer.animated !== '')) { unknown = true; backdrops = []; continue; }
       const fill = fillOf(document, layer);
       if (fill && fill.a > 0) { if (fill.a >= 0.999) { backdrops = [fill]; unknown = false; } else backdrops = backdrops.map(b => over(fill, b)); }
       const stops = gradientColors(layer).map(c => ({ ...c, a: c.a * opacityOf(layer) }));

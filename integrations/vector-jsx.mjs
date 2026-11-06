@@ -16,7 +16,10 @@ import { importSvg, toNodes } from "./vector-svg.mjs";
 import { pathError } from "./vector-geometry.mjs";
 
 const esc = (text) =>
-  String(text).replace(/[&"<>]/g, (c) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" })[c]);
+  String(text).replace(
+    /[&"<>]/g,
+    (c) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" })[c],
+  );
 const r = (v) => Math.round(Number(v) * 1000) / 1000;
 const HEX = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
 // Path data longer than this is elided in compact reads and restored from the layer on write.
@@ -37,12 +40,16 @@ export function vectorAttrs(n) {
   } else out.push('fill="none"');
   const width = Number(n.strokeWidth) || 0;
   if (width > 0) {
-    out.push(`stroke="${esc(HEX.test(n.strokeColor || "") ? n.strokeColor : "#000000")}"`, `strokeWidth={${r(width)}}`);
+    out.push(
+      `stroke="${esc(HEX.test(n.strokeColor || "") ? n.strokeColor : "#000000")}"`,
+      `strokeWidth={${r(width)}}`,
+    );
     if (n.strokeToken) out.push(`data-stroke-token="${esc(n.strokeToken)}"`);
     if (n.strokeCap) out.push(`strokeLinecap="${esc(n.strokeCap)}"`);
     if (n.strokeJoin) out.push(`strokeLinejoin="${esc(n.strokeJoin)}"`);
     if (Number(n.strokeMiter) > 0) out.push(`strokeMiterlimit={${r(n.strokeMiter)}}`);
-    if (Array.isArray(n.strokeDash) && n.strokeDash.length) out.push(`strokeDasharray="${n.strokeDash.map(r).join(" ")}"`);
+    if (Array.isArray(n.strokeDash) && n.strokeDash.length)
+      out.push(`strokeDasharray="${n.strokeDash.map(r).join(" ")}"`);
     if (n.strokeHidden === true) out.push('data-stroke-hidden="true"');
   }
   return out;
@@ -55,7 +62,9 @@ export function vectorPaths(n, { indent = "", full = true } = {}) {
   const elide = !full && total > MAX_INLINE_PATH;
   return paths
     .map((p) => {
-      const d = elide ? `[path data ${Math.max(1, Math.round(String(p.d).length / 1024))} KB]` : p.d;
+      const d = elide
+        ? `[path data ${Math.max(1, Math.round(String(p.d).length / 1024))} KB]`
+        : p.d;
       return `${indent}<path d="${esc(d)}"${p.fillRule === "evenodd" ? ' fillRule="evenodd"' : ""} />`;
     })
     .join("\n");
@@ -73,7 +82,10 @@ const hexOf = (v) => (typeof v === "string" && HEX.test(v.trim()) ? v.trim().toL
  * Vector fields from a parsed canonical <svg data-vector> element (jsx-codec parseJsx AST). `reused` is the layer the
  * element rewrites: elided path data is restored from it. Throws on invalid path data.
  */
-export function vectorFromElement(el, { tokens = {}, reused = null, warnings = [], where = "<svg>" } = {}) {
+export function vectorFromElement(
+  el,
+  { tokens = {}, reused = null, warnings = [], where = "<svg>" } = {},
+) {
   const a = el.attrs;
   const out = {};
   const vb = numbers(a.viewBox);
@@ -83,7 +95,10 @@ export function vectorFromElement(el, { tokens = {}, reused = null, warnings = [
     if (reused?.type === "vector" && Array.isArray(reused.paths)) {
       out.paths = structuredClone(reused.paths);
       if (!out.viewBox && reused.viewBox) out.viewBox = [...reused.viewBox];
-    } else warnings.push(`${where}: elided path data has no layer to restore it from; read the element with full output`);
+    } else
+      warnings.push(
+        `${where}: elided path data has no layer to restore it from; read the element with full output`,
+      );
   }
   if (!out.paths)
     out.paths = children
@@ -121,9 +136,15 @@ export function vectorFromElement(el, { tokens = {}, reused = null, warnings = [
   if (["round", "square"].includes(cap)) out.strokeCap = cap;
   if (["round", "bevel"].includes(join)) out.strokeJoin = join;
   if (miter >= 1 && miter <= 100) out.strokeMiter = miter;
-  if (dash.length && dash.length <= 16 && dash.every((v) => Number.isFinite(v) && v >= 0) && dash.some((v) => v > 0))
+  if (
+    dash.length &&
+    dash.length <= 16 &&
+    dash.every((v) => Number.isFinite(v) && v >= 0) &&
+    dash.some((v) => v > 0)
+  )
     out.strokeDash = dash;
-  if (a["data-stroke-hidden"] === "true" || a["data-stroke-hidden"] === true) out.strokeHidden = true;
+  if (a["data-stroke-hidden"] === "true" || a["data-stroke-hidden"] === true)
+    out.strokeHidden = true;
   return out;
 }
 
@@ -131,10 +152,14 @@ export function vectorFromElement(el, { tokens = {}, reused = null, warnings = [
  * Canonical JSX for an imported SVG result (web/vector-svg.js importSvg): one <svg data-vector>, or a free frame of
  * them. `attrs` are extra attribute strings for the outer element (label, residual…), `className` its classes.
  */
-export function resultJsx(result, { attrs = [], className = "", indent = "", label = "Vector", w, h } = {}) {
+export function resultJsx(
+  result,
+  { attrs = [], className = "", indent = "", label = "Vector", w, h } = {},
+) {
   let id = 0;
   const nodes = toNodes(result, { name: label, uid: () => `n${id++}`, w, h });
-  if (!attrs.some((x) => x.startsWith("data-node-label="))) attrs = [...attrs, `data-node-label="${esc(label)}"`];
+  if (!attrs.some((x) => x.startsWith("data-node-label=")))
+    attrs = [...attrs, `data-node-label="${esc(label)}"`];
   const cls = (c) => (c.trim() ? ` className="${esc(c.trim())}"` : "");
   const svg = (n, extra, classes, pad) => {
     const open = `${pad}<svg ${[...extra, ...vectorAttrs(n)].join(" ")}${cls(classes)}>`;
@@ -158,8 +183,16 @@ export function resultJsx(result, { attrs = [], className = "", indent = "", lab
 /**
  * An ordinary <svg> as canonical JSX (`w`/`h`: the size its classes give it, when known): {ok: true, jsx, warnings} or {ok: false, reason, warnings} (keep it an image).
  */
-export function svgElementJsx(markup, { color, attrs = [], className = "", label, indent = "", w, h } = {}) {
+export function svgElementJsx(
+  markup,
+  { color, attrs = [], className = "", label, indent = "", w, h } = {},
+) {
   const result = importSvg(markup, { color, width: w, height: h });
   if (!result.ok) return result;
-  return { ok: true, jsx: resultJsx(result, { attrs, className, indent, label, w, h }), result, warnings: result.warnings };
+  return {
+    ok: true,
+    jsx: resultJsx(result, { attrs, className, indent, label, w, h }),
+    result,
+    warnings: result.warnings,
+  };
 }

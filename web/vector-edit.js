@@ -29,7 +29,8 @@
       S = window.VerynizeVectorSvg;
     const readOnly = () => document.body.classList.contains("cloud-read-only");
     const tool = () => window.design?.getTool?.();
-    const typing = (t) => !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+    const typing = (t) =>
+      !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
 
     const overlay = document.createElementNS(NS, "svg");
     overlay.id = "vector-edit-overlay";
@@ -59,7 +60,12 @@
       const p = c.screenToWorld(e.clientX, e.clientY);
       if (!pen) {
         const frame = c.frameAt(e.clientX, e.clientY);
-        const free = frame && (frame.layout || "free") === "free" && !Number(frame.rotation) && !frame.flipX && !frame.flipY;
+        const free =
+          frame &&
+          (frame.layout || "free") === "free" &&
+          !Number(frame.rotation) &&
+          !frame.flipX &&
+          !frame.flipY;
         const r = free ? c.worldRect(frame.id) : null;
         const border = free ? Number(frame.strokeWidth) || 0 : 0;
         pen = {
@@ -149,7 +155,10 @@
     let edit = null; // {id, pathsRef, paths: [{fillRule, contours}], selected: [{p, c, k}], drag}
     const svgOf = (id) => wrap.querySelector(`#canvas .layer[data-id="${CSS.escape(id)}"] > svg`);
     function load(node) {
-      return node.paths.map((p) => ({ fillRule: p.fillRule, contours: G.toContours(G.parsePath(p.d)) }));
+      return node.paths.map((p) => ({
+        fillRule: p.fillRule,
+        contours: G.toContours(G.parsePath(p.d)),
+      }));
     }
     function enterEdit(id) {
       const node = c.find(id);
@@ -189,7 +198,9 @@
       const svg = svgOf(edit.id);
       if (!svg) return;
       const ds = edit.paths.map((p) => G.serializePath(G.fromContours(p.contours)));
-      svg.querySelectorAll("path").forEach((path, i) => path.setAttribute("d", ds[i % ds.length] || "M0 0"));
+      svg
+        .querySelectorAll("path")
+        .forEach((path, i) => path.setAttribute("d", ds[i % ds.length] || "M0 0"));
     }
     function commit() {
       const node = c.find(edit.id);
@@ -203,7 +214,18 @@
         return;
       }
       const fitted = G.fitBox(node, paths);
-      const patch = { paths, ...(fitted ? { x: r3(fitted.x), y: r3(fitted.y), w: r3(fitted.w), h: r3(fitted.h), viewBox: fitted.viewBox.map(r3) } : {}) };
+      const patch = {
+        paths,
+        ...(fitted
+          ? {
+              x: r3(fitted.x),
+              y: r3(fitted.y),
+              w: r3(fitted.w),
+              h: r3(fitted.h),
+              viewBox: fitted.viewBox.map(r3),
+            }
+          : {}),
+      };
       try {
         window.design.updateNodes([edit.id], patch);
       } catch (error) {
@@ -250,9 +272,12 @@
       let best = null;
       edit.paths.forEach((path, p) => {
         const hit = G.nearestSegment(path.contours, ux, uy);
-        if (hit && hit.distance * scale <= HIT && (!best || hit.distance < best.distance)) best = { ...hit, p };
+        if (hit && hit.distance * scale <= HIT && (!best || hit.distance < best.distance))
+          best = { ...hit, p };
       });
-      return best ? { kind: "segment", p: best.p, c: best.contour, k: best.index, t: best.t } : null;
+      return best
+        ? { kind: "segment", p: best.p, c: best.contour, k: best.index, t: best.t }
+        : null;
     }
     function editDown(e) {
       const m = matrix();
@@ -280,7 +305,9 @@
       if (hit.kind === "anchor") {
         const s = { p: hit.p, c: hit.c, k: hit.k };
         if (e.shiftKey) {
-          edit.selected = isSelected(s) ? edit.selected.filter((t) => !(t.p === s.p && t.c === s.c && t.k === s.k)) : [...edit.selected, s];
+          edit.selected = isSelected(s)
+            ? edit.selected.filter((t) => !(t.p === s.p && t.c === s.c && t.k === s.k))
+            : [...edit.selected, s];
           draw();
           return true;
         }
@@ -293,7 +320,10 @@
       const inv = G.invert(m);
       const start = local(e.clientX, e.clientY),
         [ux0, uy0] = G.applyPoint(inv, ...start);
-      const moving = hit.kind === "anchor" ? edit.selected.map((s) => ({ point: pointOf(s), from: { ...pointOf(s) } })) : [];
+      const moving =
+        hit.kind === "anchor"
+          ? edit.selected.map((s) => ({ point: pointOf(s), from: { ...pointOf(s) } }))
+          : [];
       const target = hit.kind === "handle" ? pointOf(hit) : null;
       const from = target ? { ...target } : null;
       const wasSmooth = target ? G.smooth(target) : false;
@@ -305,7 +335,15 @@
         const [ux, uy] = G.applyPoint(inv, ...here),
           dx = ux - ux0,
           dy = uy - uy0;
-        for (const { point, from: f } of moving) Object.assign(point, { x: f.x + dx, y: f.y + dy, ix: f.ix + dx, iy: f.iy + dy, ox: f.ox + dx, oy: f.oy + dy });
+        for (const { point, from: f } of moving)
+          Object.assign(point, {
+            x: f.x + dx,
+            y: f.y + dy,
+            ix: f.ix + dx,
+            iy: f.iy + dy,
+            ox: f.ox + dx,
+            oy: f.oy + dy,
+          });
         if (target) {
           const own = hit.side === "in" ? ["ix", "iy"] : ["ox", "oy"],
             other = hit.side === "in" ? ["ox", "oy"] : ["ix", "iy"];
@@ -330,7 +368,7 @@
       const up = () => {
         window.removeEventListener("pointermove", move, true);
         window.removeEventListener("pointerup", up, true);
-        edit && (edit.drag = null);
+        if (edit) edit.drag = null;
         if (edit && (moved || changed)) commit();
         else draw();
       };
@@ -343,7 +381,8 @@
       const contour = edit.paths[s.p].contours[s.c],
         pts = contour.points,
         pt = pts[s.k];
-      if (pt.ix !== pt.x || pt.iy !== pt.y || pt.ox !== pt.x || pt.oy !== pt.y) Object.assign(pt, { ix: pt.x, iy: pt.y, ox: pt.x, oy: pt.y });
+      if (pt.ix !== pt.x || pt.iy !== pt.y || pt.ox !== pt.x || pt.oy !== pt.y)
+        Object.assign(pt, { ix: pt.x, iy: pt.y, ox: pt.x, oy: pt.y });
       else {
         // Handles along the line through the neighbours, a third of the way to each.
         const prev = pts[s.k - 1] || (contour.closed ? pts[pts.length - 1] : null),
@@ -357,7 +396,12 @@
         vy /= l;
         const lin = prev ? Math.hypot(pt.x - prev.x, pt.y - prev.y) / 3 : 0,
           lout = next ? Math.hypot(next.x - pt.x, next.y - pt.y) / 3 : 0;
-        Object.assign(pt, { ix: pt.x - vx * lin, iy: pt.y - vy * lin, ox: pt.x + vx * lout, oy: pt.y + vy * lout });
+        Object.assign(pt, {
+          ix: pt.x - vx * lin,
+          iy: pt.y - vy * lin,
+          ox: pt.x + vx * lout,
+          oy: pt.y + vy * lout,
+        });
       }
       commit();
     }
@@ -365,7 +409,10 @@
       const doomed = new Set(edit.selected.map((s) => `${s.p}:${s.c}:${s.k}`));
       edit.paths.forEach((path, p) => {
         path.contours = path.contours
-          .map((contour, ci) => ({ ...contour, points: contour.points.filter((_, k) => !doomed.has(`${p}:${ci}:${k}`)) }))
+          .map((contour, ci) => ({
+            ...contour,
+            points: contour.points.filter((_, k) => !doomed.has(`${p}:${ci}:${k}`)),
+          }))
           .filter((contour) => contour.points.length >= 2);
       });
       edit.selected = [];
@@ -376,7 +423,8 @@
       if (!edit || edit.drag) return;
       const node = c.find(edit.id),
         selection = c.sel();
-      if (!node || node.type !== "vector" || selection.size !== 1 || !selection.has(edit.id)) return exitEdit();
+      if (!node || node.type !== "vector" || selection.size !== 1 || !selection.has(edit.id))
+        return exitEdit();
       if (node.paths !== edit.pathsRef) {
         edit.pathsRef = node.paths;
         edit.paths = load(node);
@@ -409,14 +457,28 @@
     }
     function drawPen() {
       const pts = pen.points.map((p) => ({ ...p }));
-      if (pen.hover && pts.length) pts.push({ x: pen.hover.x, y: pen.hover.y, ix: pen.hover.x, iy: pen.hover.y, ox: pen.hover.x, oy: pen.hover.y });
+      if (pen.hover && pts.length)
+        pts.push({
+          x: pen.hover.x,
+          y: pen.hover.y,
+          ix: pen.hover.x,
+          iy: pen.hover.y,
+          ox: pen.hover.x,
+          oy: pen.hover.y,
+        });
       const screen = pts.map((p) => {
         const [x, y] = toLocal(p.x, p.y),
           [ix, iy] = toLocal(p.ix, p.iy),
           [ox, oy] = toLocal(p.ox, p.oy);
         return { x, y, ix, iy, ox, oy };
       });
-      if (screen.length > 1) overlay.append(el("path", { class: "vector-edit-path", d: G.serializePath(G.fromContours([{ closed: false, points: screen }])) }));
+      if (screen.length > 1)
+        overlay.append(
+          el("path", {
+            class: "vector-edit-path",
+            d: G.serializePath(G.fromContours([{ closed: false, points: screen }])),
+          }),
+        );
       pen.points.forEach((_, i) => {
         const p = screen[i];
         if (i === pen.points.length - 1)
@@ -425,17 +487,30 @@
             [p.ox, p.oy],
           ])
             if (hx !== p.x || hy !== p.y) {
-              overlay.append(el("line", { class: "vector-edit-handle-line", x1: p.x, y1: p.y, x2: hx, y2: hy }));
+              overlay.append(
+                el("line", { class: "vector-edit-handle-line", x1: p.x, y1: p.y, x2: hx, y2: hy }),
+              );
               overlay.append(el("circle", { class: "vector-edit-handle", cx: hx, cy: hy, r: 3.5 }));
             }
-        overlay.append(el("rect", { class: "vector-edit-anchor" + (i === 0 && pen.points.length > 1 ? " first" : ""), x: p.x - 3.5, y: p.y - 3.5, width: 7, height: 7, "data-pen-anchor": i }));
+        overlay.append(
+          el("rect", {
+            class: "vector-edit-anchor" + (i === 0 && pen.points.length > 1 ? " first" : ""),
+            x: p.x - 3.5,
+            y: p.y - 3.5,
+            width: 7,
+            height: 7,
+            "data-pen-anchor": i,
+          }),
+        );
       });
     }
     function drawEdit() {
       const m = matrix();
       if (!m) return;
       const at = (x, y) => G.applyPoint(m, x, y);
-      const d = edit.paths.map((p) => G.serializePath(G.transformSegments(G.fromContours(p.contours), m))).join("");
+      const d = edit.paths
+        .map((p) => G.serializePath(G.transformSegments(G.fromContours(p.contours), m)))
+        .join("");
       overlay.append(el("path", { class: "vector-edit-path", d }));
       const shown = new Set();
       for (const s of edit.selected) {
@@ -455,11 +530,30 @@
               ]) {
                 if (hx === pt.x && hy === pt.y) continue;
                 const [sx, sy] = at(hx, hy);
-                overlay.append(el("line", { class: "vector-edit-handle-line", x1: x, y1: y, x2: sx, y2: sy }));
-                overlay.append(el("circle", { class: "vector-edit-handle", cx: sx, cy: sy, r: 3.5, "data-handle": `${key}:${side}` }));
+                overlay.append(
+                  el("line", { class: "vector-edit-handle-line", x1: x, y1: y, x2: sx, y2: sy }),
+                );
+                overlay.append(
+                  el("circle", {
+                    class: "vector-edit-handle",
+                    cx: sx,
+                    cy: sy,
+                    r: 3.5,
+                    "data-handle": `${key}:${side}`,
+                  }),
+                );
               }
             const selected = isSelected({ p, c: ci, k });
-            overlay.append(el("rect", { class: "vector-edit-anchor" + (selected ? " selected" : ""), x: x - 3.5, y: y - 3.5, width: 7, height: 7, "data-anchor": key }));
+            overlay.append(
+              el("rect", {
+                class: "vector-edit-anchor" + (selected ? " selected" : ""),
+                x: x - 3.5,
+                y: y - 3.5,
+                width: 7,
+                height: 7,
+                "data-anchor": key,
+              }),
+            );
           }),
         ),
       );
@@ -500,7 +594,8 @@
           return;
         }
         const layer = e.target.closest?.("#canvas .layer");
-        if (layer?.dataset.designType === "vector" && enterEdit(layer.dataset.id)) e.stopImmediatePropagation();
+        if (layer?.dataset.designType === "vector" && enterEdit(layer.dataset.id))
+          e.stopImmediatePropagation();
       },
       true,
     );
@@ -543,7 +638,8 @@
     );
 
     // ---------- SVG in ----------
-    const looksLikeSvg = (text) => /^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(text);
+    const looksLikeSvg = (text) =>
+      /^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(text);
     /** Vector layers for `markup` centred on a world point, inside `frame` when given. Returns ids, or null to let
      * the caller fall back to an image layer. */
     function insertSvg(markup, point, name = "Vector", frame = null) {
@@ -552,7 +648,10 @@
         c.footer(`${result.reason}; added as an image`);
         return null;
       }
-      const size = window.imageDrop?.fitSize?.(result.width, result.height) || { w: result.width, h: result.height };
+      const size = window.imageDrop?.fitSize?.(result.width, result.height) || {
+        w: result.width,
+        h: result.height,
+      };
       let ox = 0,
         oy = 0;
       if (frame) {
@@ -563,7 +662,15 @@
           oy = r.y + border;
         }
       }
-      const nodes = S.toNodes(result, { name, x: r3(point.x - ox - size.w / 2), y: r3(point.y - oy - size.h / 2), w: size.w, h: size.h, uid: ed.uid, parentId: frame?.id || null }).map((n) => ({ ...ed.defaults, text: "", ...n }));
+      const nodes = S.toNodes(result, {
+        name,
+        x: r3(point.x - ox - size.w / 2),
+        y: r3(point.y - oy - size.h / 2),
+        w: size.w,
+        h: size.h,
+        uid: ed.uid,
+        parentId: frame?.id || null,
+      }).map((n) => ({ ...ed.defaults, text: "", ...n }));
       const candidate = structuredClone(ed.design);
       candidate.pages.find((p) => p.id === ed.page().id).nodes.push(...structuredClone(nodes));
       try {
@@ -586,7 +693,13 @@
     document.addEventListener(
       "paste",
       (e) => {
-        if (typing(e.target) || readOnly() || document.querySelector("dialog[open]") || document.body.classList.contains("files-view")) return;
+        if (
+          typing(e.target) ||
+          readOnly() ||
+          document.querySelector("dialog[open]") ||
+          document.body.classList.contains("files-view")
+        )
+          return;
         const text = e.clipboardData?.getData("text/plain") || "";
         const files = [...(e.clipboardData?.files || [])];
         const svgFile = files.length === 1 && files[0].type === "image/svg+xml" ? files[0] : null;
@@ -604,7 +717,8 @@
           e.stopImmediatePropagation();
           const point = centre();
           svgFile.text().then((markup) => {
-            if (insertSvg(markup, point, svgFile.name.replace(/\.svg$/i, "") || "Pasted SVG")) return;
+            if (insertSvg(markup, point, svgFile.name.replace(/\.svg$/i, "") || "Pasted SVG"))
+              return;
             window.imageDrop?.dropFiles([svgFile], ...screenOf(point));
           });
         }
@@ -626,7 +740,11 @@
         window.vectorEdit.lastDrop = file.text().then((markup) => {
           if (ed.page().id !== pageId) return [];
           const target = frame && c.find(frame.id) ? frame : null;
-          return insertSvg(markup, point, file.name.replace(/\.svg$/i, "") || "Vector", target) || window.imageDrop?.dropFiles([file], e.clientX, e.clientY) || [];
+          return (
+            insertSvg(markup, point, file.name.replace(/\.svg$/i, "") || "Vector", target) ||
+            window.imageDrop?.dropFiles([file], e.clientX, e.clientY) ||
+            []
+          );
         });
       },
       true,
@@ -638,7 +756,10 @@
       const collect = (n) => {
         if (n.hidden) return;
         if (n.type === "vector") vectors.push(n);
-        else if (n.type === "frame") ed.nodes().filter((k) => k.parentId === n.id).forEach(collect);
+        else if (n.type === "frame")
+          ed.nodes()
+            .filter((k) => k.parentId === n.id)
+            .forEach(collect);
       };
       c.selectedNodes().forEach(collect);
       if (!vectors.length) return null;
@@ -669,15 +790,53 @@
       c.footer("SVG copied to clipboard");
       return true;
     }
-    const hasVector = () => c.selectedNodes().some((n) => n.type === "vector" || (n.type === "frame" && ed.descendants(n.id).size && [...ed.descendants(n.id)].some((id) => c.find(id)?.type === "vector")));
-    c.register({ id: "tool.pen", label: "Pen", section: "Tools", keys: ["p"], run: () => window.design.setTool(tool() === "pen" ? "move" : "pen") });
-    c.register({ id: "edit.copySvg", label: "Copy as SVG", section: "Edit", keys: [], when: hasVector, run: copySvg });
-    c.register({ id: "vector.editAnchors", label: "Edit anchors", section: "Edit", keys: [], when: () => c.sel().size === 1 && c.find([...c.sel()][0])?.type === "vector", run: () => enterEdit([...c.sel()][0]) });
+    const hasVector = () =>
+      c
+        .selectedNodes()
+        .some(
+          (n) =>
+            n.type === "vector" ||
+            (n.type === "frame" &&
+              ed.descendants(n.id).size &&
+              [...ed.descendants(n.id)].some((id) => c.find(id)?.type === "vector")),
+        );
+    c.register({
+      id: "tool.pen",
+      label: "Pen",
+      section: "Tools",
+      keys: ["p"],
+      run: () => window.design.setTool(tool() === "pen" ? "move" : "pen"),
+    });
+    c.register({
+      id: "edit.copySvg",
+      label: "Copy as SVG",
+      section: "Edit",
+      keys: [],
+      when: hasVector,
+      run: copySvg,
+    });
+    c.register({
+      id: "vector.editAnchors",
+      label: "Edit anchors",
+      section: "Edit",
+      keys: [],
+      when: () => c.sel().size === 1 && c.find([...c.sel()][0])?.type === "vector",
+      run: () => enterEdit([...c.sel()][0]),
+    });
 
     window.vectorEdit = {
       enterEdit,
       exitEdit,
-      editing: () => (edit ? { id: edit.id, selected: edit.selected.map((s) => ({ ...s })), anchors: edit.paths.map((p) => p.contours.map((k) => k.points.map((pt) => ({ ...pt })))) } : null),
+      editing: () =>
+        edit
+          ? {
+              id: edit.id,
+              selected: edit.selected.map((s) => ({ ...s })),
+              anchors: edit.paths.map((p) =>
+                p.contours.map((k) => k.points.map((pt) => ({ ...pt }))),
+              ),
+            }
+          : null,
       drawing: () => (pen ? pen.points.map((p) => ({ ...p })) : null),
       anchorScreen: (p, ci, k) => {
         const m = matrix(),

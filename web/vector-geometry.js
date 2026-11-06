@@ -26,7 +26,12 @@
 (function (root) {
   "use strict";
   // Per layer. Path data is text in the document, so the caps bound storage and parsing on every edit.
-  const LIMITS = Object.freeze({ paths: 500, pathChars: 200000, totalChars: 500000, segments: 50000 });
+  const LIMITS = Object.freeze({
+    paths: 500,
+    pathChars: 200000,
+    totalChars: 500000,
+    segments: 50000,
+  });
   const ARGS = { M: 2, L: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, T: 2, A: 7, Z: 0 };
   const NUMBER = /[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/y;
   const SEPARATOR = /[\s,]/;
@@ -80,7 +85,8 @@
         throw new Error("Path data must start with a moveto (M)");
       const kind = letter.toUpperCase(),
         command = [letter];
-      if (kind === "A") command.push(number(), number(), number(), flag(), flag(), number(), number());
+      if (kind === "A")
+        command.push(number(), number(), number(), flag(), flag(), number(), number());
       else for (let k = 0; k < ARGS[kind]; k++) command.push(number());
       out.push(command);
       if (out.length > LIMITS.segments)
@@ -127,7 +133,10 @@
     const count = Math.max(1, Math.ceil(Math.abs(sweepAngle) / (Math.PI / 2) - 1e-9)),
       step = sweepAngle / count,
       k = (4 / 3) * Math.tan(step / 4);
-    const map = (ex, ey) => [cx + rx * ex * cos - ry * ey * sin, cy + rx * ex * sin + ry * ey * cos];
+    const map = (ex, ey) => [
+      cx + rx * ex * cos - ry * ey * sin,
+      cy + rx * ex * sin + ry * ey * cos,
+    ];
     const out = [];
     for (let s = 0; s < count; s++) {
       const a = start + s * step,
@@ -249,7 +258,8 @@
   /** '' when `d` is valid path data within the limits, else the reason. Cached: the schema runs on every edit. */
   function pathError(d) {
     if (typeof d !== "string" || !d.trim()) return "Path data must be a nonempty string";
-    if (d.length > LIMITS.pathChars) return `Path data is limited to ${LIMITS.pathChars} characters`;
+    if (d.length > LIMITS.pathChars)
+      return `Path data is limited to ${LIMITS.pathChars} characters`;
     const known = errors.get(d);
     if (known !== undefined) return known;
     let error = "";
@@ -332,8 +342,10 @@
       } else if (s[0] === "C") {
         add(cx, cy);
         add(s[5], s[6]);
-        for (const t of extrema(cx, s[1], s[3], s[5])) add(cubicAt(cx, s[1], s[3], s[5], t), cubicAt(cy, s[2], s[4], s[6], t));
-        for (const t of extrema(cy, s[2], s[4], s[6])) add(cubicAt(cx, s[1], s[3], s[5], t), cubicAt(cy, s[2], s[4], s[6], t));
+        for (const t of extrema(cx, s[1], s[3], s[5]))
+          add(cubicAt(cx, s[1], s[3], s[5], t), cubicAt(cy, s[2], s[4], s[6], t));
+        for (const t of extrema(cy, s[2], s[4], s[6]))
+          add(cubicAt(cx, s[1], s[3], s[5], t), cubicAt(cy, s[2], s[4], s[6], t));
         cx = s[5];
         cy = s[6];
       }
@@ -466,7 +478,8 @@
     }
     return out.filter((c) => c.points.length);
   }
-  const corner = (p, side) => (side === "out" ? near(p.ox, p.oy, p.x, p.y) : near(p.ix, p.iy, p.x, p.y));
+  const corner = (p, side) =>
+    side === "out" ? near(p.ox, p.oy, p.x, p.y) : near(p.ix, p.iy, p.x, p.y);
   const segmentTo = (a, b) =>
     corner(a, "out") && corner(b, "in") ? ["L", b.x, b.y] : ["C", a.ox, a.oy, b.ix, b.iy, b.x, b.y];
   function fromContours(contours) {
@@ -540,7 +553,10 @@
   /** Nearest point on any segment: {contour, index, t, x, y, distance} (contour and index into `contours`). */
   function nearestSegment(contours, x, y) {
     let best = null;
-    const at = (seg, t) => [cubicAt(seg[0][0], seg[1][0], seg[2][0], seg[3][0], t), cubicAt(seg[0][1], seg[1][1], seg[2][1], seg[3][1], t)];
+    const at = (seg, t) => [
+      cubicAt(seg[0][0], seg[1][0], seg[2][0], seg[3][0], t),
+      cubicAt(seg[0][1], seg[1][1], seg[2][1], seg[3][1], t),
+    ];
     contours.forEach((contour, ci) => {
       for (let i = 0; i < contour.points.length; i++) {
         const seg = segmentPoints(contour, i);
@@ -570,7 +586,8 @@
         const t = (lo + hi) / 2,
           p = at(seg, t),
           dist = Math.hypot(p[0] - x, p[1] - y);
-        if (!best || dist < best.distance) best = { contour: ci, index: i, t, x: p[0], y: p[1], distance: dist };
+        if (!best || dist < best.distance)
+          best = { contour: ci, index: i, t, x: p[0], y: p[1], distance: dist };
       }
     });
     return best;
@@ -632,12 +649,18 @@
 
   // ---------- Rendering ----------
   const esc = (v) =>
-    String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  const resolve = (c, tokens) => (c && c.token && tokens && HEX.test(tokens[c.token] || "") ? tokens[c.token] : c && c.color);
+    String(v).replace(
+      /[&<>"']/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+    );
+  const resolve = (c, tokens) =>
+    c && c.token && tokens && HEX.test(tokens[c.token] || "") ? tokens[c.token] : c && c.color;
   /** #rrggbb[aa] × opacity → [#rrggbb, alpha]. */
   function colorOf(hex, opacity = 100) {
     if (!HEX.test(hex || "")) return null;
-    const a = (hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1) * (Math.max(0, Math.min(100, Number(opacity ?? 100))) / 100);
+    const a =
+      (hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1) *
+      (Math.max(0, Math.min(100, Number(opacity ?? 100))) / 100);
     return [hex.slice(0, 7).toLowerCase(), Math.round(a * 1000) / 1000];
   }
   /** The visible fill paints of a layer, bottom first (index 0 of `fills` paints on top). */
@@ -698,7 +721,12 @@
         nh = Number(p.imageHeight),
         fit = p.fit || "fill";
       if (nw > 0 && nh > 0 && fit !== "fill") {
-        const s = fit === "cover" ? Math.max(n.w / nw, n.h / nh) : fit === "contain" ? Math.min(n.w / nw, n.h / nh) : 1;
+        const s =
+          fit === "cover"
+            ? Math.max(n.w / nw, n.h / nh)
+            : fit === "contain"
+              ? Math.min(n.w / nw, n.h / nh)
+              : 1;
         iw = nw * s;
         ih = nh * s;
         ix = (n.w - iw) / 2;
@@ -716,7 +744,9 @@
   function strokeAttrs(n, tokens, scaling = false) {
     const width = Number(n.strokeWidth) || 0;
     if (width <= 0 || n.strokeHidden === true) return "";
-    const c = colorOf((n.strokeToken && tokens && tokens[n.strokeToken]) || n.strokeColor || "#000000");
+    const c = colorOf(
+      (n.strokeToken && tokens && tokens[n.strokeToken]) || n.strokeColor || "#000000",
+    );
     if (!c) return "";
     let dash = Array.isArray(n.strokeDash) && n.strokeDash.length ? n.strokeDash : null;
     let cap = CAPS.includes(n.strokeCap) ? n.strokeCap : "butt";
@@ -728,8 +758,12 @@
     return (
       ` stroke="${c[0]}"${c[1] < 1 ? ` stroke-opacity="${c[1]}"` : ""} stroke-width="${num(width)}"` +
       (cap !== "butt" ? ` stroke-linecap="${cap}"` : "") +
-      (JOINS.includes(n.strokeJoin) && n.strokeJoin !== "miter" ? ` stroke-linejoin="${n.strokeJoin}"` : "") +
-      (Number(n.strokeMiter) > 0 && n.strokeMiter !== 4 ? ` stroke-miterlimit="${num(n.strokeMiter)}"` : "") +
+      (JOINS.includes(n.strokeJoin) && n.strokeJoin !== "miter"
+        ? ` stroke-linejoin="${n.strokeJoin}"`
+        : "") +
+      (Number(n.strokeMiter) > 0 && n.strokeMiter !== 4
+        ? ` stroke-miterlimit="${num(n.strokeMiter)}"`
+        : "") +
       (dash ? ` stroke-dasharray="${dash.map((v) => num(v)).join(" ")}"` : "") +
       (scaling ? "" : ` vector-effect="non-scaling-stroke"`)
     );
@@ -757,7 +791,9 @@
     }
     const vb = viewBoxOf(n),
       prefix = ids || "vg-" + String(n.id || "v").replace(/[^A-Za-z0-9_-]/g, "_"),
-      paths = Array.isArray(n.paths) ? n.paths.filter((p) => p && typeof p.d === "string" && !pathError(p.d)) : [];
+      paths = Array.isArray(n.paths)
+        ? n.paths.filter((p) => p && typeof p.d === "string" && !pathError(p.d))
+        : [];
     const defs = [],
       body = [];
     const rule = (p) => (p.fillRule === "evenodd" ? ` fill-rule="evenodd"` : "");
@@ -766,7 +802,9 @@
       if (!d) return;
       if (d.def) defs.push(d.def);
       for (const p of paths)
-        body.push(`<path d="${esc(p.d)}" fill="${d.fill}"${d.opacity < 1 ? ` fill-opacity="${d.opacity}"` : ""}${rule(p)}/>`);
+        body.push(
+          `<path d="${esc(p.d)}" fill="${d.fill}"${d.opacity < 1 ? ` fill-opacity="${d.opacity}"` : ""}${rule(p)}/>`,
+        );
     });
     const stroke = strokeAttrs(n, tokens, standalone);
     if (stroke) for (const p of paths) body.push(`<path d="${esc(p.d)}" fill="none"${stroke}/>`);
