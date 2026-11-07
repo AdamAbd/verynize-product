@@ -1,5 +1,9 @@
 // Shared invoke-channel contract. Type-only imports keep sandboxed preload dependency-free.
 import type { DesktopApi } from "../web/src/lib/desktop-api.js";
+// Main returns expected non-repository states normally; preload restores the public rejection.
+type ChangesChannel<K extends "gitChanges" | "gitBranchChanges"> = (
+  ...args: Parameters<DesktopApi[K]>
+) => Promise<Awaited<ReturnType<DesktopApi[K]>> | { code: "not-a-repo"; message: string }>;
 export interface IpcContract {
   agentAccessGet: DesktopApi["agentTools"]["getAccess"];
   agentAccessSet: DesktopApi["agentTools"]["setAccess"];
@@ -86,8 +90,8 @@ export interface IpcContract {
   fontCatalog: DesktopApi["fontCatalog"];
   fontFaces: DesktopApi["fontFaces"];
   generateImage: DesktopApi["imageProvider"]["generate"];
-  gitBranchChanges: DesktopApi["gitBranchChanges"];
-  gitChanges: DesktopApi["gitChanges"];
+  gitBranchChanges: ChangesChannel<"gitBranchChanges">;
+  gitChanges: ChangesChannel<"gitChanges">;
   gitCommit: DesktopApi["gitCommit"];
   gitCreatePullRequest: DesktopApi["gitCreatePullRequest"];
   gitDiff: DesktopApi["gitDiff"];

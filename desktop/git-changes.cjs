@@ -387,8 +387,15 @@ function registerGitChanges(handle, { getProject }) {
   };
   const at = async options => new GitChanges(await resolveRoot(getProject(), options?.root));
   const mutate = method => async (options = {}) => { const repo = await at(options); return serial(repo.root, () => method(repo, options)); };
-  handle('gitChanges', async options => (await at(options)).summary());
-  handle('gitBranchChanges', async options => (await at(options)).branchChanges());
+  const readChanges = method => async options => {
+    try { return await (await at(options))[method](); }
+    catch (error) {
+      if (error.code === 'not-a-repo') return { code: error.code, message: error.message };
+      throw error;
+    }
+  };
+  handle('gitChanges', readChanges('summary'));
+  handle('gitBranchChanges', readChanges('branchChanges'));
   handle('gitDiff', async options => (await at(options)).diff(options?.file));
   handle('gitCommit', mutate((repo, options) => repo.commit(options.message)));
   handle('gitDiscard', mutate((repo, options) => repo.discard(options.file)));

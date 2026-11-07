@@ -2,9 +2,9 @@ const { onWindowClosed } = require("./window-cleanup.cjs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const fs = require("node:fs/promises");
-const { BrowserWindow, dialog, app } = require("electron");
-/** Output pixels for a CSS size at a scale (tolerates float noise such as 570 × 720/570). */
-const outputSize = (size, scale) => Math.max(1, Math.ceil(Math.ceil(size) * scale - 1e-6));
+const { BrowserWindow, dialog, app, screen } = require("electron");
+const { captureSize } = require("./render-limits.cjs");
+const { randomUUID } = require("node:crypto");
 function renderOptions(options) {
   if (
     !options ||
@@ -22,13 +22,9 @@ function renderOptions(options) {
     scale < 0.01 ||
     scale > 100 ||
     width > 10000 ||
-    height > 10000 ||
-    // Presets (720p–2160p, 512w/512h) can mean large factors for small artwork: bound the output instead.
-    outputSize(width, scale) > 16384 ||
-    outputSize(height, scale) > 16384 ||
-    outputSize(width, scale) * outputSize(height, scale) > 32e6
+    height > 10000
   )
-    throw Error("Export exceeds 32 megapixels or 16384 px per side");
+    throw Error("Invalid render dimensions: sides must be 1–10000 CSS px and scale 0.01–100");
   const fonts = Array.isArray(options.fonts) ? options.fonts.slice(0, 40) : null;
   return {
     html: options.html,
@@ -37,6 +33,7 @@ function renderOptions(options) {
     scale,
     fonts,
     measure: options.measure !== false,
+    screenshot: options.screenshot === true,
   };
 }
 
@@ -85,16 +82,14 @@ function familiesFromHtml(html, splitFontStack) {
   }
   for (const m of decode(source).matchAll(/font-weight\s*:\s*(\d{3}|bold)/gi))
     for (const entry of byFamily.values()) entry.weights.add(m[1] === "bold" ? 700 : Number(m[1]));
-  return [...byFamily.values()]
-    .slice(0, 40)
-    .map((e) => ({
-      family: e.family,
-      weights: [...e.weights].sort((a, b) => a - b),
-      styles: [...e.styles],
-    }));
+  return [...byFamily.values()].slice(0, 40).map((e) => ({
+    family: e.family,
+    weights: [...e.weights].sort((a, b) => a - b),
+    styles: [...e.styles],
+  }));
 }
 // Fonts embedded by the document itself (`fontFaces`, e.g. captured web fonts) arrive as @font-face
-// rules with data: sources inside the HTML. They are lifted out (so the navigation URL stays small),
+// rules with data: sources inside the HTML. They are lifted out for consistent font loading,
 // injected with insertCSS like cached fonts, and never looked up in the font cache.
 function liftEmbeddedFonts(html) {
   const rules = [],
@@ -162,11 +157,19 @@ function renderHTML(input, parent = null) {
   renderQueue = result.catch(() => {});
   return result;
 }
-async function renderNow({ html, width, height, scale, fonts: families, measure }, parent) {
-  const outputWidth = outputSize(width, scale),
-    outputHeight = outputSize(height, scale);
+async function renderNow(
+  { html, width, height, scale: requestedScale, fonts: families, measure, screenshot },
+  parent,
+) {
+  // Use the largest connected display factor: a hidden window may be placed on any display.
+  const deviceScale = Math.max(1, ...screen.getAllDisplays().map((display) => display.scaleFactor));
+  const {
+    width: outputWidth,
+    height: outputHeight,
+    scale,
+  } = captureSize(width, height, requestedScale, deviceScale, screenshot);
   // Chromium clamps page zoom at 5×; larger factors add CSS zoom on the root for the remainder.
-  const pageZoom = Math.min(scale, 4),
+  const pageZoom = Math.max(0.25, Math.min(scale, 4)),
     cssZoom = scale / pageZoom;
   const lifted = liftEmbeddedFonts(html);
   html = lifted.html;
@@ -175,12 +178,13 @@ async function renderNow({ html, width, height, scale, fonts: families, measure 
   const window = new BrowserWindow({
     show: false,
     useContentSize: true,
+    enableLargerThanScreen: true,
     width: outputWidth,
     height: outputHeight,
     transparent: true,
     frame: false,
     webPreferences: {
-      partition: "render-" + Date.now(),
+      partition: "render-" + randomUUID(),
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -191,24 +195,25 @@ async function renderNow({ html, width, height, scale, fonts: families, measure 
     if (!window.isDestroyed()) window.destroy();
   };
   const offClosed = onWindowClosed(parent, close);
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.webContents.on("will-navigate", (e) => e.preventDefault());
-  window.webContents.session.setPermissionRequestHandler((_w, _p, cb) => cb(false));
-  window.webContents.session.webRequest.onBeforeRequest((details, cb) =>
-    cb({ cancel: !details.url.startsWith("data:") && !details.url.startsWith("blob:") }),
-  );
-  const csp =
-    "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:\">";
+  // Some window systems clamp the constructor size to the display work area. Reapply the
+  // already-bounded content size and refuse a clipped capture if the window manager rejects it.
+  window.setContentSize(outputWidth, outputHeight);
+  const disposePage = serveRenderPage(window, html, true);
   try {
-    await window.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(csp + html));
-    // Navigation establishes the data URL's zoom context. Set the export scale on that
-    // loaded page; setting it on the initial blank page can be reset by loadURL.
+    await window.loadURL(RENDER_URL);
+    const [actualWidth, actualHeight] = window.getContentSize();
+    if (actualWidth !== outputWidth || actualHeight !== outputHeight)
+      throw Error(
+        "The window manager cannot render this size. Lower the scale or select a smaller area.",
+      );
+    // Navigation establishes the page's zoom context. Set scale after loading, otherwise
+    // loadURL can reset it. CSS zoom handles factors outside Chromium's page zoom range.
     window.webContents.setZoomFactor(pageZoom);
-    if (cssZoom > 1)
+    if (cssZoom !== 1)
       await window.webContents.executeJavaScript(
         `document.documentElement.style.zoom=${JSON.stringify(String(cssZoom))}`,
       );
-    // Inserted after load so large embedded fonts never inflate the navigation URL.
+    // Inserted after load so cached and document fonts share the same settling path.
     if (fonts.css) await window.webContents.insertCSS(fonts.css);
     if (lifted.css) await window.webContents.insertCSS(lifted.css);
     await window.webContents.executeJavaScript(
@@ -227,10 +232,13 @@ async function renderNow({ html, width, height, scale, fonts: families, measure 
         .toDataURL(),
       width: outputWidth,
       height: outputHeight,
+      scale,
+      requestedScale,
       ...(boxes && Object.keys(boxes).length ? { boxes } : {}),
       fonts: { loaded: fonts.loaded, missing: fonts.missing },
     };
   } finally {
+    disposePage();
     close();
     offClosed();
   }
@@ -269,8 +277,38 @@ function registerRendering(handle, parent) {
 // ---------------------------------------------------------------------------------------------
 // Artwork export (inspector Export section): vector PDF of the selection, native save dialog and the
 // font catalog for the font family picker.
-const csp =
-  "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:\">";
+const RENDER_URL = "verynize-render://document/";
+function serveRenderPage(window, html, scripts = false) {
+  const contents = window.webContents,
+    session = contents.session;
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.on("will-navigate", (e) => e.preventDefault());
+  contents.on("will-redirect", (e) => e.preventDefault());
+  session.setPermissionRequestHandler((_w, _p, cb) => cb(false));
+  session.setPermissionCheckHandler(() => false);
+  session.webRequest.onBeforeRequest((details, cb) =>
+    cb({
+      cancel:
+        details.url !== RENDER_URL &&
+        !details.url.startsWith("data:") &&
+        !details.url.startsWith("blob:"),
+    }),
+  );
+  session.protocol.handle(
+    "verynize-render",
+    (request) =>
+      new Response(request.url === RENDER_URL ? html : "", {
+        status: request.url === RENDER_URL ? 200 : 404,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Security-Policy":
+            "default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:;" +
+            (scripts ? " script-src 'unsafe-inline';" : ""),
+        },
+      }),
+  );
+  return () => session.protocol.unhandle("verynize-render");
+}
 // The PDF page runs without JavaScript, so web fonts (cached or embedded) are loaded through the
 // DevTools protocol before printing; otherwise printToPDF can run before any font face has decoded.
 async function settleFonts(webContents) {
@@ -300,16 +338,16 @@ async function settleFonts(webContents) {
   }
 }
 async function renderPDF(input, parent = null) {
-  const { html, width, height } = renderOptions({ ...input, scale: 1 });
+  const { width, height } = renderOptions({ ...input, scale: 1 });
   const lifted = liftEmbeddedFonts(input.html);
   const fonts = await embedFonts(lifted.html, null, lifted.families);
   fonts.loaded += lifted.count;
   const window = new BrowserWindow({
     show: false,
-    width,
-    height,
+    width: Math.min(width, 1024),
+    height: Math.min(height, 1024),
     webPreferences: {
-      partition: "pdf-" + Date.now(),
+      partition: "pdf-" + randomUUID(),
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -320,20 +358,13 @@ async function renderPDF(input, parent = null) {
     if (!window.isDestroyed()) window.destroy();
   };
   const offClosed = onWindowClosed(parent, close);
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.webContents.on("will-navigate", (e) => e.preventDefault());
-  window.webContents.session.webRequest.onBeforeRequest((details, cb) =>
-    cb({ cancel: !details.url.startsWith("data:") && !details.url.startsWith("blob:") }),
-  );
+  const title = String(input.title || "Export")
+    .replace(/[<>&]/g, "")
+    .slice(0, 120);
+  const page = `<title>${title}</title><style>@page{size:${width}px ${height}px;margin:0}html,body{margin:0;width:${width}px;height:${height}px;overflow:hidden}</style>`;
+  const disposePage = serveRenderPage(window, page + lifted.html);
   try {
-    // One page exactly the artwork size (CSS px → inches at 96 dpi), no margins.
-    const title = String(input.title || "Export")
-      .replace(/[<>&]/g, "")
-      .slice(0, 120);
-    const page = `<title>${title}</title><style>@page{size:${width}px ${height}px;margin:0}html,body{margin:0;width:${width}px;height:${height}px;overflow:hidden}</style>`;
-    await window.loadURL(
-      "data:text/html;charset=utf-8," + encodeURIComponent(csp + page + lifted.html),
-    );
+    await window.loadURL(RENDER_URL);
     if (fonts.css) await window.webContents.insertCSS(fonts.css);
     if (lifted.css) await window.webContents.insertCSS(lifted.css);
     await settleFonts(window.webContents);
@@ -351,6 +382,7 @@ async function renderPDF(input, parent = null) {
       fonts: { loaded: fonts.loaded, missing: fonts.missing },
     };
   } finally {
+    disposePage();
     close();
     offClosed();
   }
