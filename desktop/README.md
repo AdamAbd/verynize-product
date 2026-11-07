@@ -177,3 +177,5 @@ Editor files use `/editor/<fileId>` with stable library IDs. Tab switches push h
 `/editor` and known cloud-room ID aliases replace to the local file URL. Unknown or unavailable
 files return to Files with a non-blocking notice. Settings history retains the full file path;
 cloud capabilities remain exclusively in the existing fragments.
+
+- `writeClipboardImage(dataURL)` accepts a PNG data URL and writes a native bitmap to the system clipboard, returning `Promise<void>`. Invalid or empty images and inputs over 200 MiB are rejected. The IPC handler uses the editor main-frame sender check.
