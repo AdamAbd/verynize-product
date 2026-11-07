@@ -13,11 +13,12 @@ import {
   rpc,
   roleRank,
   atLeast,
-  HttpError,
+  errorStatus,
 } from "./http.js";
 import { MESSAGE_BYTES, REQUEST_BYTES } from "./limits.js";
 import { SESSION } from "./accounts.js";
-import { AUTH_BASE_PATH, createAuth } from "./auth.js";
+import { APIError } from "better-auth/api";
+import { AUTH_BASE_PATH, activeSessionCount, createAuth } from "./auth.js";
 import {
   addRoom,
   ensurePersonalOrganization,
@@ -249,8 +250,15 @@ async function handleAuth(request, env, url) {
     let revoked = 0;
     if (!SESSION.test(session)) {
       const auth = createAuth(env, request);
-      revoked = (await auth.api.listSessions({ headers: authHeaders(session) })).length;
-      await auth.api.revokeSessions({ headers: authHeaders(session) });
+      try {
+        // listSessions also supplies the freshness guard for this sensitive operation.
+        revoked = (await auth.api.listSessions({ headers: authHeaders(session) })).length;
+        await auth.api.revokeSessions({ headers: authHeaders(session) });
+      } catch (error) {
+        if (error instanceof APIError && error.body?.code === "SESSION_NOT_FRESH")
+          fail(403, "Sign in again to sign out other devices");
+        throw error;
+      }
     }
     const legacy = await rpc(directory(env).signOutEverywhere(account.id));
     return json({ signedOut: true, sessions: legacy.sessions + revoked });
@@ -260,7 +268,7 @@ async function handleAuth(request, env, url) {
     const session = sessionOf(request, url);
     const authSessions = SESSION.test(session)
       ? 0
-      : (await createAuth(env, request).api.listSessions({ headers: authHeaders(session) })).length;
+      : await activeSessionCount(env, account.authUser.id);
     const personalOrganizationId = account.authUser
       ? await ensurePersonalOrganization(env, createAuth(env, request), account.authUser)
       : null;
@@ -953,7 +961,7 @@ export default {
         return (await serveApp(request, env, url)) || missingApp();
       return env.ASSETS ? env.ASSETS.fetch(request) : new Response("Verynize API", { status: 200 });
     } catch (error) {
-      if (!(error instanceof HttpError)) {
+      if (errorStatus(error) >= 500) {
         console.error("request failed", url.pathname, error?.message);
         reportError(error, "worker");
       }

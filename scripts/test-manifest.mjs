@@ -621,6 +621,7 @@ export const CLOUD_SCENARIOS = [
   "tests/cloud-merge.mjs",
   "tests/cloud-vectors.mjs",
   "tests/cloud-accounts.mjs",
+  "tests/cloud-accounts-sessions.mjs",
   "tests/cloud-passkeys.mjs",
   "tests/cloud-apps.mjs",
   "tests/cloud-email.mjs",
