@@ -58,7 +58,8 @@ export function sourceMapUpload({ projects, release, deleteGlobs }) {
       project: projects,
       authToken,
       url: process.env.SENTRY_URL || undefined,
-      release: { name: release, inject: false },
+      // Commits and the deploy record are set after a real deploy by scripts/sentry-release.mjs, not by every build.
+      release: { name: release, inject: false, setCommits: false },
       sourcemaps: { filesToDeleteAfterUpload: deleteGlobs },
       telemetry: false,
       silent: true,

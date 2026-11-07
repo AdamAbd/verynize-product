@@ -26,7 +26,7 @@
     "build:web:nitro:vercel": "node scripts/build-ui.cjs && NITRO_PRESET=vercel vp build -c vite.nitro.config.ts",
     "start:web:nitro": "node dist/web-nitro/server/index.mjs",
     "deploy:check": "npm run build && node scripts/env.mjs cf deploy --prebuilt --dry-run",
-    "deploy": "npm run build && node scripts/env.mjs cf deploy --prebuilt",
+    "deploy": "npm run build && node scripts/env.mjs cf deploy --prebuilt && node scripts/env.mjs node scripts/sentry-release.mjs",
     "db:migrate": "node scripts/db-migrate.mjs",
     "start:server": "node scripts/build-integrations.mjs && node server/node.mjs",
     "test": "node scripts/run-tests.mjs --all",
