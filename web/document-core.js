@@ -548,7 +548,7 @@
         ids.has(view.id) ||
         !document.pages.some((p) => p.id === view.page) ||
         !Number.isFinite(view.zoom) ||
-        view.zoom < 0.05 ||
+        view.zoom < 0.02 ||
         view.zoom > 32 ||
         !["scrollLeft", "scrollTop"].every(
           (k) => Number.isFinite(view[k]) && view[k] >= 0 && view[k] <= 1e7,

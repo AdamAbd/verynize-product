@@ -69,6 +69,40 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 2);
     await page.keyboard.press(mod('Minus')); await page.keyboard.press(mod('Minus'));
     assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 0.5);
+    await page.evaluate(() => window.design.setCamera(100, 100, 0.05));
+    await page.keyboard.press(mod("Minus"));
+    assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 0.02);
+    await page.keyboard.press(mod("Minus"));
+    assert.equal(
+      await page.evaluate(() => window.design.getCamera().zoom),
+      0.02,
+      "keyboard lower clamp",
+    );
+    await page.locator("#zoom-menu-button").click();
+    await page.locator("#zoom-out").click();
+    assert.equal(
+      await page.evaluate(() => window.design.getCamera().zoom),
+      0.02,
+      "menu lower clamp",
+    );
+    await page.locator("#bd-zoom-menu").waitFor({ state: "hidden" });
+    // Return keyboard focus to the canvas before testing space-to-pan below.
+    await page.locator("#zoom-menu-button").evaluate((button) => button.blur());
+    await page.mouse.move(pivot.x, pivot.y);
+    await page.keyboard.down("Control");
+    await page.mouse.wheel(0, 10000);
+    await page.keyboard.up("Control");
+    assert.equal(
+      await page.evaluate(() => window.design.getCamera().zoom),
+      0.02,
+      "wheel/pinch lower clamp",
+    );
+    await page.evaluate(() => window.design.setCamera(100, 100, 0.001));
+    assert.equal(
+      await page.evaluate(() => window.design.getCamera().zoom),
+      0.02,
+      "API lower clamp",
+    );
     await page.keyboard.press(mod('Digit0'));
     assert.equal(await page.evaluate(() => window.design.getCamera().zoom), 1);
     await page.keyboard.press('Shift+Digit1');
@@ -87,6 +121,27 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     cam = await page.evaluate(() => window.design.getCamera()); near(cam.x, 120, 1, 'hand pan'); assert.equal((await node('a')).x, 0);
     await page.keyboard.press('Escape'); assert.equal(await page.evaluate(() => window.design.getTool()), 'move');
 
+    await seed([rect("overview", 0, 0, 20000, 20000, { type: "frame", layout: "free" })]);
+    await page.keyboard.press("Shift+Digit1");
+    assert.ok(
+      await page.evaluate(
+        () => window.design.getCamera().zoom < 0.05 && window.design.getCamera().zoom >= 0.02,
+      ),
+      "fit uses the extended zoom range",
+    );
+    await page.evaluate(() => window.design.setCamera(100, 100, 0.02));
+    const overviewLabel = page.locator("#canvas-overlay .frame-label[data-id=overview]");
+    assert.ok(
+      (await overviewLabel.boundingBox()).height >= 10,
+      "frame label stays screen-sized at 2%",
+    );
+    await click(5000, 5000);
+    assert.deepEqual(await selection(), ["overview"], "hit testing at 2%");
+    const overviewHandle = await page
+      .locator("#canvas [data-id=overview] .handle[data-corner=nw]")
+      .boundingBox();
+    near(overviewHandle.width, 9, 0.2, "handle width at 2%");
+    near(overviewHandle.height, 9, 0.2, "handle height at 2%");
     // ---- 2. Tools: draw-to-create, parenting, presets ----
     await seed([{id: 'board', name: 'Board', type: 'frame', x: 0, y: 0, w: 400, h: 300, color: '#ffffff', layout: 'free'}]);
     // D1: the toolbar Frame button arms the tool like F; neither creates a layer.

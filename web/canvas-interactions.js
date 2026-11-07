@@ -3,7 +3,7 @@
 // command/shortcut registry. Independent implementation; app.js passes its editor state in
 // through BetterCanvas.install(editor) so this file never reaches into private globals.
 (() => {
-  const ZOOM_STOPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32];
+  const ZOOM_STOPS = [0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32];
   const MIN_ZOOM = ZOOM_STOPS[0], MAX_ZOOM = ZOOM_STOPS.at(-1);
   const SAFE = {top: 48, right: 40, bottom: 96, left: 40};
   // Zoom to selection (⇧2) margins, measured in Wonder V3-selection (120×120 → 538 %: 64 px above and below inside the
