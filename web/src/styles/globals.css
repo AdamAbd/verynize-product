@@ -323,6 +323,15 @@ html[data-platform="web"] {
   --color-warning: #e3b341; /* Agents › Commit author: email not linked on GitHub (Wonder 71 warning glyph) */
   --color-avatar: #c4612b; /* Agents › Commit author initials tile */
   --color-avatar-foreground: #ffffff;
+  /* Preview / Import HTML dialog (settings/preview-import.tsx): the exported page's own white surface, frame height
+     and widths (Phone 390, Tablet 768, Desktop 1000). */
+  --color-preview-page: #ffffff;
+  --spacing-preview-frame: 70vh;
+  --spacing-preview-phone: 390px;
+  --spacing-preview-tablet: 768px;
+  --spacing-preview-desktop: 1000px;
+  --spacing-templates: 880px; /* Templates dialog width */
+  --spacing-dialog-max: calc(100vh - 48px); /* tall dialogs keep a margin from the window edges */
   /* </settings-tokens> */
   /* <code-tokens> */
   /* Code workspace, measured from /tmp/wonder-code-mode.png and design/wonder 80/81 (1440×870). */

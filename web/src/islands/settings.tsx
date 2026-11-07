@@ -10,6 +10,9 @@ import { GlobalSearchDialog } from "./settings/projects";
 import { DialogEnhancer, ExportToasts } from "./settings/dialogs";
 import { TextPrompt } from "./settings/text-prompt";
 import { PreviewImportDialog } from "./settings/preview-import";
+import { FigmaDialog } from "./settings/figma-dialog";
+import { TemplatesDialog } from "./settings/templates-dialog";
+import { ViewsDialog } from "./settings/views-dialog";
 import "./settings/settings.css";
 
 function Island() {
@@ -20,6 +23,9 @@ function Island() {
       <GlobalSearchDialog />
       <TextPrompt />
       <PreviewImportDialog />
+      <FigmaDialog />
+      <TemplatesDialog />
+      <ViewsDialog />
       <DialogEnhancer />
       <ExportToasts />
       <Toaster position="bottom-right" offset={16} visibleToasts={3} />
