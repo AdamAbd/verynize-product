@@ -85,7 +85,8 @@ try {
   );
   assert.equal(
     (await send(ana, "chat:large", { ...large, title: "must roll back" }, 1)).status,
-    400,
+    500,
+    "database write failures are server errors",
   );
   await db.exec("DROP TRIGGER reject_test_chunk");
   assert.deepEqual(

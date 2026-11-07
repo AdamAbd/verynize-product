@@ -1,7 +1,7 @@
 // Tells Sentry that the web/server release was deployed (run by `npm run deploy` after `cf deploy`).
 //   node scripts/env.mjs node scripts/sentry-release.mjs [--dry-run]
-// - Attaches the release's commits. The org has no GitHub integration, so `--auto` fails and the commits are read
-//   from local git instead (`--local`). Commits are what let Sentry resolve an issue from a `Fixes VERYNIZE-…`
+// - Attaches the release's commits through the Sentry GitHub integration (`--auto`), falling back to local git
+//   (`--local`) when the org has no integration. Commits are what let Sentry resolve an issue from a `Fixes VERYNIZE-…`
 //   line in a commit message (merge commits carry the PR description).
 // - Records a deploy for SENTRY_ENVIRONMENT (default production) with the Worker's domain.
 // Release and org come from web-start/build/telemetry.mjs, the same values the build uploaded source maps under.

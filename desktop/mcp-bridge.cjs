@@ -150,8 +150,8 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
   const shot = async (document, pageId, nodeId, scale) => {
     const node = edit.getPage(document, pageId).nodes.find(n => n.id === nodeId);
     const html = exportHTML(withName(document), pageId, { nodeId });
-    const result = await renderHTML({ html, width: Math.max(1, node.w), height: Math.max(1, node.h), scale, fonts: fonts.extractFontFamilies(document) });
-    return { data: result.dataURL.replace(/^data:image\/png;base64,/, ''), mimeType: 'image/png', width: result.width, height: result.height, source: 'offscreen', ...(validBounds(result.boxes) ? { bounds: result.boxes } : {}), fonts: result.fonts };
+    const result = await renderHTML({ html, width: Math.max(1, node.w), height: Math.max(1, node.h), scale, screenshot: true, fonts: fonts.extractFontFamilies(document) });
+    return { data: result.dataURL.replace(/^data:image\/png;base64,/, ''), mimeType: 'image/png', width: result.width, height: result.height, scale: result.scale, requestedScale: result.requestedScale, source: 'offscreen', ...(validBounds(result.boxes) ? { bounds: result.boxes } : {}), fonts: result.fonts };
   };
   const withName = document => (typeof document.name === 'string' && document.name.trim() ? document : { ...document, name: 'Untitled' });
   return {
@@ -248,7 +248,7 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
         const entry = await editorReady();
         try {
           const result = entry && await request(entry, 'screenshot', { pageId, nodeId, scale }, 60000);
-          if (result?.dataURL?.startsWith('data:image/png;base64,')) return { data: result.dataURL.slice('data:image/png;base64,'.length), mimeType: 'image/png', width: result.width, height: result.height, source: 'editor', ...(validBounds(result.bounds) ? { bounds: result.bounds } : {}), ...(result.fonts ? { fonts: result.fonts } : {}) };
+          if (result?.dataURL?.startsWith('data:image/png;base64,')) return { data: result.dataURL.slice('data:image/png;base64,'.length), mimeType: 'image/png', width: result.width, height: result.height, scale: result.scale, requestedScale: result.requestedScale, source: 'editor', ...(validBounds(result.bounds) ? { bounds: result.bounds } : {}), ...(result.fonts ? { fonts: result.fonts } : {}) };
         } catch {}
       }
       return shot(state.document, pageId, nodeId, scale);

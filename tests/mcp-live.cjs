@@ -56,6 +56,7 @@ const path=require('node:path');
     const shot=await call('take_screenshot',{id});
     assert.equal(shot.content[0].type,'image');assert.equal(shot.content[0].mimeType,'image/png');assert.ok(Buffer.from(shot.content[0].data,'base64').length>100);
     const meta=JSON.parse(shot.content[1].text);
+    assert.equal(meta.scale,1);assert.equal(meta.requestedScale,1);
     assert.equal(meta.source,'editor','captured by the live renderer');
     assert.equal(meta.geometry,'measured','renderer reports per-node boxes');assert.ok(meta.receipt,'receipt recorded');
     assert.match(shot.content[2].text,/^Lint /);assert.match(shot.content[2].text,/Geometry: measured/);

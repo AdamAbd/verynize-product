@@ -185,3 +185,37 @@ test("shorthand winners honor important declarations and reset every corner", as
     assert.equal(node.strokeColor, "#ff0000");
   }
 });
+
+test("HTML expansion counts canvas nodes and names the overflowing page atomically", async () => {
+  const doc = documentFromMeta();
+  doc.pages[0].name = "Import target";
+  const source = "<div>" + "<button>X</button>".repeat(5000) + "</div>";
+  // Only 5001 HTML elements, but each button also needs its own text layer.
+  const before = structuredClone(doc);
+  const { prepareHtmlImport } = await import("./codec-source.mjs");
+  await assert.rejects(async () => {
+    const prepared = await prepareHtmlImport(source, doc, doc.activePage, { split: "none" });
+    prepared.apply(doc);
+  }, /(?:Import target|artboard).*10001|10001.*(?:Import target|artboard)/i);
+  assert.deepEqual(doc, before);
+});
+
+test("unnamed overflowing pages report their ID instead of the document limit", async () => {
+  const { documentProblems } = await import("./document-core.mjs");
+  const doc = documentFromMeta();
+  const page = doc.pages[0];
+  delete page.name;
+  page.nodes = Array.from({ length: NODE_LIMITS.perPage + 1 }, (_, i) => ({
+    id: `n${i}`,
+    type: "rectangle",
+    x: 0,
+    y: 0,
+    w: 10,
+    h: 10,
+  }));
+  assert.ok(
+    documentProblems(doc).some((problem) =>
+      problem.message.includes(`Page "${page.id}" has 10001 nodes; limit is 10000`),
+    ),
+  );
+});

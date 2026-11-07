@@ -9,6 +9,8 @@
     ready = false,
     syncing = null,
     timer,
+    retryTimer,
+    networkAttempts = 0,
     error = "",
     starting = true,
     hydrating = false;
@@ -59,6 +61,8 @@
       revision: pending.get(key)?.revision ?? records.get(key)?.revision ?? 0,
       base: pending.get(key)?.base ?? records.get(key)?.value ?? null,
     });
+    clearTimeout(retryTimer);
+    networkAttempts = 0;
     clearTimeout(timer);
     timer = setTimeout(() => sync(), 150);
     report("");
@@ -161,14 +165,25 @@
     const a = account(),
       expected = identity;
     if (!a || scope() !== expected) throw Error("The cloud account changed");
-    const response = await fetch(a.server + path, {
-      ...init,
-      headers: { "Content-Type": "application/json", "X-Verynize-Session": a.session },
+    let response;
+    try {
+      response = await fetch(a.server + path, {
+        ...init,
+        headers: { "Content-Type": "application/json", "X-Verynize-Session": a.session },
+      });
+    } catch (failure) {
+      if (failure instanceof TypeError) Object.assign(failure, { network: true });
+      throw failure;
+    }
+    const data = await response.json().catch((failure) => {
+      if (!response.ok) return {};
+      throw failure;
     });
-    const data = await response.json();
     if (scope() !== expected) throw Error("The cloud account changed");
     if (!response.ok)
-      throw Object.assign(Error(data.error || "Account sync failed"), { status: response.status });
+      throw Object.assign(Error(data.error || `Account sync failed (HTTP ${response.status})`), {
+        status: response.status,
+      });
     return data;
   }
   async function sync() {
@@ -281,15 +296,28 @@
             records.set(item.key, item);
             changed = true;
           }
+        clearTimeout(retryTimer);
+        networkAttempts = 0;
         report("");
         if (changed) emit();
       } catch (e) {
-        if (identity === expected)
+        if (identity === expected) {
+          clearTimeout(retryTimer);
+          if (!e.network || !pending.size) networkAttempts = 0;
+          if (e.network && pending.size && networkAttempts < 3) {
+            const delay = 1000 * 2 ** networkAttempts++;
+            retryTimer = setTimeout(() => {
+              if (identity === expected && pending.size) void sync();
+            }, delay);
+          }
           report(
             e.status === 409
               ? "An item changed on another device. Your unsaved changes are still in this window."
-              : `Not saved to the database: ${e.message}`,
+              : e.network
+                ? "Can't reach Verynize — changes are kept on this device and will retry when the connection returns. Keep this window open."
+                : `Not saved to the database: ${e.message}`,
           );
+        }
       }
     })().finally(() => {
       if (identity === expected) syncing = null;
@@ -299,6 +327,9 @@
   function changedAccount() {
     const next = scope();
     if (next === identity) return;
+    clearTimeout(timer);
+    clearTimeout(retryTimer);
+    networkAttempts = 0;
     identity = next;
     ready = false;
     syncing = null;
@@ -333,8 +364,13 @@
     status: () => ({ ready, pending: pending.size, error }),
   };
   window.addEventListener("cloud-account-changed", changedAccount);
-  window.addEventListener("online", () => sync());
-  window.addEventListener("focus", () => sync());
+  const reconnect = () => {
+    clearTimeout(retryTimer);
+    networkAttempts = 0;
+    void sync();
+  };
+  window.addEventListener("online", reconnect);
+  window.addEventListener("focus", reconnect);
   window.addEventListener("beforeunload", (event) => {
     if (pending.size) {
       event.preventDefault();
@@ -342,7 +378,7 @@
     }
   });
   setInterval(() => {
-    if (!document.hidden) void sync();
+    if (!document.hidden && !networkAttempts) void sync();
   }, 3000);
   // Initial read happens after the legacy consumers have installed their listeners.
   identity = scope();

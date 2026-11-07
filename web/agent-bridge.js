@@ -144,7 +144,7 @@
       const previous = editor().getSelection();
       editor().setSelection([nodeId]);
       try {
-        const raster = await editor().exportArtwork({ format: 'PNG', scale, selectionOnly: true });
+        const raster = await editor().exportArtwork({ format: 'PNG', scale, selectionOnly: true, screenshot: true });
         // Measured layout boxes relative to the screenshotted element: from the offscreen render
         // (desktop/render.cjs) when it reports them, otherwise from the live canvas DOM.
         const bounds = rebase(raster?.boxes, nodeId) || measureCanvas(nodeId);

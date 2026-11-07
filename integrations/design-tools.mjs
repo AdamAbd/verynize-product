@@ -599,7 +599,7 @@ export function toolTable(backend, context = {}) {
       ].filter(Boolean).join('\n\n');
       return { content: [
         { type: 'image', data: shot.data, mimeType: shot.mimeType || 'image/png' },
-        { type: 'text', text: JSON.stringify({ id, artboardId: root.shortId, width: shot.width, height: shot.height, source, geometry: bounds ? 'measured' : 'estimated', receipt: receipt.id, lint: lint ? { critical: lint.stats.critical, major: lint.stats.major, minor: lint.stats.minor } : null, missingFonts: fontLines.length }) },
+        { type: 'text', text: JSON.stringify({ id, artboardId: root.shortId, width: shot.width, height: shot.height, scale: shot.scale, requestedScale: shot.requestedScale, source, geometry: bounds ? 'measured' : 'estimated', receipt: receipt.id, lint: lint ? { critical: lint.stats.critical, major: lint.stats.major, minor: lint.stats.minor } : null, missingFonts: fontLines.length }) },
         { type: 'text', text: notes },
       ] };
     },

@@ -151,6 +151,7 @@ const AREA = {
   capture: [
     "desktop/capture-*.cjs",
     "desktop/render.cjs",
+    "desktop/render-limits.cjs",
     "desktop/preview-dom.cjs",
     "desktop/html-import.cjs",
     "integrations/export-*.mjs",
@@ -394,6 +395,7 @@ const desktop = [
   ),
   unit("tests/desktop-projects.cjs", "desktop"),
   unit("tests/git-changes.cjs", "desktop"),
+  unit("tests/render-limits.cjs", "desktop", ["desktop/render-limits.cjs"]),
   unit("tests/repositories.cjs", "desktop"),
   electron("tests/code-workspace.cjs", "desktop", [...AREA.code, ...AREA.preview], {
     locks: ["port:5173"],
@@ -621,6 +623,7 @@ export const CLOUD_SCENARIOS = [
   "tests/cloud-merge.mjs",
   "tests/cloud-vectors.mjs",
   "tests/cloud-accounts.mjs",
+  "tests/cloud-accounts-sessions.mjs",
   "tests/cloud-passkeys.mjs",
   "tests/cloud-apps.mjs",
   "tests/cloud-email.mjs",
@@ -693,6 +696,7 @@ const web = [
 ];
 
 const e2eCloud = [
+  electron("tests/account-store-network.mjs", "e2e-cloud", ["web/account-store.js"]),
   electron("tests/cloud-switch-cache.mjs", "e2e-cloud", [
     ...AREA.cloudRenderer,
     "web/switch-*.js",
