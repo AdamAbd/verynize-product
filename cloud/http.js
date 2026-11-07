@@ -1,3 +1,5 @@
+import { APIError } from "better-auth/api";
+
 // Shared HTTP helpers for the collaboration Worker and its Durable Objects.
 export const MAX_JSON = 2 * 1024 * 1024;
 export const corsHeaders = {
@@ -96,11 +98,15 @@ export function documentText(document) {
   return text;
 }
 
+/** Keep client errors distinct from unexpected infrastructure/application failures. */
+export function errorStatus(error) {
+  if (error instanceof HttpError) return error.status;
+  if (error instanceof APIError) return error.statusCode;
+  return 500;
+}
+
 export const errorResponse = (error) =>
-  json(
-    { error: error.message || "Request failed" },
-    error instanceof HttpError ? error.status : 400,
-  );
+  json({ error: error?.message || "Request failed" }, errorStatus(error));
 
 export const escapeHtml = (value) =>
   String(value ?? "").replace(
