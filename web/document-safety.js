@@ -113,7 +113,17 @@
     document.body.append(stack);
     return stack;
   }
-  function notify({ key, kind, title, detail, items = [], text, name, onExport, action }) {
+  function notify({
+    key,
+    kind,
+    title,
+    detail,
+    items = [],
+    text = undefined,
+    name = undefined,
+    onExport = undefined,
+    action = undefined,
+  }) {
     if (dismissed.has(key)) return null;
     const add = () => {
       const stack = host();

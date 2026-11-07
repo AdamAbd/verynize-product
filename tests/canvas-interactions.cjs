@@ -86,8 +86,15 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
       "menu lower clamp",
     );
     await page.locator("#bd-zoom-menu").waitFor({ state: "hidden" });
-    // Return keyboard focus to the canvas before testing space-to-pan below.
-    await page.locator("#zoom-menu-button").evaluate((button) => button.blur());
+    // Return keyboard focus to the canvas before testing space-to-pan below. The closed menu hands focus
+    // back to its trigger a frame or more later, so keep blurring until focus has settled on the body.
+    await page.evaluate(async () => {
+      for (let i = 0; i < 10; i++) {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+    });
+    assert.equal(await page.evaluate(() => document.activeElement === document.body), true);
     await page.mouse.move(pivot.x, pivot.y);
     await page.keyboard.down("Control");
     await page.mouse.wheel(0, 10000);

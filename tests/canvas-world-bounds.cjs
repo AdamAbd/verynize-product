@@ -170,7 +170,9 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     // A real drag may cross the limit transiently; validate once, on release.
     const dragBefore = await p.evaluate(() => {
       const d = window.design.getDocument();
-      d.pages[0].nodes = [{ id: "drag", type: "rectangle", name: "Drag", x: 999800, y: 0, w: 100, h: 100 }];
+      d.pages[0].nodes = [
+        { id: "drag", type: "rectangle", name: "Drag", x: 999800, y: 0, w: 100, h: 100 },
+      ];
       window.design.loadDocument(d);
       window.design.setTool("move");
       window.design.setSelection(["drag"]);
@@ -187,7 +189,11 @@ const { waitForUiReady } = require("./helpers/ui-ready.cjs");
     await p.mouse.move(target.x + 50, target.y + 50);
     await p.mouse.down();
     await p.mouse.move(target.x + 250, target.y + 50, { steps: 8 });
-    assert.equal(await p.evaluate(() => window.boundsChecks), 0, "drag does not validate mid-gesture");
+    assert.equal(
+      await p.evaluate(() => window.boundsChecks),
+      0,
+      "drag does not validate mid-gesture",
+    );
     await p.mouse.up();
     assert.equal(await p.evaluate(() => window.boundsChecks), 1, "release validates exactly once");
     assert.deepEqual(await p.evaluate(() => window.design.getDocument()), dragBefore);

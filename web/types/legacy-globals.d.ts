@@ -76,5 +76,26 @@ declare global {
     previewTabTarget(): string | null;
     webCapture: { open(): void };
     verynizeTools: Readonly<{ toolsVersion: string; serverVersion: string }>;
+    /** web/document-core.js; only the world-bounds helpers are typed. */
+    VerynizeDocument: {
+      pageWorldBounds(
+        page: object,
+        measuredRects?: Map<string, { x: number; y: number; w: number; h: number }>,
+      ): {
+        bounds: { x: number; y: number; w: number; h: number } | null;
+        outOfRange: boolean;
+        advisory: boolean;
+      };
+      validateWorldBoundsChange(before: object, after: object): void;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped legacy API
+      [key: string]: any;
+    };
+    /** web/document-safety.js; only the world-bounds notices are typed. */
+    documentSafety: {
+      worldBounds(page: object, recenter: () => void): void;
+      editRejected(message: string): void;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped legacy API
+      [key: string]: any;
+    };
   }
 }
