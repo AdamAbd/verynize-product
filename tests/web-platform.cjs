@@ -191,24 +191,28 @@ async function openBrowser(url) {
     await page.locator("[data-document-tab] [data-file-tab-close]").click();
     await page.waitForFunction(() => window.design.getDocument().name === "Tab three");
     assert.equal((await tabNames()).includes("Tab two"), false, "closed tab is gone");
+    // The Figma dialog (a shadcn Dialog) exists only while open.
+    await page.evaluate(() => document.getElementById("figma-import").click());
+    await page.locator("#figma-run").click();
+    await page.locator("#figma-status").filter({ hasText: /\S/ }).waitFor();
+    const figma = await page.locator("#figma-status").textContent();
+    await page.keyboard.press("Escape");
+    await page.locator("#figma-dialog").waitFor({ state: "detached" });
     const notes = await page.evaluate(async () => {
       const $ = (id) => document.getElementById(id);
       const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
-      $("figma-run").click();
-      await settle();
       $("capture-web-url").value = "https://example.com/";
       $("capture-web-form").requestSubmit();
       await settle();
       $("cloud-app-section").open = true;
       await settle();
       return {
-        figma: $("figma-status").textContent,
         capture: $("capture-web-status").textContent,
         publish: $("cloud-app-project").textContent,
       };
     });
+    assert.equal(figma, "Open the desktop app to import from Figma.");
     assert.deepEqual(notes, {
-      figma: "Open the desktop app to import from Figma.",
       capture: "Open the desktop app to capture web pages.",
       publish: "App publishing runs in the Verynize desktop app.",
     });
