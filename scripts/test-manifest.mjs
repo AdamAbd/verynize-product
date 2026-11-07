@@ -352,6 +352,7 @@ const canvas = [
   electron("tests/canvas-frame-labels.cjs", "canvas", AREA.canvas),
   unit("tests/node-index.cjs", "canvas", ["web/node-index.js"]),
   electron("tests/canvas-text-caret.cjs", "canvas", AREA.canvas),
+  electron("tests/canvas-world-bounds.cjs", "canvas", [...AREA.canvas, "web/document-safety.js"]),
   electron("tests/canvas-page.cjs", "canvas", AREA.canvas),
   electron("tests/inspector-parity.cjs", "canvas", AREA.inspector, CLIP),
   electron(

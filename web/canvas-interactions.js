@@ -513,6 +513,7 @@
 
     // ---------- Pointer: pan / move / resize / marquee / draw ----------
     function track(e, move, end) {
+      ed.beginGesture?.();
       const pointerId = e.pointerId, buttonMask = e.button === 1 ? 4 : e.button === 2 ? 2 : 1;
       let finished = false;
       const up = ev => {
@@ -521,7 +522,7 @@
         window.removeEventListener('pointermove', moving); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
         window.removeEventListener('blur', up); wrap.removeEventListener('lostpointercapture', up);
         try { if (wrap.hasPointerCapture(pointerId)) wrap.releasePointerCapture(pointerId); } catch {}
-        end?.(ev);
+        try { end?.(ev); } finally { ed.endGesture?.(); }
       };
       const moving = ev => { if (ev.pointerId !== pointerId) return; if (!(ev.buttons & buttonMask)) { up(ev); return; }
         if (Math.hypot(ev.clientX-e.clientX,ev.clientY-e.clientY)>3) { try { if(!wrap.hasPointerCapture(pointerId))wrap.setPointerCapture(pointerId); } catch {} }

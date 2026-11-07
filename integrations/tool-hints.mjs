@@ -1,9 +1,17 @@
-import { NODE_LIMITS } from "./document-core.mjs";
+import { NODE_LIMITS, pageWorldBounds } from "./document-core.mjs";
 import { getPage, indexPage } from "./design-edit.mjs";
 import { isReceiptValid } from "./verification.mjs";
 
 export function toolHints({ page, artboards = [], revision, receiptFor, omit = new Set() }) {
   const lines = [];
+  // Hints also accept metadata-only page summaries. Geometry is available on full tool reads.
+  if (
+    page.nodes.every((n) => n.id && ["x", "y", "w", "h"].every((k) => Number.isFinite(n[k]))) &&
+    pageWorldBounds(page).advisory
+  )
+    lines.push(
+      "Content extends beyond ±100,000 world px. Use Recenter page in the editor to move it closer to the origin.",
+    );
   if (!omit.has("assets")) {
     const count = page.nodes.filter(
       (n) => n.assetStatus === "pending" || n.assetStatus === "missing",

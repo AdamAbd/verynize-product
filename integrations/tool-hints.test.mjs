@@ -57,3 +57,9 @@ test("node capacity threshold on/off and two-line deterministic cap", () => {
   assert.equal(toolHints(s), toolHints(s));
   assert.equal(toolHints(state({ receiptFor: () => null, omit: new Set(["screenshot"]) })), "");
 });
+test("far-origin advice follows the page bounds threshold", () => {
+  const page = { id: "p", nodes: [{ id: "a", x: 99900, y: 0, w: 100, h: 100 }] };
+  assert.equal(toolHints(state({ page })), "");
+  page.nodes[0].x++;
+  assert.match(toolHints(state({ page })), /Recenter page/);
+});

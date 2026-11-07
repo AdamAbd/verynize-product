@@ -18,7 +18,7 @@ import { validateDocument } from "./design-store.mjs";
 const read = (rel) => readFileSync(new URL("../" + rel, import.meta.url), "utf8");
 // The canvas layer defaults (`const defaults={…}` in web/app.js), a plain object literal.
 const DEFAULTS = Function(
-  `return (${read("web/app.js").match(/const defaults=(\{[^}]*\})/)[1]})`,
+  `return (${read("web/app.js").match(/const defaults\s*=\s*(\{[^}]*\})/)[1]})`,
 )();
 const page = (nodes) => ({ id: "p1", name: "Page 1", nodes });
 const doc = (nodes, extra = {}) => ({
@@ -44,7 +44,7 @@ test("web/app.js has no validator of its own: validate() is prepareDocument with
   const app = read("web/app.js");
   assert.match(
     app,
-    /function validate\(d\)\{return window\.VerynizeDocument\.prepareDocument\(d,defaults\)\}/,
+    /function validate\(d\)\s*\{\s*return window\.VerynizeDocument\.prepareDocument\(d,\s*defaults\);?\s*\}/,
   );
   assert.doesNotMatch(app, /function roomAssetUrl/);
   const html = read("web/index.html");

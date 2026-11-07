@@ -10,6 +10,11 @@ import "../web/document-core.js";
 const api = globalThis.VerynizeDocument;
 export const {
   NODE_LIMITS,
+  WORLD_COORDINATE_LIMIT,
+  WORLD_ADVISORY_LIMIT,
+  pageWorldBounds,
+  validateWorldBounds,
+  validateWorldBoundsChange,
   nodeLimitMessage,
   validateDocument,
   normalizeDocument,
