@@ -58,6 +58,8 @@ export class DesignRoom extends DurableObject {
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     this.clock = Ops.createClock("server");
+    // Batches being applied right now, so a live duplicate waits for the first attempt.
+    this.applyingBatches = new Map();
     this.store = new RoomStore(this.sql);
     // Per-artboard version history (cloud/room-history.js, docs/version-history.md).
     this.history = new RoomHistory(this.sql, { idleMs: Number(env?.VERSION_IDLE_MS) || undefined });
@@ -307,7 +309,6 @@ export class DesignRoom extends DurableObject {
     if (!Array.isArray(ops) || ops.length > 5000) fail(400, "A batch holds 1–5000 operations");
     // A live duplicate waits for its first request; only a marker from an interrupted
     // invocation is poison. sync() is a durability boundary, not an acknowledgement.
-    this.applyingBatches ??= new Map();
     const key = `${client}/${batch}`;
     const running = this.applyingBatches.get(key);
     if (running) {
