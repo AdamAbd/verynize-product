@@ -606,7 +606,9 @@
       ids.add(page.id);
       if (!Array.isArray(page.nodes)) throw new Error("Page nodes must be an array");
       if (page.nodes.length > NODE_LIMITS.perPage)
-        throw new Error(nodeLimitMessage(page.nodes.length, NODE_LIMITS.perPage, page.name));
+        throw new Error(
+          nodeLimitMessage(page.nodes.length, NODE_LIMITS.perPage, page.name ?? page.id),
+        );
       const nodes = new Map();
       for (const node of page.nodes) {
         if (!node || typeof node !== "object") throw new Error("Invalid node");
@@ -778,7 +780,7 @@
       if (page.nodes.length > NODE_LIMITS.perPage)
         add(
           `pages[${i}].nodes`,
-          nodeLimitMessage(page.nodes.length, NODE_LIMITS.perPage, page.name),
+          nodeLimitMessage(page.nodes.length, NODE_LIMITS.perPage, page.name ?? page.id),
         );
       const byId = new Map();
       page.nodes.forEach((node, j) => {

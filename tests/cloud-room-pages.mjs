@@ -231,6 +231,44 @@ try {
   editor.ws.close();
   lazyClient.ws.close();
 
+  // Neither unloaded pages nor replayed IDs consume the target page budget twice.
+  // Cover both a document below 10k and a document above 10k whose individual pages fit.
+  for (const size of [4500, 6000]) {
+    const counted = {
+      version: 2,
+      name: "Counted",
+      activePage: "left",
+      pages: ["left", "right"].map((id) => ({
+        id,
+        name: id,
+        nodes: Array.from({ length: size }, (_, i) => node(`${id}-${i}`)),
+      })),
+    };
+    const room = await data(
+      await call("/api/rooms", { method: "POST", body: { document: counted } }),
+      201,
+    );
+    const route = `/api/rooms/${room.id}`;
+    const lazy = await data(await call(route + "?lazy=1", { token: room.token }));
+    assert.deepEqual(lazy.unloaded, ["right"]);
+    const ops = [{ t: "add", page: "left", id: "new", value: node("new") }];
+    // Same batch replay and same ID in a fresh batch both leave exactly one new node.
+    for (const batch of [1, 1, 2])
+      await data(
+        await call(route + "/ops", {
+          method: "POST",
+          token: room.token,
+          body: { client: "count-test", batch, ops },
+        }),
+      );
+    const saved = (await data(await call(route, { token: room.token }))).document;
+    assert.deepEqual(
+      saved.pages.map((p) => p.nodes.length),
+      [size + 1, size],
+    );
+  }
+  console.log("PASS node counts below/above 10k, unloaded pages, and resent IDs");
+
   // Node limits include unloaded pages, and failed operations leave stored content intact.
   const capped = { version: 2, name: "Capped", activePage: "cap0", pages: [] };
   for (let offset = 0; offset < NODE_LIMITS.perDocument; offset += NODE_LIMITS.perPage)

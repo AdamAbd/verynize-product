@@ -227,7 +227,7 @@ export class RoomStore {
       }
       nodeCount += page.nodes.length;
       if (enforce && page.nodes.length > NODE_LIMITS.perPage)
-        tooLarge(nodeLimitMessage(page.nodes.length, NODE_LIMITS.perPage, page.name));
+        tooLarge(nodeLimitMessage(page.nodes.length, NODE_LIMITS.perPage, page.name ?? page.id));
       const head = headText(page),
         nodes = JSON.stringify(page.nodes);
       const bytes = byteSize(head) - 4 + byteSize(nodes);
