@@ -35,7 +35,7 @@ npm run deploy
 
 ## Accounts database (D1) and auth secret
 
-Better Auth (`cloud/auth.js`) keeps users, sessions and organizations in the `DB` D1 database, whose schema is in `cloud/migrations`. The Worker needs Workers Paid, because `cloudflare.config.ts` sets `limits.cpuMs` to 30 000 for scrypt password hashing. First deployment:
+Better Auth (`cloud/auth.js`) keeps users, sessions and organizations in the `DB` D1 database, whose schema is in `cloud/migrations`. The Worker needs Workers Paid, because `cloudflare.config.ts` sets `limits.cpuMs` to 300 000 (the Paid maximum) for scrypt password hashing and large room imports. `npm run deploy` sends that value on every deploy, so a CPU limit changed in the Cloudflare dashboard is reset by the next deploy: change it in `cloudflare.config.ts`. First deployment:
 
 Production uses `https://verynize.gayaloo.app`, with D1 database `verynize`
 (`76210bc4-d4fe-4075-a321-776c2525a828`) pinned in `cloudflare.config.ts`.

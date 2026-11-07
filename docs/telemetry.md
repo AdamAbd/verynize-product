@@ -134,3 +134,8 @@ An exported variable beats `.env`, so `SENTRY_DSN_WEB= npm run deploy` deploys w
     `verynize-server`
 - `scripts/package-macos.cjs` also never copies a `.map` into the app, because `app://verynize` would serve it.
 - The legacy `web/*.js` scripts and the desktop `.cjs` files ship unminified, so their frames need no maps.
+- **After `npm run deploy`,** `scripts/sentry-release.mjs` attaches the release's commits and records a deploy for
+  `SENTRY_ENVIRONMENT` (default `production`). The org has no GitHub integration, so commits come from local git
+  (`set-commits --local`); builds alone (`build`, `deploy:check`) never attach commits.
+- **Resolving issues:** a `Fixes VERYNIZE-SERVER-3` line resolves that issue once a commit carrying it is deployed.
+  Merge commits take the PR description as their body, so put the line in the PR description.
