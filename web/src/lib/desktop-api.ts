@@ -60,7 +60,13 @@ export type AuthEvent = {
   type: string;
   message: string;
 };
-export type RenderResult = { dataURL: string; width: number; height: number };
+export type RenderResult = {
+  dataURL: string;
+  width: number;
+  height: number;
+  scale?: number;
+  requestedScale?: number;
+};
 export type PreviewTarget = { target?: string };
 export type CapturedPreview = {
   document?: { pages: { nodes: { id: string; parentId: string | null }[] }[] };
@@ -160,6 +166,7 @@ export interface DesktopApi {
   };
   // Rendering, fonts and export (desktop/render.cjs).
   renderDesign(options: {
+    screenshot?: boolean;
     html: string;
     width: number;
     height: number;

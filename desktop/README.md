@@ -180,3 +180,7 @@ files return to Files with a non-blocking notice. Settings history retains the f
 cloud capabilities remain exclusively in the existing fragments.
 
 - `writeClipboardImage(dataURL)` accepts a PNG data URL and writes a native bitmap to the system clipboard, returning `Promise<void>`. Invalid or empty images and inputs over 200 MiB are rejected. The IPC handler uses the editor main-frame sender check.
+
+Raster rendering uses an isolated per-render protocol with a restrictive CSP; HTML never enters the navigation URL. `renderDesign({screenshot:true,...})` may reduce the requested scale to keep capture textures within 8192 physical pixels per side and 32 megapixels, accounting for the largest connected display scale. Results include `scale` and `requestedScale`; both live and offscreen MCP screenshots report them. Normal raster exports preserve the requested scale or reject with a lower-scale/smaller-selection message. PDF exports use the same protocol with JavaScript disabled and a small viewport.
+
+The `gitChanges` and `gitBranchChanges` IPC handlers return `{code:'not-a-repo',message}` for ordinary folders. Preload converts that result into the existing renderer rejection so the UI stays unchanged without Electron logging an IPC-handler stack.

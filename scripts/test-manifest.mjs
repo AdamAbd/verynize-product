@@ -151,6 +151,7 @@ const AREA = {
   capture: [
     "desktop/capture-*.cjs",
     "desktop/render.cjs",
+    "desktop/render-limits.cjs",
     "desktop/preview-dom.cjs",
     "desktop/html-import.cjs",
     "integrations/export-*.mjs",
@@ -394,6 +395,7 @@ const desktop = [
   ),
   unit("tests/desktop-projects.cjs", "desktop"),
   unit("tests/git-changes.cjs", "desktop"),
+  unit("tests/render-limits.cjs", "desktop", ["desktop/render-limits.cjs"]),
   unit("tests/repositories.cjs", "desktop"),
   electron("tests/code-workspace.cjs", "desktop", [...AREA.code, ...AREA.preview], {
     locks: ["port:5173"],

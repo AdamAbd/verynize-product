@@ -2,6 +2,11 @@ const { contextBridge, ipcRenderer } = require("electron");
 /** @type {import("./ipc-contract").Invoke} */
 const call = (method, ...args) =>
   ipcRenderer.invoke("desktop:" + method, .../** @type {unknown[]} */ (args));
+// Expected non-repository state crosses IPC normally; preserve the renderer's existing error UI.
+const changesResult = (result) => {
+  if (result?.code === "not-a-repo") throw Error(result.message);
+  return result;
+};
 // Crash report settings for web/src/telemetry.ts, passed by main as an additional argument (desktop/telemetry.cjs).
 const telemetryConfig = (() => {
   const arg = (process.argv || []).find(
@@ -242,8 +247,8 @@ contextBridge.exposeInMainWorld("desktop", {
   removeAllowRule: (options) => call("removeAllowRule", options),
   agentToolsVersion: () => call("agentToolsVersion"),
   agentTitle: (options) => call("agentTitle", options),
-  gitChanges: (options) => call("gitChanges", options),
-  gitBranchChanges: (options) => call("gitBranchChanges", options),
+  gitChanges: (options) => call("gitChanges", options).then(changesResult),
+  gitBranchChanges: (options) => call("gitBranchChanges", options).then(changesResult),
   gitDiff: (options) => call("gitDiff", options),
   gitCommit: (options) => call("gitCommit", options),
   gitDiscard: (options) => call("gitDiscard", options),
