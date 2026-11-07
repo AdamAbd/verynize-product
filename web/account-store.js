@@ -172,7 +172,7 @@
         headers: { "Content-Type": "application/json", "X-Verynize-Session": a.session },
       });
     } catch (failure) {
-      if (failure instanceof TypeError) failure.network = true;
+      if (failure instanceof TypeError) Object.assign(failure, { network: true });
       throw failure;
     }
     const data = await response.json().catch((failure) => {
