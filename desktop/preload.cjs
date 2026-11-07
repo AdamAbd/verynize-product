@@ -2,6 +2,17 @@ const { contextBridge, ipcRenderer } = require("electron");
 /** @type {import("./ipc-contract").Invoke} */
 const call = (method, ...args) =>
   ipcRenderer.invoke("desktop:" + method, .../** @type {unknown[]} */ (args));
+// Crash report settings for web/src/telemetry.ts, passed by main as an additional argument (desktop/telemetry.cjs).
+const telemetryConfig = (() => {
+  const arg = (process.argv || []).find(
+    (value) => typeof value === "string" && value.startsWith("--verynize-telemetry="),
+  );
+  try {
+    return Object.freeze(JSON.parse(atob(arg.slice("--verynize-telemetry=".length))));
+  } catch {
+    return Object.freeze({ enabled: false });
+  }
+})();
 contextBridge.exposeInMainWorld("desktop", {
   agentAccountStatus: (options) => call("agentAccountStatus", options),
   startAgentLogin: (options) => call("startAgentLogin", options),
@@ -37,6 +48,12 @@ contextBridge.exposeInMainWorld("desktop", {
     },
   },
   // end Settings › Preferences hook
+  // Crash reports (desktop/telemetry.cjs): opt-in setting and the renderer SDK configuration.
+  telemetry: {
+    config: () => telemetryConfig,
+    get: () => call("telemetryGet"),
+    set: (enabled) => call("telemetrySet", enabled),
+  },
   // Settings › Usage and Memory (desktop/agent-usage.cjs, desktop/agent-memory.cjs).
   agentUsage: {
     read: (options) => call("agentUsage", options),

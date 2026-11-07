@@ -122,7 +122,9 @@ async function asyncWaits(dir) {
       /timed out after 100ms/,
     );
     await assert.rejects(
-      waitForAsync(page, () => new Promise(() => {}), null, { timeout: 100 }),
+      // Keep the pending Promise reachable: an unreferenced one can be garbage collected before the
+      // timeout, which Playwright reports as a different error.
+      waitForAsync(page, () => (window.__pendingWait = new Promise(() => {})), null, { timeout: 100 }),
       /timed out after 100ms/,
     );
     await assert.rejects(

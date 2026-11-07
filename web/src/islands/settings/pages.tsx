@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import { FigmaIcon } from "@/components/icons";
 import { AdvancedSection, ChatSoundRow } from "./preferences-extra";
+import { TelemetrySection } from "./telemetry";
 import { useToolsInfo } from "./agent-memory";
 import { AgentAccessSection, AgentToolsSection, ProviderAccountList } from "./agents-tools";
 import { AgentBehaviorSections } from "./agents-behavior";
@@ -267,6 +268,8 @@ export function PreferencesPage({ preferences, setPreference }: PageProps) {
         <ImportGenerationSection />
 
         <AdvancedSection preferences={preferences} setPreference={setPreference} />
+
+        <TelemetrySection />
       </Pages>
     </>
   );

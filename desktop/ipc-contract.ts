@@ -151,6 +151,8 @@ export interface IpcContract {
   soundRead: DesktopApi["appPreferences"]["readSound"];
   startAgentLogin: DesktopApi["startAgentLogin"];
   steerAgent: DesktopApi["steerAgent"];
+  telemetryGet: DesktopApi["telemetry"]["get"];
+  telemetrySet: DesktopApi["telemetry"]["set"];
   templatePackDecode: DesktopApi["templatePacks"]["decode"];
   templatePackEncode: DesktopApi["templatePacks"]["encode"];
   terminalCreate: DesktopApi["terminalCreate"];

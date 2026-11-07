@@ -72,6 +72,9 @@ let primaryRuntime = null,
   agentStores = null;
 const liveRuntimes = new Set(); // agent runtime of the latest editor window (serves ask_agent)
 app.setName("Verynize");
+// Crash reports (desktop/telemetry.cjs): main-process error handlers, and Sentry when the user opted in (off by default).
+const telemetry = require("./telemetry.cjs");
+telemetry.start(app, { dialog });
 // Shared storage policy disables keychain access when HOME differs from the OS user home.
 // Image keys then remain in session memory; never enable a mock keychain for users.
 require("./secure-storage.cjs");
@@ -185,6 +188,7 @@ app.whenReady().then(async () => {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,
+        additionalArguments: telemetry.rendererArguments(),
       },
     });
     // Off macOS the default Electron menu would be a window menu bar: the shell draws its own (AppMenu), and the bar's
@@ -255,6 +259,7 @@ app.whenReady().then(async () => {
     });
     // First-run onboarding (web/src/islands/onboarding): automated runs skip it with VERYNIZE_SKIP_ONBOARDING=1.
     handle("onboardingState", () => ({ skip: process.env.VERYNIZE_SKIP_ONBOARDING === "1" }));
+    telemetry.registerTelemetry(handle); // Settings › Preferences › Privacy: telemetryGet, telemetrySet
     require("./cloud-defaults.cjs").registerCloudDefaults(handle); // Share panel server default: production or VERYNIZE_CLOUD_SERVER
     handle("openExternal", (value) => {
       const url = new URL(value);
