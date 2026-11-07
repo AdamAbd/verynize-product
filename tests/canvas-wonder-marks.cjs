@@ -98,7 +98,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
     await pageRow('pg3').dblclick();
     await field.waitFor();
     assert.deepEqual(await field.evaluate(e => [e.value, e.selectionStart, e.selectionEnd, document.activeElement === e]), ['Page 3', 0, 6, true], 'field shows the name, all selected and focused');
-    assert.equal(await page.locator('#text-prompt').evaluate(e => e.open ?? false).catch(() => false), false, 'no modal prompt');
+    assert.equal(await page.locator('#text-prompt').count() > 0, false, 'no modal prompt');
     await page.keyboard.type('Audit'); await page.keyboard.press('Enter');
     await field.waitFor({state: 'detached'});
     assert.equal((await doc()).pages.find(p => p.id === 'pg3').name, 'Audit', 'Enter commits');

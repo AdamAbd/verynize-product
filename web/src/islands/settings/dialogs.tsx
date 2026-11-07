@@ -7,11 +7,6 @@ import { legacy } from "@/lib/bridge";
 /** Dialog id → heading element id (`title`) or accessible name (`label`), and its close button id. */
 const DIALOGS: Record<string, { title?: string; label?: string; close?: string }> = {
   "cloud-dialog": { label: "Share", close: "cloud-close" },
-  "templates-dialog": { label: "Templates", close: "templates-close" },
-  "views-dialog": { label: "Saved views", close: "views-close" },
-  "figma-dialog": { label: "Import from Figma", close: "figma-close" },
-  "text-prompt": { title: "text-prompt-label" },
-  modal: { title: "modal-title", close: "close" },
 };
 
 function labelDialogs() {
@@ -29,7 +24,7 @@ function labelDialogs() {
     }
   }
   // Primary actions get the purple button treatment.
-  for (const id of ["cloud-create", "figma-run", "text-prompt-ok", "apply", "view-save"])
+  for (const id of ["cloud-create"])
     document.getElementById(id)?.classList.add("bd-primary");
   // Cloud share: group the room actions so the panel reads like Wonder's share popover.
   const publicLink = document.getElementById("cloud-public");
@@ -41,7 +36,7 @@ function focusFirstField(dialog: HTMLDialogElement) {
   const field = dialog.querySelector<HTMLElement>(
     "input:not([type=hidden]):not([type=file]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [data-template]",
   );
-  if (field && dialog.id !== "modal") field.focus();
+  if (field) field.focus();
 }
 
 export function DialogEnhancer() {

@@ -16,7 +16,7 @@ const os = require('node:os');
       return {a:[...a],b:[...b],error:gl.getError()};
     });
     assert.equal(pixels.error,0);assert.equal(pixels.a[3],255);assert.ok(pixels.a.slice(0,3).some(v=>v>0));assert.notDeepEqual(pixels.a,pixels.b);
-    const openDialog=await page.locator('#text-prompt').evaluate(d=>d.open?d.textContent:null);if(openDialog)throw Error('Unexpected dialog: '+openDialog);await page.locator('#shader-settings summary').click();
+    const openDialog=await page.evaluate(()=>document.getElementById('text-prompt')?.textContent??null);if(openDialog)throw Error('Unexpected dialog: '+openDialog);await page.locator('#shader-settings summary').click();
     for(const preset of ['aurora','noise','waves']){await page.locator('[name=shaderPreset]').selectOption(preset);await page.waitForSelector('#canvas [data-shader-status="ready"]');const alpha=await page.locator('#canvas canvas.shader-surface').evaluate(c=>{const gl=c.getContext('webgl'),p=new Uint8Array(4);gl.readPixels(10,10,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return p[3]});assert.equal(alpha,255);}
     await page.locator('[name=shaderSpeed]').fill('0');await page.locator('[name=shaderSpeed]').press('Tab');
     await page.locator('[name=shaderIntensity]').fill('1.7');await page.locator('[name=shaderIntensity]').press('Tab');

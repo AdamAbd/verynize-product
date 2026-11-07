@@ -132,7 +132,7 @@
     }
   },
   "legacy-web": {
-    "total": 868,
+    "total": 805,
     "files": {
       "web/account-store.js TS2322": 1,
       "web/account-store.js TS2339": 2,
@@ -177,9 +177,8 @@
       "web/document-lifecycle.js TS2339": 3,
       "web/document-safety.js TS2339": 8,
       "web/document-safety.js TS2741": 1,
-      "web/figma-panel.js TS2339": 39,
+      "web/figma-panel.js TS2339": 10,
       "web/figma-panel.js TS2349": 1,
-      "web/figma-panel.js TS2551": 1,
       "web/figma-panel.js TS2700": 1,
       "web/image-drop.js TS2339": 3,
       "web/image-upload.js TS2322": 1,
@@ -223,10 +222,9 @@
       "web/version-history.js TS2322": 1,
       "web/version-history.js TS2339": 18,
       "web/version-history.js TS2349": 5,
-      "web/views-templates.js TS2339": 32,
-      "web/views-templates.js TS2349": 6,
+      "web/views-templates.js TS2339": 7,
+      "web/views-templates.js TS2349": 4,
       "web/views-templates.js TS2362": 1,
-      "web/views-templates.js TS2551": 6,
       "web/views-templates.js TS2769": 1,
       "web/wonder-shell.js TS2322": 3,
       "web/wonder-shell.js TS2339": 35,

@@ -1,10 +1,17 @@
 // The one-line text prompt behind `window.askText(title, value)` (file and folder names, variable names, repository
-// URLs, …), rendered by this island in place of the legacy web/ui.js dialog. It keeps the native modal <dialog> and
-// its ids (#text-prompt, #text-prompt-label, #text-prompt-input, #text-prompt-ok): settings.css styles them and
-// tests drive them (DialogEnhancer in dialogs.tsx adds the primary button look). Resolves the entered text on
-// Continue (Enter) and null on Cancel or Escape; a call while a prompt
-// is open resolves null at once, like the legacy prompt.
-import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+// URLs, …), a shadcn Dialog rendered by this island. Ids are kept for tests: #text-prompt (the dialog content, present
+// only while open), #text-prompt-label, #text-prompt-input, #text-prompt-ok. Resolves the entered text on Continue
+// (Enter) and null on Cancel, Escape or a click outside; a call while a prompt is open resolves null at once.
+import { useRef, useSyncExternalStore } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 type Request = { title: string; value: string; resolve: (value: string | null) => void };
 
@@ -26,9 +33,10 @@ function askText(title: string, value = ""): Promise<string | null> {
 
 function settle(result: string | null) {
   const request = current;
+  if (!request) return;
   current = null;
   emit();
-  request?.resolve(result);
+  request.resolve(result);
 }
 
 // Registered when the UI bundle runs, before the islands mount; a prompt asked before the first render opens with it.
@@ -40,52 +48,52 @@ export function TextPrompt() {
     () => current,
     () => null,
   );
-  const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
 
-  useLayoutEffect(() => {
-    const element = dialog.current;
-    const field = input.current;
-    if (!element || !field) return;
-    if (!request) {
-      if (element.open) element.close();
-      return;
-    }
-    field.value = request.value;
-    element.returnValue = "cancel";
-    if (!element.open) element.showModal();
-    field.focus();
-    field.select();
-  }, [request]);
-
-  useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    const closed = () => {
-      if (!current) return;
-      settle(element.returnValue === "ok" ? (input.current?.value ?? "") : null);
-    };
-    element.addEventListener("close", closed);
-    return () => element.removeEventListener("close", closed);
-  }, []);
-
   return (
-    <dialog id="text-prompt" ref={dialog} aria-labelledby="text-prompt-label">
-      <form method="dialog">
-        <label id="text-prompt-label" htmlFor="text-prompt-input">
-          {request?.title}
-        </label>
-        <input id="text-prompt-input" ref={input} autoComplete="off" />
-        <div>
-          {/* Not a submit button, so Enter in the field means Continue. */}
-          <button type="button" onClick={() => dialog.current?.close("cancel")}>
-            Cancel
-          </button>
-          <button type="submit" value="ok" id="text-prompt-ok">
-            Continue
-          </button>
-        </div>
-      </form>
-    </dialog>
+    <Dialog open={!!request} onOpenChange={(open) => !open && settle(null)}>
+      <DialogContent
+        id="text-prompt"
+        className="max-w-sm sm:max-w-sm"
+        showCloseButton={false}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          input.current?.focus();
+          input.current?.select();
+        }}
+      >
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            settle(input.current?.value ?? "");
+          }}
+        >
+          <DialogTitle asChild>
+            <label id="text-prompt-label" htmlFor="text-prompt-input" className="m-0">
+              {request?.title}
+            </label>
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            Enter a value and press Continue.
+          </DialogDescription>
+          <Input
+            id="text-prompt-input"
+            ref={input}
+            autoComplete="off"
+            defaultValue={request?.value}
+            key={request?.title + "\0" + request?.value}
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => settle(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" id="text-prompt-ok">
+              Continue
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
