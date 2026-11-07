@@ -720,3 +720,34 @@ export function RemoveIcon(props: IconProps) {
     </Glyph>
   );
 }
+
+/** Main component (Figma 02/25 layer rows): four filled diamonds around the centre. */
+export function ComponentMainIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-icon="" {...props}>
+      <path
+        stroke="none"
+        d="m12 2.5 3.25 3.25L12 9 8.75 5.75 12 2.5ZM12 15l3.25 3.25L12 21.5l-3.25-3.25L12 15ZM5.75 8.75 9 12l-3.25 3.25L2.5 12l3.25-3.25ZM18.25 8.75 21.5 12l-3.25 3.25L15 12l3.25-3.25Z"
+      />
+    </svg>
+  );
+}
+
+/** Instance of a component (Figma 11/25 layer rows): one hollow diamond. */
+export function ComponentInstanceIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <path d="m12 3.5 8.5 8.5-8.5 8.5L3.5 12 12 3.5Z" />
+    </Glyph>
+  );
+}
+
+/** Slot, a content region of a main component (Figma 09 layer rows): a square with a plus. */
+export function SlotIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="4.5" y="4.5" width="15" height="15" rx="2" />
+      <path d="M12 9v6M9 12h6" />
+    </Glyph>
+  );
+}

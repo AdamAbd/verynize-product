@@ -7,7 +7,7 @@ const { mod } = require("./helpers/keys.cjs");
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 
-const FRAME_MENU = ['Add context', '|', 'Copy', 'Copy as', 'Copy link to selection', '|', 'Select layer', 'Paste', 'Paste to replace', 'Paste over selection', 'Duplicate', '|', 'Hide', 'Lock', 'Hide label', '|', 'Arrange', '|', 'Layout', '|', 'Set as file thumbnail'];
+const FRAME_MENU = ['Add context', '|', 'Copy', 'Copy as', 'Copy link to selection', '|', 'Select layer', 'Paste', 'Paste to replace', 'Paste over selection', 'Duplicate', '|', 'Hide', 'Lock', 'Version history', 'Hide label', '|', 'Arrange', '|', 'Layout', '|', 'Set as file thumbnail'];
 const without = (list, ...drop) => list.filter(x => !drop.includes(x));
 
 (async () => {
@@ -102,7 +102,7 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await openSub('menu.arrange');
     assert.deepEqual(await items('[data-submenu="menu.arrange"]'), ['Bring to front', 'Bring forward', 'Send backward', 'Send to back', '|', 'Flip horizontal', 'Flip vertical']);
     await openSub('menu.layout');
-    assert.deepEqual(await items('[data-submenu="menu.layout"]'), ['Frame selection', 'Add auto layout']);
+    assert.deepEqual(await items('[data-submenu="menu.layout"]'), ['Frame selection', 'Create component', 'Add auto layout']);
     await openSub('menu.selectLayer');
     assert.deepEqual(await items('[data-submenu="menu.selectLayer"]'), ['art'], 'Select layer lists the layers under the pointer');
     await close();
@@ -128,7 +128,7 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     // CM3: text, the frame menu without Hide label.
     await rightClick(await at('title'));
     assert.deepEqual(await selection(), ['title']);
-    assert.deepEqual(await items(), without(FRAME_MENU, 'Hide label'), 'text menu order');
+    assert.deepEqual(await items(), without(FRAME_MENU, 'Version history', 'Hide label'), 'text menu order');
     await close();
 
     // CM5: multi-selection keeps the selection; no Copy link to selection, no Hide label for children.
@@ -136,7 +136,7 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await rightClick(await at('b'));
     assert.deepEqual(await selection(), ['a', 'b'], 'right-click inside a multi-selection keeps it');
     // Two siblings: Use as mask follows Layout (Wonder CM5-multi-verified, P5-mask-menu).
-    { const multi = without(FRAME_MENU, 'Copy link to selection', 'Hide label'); multi.splice(multi.lastIndexOf('|'), 0, 'Use as mask'); assert.deepEqual(await items(), multi, 'multi-selection menu order (Use as mask after Layout, before Set as file thumbnail)'); }
+    { const multi = without(FRAME_MENU, 'Copy link to selection', 'Version history', 'Hide label'); multi.splice(multi.lastIndexOf('|'), 0, 'Use as mask'); assert.deepEqual(await items(), multi, 'multi-selection menu order (Use as mask after Layout, before Set as file thumbnail)'); }
     await close();
 
     // CM6: a locked layer is targeted although it is not hit-tested; its menu says Unlock.
@@ -174,7 +174,7 @@ const without = (list, ...drop) => list.filter(x => !drop.includes(x));
     await page.evaluate(() => window.design.setSelection([]));
     assert.equal(await page.locator('#canvas-overlay .frame-label', {hasText: 'side'}).count(), 0, 'the label is gone');
     await rightClick(await at('side'));
-    assert.equal((await items())[14], 'Show label');
+    assert.equal((await items())[15], 'Show label');
     await item('menu.hideLabel').click();
     assert.equal((await node('side')).labelHidden, undefined, 'Show label');
 

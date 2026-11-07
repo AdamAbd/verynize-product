@@ -10,21 +10,22 @@ import fs from "node:fs";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { createWebServer } from "../web-start/node/server.mjs";
-import { launchBrowser, signedInContext } from "./helpers/web-app.mjs";
+import { launchBrowser, openStarterFile, signedInContext } from "./helpers/web-app.mjs";
 import { checkWebRouter } from "./helpers/web-router.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const dist = fileURLToPath(new URL("../dist/web-node", import.meta.url));
 if (!fs.existsSync(new URL("../web/dist/ui.js", import.meta.url)))
   execFileSync(process.execPath, ["scripts/build-ui.cjs"], { cwd: root, stdio: "pipe" });
-execFileSync(
-  process.execPath,
-  ["node_modules/vite-plus/bin/vp", "build", "-c", "vite.node.config.ts"],
-  {
-    cwd: root,
-    stdio: "pipe",
-  },
-);
+if (!process.env.TEST_WEB_NODE_BUILT)
+  execFileSync(
+    process.execPath,
+    ["node_modules/vite-plus/bin/vp", "build", "-c", "vite.node.config.ts"],
+    {
+      cwd: root,
+      stdio: "pipe",
+    },
+  );
 
 // The signed-in account (the web app needs one) and the account reads the editor makes, answered
 // like the real backend with an empty workspace.
@@ -155,7 +156,13 @@ try {
   await page.waitForFunction(() => document.documentElement.dataset.uiReady === "true", null, {
     timeout: 20000,
   });
-  assert.equal(await page.evaluate(() => window.shellRouter.state.location.pathname), "/editor");
+  // No file of its own: a fresh profile lands on Files until the user opens or makes one.
+  await page.waitForFunction(() => location.pathname === "/" && !window.fileLibrary.currentId);
+  await openStarterFile(page, { detached: true });
+  assert.equal(
+    await page.evaluate(() => window.shellRouter.state.location.pathname),
+    await page.evaluate(() => "/editor/" + encodeURIComponent(window.fileLibrary.currentId)),
+  );
   await page.waitForSelector("#canvas .layer");
   const before = await page.locator("#canvas .layer").count();
   await page.locator(".app-menu-trigger:visible").first().click();

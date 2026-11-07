@@ -58,6 +58,7 @@ import {
   PreviewTemplateSection,
 } from "./preview-frame";
 import { ScaleSection } from "./scale";
+import { ComponentSection } from "./component";
 import { FillTools, PaintStack, hasPaintRows } from "./paints";
 import { parseColor, toHex } from "./color";
 import { fmt, hexLabel, pageNodes, parseHex, patchNodes, setField, type Node } from "./model";
@@ -79,6 +80,7 @@ import { ShadowSection } from "./shadows";
 import { FilterSection } from "./filters";
 import { MaskSection } from "./masks";
 import { BorderSection } from "./border-colors";
+import { VectorStrokeSection } from "./vector-stroke";
 import {
   ShaderFill,
   ShaderParameters,
@@ -430,7 +432,7 @@ function PositionSection({ doc, node, selection }: Props) {
           name="zIndex"
           label="Stack order"
           numeric
-          className="col-span-2 has-disabled:bg-field-disabled"
+          className={cn("col-span-2", inFlow && !many && "bg-field-disabled")}
           inputClassName="placeholder:text-foreground disabled:placeholder:text-field-disabled-foreground"
           disabled={inFlow && !many}
           value={node.zIndex ? fmt(node.zIndex) : ""}
@@ -805,7 +807,9 @@ function FillSection({
             ? "Text Fill"
             : node?.type === "shader"
               ? "Shader Fill"
-              : "Background Fill"}
+              : node?.type === "vector"
+                ? "Fill"
+                : "Background Fill"}
         </h3>
         {node ? <FillTools doc={doc} node={node} selection={selection} /> : null}
       </div>
@@ -819,7 +823,7 @@ function FillSection({
         <ShaderSettings node={node} selection={selection} />
         {node ? <ShaderParameters doc={doc} node={node} selection={selection} /> : null}
         {/* Shader mode (H6): preset dropdown + colours in place of the paint rows (Text Fill has no shader mode). */}
-        {node && node.type !== "text" ? (
+        {node && node.type !== "text" && node.type !== "vector" ? (
           <ShaderFill doc={doc} node={node} selection={selection} />
         ) : null}
         {node ? (
@@ -1076,6 +1080,7 @@ export function PropertiesBody({
       ) : null}
       <div className={scaling ? "hidden" : "contents"}>
         {node && preview ? <PreviewTemplateSection node={node} /> : null}
+        {node && !many && !preview ? <ComponentSection doc={doc} node={node} /> : null}
         {node ? <PositionSection doc={doc} node={node} selection={selection} /> : null}
         {node && preview ? (
           <PreviewLayoutSection doc={doc} node={node} selection={selection} />
@@ -1106,7 +1111,12 @@ export function PropertiesBody({
         {node?.type === "text" && !fillsMixed ? (
           <TextBackgroundFillSection doc={doc} node={node} selection={selection} />
         ) : null}
-        {plain ? <BorderSection doc={doc} node={plain} selection={selection} /> : null}
+        {/* A vector's stroke follows its path (cap, join, dash) instead of the box border. */}
+        {plain?.type === "vector" ? (
+          <VectorStrokeSection doc={doc} node={plain} selection={selection} />
+        ) : plain ? (
+          <BorderSection doc={doc} node={plain} selection={selection} />
+        ) : null}
         {plain ? <OutlineSection doc={doc} node={plain} selection={selection} /> : null}
         {node && shadowsMixed ? (
           <MixedSection

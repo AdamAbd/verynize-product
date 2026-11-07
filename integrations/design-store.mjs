@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { eachPaintColor } from './node-style.mjs';
 import { dropAliases } from './variables.mjs';
 import * as core from './document-core.mjs';
+import { syncComponents } from './component-core.mjs';
 
 const LIMIT = 20 * 1024 * 1024;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -14,7 +15,7 @@ const RESERVED_NAMES = core.RESERVED_NAMES;
 /** The shared schema plus this store's size limit (files above 20 MiB are refused on read too). */
 export function validateDocument(document) {
   core.validateDocument(document);
-  if(Buffer.byteLength(JSON.stringify(document))>LIMIT)throw new Error('Document exceeds 20 MiB');
+  if(Buffer.byteLength(JSON.stringify(document))+1>LIMIT)throw new Error('Document exceeds 20 MiB');
   return document;
 }
 export function applyOperations(document, operations) {
@@ -38,7 +39,9 @@ export function applyOperations(document, operations) {
     }
   }
   for(const page of d.pages)for(const node of page.nodes)if(node.fontWeight!==undefined)node.fontWeight=String(node.fontWeight);
-  return validateDocument(d);
+  syncComponents(document,d); // instances follow their mains (web/component-core.js)
+  validateDocument(d);
+  return core.validateWorldBoundsChange(document,d);
 }
 const revision = bytes => createHash('sha256').update(bytes).digest('hex');
 export class DesignStore {
@@ -47,7 +50,7 @@ export class DesignStore {
   file(name) { if(typeof name!=='string'||! /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$/.test(name))throw new Error('Document name must contain only letters, numbers, hyphen or underscore');return path.join(this.root,name+'.verynize.json'); }
   async list(){return (await fs.readdir(this.root,{withFileTypes:true})).filter(e=>e.isFile()&&e.name.endsWith('.verynize.json')).map(e=>e.name.slice(0,-'.verynize.json'.length)).sort();}
   async read(name){const file=this.file(name);const st=await fs.lstat(file);if(!st.isFile()||st.isSymbolicLink()||st.size>LIMIT)throw new Error('Not a regular document or exceeds 20 MiB');const bytes=await fs.readFile(file,'utf8');return {document:validateDocument(JSON.parse(bytes)),revision:revision(bytes)};}
-  async mutate(name,fn){const file=this.file(name),lock=file+'.lock';const handle=await fs.open(lock,'wx',0o600).catch(()=>{throw new Error('Document is locked; another writer may be active')});let temp;try{const document=await fn();validateDocument(document);const bytes=JSON.stringify(document,null,2)+'\n';temp=file+'.'+randomUUID()+'.tmp';await fs.writeFile(temp,bytes,{flag:'wx',mode:0o600});await fs.rename(temp,file);return {document,revision:revision(bytes)};}finally{if(temp)await fs.unlink(temp).catch(()=>{});await handle.close();await fs.unlink(lock).catch(()=>{});}}
+  async mutate(name,fn){const file=this.file(name),lock=file+'.lock';const handle=await fs.open(lock,'wx',0o600).catch(()=>{throw new Error('Document is locked; another writer may be active')});let temp;try{const document=await fn();validateDocument(document);const pretty=JSON.stringify(document,null,2)+'\n';const bytes=Buffer.byteLength(pretty)>LIMIT?JSON.stringify(document)+'\n':pretty;temp=file+'.'+randomUUID()+'.tmp';await fs.writeFile(temp,bytes,{flag:'wx',mode:0o600});await fs.rename(temp,file);return {document,revision:revision(bytes)};}finally{if(temp)await fs.unlink(temp).catch(()=>{});await handle.close();await fs.unlink(lock).catch(()=>{});}}
   async create(name,title){return this.mutate(name,async()=>{try{await fs.lstat(this.file(name));throw new Error('Document already exists');}catch(e){if(e.code!=='ENOENT')throw e;}return {version:2,name:title,pages:[{id:randomUUID(),name:'Page 1',nodes:[]}],tokens:{}};});}
   async update(name,expectedRevision,operations){return this.mutate(name,async()=>{const current=await this.read(name);if(current.revision!==expectedRevision)throw new Error('Revision conflict; read the document again before editing');return applyOperations(current.document,operations);});}
 }

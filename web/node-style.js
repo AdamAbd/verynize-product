@@ -713,7 +713,9 @@
     const flip = (n.flipX === true || n.flipY === true) ? `scale(${n.flipX === true ? -1 : 1}, ${n.flipY === true ? -1 : 1})` : '';
     if (num(n.rotation) || flip) set('transform', [num(n.rotation) ? `rotate(${num(n.rotation)}deg)` : '', flip].filter(Boolean).join(' '));
     set('opacity', String(num(n.opacity, 100) / 100));
-    set('border', `${n.strokeHidden === true ? 0 : Math.max(0, num(n.strokeWidth))}px solid ${safe(n.strokeColor, '#000000')}`);
+    // A vector layer paints its fill and stroke in its <svg> (web/vector-geometry.js), never on the box.
+    const vector = n.type === 'vector';
+    set('border', `${n.strokeHidden === true || vector ? 0 : Math.max(0, num(n.strokeWidth))}px solid ${safe(n.strokeColor, '#000000')}`);
     if (safe(n.shadow)) set('box-shadow', safe(n.shadow));
     if (n.clipContent) set('overflow', 'hidden');
     set('white-space', 'pre-wrap');
@@ -721,9 +723,9 @@
     set('color', color);
     set('z-index', String(Math.round(num(n.zIndex))));
     set('flex-shrink', '0');
-    set('background', n.type === 'text' ? 'transparent' : color);
-    if (n.type !== 'text' && safe(n.gradient)) set('background-image', safe(n.gradient));
-    const paints = n.type === "shader" ? null : fillsCss(n, ctx.tokens);
+    set('background', n.type === 'text' || vector ? 'transparent' : color);
+    if (n.type !== 'text' && !vector && safe(n.gradient)) set('background-image', safe(n.gradient));
+    const paints = n.type === "shader" || vector ? null : fillsCss(n, ctx.tokens);
     if (paints && n.type === "text" && paints.solid) set("color", paints.solid);
     else if (paints) {
       // A legacy CSS gradient string stays on top of the stack.
@@ -767,7 +769,7 @@
       set("-webkit-background-clip", clip);
       set("background-clip", clip);
     }
-    if (PALETTES[n.animated]) { set('background-image', `linear-gradient(120deg,${PALETTES[n.animated]})`); set('background-size', '250% 250%'); set('animation', 'design-gradient 8s ease infinite'); }
+    if (PALETTES[n.animated] && !vector) { set('background-image', `linear-gradient(120deg,${PALETTES[n.animated]})`); set('background-size', '250% 250%'); set('animation', 'design-gradient 8s ease infinite'); }
     if (safe(n.mask)) set('mask-image', safe(n.mask));
     if (parent?.layout === 'inline') { set('display', 'inline-block'); set('vertical-align', 'top'); }
 
@@ -852,7 +854,8 @@
     if (Array.isArray(n.cornerRadii) && n.cornerRadii.length === 4) set('border-radius', n.cornerRadii.map(px).join(' '));
     // Ellipse: any box type can be drawn as an ellipse inscribed in its bounds; it overrides corner radii.
     if (n.ellipse === true && n.type !== 'text') set('border-radius', '50%');
-    if (n.strokeHidden !== true && Array.isArray(n.strokeWidths) && n.strokeWidths.length === 4) set('border-width', bordersOf(n).map(v => px(Math.max(0, v))).join(' '));
+    if (vector) set('border-radius', '0px'); // the path is the shape; the box has no corners
+    if (n.strokeHidden !== true && !vector && Array.isArray(n.strokeWidths) && n.strokeWidths.length === 4) set('border-width', bordersOf(n).map(v => px(Math.max(0, v))).join(' '));
     if (['dashed', 'dotted', 'double'].includes(n.strokeStyle)) set('border-style', n.strokeStyle);
     if (num(n.ringWidth) > 0) {
       const ring = (n.ringInset ? 'inset ' : '') + `0 0 0 ${num(n.ringWidth)}px ${safe(n.ringColor, '#000000')}`;

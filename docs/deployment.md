@@ -35,7 +35,7 @@ npm run deploy
 
 ## Accounts database (D1) and auth secret
 
-Better Auth (`cloud/auth.js`) keeps users, sessions and organizations in the `DB` D1 database, whose schema is in `cloud/migrations`. The Worker needs Workers Paid, because `cloudflare.config.ts` sets `limits.cpuMs` to 30 000 for scrypt password hashing. First deployment:
+Better Auth (`cloud/auth.js`) keeps users, sessions and organizations in the `DB` D1 database, whose schema is in `cloud/migrations`. The Worker needs Workers Paid, because `cloudflare.config.ts` sets `limits.cpuMs` to 300 000 (the Paid maximum) for scrypt password hashing and large room imports. `npm run deploy` sends that value on every deploy, so a CPU limit changed in the Cloudflare dashboard is reset by the next deploy: change it in `cloudflare.config.ts`. First deployment:
 
 Production uses `https://verynize.gayaloo.app`, with D1 database `verynize`
 (`76210bc4-d4fe-4075-a321-776c2525a828`) pinned in `cloudflare.config.ts`.
@@ -69,6 +69,10 @@ Shared-room images live in the R2 bucket `verynize-assets` (binding `ASSETS_BUCK
 3. Provide the secret, generated with `openssl rand -base64 32`. For the next deploy, add `ASSET_SIGNING_SECRET` to the private secrets file and run `npm run deploy -- --secrets-file /path/to/private-secrets.json`, or set it on the existing Worker with `npx cf workers secrets update ASSET_SIGNING_SECRET --worker verynize --text '<value>'` (keep the value out of shell history). Delete the file afterwards.
 
 Do not rotate `ASSET_SIGNING_SECRET`: every image URL stored in room documents depends on it. Without the bucket or the secret, the asset endpoints answer 503 and the desktop keeps images embedded as before. These steps were checked only with `npm run deploy:check`; no bucket or secret was created against a real account.
+
+### Crash reports (Sentry)
+
+Optional. Put `SENTRY_DSN_WEB` (and `SENTRY_AUTH_TOKEN` for source maps) in the repo-root `.env`, which `npm run build`, `deploy` and `deploy:check` load, or export them. Set `SENTRY_DSN_SERVER` as a Worker secret (`npx cf workers secrets update SENTRY_DSN_SERVER --worker verynize --text '<dsn>'`) or in `.env` to build it in. Without them nothing is reported. See docs/telemetry.md.
 
 ### Transactional email
 

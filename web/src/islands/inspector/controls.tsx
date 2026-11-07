@@ -417,7 +417,7 @@ export function NativeSelect({
         bare
           ? "relative flex h-6 shrink-0 items-center"
           : // Disabled field (properties-audit B4/C1): #242424 fill, #828282 value, dim caret.
-            cn(fieldBox, "pr-0 has-disabled:bg-field-disabled", prefix && fieldPrefixInset),
+            cn(fieldBox, "pr-0", disabled && "bg-field-disabled", prefix && fieldPrefixInset),
         className,
       )}
     >

@@ -132,6 +132,15 @@ test('root containment: project root and its worktrees only', async () => {
     await fs.mkdir(plain);
     await assert.rejects(new GitChanges(plain).summary(), /not a Git repository/);
 
+    const plainHandlers = {};
+    registerGitChanges((name, fn) => (plainHandlers[name] = fn), { getProject: () => new Project(plain) });
+    for (const name of ['gitChanges', 'gitBranchChanges']) {
+      const result = await plainHandlers[name]({});
+      assert.equal(result.code, 'not-a-repo');
+      assert.match(result.message, /not a Git repository/);
+    }
+    await assert.rejects(plainHandlers.gitCommit({ message: 'No repo' }), /not a Git repository/);
+
     // IPC registration wires every handler through the root check.
     const handlers = {};
     registerGitChanges((name, fn) => (handlers[name] = fn), { getProject: () => project });

@@ -3,7 +3,7 @@
 // command/shortcut registry. Independent implementation; app.js passes its editor state in
 // through BetterCanvas.install(editor) so this file never reaches into private globals.
 (() => {
-  const ZOOM_STOPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32];
+  const ZOOM_STOPS = [0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32];
   const MIN_ZOOM = ZOOM_STOPS[0], MAX_ZOOM = ZOOM_STOPS.at(-1);
   const SAFE = {top: 48, right: 40, bottom: 96, left: 40};
   // Zoom to selection (⇧2) margins, measured in Wonder V3-selection (120×120 → 538 %: 64 px above and below inside the
@@ -11,7 +11,7 @@
   const SELECTION_SAFE = {top: 64, right: 29, bottom: 120, left: 29};
   const BOARD = {x: 0, y: 0, w: 1000, h: 700};
   const DRAW_TOOLS = new Set(['frame', 'rectangle', 'ellipse', 'text', 'shader']);
-  const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', eyedropper: 'eyedropper-tool', frame: 'add-frame', rectangle: 'rectangle', ellipse: 'add-ellipse', text: 'text', shader: 'add-shader'};
+  const TOOL_BUTTONS = {move: 'select-tool', scale: 'scale-tool', hand: 'pan-tool', eyedropper: 'eyedropper-tool', frame: 'add-frame', rectangle: 'rectangle', ellipse: 'add-ellipse', text: 'text', shader: 'add-shader', pen: 'pen-tool'};
   const STYLE_KEYS = ['color', 'token', 'gradient', 'radius', 'ellipse', 'strokeWidth', 'strokeColor', 'shadow', 'opacity', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'textAlignVertical', 'textTransform', 'textDecoration', 'textWrap', 'whiteSpace', 'wordBreak', 'textIndent', 'fontSmoothing', 'truncate', 'mask', 'animated', 'clipContent'];
   const CLIP_MARKER = 'verynize/nodes';
   // Wonder's frame tool presets (Properties panel with the Frame tool on and nothing selected): [category, [[name, w, h]]].
@@ -46,11 +46,12 @@
     const wrap = $('#canvas-wrap'), workspace = $('#workspace');
     let tool = 'move', space = false, autoFit = true, lastPage = null, clipboard = null, styleClipboard = null, pasteTimer = null, pendingInPlace = false, suppressPasteUntil = 0, menu = null;
     const drilled = new Set(), cameras = new Map();
-    const find = id => ed.nodes().find(n => n.id === id);
+    const find = id => window.VerynizeNodeIndex.find(ed.nodes(), id);
     const sel = () => ed.getSelection();
     const selectedNodes = () => ed.nodes().filter(n => sel().has(n.id));
     const isFlow = n => !!n && n.type === 'frame' && n.layout !== 'free';
-    const elementOf = id => canvas.querySelector('[data-id="' + CSS.escape(id) + '"]');
+    // The renderer's map first: an attribute query walks the canvas (O(page) per call, several calls per pointer move).
+    const elementOf = id => { const el = ed.layerOf?.(id); return el && canvas.contains(el) ? el : canvas.querySelector('[data-id="' + CSS.escape(id) + '"]'); };
     const footer = message => { const f = $('#workspace footer') || $('footer'); if (f) f.textContent = message; };
 
     // ---------- Overlay (screen-space chrome) ----------
@@ -59,6 +60,9 @@
     overlay.innerHTML = '<svg class="guide-layer" xmlns="http://www.w3.org/2000/svg"></svg><div class="guide-labels"></div><div class="frame-labels"></div><div class="marquee" hidden></div>';
     wrap.append(overlay);
     const guideSvg = overlay.querySelector('.guide-layer'), guideLabels = overlay.querySelector('.guide-labels'), frameLabels = overlay.querySelector('.frame-labels'), marqueeBox = overlay.querySelector('.marquee');
+    // Frame labels by frame id (drawFrameLabels), and the viewport size they are culled against (set on resize).
+    const frameLabelOf = new Map();
+    let labelView = null;
 
 
     // ---------- Hover: outline what a click would select and tint its name label (Wonder S1-hover-final) ----------
@@ -73,12 +77,16 @@
     clippedSelection.className = 'clipped-selection';
     overlay.append(clippedSelection);
     function drawClippedSelection() {
-      clippedSelection.replaceChildren();
+      // Measure every ring first, then write once: a read after each append would force a style recalc per ring.
+      const boxes = [];
       for (const id of sel()) {
         const n = find(id); if (!n || n.hidden || n.rotation) continue;
         let p = n.parentId && find(n.parentId), clipped = !!n.clipContent;
         while (p && !clipped) { clipped = !!p.clipContent; p = p.parentId && find(p.parentId); }
-        const b = clipped && screenBox(id); if (!b) continue;
+        const b = clipped && screenBox(id); if (b) boxes.push([id, n, b]);
+      }
+      clippedSelection.replaceChildren();
+      for (const [id, n, b] of boxes) {
         const ring = document.createElement('div'); ring.className = 'selection-ring'; placeBox(ring, b);
         if (!n.locked) for (const corner of ['nw', 'ne', 'sw', 'se']) {
           const h = document.createElement('div'); h.className = 'handle'; h.dataset.id = id; h.dataset.corner = corner; ring.append(h);
@@ -273,6 +281,7 @@
     let lastZoom = null, releaseTimer = 0;
     const releaseLayer = () => { clearTimeout(releaseTimer); canvas.classList.remove('camera-moving'); };
     function applyCamera() {
+      window.canvasTiles?.camera(cam);
       canvas.style.transform = `translate(${cam.x}px, ${cam.y}px) scale(${cam.zoom})`;
       if (lastZoom !== cam.zoom) releaseLayer();
       else { canvas.classList.add('camera-moving'); clearTimeout(releaseTimer); releaseTimer = setTimeout(releaseLayer, 160); }
@@ -360,6 +369,7 @@
       const moved = viewportLeft !== null && (reflow ? left !== viewportLeft : Math.abs(left - viewportLeft) >= 100 && performance.now() - panelToggledAt < 1000);
       if (moved) { cam.x -= left - viewportLeft; autoFit = false; }
       viewportLeft = left;
+      const size = viewport(); labelView = {w: size.width, h: size.height};
       if (autoFit) fit(true); else applyCamera();
     }).observe(wrap);
     // Bring a layer into view by moving the camera (scrolling cannot reach negative world space).
@@ -488,20 +498,22 @@
     const inStack = n => !!n && isFlow(find(n.parentId)) && n.position !== 'absolute';
     // Selected nodes without any selected ancestor.
     function topSelected() {
-      const list = selectedNodes();
-      return list.filter(n => !list.some(o => o.id !== n.id && ed.descendants(o.id).has(n.id)));
+      return window.VerynizeNodeIndex.of(ed.nodes()).topmost(selectedNodes());
     }
     function select(ids) { ed.setSelection(new Set(ids)); ed.render(); }
     function clearSelection() { drilled.clear(); select([]); }
 
-    // Lazy undo: only record history once a gesture actually changes something.
-    function gesture() {
-      const before = ed.snapshot(); let committed = false;
-      return {commit() { if (!committed) { ed.pushHistory(before); committed = true; } }, get committed() { return committed; }};
+    // Lazy undo: only record history once a gesture actually changes something. A late gesture takes its snapshot
+    // when it commits (the whole document, so a click that never commits does not pay for it); its caller commits
+    // before its first change to the document.
+    function gesture(late = false) {
+      const before = late ? null : ed.snapshot(); let committed = false;
+      return {commit() { if (!committed) { ed.pushHistory(before ?? ed.snapshot()); committed = true; } }, get committed() { return committed; }};
     }
 
     // ---------- Pointer: pan / move / resize / marquee / draw ----------
     function track(e, move, end) {
+      ed.beginGesture?.();
       const pointerId = e.pointerId, buttonMask = e.button === 1 ? 4 : e.button === 2 ? 2 : 1;
       let finished = false;
       const up = ev => {
@@ -510,7 +522,7 @@
         window.removeEventListener('pointermove', moving); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
         window.removeEventListener('blur', up); wrap.removeEventListener('lostpointercapture', up);
         try { if (wrap.hasPointerCapture(pointerId)) wrap.releasePointerCapture(pointerId); } catch {}
-        end?.(ev);
+        try { end?.(ev); } finally { ed.endGesture?.(); }
       };
       const moving = ev => { if (ev.pointerId !== pointerId) return; if (!(ev.buttons & buttonMask)) { up(ev); return; }
         if (Math.hypot(ev.clientX-e.clientX,ev.clientY-e.clientY)>3) { try { if(!wrap.hasPointerCapture(pointerId))wrap.setPointerCapture(pointerId); } catch {} }
@@ -677,7 +689,7 @@
       fillEditor(el, String(n.text || ''), charStylesOf(n));
       try { el.contentEditable = 'plaintext-only'; } catch {}
       if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
-      el.spellcheck = false; el.dataset.textEditing = '';
+      el.spellcheck = false; el.dataset.textEditing = ''; clippedSelection.dataset.textEditing = ''; // selection-chrome.js hides it
       el.style.setProperty('user-select', 'text'); el.style.setProperty('-webkit-user-select', 'text'); el.style.setProperty('cursor', 'text');
       const onKey = e => {
         if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) { e.preventDefault(); e.stopPropagation(); finishText(true); return; }
@@ -703,7 +715,7 @@
       const s = textEdit; if (!s) return;
       textEdit = null; s.cleanup();
       const {text, styles} = readEditor(s.el);
-      s.el.removeAttribute('contenteditable'); delete s.el.dataset.textEditing;
+      s.el.removeAttribute('contenteditable'); delete s.el.dataset.textEditing; delete clippedSelection.dataset.textEditing;
       for (const k of ['user-select', '-webkit-user-select', 'cursor']) s.el.style.removeProperty(k);
       if (document.activeElement === s.el) s.el.blur();
       const n = find(s.id), draft = draftText?.id === s.id ? draftText : null;
@@ -757,10 +769,11 @@
       if (!textEdit || textEdit.el.isConnected) return;
       const fresh = elementOf(textEdit.id);
       if (fresh && find(textEdit.id)) { fresh.replaceWith(textEdit.el); textEdit.el.focus({preventScroll: true}); }
-      else { textEdit.cleanup(); textEdit = null; }
+      else { textEdit.cleanup(); textEdit = null; delete clippedSelection.dataset.textEditing; }
     }
 
     let layerPreview = null; // {ids, parentId, index?} while a drag previews a new parent in the Layers tree
+    const dropHits = window.VerynizeDropHits.create({canvas, wrap, camera: cam, find});
     function guideTargets(moving) {
       const first = find(moving[0]); if (!first) return [];
       const excluded = new Set(moving.flatMap(id => [...ed.descendants(id)]));
@@ -786,22 +799,50 @@
       layerPreview = next; window.dispatchEvent(new CustomEvent('bd:layer-preview', {detail: next}));
       return true;
     }
+    // Free layers follow the pointer without a render: x/y change live (snapping, drop targets and agents read them)
+    // and each layer's own element is offset by a CSS translate (parent space, so it composes with rotation and the
+    // translate of a centred constraint). A render on the way (nesting into a frame, a collaborator's edit) draws the
+    // layer at its current x/y; the offset is then measured again from there. `s.lx/ly` = x/y at the last follow.
+    function follow(list) {
+      const offset = (base, d) => (base ? `calc(${base} + ${d}px)` : d + 'px');
+      for (const s of list) {
+        if (!s.el?.isConnected || s.el.style.translate !== s.shown) {
+          s.el = elementOf(s.n.id); if (!s.el) continue;
+          s.base = s.el.style.translate === 'none' ? '' : s.el.style.translate; s.rx = s.lx ?? s.x; s.ry = s.ly ?? s.y;
+        }
+        const [bx = '', by = bx ? '0px' : ''] = s.base ? s.base.split(' ') : [];
+        s.el.style.translate = offset(bx, s.n.x - s.rx) + ' ' + offset(by, s.n.y - s.ry);
+        s.shown = s.el.style.translate; s.lx = s.n.x; s.ly = s.n.y;
+      }
+    }
+    // Back to the layer's own translate before the render that commits the drag.
+    function unfollow(list) { for (const s of list) if (s.el?.isConnected && s.el.style.translate === s.shown) s.el.style.translate = s.base; }
+    // While a drag runs the overlay and the selected layers carry the state its chrome reads (selection-chrome.js). Not
+    // a class on #workspace: rules under one restyle every layer of the page when it toggles (1 s at 50,000 layers).
+    let dragMarked = [];
+    function markDrag(on) {
+      workspace.classList.toggle('moving', on);
+      overlay.toggleAttribute('data-moving', on);
+      for (const el of dragMarked) el.removeAttribute('data-dragging');
+      dragMarked = on ? [...sel()].map(elementOf).filter(Boolean) : [];
+      for (const el of dragMarked) el.setAttribute('data-dragging', '');
+    }
     function startMove(e, onClick) {
       let moving = topSelected().filter(n => !n.locked).map(n => n.id);
-      const g = gesture(), start = {x: e.clientX, y: e.clientY};
-      let free = null, flowOnly = false, stacked = [], grab = null, box = null, targets = null, excluded = null, home, drop = null, deferred = false, cancelled = false;
+      const g = gesture(true), start = {x: e.clientX, y: e.clientY};
+      let free = null, flowOnly = false, stacked = [], grab = null, box = null, targets = null, excluded = null, home, origin, drop = null, deferred = false, cancelled = false;
       const onKey = ev => {
         if (ev.key !== 'Escape' || !deferred || cancelled) return;
         ev.preventDefault(); ev.stopImmediatePropagation();
         cancelled = true; window.removeEventListener('keydown', onKey, true);
         clearGhosts(stacked); drawGuides([]); drawDrop(null); setLayerPreview(null);
-        workspace.classList.remove('moving'); ed.updateMeasurement();
+        markDrag(false); ed.updateMeasurement();
       };
       const begin = ev => {
         const picked = moving.map(find).filter(Boolean);
         deferred = !ev.altKey && picked.length > 0 && picked.every(inStack);
         if (deferred) window.addEventListener('keydown', onKey, true); else g.commit();
-        if (ev.altKey) moving = duplicateNodes(moving, 0);
+        if (ev.altKey) { moving = duplicateNodes(moving, 0); ed.render(); } // the copies are the layers that follow
         const nodes = moving.map(find).filter(Boolean);
         free = nodes.filter(n => !inStack(n)).map(n => ({n, x: n.x, y: n.y})); // anchored layers re-derive their insets from x/y (beforeRender)
         stacked = nodes.filter(inStack);
@@ -809,10 +850,10 @@
         box = union(free.map(s => grab.get(s.n.id))); targets = free.length ? guideTargets(free.map(s => s.n.id)) : [];
         excluded = new Set(nodes.flatMap(n => [...ed.descendants(n.id)]));
         const parents = new Set(nodes.map(n => n.parentId || null));
-        home = parents.size === 1 ? [...parents][0] : undefined;
+        home = origin = parents.size === 1 ? [...parents][0] : undefined;
         // A top-level frame enters a stack by a drag (Wonder R1-row-return-during) but never a free frame (unproven).
         flowOnly = nodes.some(n => !n.parentId && n.type === 'frame');
-        workspace.classList.add('moving'); showHover(null);
+        markDrag(true); showHover(null);
       };
       track(e, ev => {
         if (!moving.length || cancelled) return;
@@ -829,26 +870,32 @@
         for (const s of free) {
           s.n.x = r2(s.x + dx); s.n.y = r2(s.y + dy);
         }
-        if (free.length) ed.render();
+        follow(free);
         // Free layers move into a free frame (or back onto the page) as soon as the pointer crosses into it, so the
         // frame clips them and its edges and centre lines become snap targets for the rest of the drag.
         if (drop.parent && free.length && !stacked.length && drop.index === undefined) {
+          unfollow(free);
           relocate(free.map(s => s.n), drop.parent.id === '' ? null : drop.parent.id);
-          ed.render();
+          // Canvas only: panels, save and subscribers see the new parent with the release's render (the Layers tree
+          // previews it meanwhile, below), so a drag across frames costs the page, not the whole document.
+          ed.renderCanvas(); markDrag(true); // the render may have replaced the dragged layers' elements
           home = free[0].n.parentId || null;
-          for (const s of free) { s.x = s.n.x - dx; s.y = s.n.y - dy; }
+          for (const s of free) { s.x = s.n.x - dx; s.y = s.n.y - dy; s.el = null; s.lx = s.n.x; s.ly = s.n.y; }
           targets = guideTargets(free.map(s => s.n.id));
           drop = {};
         }
-        const previewed = setLayerPreview(drop.parent ? {ids: [...moving], parentId: drop.parent.id || null, ...(drop.index === undefined ? {} : {index: drop.index})} : null);
+        const previewed = setLayerPreview(drop.parent ? {ids: [...moving], parentId: drop.parent.id || null, ...(drop.index === undefined ? {} : {index: drop.index})}
+          : free.length && home !== origin ? {ids: [...moving], parentId: home} : null);
         placeGhosts(stacked, grab, dx, dy);
-        if (stacked.length || previewed) ed.updateMeasurement(); // the name label follows the dragged copy
+        if (free.length || stacked.length || previewed) ed.updateMeasurement(); // the name label (and a multi-selection's box) follows the dragged layers
+        if (free.some(s => !s.n.parentId && s.n.type === 'frame')) drawFrameLabels(); // artboard labels ride with their frames
         drawGuides(guides); drawDrop(drop);
       }, () => {
         window.removeEventListener('keydown', onKey, true);
         if (cancelled) return;
-        workspace.classList.remove('moving');
+        markDrag(false);
         if (!free) { onClick?.(); return; }
+        unfollow(free);
         drawGuides([]); drawDrop(null); setLayerPreview(null);
         if (deferred) g.commit();
         // Stack children leaving their stack land where the pointer put them (relocate measures the ghosts).
@@ -866,18 +913,31 @@
       let target = home;
       if (!excluded || home === undefined) return {};
       if (!(isFlow(homeNode) && stacked.length && (() => { const r = worldRect(home); return r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; })())) {
-        target = null;
-        for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
-          if (!canvas.contains(el) || !el.classList.contains('frame-layer') || excluded.has(el.dataset.id)) continue;
-          const n = find(el.dataset.id); if (n && !n.locked && !n.hidden) { target = n.id; break; }
-        }
+        // The full hit test walks the whole page: web/canvas-drop-hits.js repeats it only when the answer can change.
+        target = dropHits.frameAt(e.clientX, e.clientY, excluded, (x, y) => {
+          for (const el of document.elementsFromPoint(x, y)) {
+            if (!canvas.contains(el) || !el.classList.contains('frame-layer') || excluded.has(el.dataset.id)) continue;
+            const n = find(el.dataset.id); if (n && !n.locked && !n.hidden) return n.id;
+          }
+          return null;
+        });
         if (flowOnly && !isFlow(find(target))) target = home;
+        if (target && target !== home && cycleDrop(excluded, target)) target = home;
       }
       const node = target ? find(target) : null, result = {};
       if (target !== home) result.parent = node || {id: ''};
       if (isFlow(node)) result.index = stackIndex(node, ed.nodes().filter(n => n.parentId === node.id && !excluded.has(n.id)), p);
       if (node && (result.parent || stacked.length)) result.frame = node.id;
       return result;
+    }
+    // A drag never enters a main that the dragged instances depend on (one notice per drag; answers cached per frame).
+    let cycleDrops = {moving: null, refused: new Map(), told: false};
+    function cycleDrop(moving, target) {
+      if (cycleDrops.moving !== moving) cycleDrops = {moving, refused: new Map(), told: false};
+      if (!cycleDrops.refused.has(target)) cycleDrops.refused.set(target, !!window.VerynizeComponents?.wouldCycle(ed.design, [...moving].map(find), target));
+      const refused = cycleDrops.refused.get(target);
+      if (refused && !cycleDrops.told) { cycleDrops.told = true; notice('A main component cannot contain an instance of itself'); }
+      return refused;
     }
     // Slot in a stack for a world point: main-axis order for single-line flex, reading order for wrap/grid/inline.
     function stackIndex(parent, kids, p) {
@@ -1126,15 +1186,53 @@
     }
 
     // Name labels above top-level frames (artboards); drag a label to move its frame.
+    // Placed from document geometry, not layout: a top-level frame's box is its x/y/w/h (border-box), turned about its
+    // centre by its rotation, and the label sits on the top-left of that box's axis-aligned bounds. Only a rotated frame
+    // whose size layout can change (hug/fill, min/max, aspect ratio) reads its laid-out size, and all reads come before
+    // any write. Labels are keyed by frame id and reused, so a camera move only repositions them; labels outside the
+    // viewport are detached.
+    const LABEL_MAX_W = 240, LABEL_H = 16, LABEL_GAP = 18; // canvas.css .frame-label: max-width, line-height; offset above
+    const laidOut = n => ['wMode', 'hMode'].some(k => n[k] && n[k] !== 'fixed') || ['minW', 'maxW', 'minH', 'maxH'].some(k => n[k] !== undefined && n[k] !== null) || n.wPct !== undefined || n.hPct !== undefined || Number(n.aspectRatio) > 0;
+    function frameCorner(n) {
+      let x = Number(n.x) || 0, y = Number(n.y) || 0, w = Number(n.w) || 0, h = Number(n.h) || 0;
+      const a = (Number(n.rotation) || 0) * Math.PI / 180;
+      if (!a) return {x, y, w, h};
+      const el = laidOut(n) && elementOf(n.id); if (el) { w = el.offsetWidth; h = el.offsetHeight; }
+      const c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a)), bw = w * c + h * s, bh = w * s + h * c;
+      return {x: x + (w - bw) / 2, y: y + (h - bh) / 2, w: bw, h: bh};
+    }
+    function frameLabelDown(e) {
+      if (e.button !== 0 || space || tool === 'hand') return;
+      e.stopPropagation(); const id = e.currentTarget.dataset.id;
+      select(e.shiftKey ? [...sel(), id] : [id]); if (!e.shiftKey && !readOnly()) startMove(e);
+    }
     function drawFrameLabels() {
-      frameLabels.replaceChildren();
-      for (const n of ed.nodes().filter(n => !n.parentId && n.type === 'frame' && !n.hidden && !n.preview && !n.labelHidden)) {
-        const r = worldRect(n.id); if (!r || (sel().has(n.id) && sel().size === 1)) continue;
-        const label = document.createElement('span'); label.className = 'frame-label' + (sel().has(n.id) ? ' selected' : '') + (n.id === hoverId ? ' hovered' : ''); label.textContent = n.name; label.dataset.id = n.id;
-        label.style.left = toScreenX(r.x) + 'px'; label.style.top = toScreenY(r.y) - 18 + 'px';
-        label.onpointerdown = e => { if (e.button !== 0 || space || tool === 'hand') return; e.stopPropagation(); select(e.shiftKey ? [...sel(), n.id] : [n.id]); if (!e.shiftKey && !readOnly()) startMove(e); };
-        frameLabels.append(label);
+      const selection = sel(), single = selection.size === 1;
+      const visible = [];
+      for (const n of ed.nodes()) {
+        if (n.parentId || n.type !== 'frame' || n.hidden || n.preview || n.labelHidden || (single && selection.has(n.id))) continue;
+        const r = frameCorner(n); if (!r.w && !r.h) continue;
+        const left = toScreenX(r.x), top = toScreenY(r.y) - LABEL_GAP;
+        if (labelView && (left >= labelView.w || left + LABEL_MAX_W <= 0 || top >= labelView.h || top + LABEL_H <= 0)) continue;
+        visible.push({n, left, top});
       }
+      let shown = 0;
+      for (const {n, left, top} of visible) {
+        let entry = frameLabelOf.get(n.id);
+        if (!entry) {
+          const el = document.createElement('span'); el.dataset.id = n.id; el.onpointerdown = frameLabelDown;
+          frameLabelOf.set(n.id, entry = {el});
+        }
+        const el = entry.el, className = 'frame-label' + (selection.has(n.id) ? ' selected' : '') + (n.id === hoverId ? ' hovered' : '') + (n.component === true ? ' is-main' : n.instanceOf ? ' is-instance' : '');
+        if (el.className !== className) el.className = className;
+        if (entry.name !== n.name) { el.textContent = n.name; entry.name = n.name; }
+        if (entry.left !== left) { el.style.left = left + 'px'; entry.left = left; }
+        if (entry.top !== top) { el.style.top = top + 'px'; entry.top = top; }
+        if (frameLabels.children[shown] !== el) frameLabels.insertBefore(el, frameLabels.children[shown] || null);
+        shown++;
+      }
+      while (frameLabels.children.length > shown) frameLabels.lastElementChild.remove();
+      if (frameLabelOf.size > shown) for (const [id, entry] of frameLabelOf) if (!entry.el.isConnected && !find(id)) frameLabelOf.delete(id);
     }
 
     // ---------- Structure commands ----------
@@ -1142,6 +1240,7 @@
     function duplicateNodes(ids, offset = 20) {
       const all = new Set(ids.flatMap(id => [...ed.descendants(id)])), mapping = new Map([...all].map(id => [id, ed.uid()]));
       const copies = ed.nodes().filter(n => all.has(n.id)).map(n => ({...structuredClone(n), id: mapping.get(n.id), parentId: mapping.get(n.parentId) || n.parentId, x: n.x + (all.has(n.parentId) ? 0 : offset), y: n.y + (all.has(n.parentId) ? 0 : offset)}));
+      window.VerynizeComponents?.adoptCopies(ed.design, copies, mapping); // a copy of a main is an instance of it
       ed.nodes().push(...copies);
       const result = ids.map(id => mapping.get(id));
       hooks.duplicated?.(result);
@@ -1285,7 +1384,7 @@
       if (!['above', 'below', 'inside'].includes(position) || (targetId && !target)) return null;
       const wanted = new Set(ids);
       let roots = all.filter(n => wanted.has(n.id) && !n.locked);
-      roots = roots.filter(n => !roots.some(o => o !== n && ed.descendants(o.id).has(n.id)));
+      roots = window.VerynizeNodeIndex.of(all).topmost(roots);
       if (!roots.length) return null;
       const parentId = position === 'inside' ? (target ? target.id : null) : (target?.parentId || null), parent = find(parentId);
       if (position === 'inside' && target && target.type !== 'frame') return null;
@@ -1302,6 +1401,7 @@
       return moveRoots(roots, parentId, position === 'inside' ? 'front' : {target, after: position === 'above'});
     }
     function moveRoots(roots, parentId, where) {
+      if (roots.some(n => (n.parentId || null) !== (parentId || null)) && refusesCycle(subtreeOf(roots), parentId)) return null;
       const before = ed.snapshot(), all = ed.nodes(), parent = find(parentId), origin = contentOrigin(parentId);
       const plan = roots.map(n => {
         const world = layerOrigin(n), next = {x: Math.round((world.x - origin.x) * 100) / 100, y: Math.round((world.y - origin.y) * 100) / 100};
@@ -1422,6 +1522,7 @@
       const ids = new Map(data.nodes.map(n => [n.id, ed.uid()])), roots = new Set(data.roots);
       const target = !inPlace && sel().size === 1 && selectedNodes()[0].type === 'frame' && !roots.has(selectedNodes()[0].id) ? selectedNodes()[0] : null;
       const copies = data.nodes.map(n => ({...structuredClone(n), id: ids.get(n.id), parentId: ids.get(n.parentId) || n.parentId || null}));
+      window.VerynizeComponents?.adoptCopies(ed.design, copies, ids);
       const originalOf = new Map([...ids].map(([from, to]) => [to, from]));
       const placed = copies.filter(n => roots.has(originalOf.get(n.id)));
       for (const n of placed) {
@@ -1435,6 +1536,7 @@
         const b = union(tops.map(n => ({x: n.x, y: n.y, w: n.w, h: n.h})));
         if (!intersects(b, visibleWorld())) { const p = placeInView(b.w, b.h); for (const n of tops) { n.x += p.x - b.x; n.y += p.y - b.y; } }
       }
+      if (target && refusesCycle(copies, target.id)) return false;
       const candidate = structuredClone(ed.design);
       candidate.pages.find(p => p.id === ed.page().id).nodes.push(...structuredClone(copies));
       for (const [k, v] of Object.entries(data.tokens || {})) if (!candidate.tokens[k]) candidate.tokens[k] = v;
@@ -1486,6 +1588,68 @@
       for (const n of selectedNodes()) for (const [k, v] of Object.entries(styleClipboard)) if (v !== undefined) n[k] = structuredClone(v);
       ed.render();
     }
+
+    // ---------- Components (web/component-core.js; spec: design/component-audit/README.md "UI") ----------
+    // The engine work is window.design.components (validated, one undo step each); this adds the canvas parts:
+    // wrapping several layers before Create component, placing new instances, going to a main on another page,
+    // and refusing moves that would make a main contain an instance of itself.
+    const components = () => window.design?.components;
+    const notice = message => { footer(message); window.dispatchEvent(new CustomEvent('bd:notice', {detail: {message}})); };
+    const componentInfo = () => sel().size === 1 ? components()?.info([...sel()][0]) || null : null;
+    const insideMain = n => { for (let p = n && find(n.parentId); p; p = find(p.parentId)) if (p.component === true) return true; return false; };
+    /** Refuses (with a notice) placing the layers and their subtrees inside `parentId` when that makes a cycle. */
+    function refusesCycle(nodes, parentId) {
+      if (!parentId || !window.VerynizeComponents?.wouldCycle(ed.design, nodes, parentId)) return false;
+      notice('A main component cannot contain an instance of itself');
+      return true;
+    }
+    const subtreeOf = roots => roots.flatMap(n => [...ed.descendants(n.id)]).map(find).filter(Boolean);
+    function createComponent() {
+      const list = topSelected().filter(n => !n.locked), api = components(); if (!list.length || !api) return null;
+      try {
+        if (list.length === 1 && list[0].type === 'frame') return api.create(list[0].id);
+        // Several layers, or one that is not a frame: frame them first (Figma), in the same undo step.
+        if (list.some(n => n.sourceId)) throw new Error('Detach the instance before making its layers a component');
+        const frame = frameSelection(); if (!frame) return null;
+        frame.name = list.length === 1 ? list[0].name : 'Component';
+        window.VerynizeComponents.createComponent(ed.design, null, frame.id);
+        ed.render();
+        return frame.id;
+      } catch (error) { notice(error.message); return null; }
+    }
+    function createInstance() {
+      const info = componentInfo(); if (!info?.mainId || info.missingMain || !['main', 'instance'].includes(info.role)) return null;
+      const r = worldRect([...sel()][0]), p = r ? {x: Math.round(r.x + r.w + 40), y: Math.round(r.y)} : placeInView(find(info.mainId)?.w || 100, find(info.mainId)?.h || 100);
+      try { return components().instance(info.mainId, {parentId: null, x: p.x, y: p.y}); } catch (error) { notice(error.message); return null; }
+    }
+    /** Selects the main of the selected instance (switching page when it lives elsewhere) and zooms to it. */
+    function goToMain(mainId = componentInfo()?.mainId) {
+      if (!mainId) return false;
+      const page = ed.design.pages.find(p => p.nodes?.some(n => n.id === mainId));
+      if (!page) { notice('The main component is missing'); return false; }
+      if (page.id !== ed.page().id) window.design.setActivePage(page.id);
+      select([mainId]);
+      requestAnimationFrame(() => zoomToSelection());
+      return true;
+    }
+    function resetOverrides() {
+      const info = componentInfo(); if (!info?.instanceId || !info.overrideCount) return false;
+      components().reset([info.id], {all: info.role === 'instance'});
+      return true;
+    }
+    function detachInstance() {
+      const info = componentInfo(); if (info?.role !== 'instance') return false;
+      components().detach(info.id);
+      return true;
+    }
+    function setSlot(on) {
+      const n = selectedNodes()[0]; if (!n) return false;
+      try { components().setSlot(n.id, on); } catch (error) { notice(error.message); return false; }
+      return true;
+    }
+    const canSlot = () => { const n = sel().size === 1 && selectedNodes()[0]; return !!n && n.type === 'frame' && !n.sourceId && !n.instanceOf && n.component !== true && n.slot !== true && insideMain(n); };
+    const isMainSlot = () => { const n = sel().size === 1 && selectedNodes()[0]; return !!n && n.slot === true && !n.sourceId; };
+    const roleIs = (...roles) => () => roles.includes(componentInfo()?.role);
 
     // ---------- Command registry ----------
     const needsSelection = () => sel().size > 0;
@@ -1544,6 +1708,13 @@
       {id: 'arrange.backward', label: 'Send backward', section: 'Transform', keys: ['mod+['], when: needsSelection, run: () => arrange('backward')},
       {id: 'arrange.front', label: 'Bring to front', section: 'Transform', keys: ['mod+alt+]'], when: needsSelection, run: () => arrange('front')},
       {id: 'arrange.back', label: 'Send to back', section: 'Transform', keys: ['mod+alt+['], when: needsSelection, run: () => arrange('back')},
+      {id: 'component.create', label: 'Create component', section: 'Components', keys: ['mod+alt+k'], when: needsSelection, run: createComponent},
+      {id: 'component.instance', label: 'Create instance', section: 'Components', keys: [], when: () => { const i = componentInfo(); return !!i && ['main', 'instance'].includes(i.role) && !i.missingMain; }, run: createInstance},
+      {id: 'component.goToMain', label: 'Go to main component', section: 'Components', keys: [], when: () => { const i = componentInfo(); return !!i?.instanceId && !i.missingMain; }, run: () => goToMain()},
+      {id: 'component.reset', label: 'Reset overrides', section: 'Components', keys: [], when: () => !!componentInfo()?.overrideCount, run: resetOverrides},
+      {id: 'component.detach', label: 'Detach instance', section: 'Components', keys: ['mod+alt+b'], when: roleIs('instance'), run: detachInstance},
+      {id: 'component.convertToSlot', label: 'Convert to slot', section: 'Components', keys: [], when: canSlot, run: () => setSlot(true)},
+      {id: 'component.removeSlot', label: 'Remove slot', section: 'Components', keys: [], when: isMainSlot, run: () => setSlot(false)},
       {id: 'layer.visibility', label: 'Show/hide', section: 'Edit', keys: ['mod+shift+h'], when: needsSelection, run: () => toggleFlag('hidden')},
       {id: 'layer.lock', label: 'Lock/unlock', section: 'Edit', keys: ['mod+shift+l'], when: needsSelection, run: () => toggleFlag('locked')},
       {id: 'align.left', label: 'Align left', section: 'Alignment', keys: ['alt+a'], when: needsSelection, run: () => ed.align('left')},
@@ -1695,6 +1866,7 @@
 
     // ---------- Render integration ----------
     function afterRender() {
+      dropHits.invalidate();
       keepTextEditor();
       syncAnchored();
       const pageId = ed.page().id;

@@ -242,12 +242,12 @@ export function WorkingDirectories({ state }: { state: ChatState }) {
           className={cn(hook.mention, "group/dir flex h-6 max-w-full items-center gap-1.5 rounded-md border border-chat-chip-border bg-chat-chip-bg px-2 text-base leading-5.25 text-foreground-2")}
         >
           <span className="relative flex size-3.5 shrink-0 items-center justify-center">
-            <FolderIcon className="size-3.5 text-muted-foreground transition-opacity group-hover/dir:opacity-0 group-has-focus-visible/dir:opacity-0" />
+            <FolderIcon className="size-3.5 text-muted-foreground transition-opacity group-hover/dir:opacity-0 group-focus-within/dir:opacity-0" />
             <button
               type="button"
               aria-label={`Remove working directory ${dir}`}
               onClick={() => workspace()?.removeDirectory?.(dir)}
-              className="absolute inset-0 flex items-center justify-center rounded-sm text-muted-foreground opacity-0 group-hover/dir:opacity-100 hover:text-foreground focus-visible:opacity-100"
+              className="absolute inset-0 flex items-center justify-center rounded-sm text-muted-foreground opacity-0 group-hover/dir:opacity-100 group-focus-within/dir:opacity-100 hover:text-foreground focus-visible:opacity-100"
             >
               <XIcon className="size-3.5" />
             </button>

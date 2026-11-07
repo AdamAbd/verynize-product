@@ -20,6 +20,7 @@
 // OpenRouter account"; a pasted key is checked (rejected, then accepted); OAuth PKCE through the fake OpenRouter
 // sign-in page and the backend callback returns to the editor with its #room= fragment restored; turns carry the
 // account's own key; Settings › Agents shows the connection (last4, source, usage), Disconnect and Paste API key.
+import { waitForAsync } from "./helpers/wait-for-async.cjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -29,6 +30,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   launchBrowser,
+  openStarterFile,
   screenshot,
   signedInContext as signedInBrowserContext,
 } from "./helpers/web-app.mjs";
@@ -43,23 +45,36 @@ const { createWebServer } = await import("../web-start/node/server.mjs");
 const root = fileURLToPath(new URL("../", import.meta.url));
 if (!fs.existsSync(path.join(root, "web/dist/ui.js")))
   execFileSync(process.execPath, ["scripts/build-ui.cjs"], { cwd: root, stdio: "pipe" });
-execFileSync(
-  process.execPath,
-  ["node_modules/vite-plus/bin/vp", "build", "-c", "vite.node.config.ts"],
-  {
-    cwd: root,
-    stdio: "pipe",
-  },
-);
+if (!process.env.TEST_WEB_NODE_BUILT)
+  execFileSync(
+    process.execPath,
+    ["node_modules/vite-plus/bin/vp", "build", "-c", "vite.node.config.ts"],
+    {
+      cwd: root,
+      stdio: "pipe",
+    },
+  );
 
 const labelOf = (body) => /\[label:([\w -]+)\]/.exec(userText(body))?.[1] || "AI card";
+// The browser controls when the provider continues, so slow CI cannot miss the streaming
+// state and fast runs do not pay fixed 1.5s / 2.5s sleeps.
+const streamGate = Promise.withResolvers();
+const reconnectGate = Promise.withResolvers();
 const fake = await startFakeOpenRouter({
   tree: [
     [{ text: "Let me look at the room." }, { tool: "get_element_tree", args: {} }],
     [{ text: "The room has a Hero artboard." }],
   ],
-  stream: [[{ text: "First part arrives " }, { delay: 1500 }, { text: "and then the rest." }]],
-  drop: [[{ text: "Before the drop " }, { delay: 2500 }, { text: "after the reconnect." }]],
+  stream: [
+    [{ text: "First part arrives " }, { wait: streamGate.promise }, { text: "and then the rest." }],
+  ],
+  drop: [
+    [
+      { text: "Before the drop " },
+      { wait: reconnectGate.promise },
+      { text: "after the reconnect." },
+    ],
+  ],
   slow: [[{ text: "Working on it" }, { hang: true }]],
   // One write (create_artboard of a card named by [label:…]), then a closing text that echoes the tool result.
   write: (body) =>
@@ -173,7 +188,8 @@ try {
       );
     };
     await signInWithPassword(page);
-    assert.equal(new URL(page.url()).pathname, "/editor");
+    // A new account has no file and none is made for it: the editor URL lands on Files.
+    await page.waitForFunction(() => location.pathname === "/" && !window.fileLibrary.currentId);
 
     // First sign-in of the account: the AI setup steps, OpenRouter not connected yet, Claude Code / Codex desktop-only.
     const setup = page.locator("#onboarding[data-step='ai']");
@@ -198,7 +214,7 @@ try {
     // Skip for now: closed and remembered for the account on the server.
     await page.locator("#onboarding-ai-skip").click();
     await setup.waitFor({ state: "detached" });
-    await page.waitForFunction(async () => {
+    await waitForAsync(page, async () => {
       const me = await window.cloudAccount.request("/api/me");
       return typeof me.aiSetupAt === "number";
     });
@@ -273,6 +289,8 @@ try {
   page.on("dialog", (dialog) => dialog.accept());
   await page.goto(origin + "/editor");
   await ready(page);
+  // A design to chat about: the user makes one (stored as a database room); none is made on its own.
+  await openStarterFile(page);
   const gateState = (state) =>
     page.waitForFunction(
       (wanted) => document.getElementById("chat-web-gate")?.dataset.state === wanted,
@@ -329,6 +347,9 @@ try {
 
   // Connect OpenRouter: OAuth PKCE in this tab, through OpenRouter's sign-in page (faked) and the backend's
   // callback, back to the editor with its #room= fragment restored (kept client-side, never sent to the server).
+  const editorPath = await page.evaluate(
+    () => "/editor/" + encodeURIComponent(window.fileLibrary.currentId),
+  );
   const authBefore = fake.authRequests.length;
   const cameBack = page.waitForURL((url) => url.searchParams.get("openrouter") === "connected", {
     timeout: 20000,
@@ -337,7 +358,7 @@ try {
   await cameBack;
   await page.waitForURL(
     (url) =>
-      url.pathname === "/editor" &&
+      url.pathname === editorPath &&
       !url.searchParams.has("openrouter") &&
       url.hash === `#room=${room.id}`,
     { timeout: 20000 },
@@ -402,6 +423,8 @@ try {
   assert.match(menuText, /Fake Alpha/);
   assert.doesNotMatch(menuText, /Claude|Codex|Effort/);
   await menu.getByText("Fake Beta").click();
+  // Let the menu finish closing and restore focus before typing/pressing Enter in the composer.
+  await menu.waitFor({ state: "detached" });
   assert.equal(await page.locator("#bd-agent-model-label").innerText(), "Fake Beta");
 
   // Streamed text: the first part is in the transcript before the rest arrives.
@@ -413,6 +436,8 @@ try {
     /and then the rest/,
     "text streams before the turn ends",
   );
+  assert.equal((await lastReply()).state, "running");
+  streamGate.resolve();
   await transcript.getByText("and then the rest.").waitFor({ timeout: 15000 });
   await idle();
   let reply = await lastReply();
@@ -463,6 +488,7 @@ try {
     .getByText("Before the drop")
     .waitFor({ timeout: 15000 });
   web.closeAllConnections();
+  reconnectGate.resolve();
   await page
     .locator(".chat-message.assistant")
     .last()
@@ -763,6 +789,8 @@ try {
     "PASS web chat (model API): sign-in screen, AI setup steps (once per account, skip, reopen, connected), sign out, needs-credentials and not-configured states, pasted key (rejected, accepted), OAuth PKCE round-trip keeping #room=, Settings OpenRouter status/disconnect/paste, room gate, streamed text, read tool call, history, reconnect with events?after=, cancel, model picker, access Ask with write approvals (allow and deny)",
   );
 } finally {
+  streamGate.resolve();
+  reconnectGate.resolve();
   await browser?.close();
   web.closeAllConnections?.();
   await new Promise((resolve) => web.close(resolve));

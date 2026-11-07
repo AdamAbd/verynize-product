@@ -294,19 +294,55 @@
       if (stamps && stamp && (!stamps.get(path) || stamp > stamps.get(path)))
         stamps.set(path, stamp);
     };
-    const findNode = (id) => {
-      if (!isStructured(doc)) return null;
-      for (const page of doc.pages) {
-        const index = page.nodes.findIndex((node) => node.id === id);
-        if (index >= 0) return { page, node: page.nodes[index], index };
-      }
-      // Paged rooms (cloud/room-store.js) hold only the pages a batch touches; `external` reports
-      // ids used on the pages left out, so node ids stay unique across the whole document.
-      return options.external?.(id) ? { external: true } : null;
+    // Cache shape validation too: isStructured walks every node. Tombstones let a run
+    // of removes stay linear; compact only at an order change or the end of the batch.
+    let indexed = false,
+      structured,
+      pages,
+      nodeIds,
+      indexes;
+    const dirtyPages = new Set();
+    const compact = () => {
+      for (const page of dirtyPages) page.nodes = page.nodes.filter(Boolean);
+      dirtyPages.clear();
     };
-    const pageOf = (id) => (isStructured(doc) ? doc.pages.find((page) => page.id === id) : null);
+    const ensureIndex = () => {
+      if (indexed) return;
+      compact();
+      structured = isStructured(doc);
+      pages = new Map();
+      nodeIds = new Map();
+      indexes = new Map();
+      if (structured)
+        for (const page of doc.pages) {
+          if (!pages.has(page.id)) pages.set(page.id, page);
+          const first = new Map(),
+            byId = new Map();
+          page.nodes.forEach((node, index) => {
+            if (!first.has(node.id)) first.set(node.id, { node, index });
+            byId.set(node.id, node);
+            nodeIds.set(node.id, (nodeIds.get(node.id) || 0) + 1);
+          });
+          indexes.set(page, { first, byId });
+        }
+      indexed = true;
+    };
+    const hasPages = () => {
+      ensureIndex();
+      return structured;
+    };
+    const findNode = (id) => {
+      ensureIndex();
+      if (!structured) return false;
+      return nodeIds.has(id) || options.external?.(id);
+    };
+    const pageOf = (id) => {
+      ensureIndex();
+      return pages.get(id);
+    };
+    const nodeOf = (page, id) => page && indexes.get(page).first.get(id)?.node;
     const createsCycle = (page, id, parent) => {
-      const byId = new Map(page.nodes.map((node) => [node.id, node]));
+      const byId = indexes.get(page).byId;
       const seen = new Set();
       for (let current = parent; current; current = byId.get(current)?.parentId) {
         if (current === id || seen.has(current)) return true;
@@ -330,17 +366,20 @@
       switch (op.t) {
         case "root": {
           if (!newer(path, stamp)) return reject("Superseded");
+          compact();
           doc = clone(op.value);
+          indexed = false;
           if (stamps) stamps.clear();
           return accept({ t: "root", value: clone(op.value) });
         }
         case "doc": {
           if (!isObject(doc)) return reject("Document is not an object");
-          if (op.key === "pages" && isStructured(doc))
+          if (op.key === "pages" && hasPages())
             return reject("Pages change through page operations");
           if (!newer(path, stamp)) return reject("Superseded");
           if (op.del) delete doc[op.key];
           else doc[op.key] = clone(op.value);
+          if (op.key === "pages") indexed = false;
           return accept(
             op.del
               ? { t: "doc", key: op.key, del: true }
@@ -348,12 +387,13 @@
           );
         }
         case "addPage": {
-          if (!isStructured(doc)) return reject("Document has no pages");
+          if (!hasPages()) return reject("Document has no pages");
           if (pageOf(op.id)) return reject("Page exists");
           if (op.value.nodes.some((node) => findNode(node.id)))
             return reject("Node id already used");
           if (!newer(path, stamp)) return reject("Superseded");
           doc.pages.push(clone(op.value));
+          indexed = false;
           for (const node of op.value.nodes) record("n/" + node.id, stamp);
           return accept({ t: "addPage", id: op.id, value: clone(op.value) });
         }
@@ -363,6 +403,7 @@
           if (doc.pages.length === 1) return reject("A document keeps at least one page");
           if (!newer(path, stamp)) return reject("Superseded");
           doc.pages = doc.pages.filter((item) => item.id !== op.id);
+          indexed = false;
           for (const node of page.nodes) record("n/" + node.id, stamp);
           return accept({ t: "removePage", id: op.id });
         }
@@ -380,9 +421,10 @@
           );
         }
         case "pageOrder": {
-          if (!isStructured(doc)) return reject("Document has no pages");
+          if (!hasPages()) return reject("Document has no pages");
           if (!newer(path, stamp)) return reject("Superseded");
           doc.pages = reorder(doc.pages, op.value);
+          indexed = false;
           return accept({ t: "pageOrder", value: op.value.slice() });
         }
         case "add": {
@@ -390,26 +432,39 @@
           if (!page) return reject("Missing page");
           if (findNode(op.id)) return reject("Node exists");
           if (!newer(path, stamp)) return reject("Superseded");
-          page.nodes.push(clone(op.value));
+          const node = clone(op.value);
+          const index = page.nodes.length;
+          page.nodes.push(node);
+          indexes.get(page).first.set(node.id, { node, index });
+          indexes.get(page).byId.set(node.id, node);
+          nodeIds.set(node.id, 1);
           if (stamps && stamp)
             for (const key of Object.keys(op.value)) record(path + "/" + key, stamp);
           return accept({ t: "add", page: op.page, id: op.id, value: clone(op.value) });
         }
         case "remove": {
           const page = pageOf(op.page);
-          const index = page ? page.nodes.findIndex((node) => node.id === op.id) : -1;
+          const index = page ? (indexes.get(page).first.get(op.id)?.index ?? -1) : -1;
           if (index < 0) return reject("Missing node");
           if (!newer(path, stamp)) return reject("Superseded");
-          page.nodes.splice(index, 1);
+          page.nodes[index] = null;
+          dirtyPages.add(page);
+          const count = nodeIds.get(op.id);
+          if (count === 1) nodeIds.delete(op.id);
+          else nodeIds.set(op.id, count - 1);
+          indexes.get(page).first.delete(op.id);
+          indexes.get(page).byId.delete(op.id);
+          // Legacy malformed documents may repeat ids: retain first-match lookup semantics.
+          if (count > 1) indexed = false;
           return accept({ t: "remove", page: op.page, id: op.id });
         }
         case "node": {
           const page = pageOf(op.page);
-          const node = page?.nodes.find((item) => item.id === op.id);
+          const node = nodeOf(page, op.id);
           if (!node) return reject("Missing node");
           if (op.key === "id") return reject("Node ids are immutable");
           if (op.key === "parentId" && !op.del && op.value !== null) {
-            if (!validId(op.value) || !page.nodes.some((item) => item.id === op.value))
+            if (!validId(op.value) || !indexes.get(page).byId.has(op.value))
               return reject("Missing parent");
             if (createsCycle(page, op.id, op.value)) return reject("Move would create a cycle");
           }
@@ -424,7 +479,7 @@
         }
         case "text": {
           const page = pageOf(op.page);
-          const node = page?.nodes.find((item) => item.id === op.id);
+          const node = nodeOf(page, op.id);
           if (!node) return reject("Missing node");
           const current = node[op.key];
           let value =
@@ -438,27 +493,74 @@
             value = op.value;
           }
           node[op.key] = value;
+          if (op.key === "id") indexed = false;
           return accept({ t: "node", page: op.page, id: op.id, key: op.key, value });
         }
         case "nodeOrder": {
           const page = pageOf(op.page);
           if (!page) return reject("Missing page");
           if (!newer(path, stamp)) return reject("Superseded");
+          compact();
           page.nodes = reorder(page.nodes, op.value);
+          indexed = false;
           return accept({ t: "nodeOrder", page: op.page, value: op.value.slice() });
         }
       }
     });
-    if (options.normalize && isStructured(doc)) {
+    compact();
+    if (options.normalize && hasPages()) {
       // Concurrent deletes can orphan children; reattach them to the page so content stays visible.
       for (const page of doc.pages) {
-        const ids = new Set(page.nodes.map((node) => node.id));
+        const byId = indexes.get(page).byId;
+        const ids = new Set(byId.keys());
+        const unique = ids.size === page.nodes.length;
+        // Label parent chains once. When a repair breaks a chain, mark its reverse
+        // descendants safe too; each edge is visited at most once across all repairs.
+        const reaches = new Map(),
+          children = new Map();
+        for (const node of page.nodes) {
+          if (!children.has(node.parentId)) children.set(node.parentId, []);
+          children.get(node.parentId).push(node.id);
+        }
+        if (unique)
+          for (const node of page.nodes) {
+            if (reaches.has(node.id)) continue;
+            const chain = [],
+              positions = new Map();
+            let current = node.id;
+            while (
+              current &&
+              byId.has(current) &&
+              !reaches.has(current) &&
+              !positions.has(current)
+            ) {
+              positions.set(current, chain.length);
+              chain.push(current);
+              current = byId.get(current).parentId;
+            }
+            let cycle = reaches.get(current) || null;
+            if (positions.has(current)) {
+              cycle = current;
+            }
+            for (const id of chain) reaches.set(id, cycle);
+          }
         for (const node of page.nodes) {
           if (
             node.parentId !== undefined &&
             node.parentId !== null &&
-            (!ids.has(node.parentId) || createsCycle(page, node.id, node.parentId))
+            (!ids.has(node.parentId) ||
+              (unique ? reaches.get(node.id) : createsCycle(page, node.id, node.parentId)))
           ) {
+            if (unique && reaches.get(node.id)) {
+              const safe = [node.id];
+              reaches.set(node.id, null);
+              for (let i = 0; i < safe.length; i++)
+                for (const child of children.get(safe[i]) || []) {
+                  if (!reaches.get(child)) continue;
+                  reaches.set(child, null);
+                  safe.push(child);
+                }
+            }
             node.parentId = null;
             applied.push({
               t: "node",

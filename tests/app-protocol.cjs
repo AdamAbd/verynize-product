@@ -167,13 +167,21 @@ async function appChecks(profile) {
   const app = await launch(profile);
   try {
     const page = await editor(app);
-    assert.equal(page.url(), ENTRY);
+    // The launch entry (ENTRY, a bare /editor) is replaced with the active file's URL once the library is ready.
+    // Wait for it, so that replace can't land on top of the entries pushed below.
+    await page.waitForFunction(
+      () =>
+        !!window.fileLibrary?.currentId &&
+        location.pathname === "/editor/" + encodeURIComponent(window.fileLibrary.currentId),
+    );
+    assert.match(page.url(), /^app:\/\/verynize\/editor\/[^/?#]+$/);
     assert.equal(await page.evaluate(() => location.origin), "app://verynize");
     assert.equal(await page.evaluate(() => isSecureContext), true);
     assert.ok(await ipcWorks(page));
     // Client-side routes: path, query and hash do not matter to IPC.
+    // (The router replaces a bare /editor with the active file's URL.)
     await page.evaluate(() => history.pushState({}, "", "/editor"));
-    assert.equal(await page.evaluate(() => location.pathname), "/editor");
+    assert.match(await page.evaluate(() => location.pathname), /^\/editor(\/[^/]+)?$/);
     assert.ok(await ipcWorks(page), "IPC after pushState");
     await page.evaluate(() => history.pushState({}, "", "/settings?tab=agents#advanced"));
     assert.ok(await ipcWorks(page), "IPC with query and hash");
@@ -181,7 +189,11 @@ async function appChecks(profile) {
     await page.evaluate(() => history.pushState({}, "", "/editor"));
     await Promise.all([page.waitForEvent("load"), page.evaluate(() => location.reload())]);
     await page.waitForFunction(() => !!window.desktop);
-    assert.equal(page.url(), "app://verynize/editor");
+    // Bare /editor is replaced with the active file's canonical URL (/editor/<fileId>).
+    await page.waitForFunction(
+      () => location.pathname === "/editor/" + encodeURIComponent(window.fileLibrary?.currentId),
+    );
+    assert.match(page.url(), /^app:\/\/verynize\/editor\/[^/?#]+$/);
     assert.ok(await ipcWorks(page), "IPC after reloading app://verynize/editor");
     assert.ok((await stylesLoaded(page)) >= 10, "stylesheets load from a route URL");
     // A nested route loads its root-absolute assets too.
@@ -328,7 +340,12 @@ async function migrationChecks(profile) {
   });
   try {
     const page = await editor(again);
-    assert.equal(page.url(), ENTRY, "editor opens without waiting for the downgrade probe");
+    // ENTRY, or its canonical /editor/<fileId> once the library replaced the launch entry.
+    assert.match(
+      page.url(),
+      /^app:\/\/verynize\/editor(\/[^/?#]+)?$/,
+      "editor opens without waiting for the downgrade probe",
+    );
     let probe;
     for (let i = 0; i < 400 && !probe; i++) {
       probe = await fs

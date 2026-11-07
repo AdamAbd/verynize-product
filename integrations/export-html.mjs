@@ -5,10 +5,13 @@ import { readFileSync } from 'node:fs';
 import { validateDocument } from './design-store.mjs';
 import { nodeStyle, styleText, textSegments, lastInFlowId, safeCss } from './node-style.mjs';
 import { styleSignature } from './codec-html.mjs';
+import { svgMarkup } from './vector-geometry.mjs';
 
 // Lossless mode: each layer also carries its exact record (data-vn-node) and a signature of its
-// declarations (data-vn-sig) so codec-html.mjs can restore it while the CSS is unchanged.
-const LAYER_SKIP = new Set(['id', 'parentId', 'shortId', 'measured']);
+// declarations (data-vn-sig) so codec-html.mjs can restore it while the CSS is unchanged. Instances are
+// materialized, so they export as the layers they are; their component links (web/component-core.js) point at
+// ids of this document and are left out.
+const LAYER_SKIP = new Set(['id', 'parentId', 'shortId', 'measured', 'component', 'instanceOf', 'sourceId', 'overrides', 'slot', 'slotName']);
 export const layerRecord = node => JSON.stringify(Object.fromEntries(Object.entries(node).filter(([key]) => !LAYER_SKIP.has(key))));
 export const losslessAttrs = (node, style) => ` data-vn-node="${escape(layerRecord(node))}" data-vn-sig="${styleSignature(style)}"`;
 import { paramsAttr } from './shaders.mjs';
@@ -38,6 +41,7 @@ export function exportHTML(document, pageId, { nodeId, lossless = false } = {}) 
     let inner = '';
     if (node.type === 'text') inner = richText(node);
     else if (node.type === 'image') { const src = (node.src && recolored) || safeSrc(node.src) || safeSrc(node.srcRemote); if (src) inner = svgTint ? `<span role="img" aria-label="${escape(node.name)}" data-svg-color="true" style="${escape(styleText(img))}"></span>` : `<img src="${escape(src)}" alt="${escape(node.name)}" style="${escape(styleText(img))}">`; }
+    else if (node.type === 'vector') inner = svgMarkup(node, tokens);
     else if (node.type === 'frame') {
       const children = kids.get(node.id) || [];
       const last = lastInFlowId(children);

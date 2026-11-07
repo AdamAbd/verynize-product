@@ -1,6 +1,7 @@
 // Tailwind classes -> Verynize node properties, using CSS declarations produced by the real
 // Tailwind v4 engine (tailwind-engine.mjs). Every class that cannot be represented is reported
 // with a reason; nothing is dropped silently.
+import { expand } from './codec-css-cascade.mjs';
 import { compileClass, sortClasses, resolveValue } from './tailwind-engine.mjs';
 import { lengthOf, cssColorToHex, normalizeColorsIn, splitTop, matchMedia } from './codec-css.mjs';
 import { BLEND_MODES, FILTERS } from './node-style.mjs';
@@ -96,16 +97,19 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
       if (!applies) { ignore(cls, `variant ${result.variants.join(':')}: is ignored — ${viewport ? 'its condition does not match the import viewport or it is a state variant' : 'responsive, state and dark-mode variants are not represented on the canvas'}; only base classes apply (the class is kept on the layer and written back on export)`); continue; }
     }
     if (result.kind === 'unsupported') { ignore(cls, `produces only ${result.extras.join(', ')} rules, which the canvas does not represent`); continue; }
-    for (const decl of result.decls) {
-      // `hidden` (display:none) hides the layer without discarding its layout class (flex, grid…);
-      // a matching responsive variant that sets a display value shows it again (hidden md:flex).
-      if (decl.property === 'display') {
-        if (decl.value.trim() === 'none') { hiddenBy = cls; continue; }
-        else if (result.kind === 'variant') hiddenBy = null;
+    for (const raw of result.decls) {
+      if (raw.property === 'border-radius' && raw.value.includes('/')) ignore(cls, 'elliptical border radius is approximated by horizontal radii');
+      for (const decl of /^(border(?:-(?:top|right|bottom|left|radius|width|style|color))?|outline|background)$/.test(raw.property) ? expand(raw) : [raw]) {
+        // `hidden` (display:none) hides the layer without discarding its layout class (flex, grid…);
+        // a matching responsive variant that sets a display value shows it again (hidden md:flex).
+        if (decl.property === 'display') {
+          if (decl.value.trim() === 'none') { hiddenBy = cls; continue; }
+          else if (result.kind === 'variant') hiddenBy = null;
+        }
+        const prev = decls.get(decl.property);
+        if (prev && prev.important && !decl.important) continue;
+        decls.set(decl.property, { ...decl, cls });
       }
-      const prev = decls.get(decl.property);
-      if (prev && prev.important && !decl.important) continue;
-      decls.set(decl.property, { ...decl, cls });
     }
     if (result.childDecls.length) child.push({ cls, decls: result.childDecls });
     fromClass.set(cls, result);
@@ -293,14 +297,27 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
   if ((d = take('background-image'))) {
     let v = d.resolved;
     if (v === 'none') set('gradient', '');
-    else if (/url\s*\(/i.test(v)) ignore(d.cls, 'background images (url) are not supported; use an <img> element');
-    else {
+    else if (/url\s*\(/i.test(v)) {
+      const match = /^url\(\s*(["']?)(.*?)\1\s*\)$/.exec(v);
+      if (match && /^data:image\//.test(match[2])) set('fills', [{ type: 'image', src: match[2], fit: 'cover' }]);
+      else if (match && /^https?:\/\//.test(match[2])) set('backgroundRemote', match[2]);
+      else ignore(d.cls, 'Unresolved background URL; use HTML import with a base URL or an embedded image');
+    } else {
       v = normalizeColorsIn(v.replace(/\s+in\s+(?:oklab|oklch|srgb|hsl)(?:\s+(?:shorter|longer|increasing|decreasing)\s+hue)?/g, '').replace(/\(\s*,\s*/g, '(').replace(/,\s*,/g, ','));
       if (SAFE_CSS(v) && /gradient\(/.test(v)) set('gradient', v); else ignore(d.cls, `background-image ${d.resolved} is not supported`);
     }
   }
   if ((d = take('background'))) { const c = cssColorToHex(d.resolved); if (c) set('fill', c); else if (/gradient\(/.test(d.resolved) && SAFE_CSS(d.resolved)) set('gradient', normalizeColorsIn(d.resolved)); else ignore(d.cls, `background ${d.resolved} is not supported`); }
-  for (const p of ['background-size', 'background-position', 'background-repeat', 'background-clip', 'background-attachment', 'background-origin']) if ((d = take(p))) ignore(d.cls, `${p} is not supported`);
+  if ((d = take('background-size'))) {
+    const fit = ({ cover: 'cover', contain: 'contain', '100% 100%': 'fill', auto: 'none' })[d.resolved];
+    if (fit && out.props.fills) { for (const fill of out.props.fills) if (fill.type === 'image') fill.fit = fit; }
+    else if (!fit || out.props.backgroundRemote) ignore(d.cls, 'background-size is approximated by cover');
+  }
+  for (const p of ['background-position', 'background-repeat', 'background-clip', 'background-attachment', 'background-origin']) if ((d = take(p))) {
+    if (p === 'background-position' && /^(center|50% 50%)$/.test(d.resolved)) continue;
+    if (p === 'background-repeat' && d.resolved === 'no-repeat') continue;
+    ignore(d.cls, `${p} is approximated by a centered non-repeating image fill`);
+  }
 
   // --- borders
   const widths = {};
@@ -329,14 +346,23 @@ export function parseClasses(className, { tokens = {}, viewport = null } = {}) {
     if (base) { set('strokeColor', base.color); set('strokeToken', base.token || ''); }
     if (sides.some(Boolean)) {
       const fallback = base || sides.find(Boolean);
-      if (!base) { set('strokeColor', fallback.color); set('strokeToken', ''); }
-      set('strokeColors', sides.map(c => { const v = c || fallback; return v.token ? { color: v.color, token: v.token } : { color: v.color }; }));
+      if (!base) { set('strokeColor', fallback.color); set('strokeToken', sides.every(c => c?.token === fallback.token) ? fallback.token || '' : ''); }
+      if (!sides.every(c => c?.color === fallback.color && c?.token === fallback.token)) set('strokeColors', sides.map(c => { const v = c || fallback; return v.token ? { color: v.color, token: v.token } : { color: v.color }; }));
     }
   }
   const corners = [undefined, undefined, undefined, undefined];
+  const ellipse = ['top-left', 'top-right', 'bottom-right', 'bottom-left'].every(corner => {
+    const raw = decls.get(`border-${corner}-radius`);
+    const value = raw && lengthOf(resolve(raw.value).value);
+    return value?.frac === 0.5 && !value.px;
+  });
+  if (ellipse) set('ellipse', true);
   for (const [p, idx] of Object.entries(CORNERS)) {
     if (!(d = take(p))) continue;
-    const l = lengthOf(d.resolved);
+    if (ellipse) continue;
+    const axes = splitTop(d.resolved, ' ');
+    if (axes.length > 1) ignore(d.cls, 'elliptical border radius is approximated by horizontal radii');
+    const l = lengthOf(axes[0]);
     // rounded-[50%] on every corner is an ellipse inscribed in the box (other percentages are not represented).
     if (p === 'border-radius' && l?.frac === 0.5 && !l.px) { set('ellipse', true); continue; }
     if (!l || l.px === undefined || l.frac !== undefined) { ignore(d.cls, `radius ${d.resolved} is not supported`); continue; }

@@ -3,6 +3,7 @@
 // the list and keeps the typed text; an empty Min/Max row lists the variables as soon as it is focused.
 const { _electron } = require("@playwright/test");
 const { mod } = require("./helpers/keys.cjs");
+const { waitForUiReady } = require("./helpers/ui-ready.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -22,11 +23,25 @@ const path = require("node:path");
     const page = await app.firstWindow({ timeout: 20000 });
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    await waitForUiReady(page);
     await page.waitForSelector("#canvas .layer");
     const node = () =>
       page.evaluate(() => window.design.getDocument().pages[0].nodes.find((n) => n.id === "box"));
     const list = (field) => page.locator(`[data-type-bind="${field}"]`);
     const options = (field) => list(field).locator("[role=option]");
+    const addWidthLimit = async (field) => {
+      const trigger = page.locator('[data-size-menu="w"]');
+      // Radix keeps closing menu items mounted during their exit animation. Finish
+      // that lifecycle before reopening, and never target an exiting menu item.
+      await page.locator('[role=menu][data-state=closed]').waitFor({ state: "detached" });
+      await trigger.click();
+      const menu = page.locator('[role=menu][data-state=open]').filter({
+        has: page.locator(`[data-limit="${field}"]`),
+      });
+      await menu.locator(`[data-limit="${field}"]`).click();
+      await page.locator('[role=menu]').waitFor({ state: "detached" });
+      await list(field).waitFor();
+    };
     const typeInto = async (name, text) => {
       const input = page.locator(`#properties [name="${name}"]`);
       await input.click();
@@ -143,9 +158,7 @@ const path = require("node:path");
     assert.equal(await gap.inputValue(), "8", "a second Escape reverts the field");
 
     // 4. Add min width: the empty, focused row lists the dimension variables without typing (Wonder 224 wide).
-    await page.locator('[data-size-menu="w"]').click();
-    await page.locator('[data-limit="minW"]').click();
-    await list("minW").waitFor();
+    await addWidthLimit("minW");
     assert.ok(
       await page.locator("#properties [name=minW]").evaluate((e) => e === document.activeElement),
       "the new Min W row is focused",
@@ -183,9 +196,7 @@ const path = require("node:path");
     assert.equal(box.minW, 240);
 
     // Max W behaves the same.
-    await page.locator('[data-size-menu="w"]').click();
-    await page.locator('[data-limit="maxW"]').click();
-    await list("maxW").waitFor();
+    await addWidthLimit("maxW");
     assert.equal(await options("maxW").count(), 2);
     await page.keyboard.press("Escape");
     await list("maxW").waitFor({ state: "detached" });

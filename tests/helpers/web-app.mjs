@@ -103,3 +103,50 @@ export async function screenshot(page, name) {
   await mkdir(dir, { recursive: true });
   await page.screenshot({ path: `${dir}/${name}` });
 }
+
+/**
+ * Opens a file in a signed-in web editor that has none. The app never creates a file on its own (a fresh profile
+ * lands on Files), so tests that need an open document make one the way a user does, from the editor's starting
+ * document: `fileLibrary.createFromDocument`, which stores it as a room on the backend, or, `detached` (stub backends
+ * that cannot create rooms), a local file record detached from any room. Resolves the file id once the editor shows it.
+ */
+export async function openStarterFile(page, { detached = false } = {}) {
+  const ready = () =>
+    page.waitForFunction(
+      () =>
+        document.documentElement.dataset.uiReady === "true" &&
+        window.shellRouter?.state.status === "idle" &&
+        !!window.fileLibrary?.currentId &&
+        location.pathname === "/editor/" + encodeURIComponent(window.fileLibrary.currentId),
+      null,
+      { timeout: 20000 },
+    );
+  if (!detached) {
+    await page.evaluate(() => window.fileLibrary.createFromDocument(window.design.getDocument()));
+    await ready();
+    return page.evaluate(() => window.fileLibrary.currentId);
+  }
+  const id = await page.evaluate(() => {
+    const key = "verynize-library-v1";
+    const library = JSON.parse(localStorage.getItem(key) || "null") || { files: [], folders: [] };
+    const document = window.design.getDocument();
+    const id = crypto.randomUUID();
+    library.files.push({
+      id,
+      name: document.name,
+      document,
+      updated: Date.now(),
+      folder: null,
+      archived: false,
+      cloud: { server: location.origin, roomId: "starter-" + id, detached: true },
+    });
+    library.active = id;
+    library.seeded = true;
+    localStorage.setItem(key, JSON.stringify(library));
+    return id;
+  });
+  await page.goto(new URL("/editor/" + encodeURIComponent(id), page.url()).href);
+  await page.waitForFunction(() => document.documentElement.dataset.legacyEditor === "ready");
+  await ready();
+  return id;
+}

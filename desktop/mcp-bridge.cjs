@@ -1,3 +1,5 @@
+require('../web/document-core.js');
+const {NODE_LIMITS}=globalThis.VerynizeDocument;
 const {onWindowClosed}=require('./window-cleanup.cjs');
 /**
  * Verynize live MCP bridge (desktop main process)
@@ -60,6 +62,7 @@ const windows = new Map(); // webContents.id -> {win, designFiles, trusted, pend
 let info = null, server = null, starting = null, lastFocused = null;
 const bridgeOptions = { askAgent: null, shellExec: true, confirmExec: null };
 function setBridgeOptions(options = {}) {
+  if (options && Object.hasOwn(options, "generateImage")) bridgeOptions.generateImage = typeof options.generateImage === "function" ? options.generateImage : null;
   if (options && Object.hasOwn(options, 'askAgent')) bridgeOptions.askAgent = typeof options.askAgent === 'function' ? options.askAgent : null;
   if (options && Object.hasOwn(options, 'shellExec')) bridgeOptions.shellExec = options.shellExec !== false;
   if (options && Object.hasOwn(options, 'confirmExec')) bridgeOptions.confirmExec = typeof options.confirmExec === 'function' ? options.confirmExec : null;
@@ -124,7 +127,7 @@ const looksLikeDocument = d => d && d.version === 2 && Array.isArray(d.pages) &&
 function validBounds(bounds) {
   if (!bounds || typeof bounds !== 'object' || Array.isArray(bounds)) return false;
   const entries = Object.entries(bounds);
-  return entries.length > 0 && entries.length <= 5000 && entries.every(([, b]) => b && ['x', 'y', 'w', 'h'].every(k => Number.isFinite(b[k])));
+  return entries.length > 0 && entries.length <= NODE_LIMITS.perPage && entries.every(([, b]) => b && ['x', 'y', 'w', 'h'].every(k => Number.isFinite(b[k])));
 }
 
 function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, validateDocument, fonts }) {
@@ -147,8 +150,8 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
   const shot = async (document, pageId, nodeId, scale) => {
     const node = edit.getPage(document, pageId).nodes.find(n => n.id === nodeId);
     const html = exportHTML(withName(document), pageId, { nodeId });
-    const result = await renderHTML({ html, width: Math.max(1, node.w), height: Math.max(1, node.h), scale, fonts: fonts.extractFontFamilies(document) });
-    return { data: result.dataURL.replace(/^data:image\/png;base64,/, ''), mimeType: 'image/png', width: result.width, height: result.height, source: 'offscreen', ...(validBounds(result.boxes) ? { bounds: result.boxes } : {}), fonts: result.fonts };
+    const result = await renderHTML({ html, width: Math.max(1, node.w), height: Math.max(1, node.h), scale, screenshot: true, fonts: fonts.extractFontFamilies(document) });
+    return { data: result.dataURL.replace(/^data:image\/png;base64,/, ''), mimeType: 'image/png', width: result.width, height: result.height, scale: result.scale, requestedScale: result.requestedScale, source: 'offscreen', ...(validBounds(result.boxes) ? { bounds: result.boxes } : {}), fonts: result.fonts };
   };
   const withName = document => (typeof document.name === 'string' && document.name.trim() ? document : { ...document, name: 'Untitled' });
   return {
@@ -165,19 +168,21 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
       if (!target.live) return storeBackend.read(ref);
       return { document: target.state.document, revision: tools.revisionOf(target.state.document), live: true, name: target.name, selection: target.state.selection || [] };
     },
-    async transact(ref, fn) {
+    async transact(ref, fn, options = {}) {
       for (let attempt = 0; attempt < 4; attempt++) {
         const target = await route(ref);
         if (!target.live) { // Settings › Usage: count layers the agent added (desktop/agent-usage.cjs)
           let added = 0;
-          const result = await storeBackend.transact(ref, (document, meta) => { const before = structuredClone(document); const out = fn(document, meta); added = agentUsage.countNewNodes(before, out?.document); return out; });
+          const result = await storeBackend.transact(ref, (document, meta) => { const before = structuredClone(document); const out = fn(document, meta); added = agentUsage.countNewNodes(before, out?.document); return out; }, options);
           agentUsage.recordGeneratedLayers(added);
           return result;
         }
         const { state, entry } = target;
         const out = fn(structuredClone(state.document), { revision: tools.revisionOf(state.document) });
         validateDocument(withName(out.document));
-        const reply = await request(entry, 'commit', { document: out.document, stamp: state.stamp }, 15000);
+        // Version history (web/version-history.js): an agent edit; restore_version marks a restore.
+        const history = { actor: options.actor || { kind: 'agent', name: 'Agent' }, ...(options.force ? { force: options.force, artboardId: options.artboardId, label: options.label } : {}) };
+        const reply = await request(entry, 'commit', { document: out.document, stamp: state.stamp, ...history }, 15000);
         if (reply?.conflict) continue; // the user edited meanwhile; re-read and re-apply
         const committed = looksLikeDocument(reply?.document) ? reply.document : out.document;
         agentUsage.recordGeneratedLayers(agentUsage.countNewNodes(state.document, committed));
@@ -199,10 +204,39 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
       await request(entry, 'open', { document: state.document, path: file }, 15000);
       return { opened: true, name, path: file, live: true, pageId: state.document.pages[0].id };
     },
+    // Version history: the open document's (sidecar, browser storage or room) through the editor,
+    // a stored file's sidecar otherwise.
+    versions: {
+      async list(ref, artboardId) {
+        const target = await route(ref);
+        if (!target.live) return storeBackend.versions.list(ref, artboardId);
+        return (await request(target.entry, 'versions', { artboardId }, 15000)).versions;
+      },
+      async get(ref, id) {
+        const target = await route(ref);
+        if (!target.live) return storeBackend.versions.get(ref, id);
+        return (await request(target.entry, 'version', { id }, 15000)).found;
+      },
+      async capture(ref, artboardId, options = {}) {
+        const target = await route(ref);
+        if (!target.live) return storeBackend.versions.capture(ref, artboardId, options);
+        return (await request(target.entry, 'versionCapture', { artboardId, reason: options.reason, label: options.label }, 15000)).versions;
+      },
+    },
     async focus(ref, pageId, nodeId) {
       const target = await route(ref);
       if (!target.live) return { focused: false };
       return request(target.entry, 'focus', { pageId, nodeId }, 5000);
+    },
+    async generateImage(options) {
+      if (!bridgeOptions.generateImage)
+        throw new Error("Image generation needs the Verynize desktop app");
+      const entry = await editorReady();
+      if (!entry) throw new Error("Image generation needs an open Verynize desktop editor");
+      const image = await bridgeOptions.generateImage(options);
+      return entry.win.webContents.executeJavaScript(
+        `(async()=>{const blob=await (await fetch(${JSON.stringify(image.src)})).blob();return window.imageUpload.prepare(new File([blob], 'generated.png', {type:blob.type}));})()`,
+      );
     },
     async askAgent({ agent, task }) {
       if (typeof bridgeOptions.askAgent !== 'function') throw new Error('ask_agent is unavailable: this Verynize build has no reviewer agent configured');
@@ -214,7 +248,7 @@ function createLiveBackend({ store, storeBackend, tools, edit, exportHTML, valid
         const entry = await editorReady();
         try {
           const result = entry && await request(entry, 'screenshot', { pageId, nodeId, scale }, 60000);
-          if (result?.dataURL?.startsWith('data:image/png;base64,')) return { data: result.dataURL.slice('data:image/png;base64,'.length), mimeType: 'image/png', width: result.width, height: result.height, source: 'editor', ...(validBounds(result.bounds) ? { bounds: result.bounds } : {}), ...(result.fonts ? { fonts: result.fonts } : {}) };
+          if (result?.dataURL?.startsWith('data:image/png;base64,')) return { data: result.dataURL.slice('data:image/png;base64,'.length), mimeType: 'image/png', width: result.width, height: result.height, scale: result.scale, requestedScale: result.requestedScale, source: 'editor', ...(validBounds(result.bounds) ? { bounds: result.bounds } : {}), ...(result.fonts ? { fonts: result.fonts } : {}) };
         } catch {}
       }
       return shot(state.document, pageId, nodeId, scale);

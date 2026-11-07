@@ -31,9 +31,9 @@ const nodes = [
     };
     await seed();
 
-    // ---- T1: Move, Scale, Hand | Frame, Shader, Text, then the view toggles and `+`.
+    // ---- T1: Move, Scale, Hand | Frame, Shader, Text (+ Verynize's Pen), then the view toggles and `+`.
     const labels = await p.locator('#canvas-toolbar button').evaluateAll(list => list.map(b => b.getAttribute('aria-label')));
-    assert.deepEqual(labels, ['Move', 'Scale', 'Hand', 'Frame', 'Shader', 'Text', 'Details layout', 'Design layout', 'Views']);
+    assert.deepEqual(labels, ['Move', 'Scale', 'Hand', 'Frame', 'Shader', 'Text', 'Pen', 'Find layers', 'Details layout', 'Design layout', 'Views']);
     assert.equal(await p.locator('#canvas-toolbar #eyedropper-tool, #eyedropper-tool:visible').count(), 0, 'no eyedropper button');
     assert.equal(await p.locator('#canvas-toolbar #add-ellipse, #add-ellipse:visible').count(), 0, 'no ellipse button');
     await p.keyboard.press('o');
@@ -145,7 +145,7 @@ const nodes = [
     assert.equal(await p.locator('#shortcuts-search').getAttribute('placeholder'), 'Search shortcuts…');
     assert.equal(await p.evaluate(() => document.activeElement?.id), 'shortcuts-search');
     const sections = await p.locator('#shortcuts-drawer [data-shortcut-section]').evaluateAll(list => list.map(s => s.dataset.shortcutSection));
-    assert.deepEqual(sections, ['APPLICATION', 'TOOLS', 'EDIT', 'SELECTION', 'VIEW', 'TRANSFORM', 'ALIGNMENT', 'MOVEMENT', 'TEXT EDITING']);
+    assert.deepEqual(sections, ['APPLICATION', 'TOOLS', 'EDIT', 'SELECTION', 'VIEW', 'TRANSFORM', 'COMPONENTS', 'ALIGNMENT', 'MOVEMENT', 'TEXT EDITING']);
     const row = label => p.locator(`#shortcuts-drawer [data-shortcut-section] [data-shortcut="${label}"]`);
     assert.equal((await row('Command palette').innerText()).replace(/\s+/g, ''), `Commandpalette${MOD_LABEL}K`);
     assert.equal((await row('Eye dropper (alt)').innerText()).replace(/\s+/g, ''), 'Eyedropper(alt)⌃C');

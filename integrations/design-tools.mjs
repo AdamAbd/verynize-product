@@ -1,3 +1,7 @@
+import { attachToolHints } from './tool-hints.mjs';
+import { replaceInElement } from './replace-in-element.mjs';
+import { IMAGE_PROVIDERS } from "./image-provider.mjs";
+import { IMAGE_FILL_TYPES, validateWorldBoundsChange } from "./document-core.mjs";
 // One definition of the Verynize MCP tool set, shared by the stdio server
 // (integrations/mcp-server.mjs) and the desktop app's loopback HTTP bridge
 // (desktop/mcp-bridge.cjs), so both expose identical names, schemas and behavior.
@@ -30,16 +34,20 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { applyOperations, BINDABLE, checkVariableValue } from './design-store.mjs';
+import { syncComponents, componentProblems, hasComponents, componentInfo, createComponent, createInstance, detachInstance, resetOverrides, setSlot } from './component-core.mjs';
 import { setAlias, detachAlias, folderOf, folderMembers, folderRenames } from './variables.mjs';
 import { exportHTML } from './export-html.mjs';
 import { documentToJsx, documentToHtml, importJsxInto, prepareHtmlImport } from './codec-source.mjs';
+import { componentAttrs } from './jsx-codec.mjs';
 import {
-  clone, ensureShortIds, indexPage, getPage, elementCode, runDirectives, createArtboards, duplicateElements, removeSubtree,
+  clone, ensureShortIds, indexPage, getPage, elementCode, runDirectives, createArtboards, duplicateElements, removeSubtree, wrapElements, resolveMain, reflow,
   describeTokens, tokenColor, checkTokenName, renameTokenRefs, unbindToken, syncTokenColors,
   describeVariables, unbindVariable, renameVariableRefs,
 } from './design-edit.mjs';
 import { fundamentals, getDesignGuidelines, getSkill, skillCatalog, styleIds, archetypes, designTokens } from './design-knowledge/index.mjs';
 import { lintArtboard } from './design-lint.mjs';
+import { restore as restoreVersion } from './version-core.mjs';
+import { sidecarFor } from './version-store.mjs';
 import { ReceiptStore, createReceipt, finishGate, MAX_REPAIRS } from './verification.mjs';
 import { searchIcons, resolveIcon, ICON_SETS } from './assets.mjs';
 import { searchStockPhotos, fetchImageAsDataUrl, attribution, trackUnsplashDownload } from './images.mjs';
@@ -49,7 +57,7 @@ import { shellToolTable, SHELL_INSTRUCTIONS } from './shell-tools.mjs'; // bridg
 import { presetIds as shaderPresetIds, COLOR_ROLES as SHADER_COLOR_ROLES, PARAM_KEYS as SHADER_PARAM_KEYS } from './shaders.mjs';
 
 export const SERVER_NAME = 'verynize';
-export const SERVER_VERSION = '0.7.0';
+export const SERVER_VERSION = '0.9.0';
 /**
  * Short fingerprint of the agent-facing tool layer: sha256 over the source of the tools, the
  * editing/codec modules and the design knowledge, first 12 hex chars. Changes whenever behavior an
@@ -61,7 +69,7 @@ export const TOOLS_VERSION = (() => {
   const knowledge = ['index', 'fundamentals', 'archetypes', 'playbooks', 'elevation', 'color', 'skills', 'persona'].map(name => `design-knowledge/${name}.mjs`);
   let styleFiles = [];
   try { styleFiles = readdirSync(new URL('design-knowledge/styles/', import.meta.url)).filter(name => name.endsWith('.mjs')).sort().map(name => `design-knowledge/styles/${name}`); } catch { /* packaged without sources */ }
-  for (const file of ['design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', ...knowledge, ...styleFiles, 'shell-tools.mjs']) {
+  for (const file of ['tool-hints.mjs', 'replace-in-element.mjs', 'design-tools.mjs', 'design-edit.mjs', 'jsx-codec.mjs', 'tailwind-map.mjs', 'codec-layout.mjs', ...knowledge, ...styleFiles, 'shell-tools.mjs']) {
     hash.update(file + '\0');
     try { hash.update(readFileSync(new URL(file, import.meta.url))); } catch { hash.update('missing'); }
     hash.update('\0');
@@ -88,7 +96,7 @@ export const INSTRUCTIONS = `Verynize is a local design editor with a live canva
 - ask_agent asks another agent (Claude or Codex) for a read-only second opinion or design review of your plan or result; pass the context it needs in task. It cannot edit the canvas.
 
 ## Code model (Tailwind v4 JSX)
-- Frames are <div>, <section>, <header>, <nav>, <button>…; text elements hold text with inline <b>, <i>, <span className="…"> and <br />; a self-closing <div /> is a rectangle; <img src="https://…" alt="…"> places a photo (downloaded and embedded in the background) and also accepts data:image/… URLs; <Icon name="lucide:arrow-right" className="size-5 text-…" /> places an icon from get_icons; <Shader preset="aurora" /> is a WebGL fill.
+- Frames are <div>, <section>, <header>, <nav>, <button>…; text elements hold text with inline <b>, <i>, <span className="…"> and <br />; a self-closing <div /> is a rectangle; <img src="https://…" alt="…"> places a photo (downloaded and embedded in the background) and also accepts data:image/… URLs; <Icon name="lucide:arrow-right" className="size-5 text-…" /> places an icon from get_icons; <Shader preset="aurora" /> is a WebGL fill. An inline <svg viewBox="…"><path d="…" /></svg> (paths and basic shapes, solid fills and strokes, transforms and <use>) becomes an editable vector layer, read back as <svg data-vector viewBox="…" fill="#…" stroke="#…" strokeWidth={2} strokeLinecap="round"><path d="…" /></svg>: there strokeWidth and strokeDasharray are layer pixels, fill="none" means no fill, data-fill-token / data-stroke-token bind colour tokens, and an edit may restate only the attributes it changes (path children replace all paths). SVG with gradients, filters, masks, clip paths or text stays an image. Long path data reads as [path data N KB] and is kept when written back unchanged.
 - Layout is CSS. A plain <div> is block flow: children stack vertically and padding applies. Use flex, flex-col, grid grid-cols-N, gap-*, items-*, justify-*, flex-wrap, grow, basis-*, mx-auto for layout. Position a child out of flow only with \`absolute\` plus top-*/right-*/bottom-*/left-* inside a \`relative\` parent; never write left-[x] top-[y] without \`absolute\`.
 - Sizing: w-*/h-*/size-* (px, fractions, full), min-*/max-*, aspect-*. Let heights hug content unless a fixed height is intended.
 - Spacing is real CSS: per-side padding and margins (pt-*, pr-*, pb-*, pl-*, px-*, py-*, mt-*, mx-auto…) and per-corner radius (rounded-t-*, rounded-tl-*…) all work. Sections hug their content: create vertical space with padding (py-24) and gap, never pin a section height with h-[…] to fake spacing. Fixed heights are for media, icons and deliberately sized UI (a 64px nav bar, a full-viewport hero with min-h-*).
@@ -103,6 +111,9 @@ Every element has a short page-unique id. A top-level artboard looks like "bok";
 
 ## update_elements directives
 {/* edit ID */} + one element patches the label, classes (merged), text and identified children; {/* replace ID */} + one element rebuilds it in place keeping its id; {/* insert as first child of ID */}, {/* insert as last child of ID */}, {/* insert before ID */}, {/* insert after ID */} + elements; {/* delete ID */}. Each directive applies or fails on its own and the report lists the result.
+
+## Components
+A main component (create_component) is one definition; instances (create_instance) are linked copies that follow it. Edit the main to change every instance; keys edited inside an instance become overrides of that instance (reset_overrides undoes them). Per-instance content goes into slots (set_slot on a frame of the main, then insert into the instance's slot id). In JSX, data-component marks a main, data-instance-of names an instance's main and data-slot a slot. For repeated parts and app shells load get_skills {skill:"components"}; list_components shows what exists.
 
 ## Verification
 take_screenshot returns the PNG (after pending images and fonts load), records a verification receipt bound to the current document revision, and appends a lint report: clipping, overflow, overlap, contrast against the real backdrop, leftover placeholders, missing assets and taste rules. Any edit invalidates receipts. Fix critical problems before finishing; repairs are capped at ${MAX_REPAIRS} blocked finish attempts per artboard, after which finish_artboard reports "unverified".
@@ -210,7 +221,24 @@ const layoutFields = {
   masks: z.array(z.object({ type: z.enum(['linear', 'radial', 'conic', 'image', 'custom', 'shape']), rotation: z.number().finite().optional(), alpha: z.number().finite().min(0).max(100).optional(), invert: z.boolean().optional(), hidden: z.boolean().optional(), src: z.string().max(15e6).describe('image mask: embedded data:image URL').optional(), css: z.string().max(2100).describe('custom mask: a CSS gradient').optional(), shape: z.string().max(120).describe('shape mask: inset(T% R% B% L%) of this layer\'s box (negative = outside), as made by Use as mask').optional(), mode: z.enum(['auto', 'alpha', 'luminance']).optional(), repeat: z.enum(['repeat', 'no-repeat', 'repeat-x', 'repeat-y', 'space', 'round']).optional(), x: z.number().finite().describe('position X %').optional(), y: z.number().finite().describe('position Y %').optional(), size: z.string().max(40).describe('auto, cover, contain, or "<n>%"/"<n>px" (one or two values)').optional(), composite: z.enum(['add', 'subtract', 'intersect', 'exclude']).describe('how this mask combines with the masks below it').optional() }).strict()).max(8).describe('masks: gradient fades, embedded images, custom CSS gradients, shape (inset) masks').optional(),
   textStyle: z.record(z.string().regex(/^[a-zA-Z]{1,40}$/), z.union([z.string().max(400), z.number().finite(), z.boolean()])).refine(v => Object.keys(v).length <= 30, 'At most 30 textStyle keys').optional(),
 };
-const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader']).optional(), shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), shaderFill: z.boolean().describe('Shader mode: a non-shader layer paints its fill with shaderPreset/shaderColors/shaderParams/shaderSpeed').optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields };
+// Components (web/component-core.js): link fields round-trip so agents never drop them.
+const componentFields = {
+  component: z.boolean().describe('main component (frames only)').optional(),
+  instanceOf: z.string().min(1).max(200).describe('instance root: id of its main component').optional(),
+  sourceId: z.string().min(1).max(200).describe('linked layer: id of the node it copies').optional(),
+  overrides: z.array(z.string().min(1).max(120)).max(500).describe('keys this linked layer owns; "children" on a slot = Modified').optional(),
+  slot: z.boolean().describe('slot frame inside a main component').optional(),
+  slotName: z.string().max(100).optional(),
+};
+const vectorFields = {
+  paths: z.array(z.object({ d: z.string().min(1).max(200000).describe('SVG path data in viewBox units'), fillRule: z.enum(['nonzero', 'evenodd']).optional() }).strict()).min(1).max(500).describe('vector layers: the paths, drawn stretched from viewBox over the layer box').optional(),
+  viewBox: z.array(z.number().finite()).length(4).describe('vector layers: [x, y, width, height] of the path coordinates').optional(),
+  strokeCap: z.enum(['butt', 'round', 'square']).optional(),
+  strokeJoin: z.enum(['miter', 'round', 'bevel']).optional(),
+  strokeMiter: z.number().min(1).max(100).optional(),
+  strokeDash: z.array(z.number().min(0).max(10000)).max(16).describe('vector stroke dash pattern in layer pixels').optional(),
+};
+const nodeFields = { type: z.enum(['rectangle', 'text', 'frame', 'image', 'shader', 'vector']).optional(), ...vectorFields, shaderPreset: z.enum(shaderPresetIds).optional(), shaderColors: z.partialRecord(z.enum(SHADER_COLOR_ROLES), z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), token: z.string().max(100).optional() })).optional(), shaderParams: z.partialRecord(z.enum(SHADER_PARAM_KEYS), z.number().min(0).max(100)).optional(), shaderSpeed: z.number().min(0).max(5).optional(), shaderIntensity: z.number().min(0).max(2).optional(), shaderFill: z.boolean().describe('Shader mode: a non-shader layer paints its fill with shaderPreset/shaderColors/shaderParams/shaderSpeed').optional(), name: z.string().min(1).max(200).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(), color: z.string().max(200).optional(), text: z.string().max(1000000).optional(), textRuns: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive(), bold: z.boolean(), italic: z.boolean(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fontSize: z.number().min(8).max(200).optional() })).optional(), parentId: z.string().min(1).max(200).nullable().optional(), fontSize: z.number().optional(), radius: z.number().optional(), layout: z.enum(['free', 'flex', 'grid', 'block', 'inline']).optional(), gap: z.number().optional(), padding: z.number().optional(), columns: z.number().optional(), direction: z.string().max(20).optional(), token: z.string().max(100).optional(), gradient: z.string().max(4000).optional(), mask: z.string().max(4000).optional(), animated: z.enum(['', 'aurora', 'sunset', 'ocean']).optional(), src: z.string().optional(), zIndex: z.number().optional(), fontFamily: z.string().max(200).optional(), fontWeight: z.union([z.number(), z.string()]).optional(), textAlign: z.string().max(20).optional(), rotation: z.number().optional(), opacity: z.number().min(0).max(100).optional(), strokeWidth: z.number().min(0).optional(), strokeColor: z.string().max(200).optional(), shadow: z.string().max(4000).optional(), clipContent: z.boolean().optional(), lineHeight: z.number().optional(), letterSpacing: z.number().optional(), alignItems: z.string().max(40).optional(), justifyContent: z.string().max(40).optional(), ...layoutFields, ...componentFields };
 const pageName = z.string().min(1).max(200);
 const operations = z.array(z.discriminatedUnion('type', [
   z.object({ type: z.literal('create_page'), id: z.string().min(1).max(200).optional(), name: pageName }),
@@ -235,10 +263,12 @@ const MAX_CODE = 400_000;
 async function readPrepared(backend, ref) {
   const state = await backend.read(ref);
   const document = clone(state.document); ensureShortIds(document);
-  return { ...state, document };
+  const prepared = { ...state, document };
+  sessionFor(backend).last = { ref, state: prepared }; // reused by the next-step hints
+  return prepared;
 }
 const linkFor = (state, pageId, shortId) => `verynize://node/${encodeURIComponent(state.name || 'editor')}/${encodeURIComponent(pageId)}/${encodeURIComponent(shortId)}`;
-const tagOf = node => node.htmlTag || ({ frame: 'div', rectangle: 'div', text: 'p', image: 'img', shader: 'Shader' })[node.type] || 'div';
+const tagOf = node => (node.type === 'vector' ? 'svg' : node.htmlTag) || ({ frame: 'div', rectangle: 'div', text: 'p', image: 'img', shader: 'Shader', vector: 'svg' })[node.type] || 'div';
 
 function artboardSummary(page) {
   const index = indexPage(page);
@@ -289,6 +319,34 @@ function pendingAssets(document) {
   return out;
 }
 
+// Preserve backend identity: image jobs and verification receipts are keyed by it.
+function boundsTransaction(backend, ref, fn, options) {
+  return backend.transact(ref, (document, meta) => {
+    const before = clone(document);
+    const out = fn(document, meta);
+    validateWorldBoundsChange(before, out.document);
+    return out;
+  }, options);
+}
+
+async function retryAssetTransaction(backend, ref, fn) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await boundsTransaction(backend, ref, fn); }
+    catch (error) {
+      if (!/locked|conflict/i.test(error.message) || attempt >= 8) throw error;
+      await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
+async function imageWarnings(backend, ref, out) {
+  const key = docKey(out.name, ref);
+  await waitForAssets(backend, key);
+  const state = await backend.read(ref);
+  out.revision = state.revision;
+  const images = state.document.pages.flatMap(p => p.nodes).filter(n => ['missing', 'pending'].includes(n.assetStatus));
+  return [...(sessionFor(backend).warnings.get(key) || []), ...(images.length ? [`${images.length} image(s) missing/pending: ${images.map(n => `${n.name}: ${n.assetError || 'download pending'}`).join('; ')}`] : [])];
+}
+
 /** Resolve pending remote images in the background: download, embed as data URL, mark ready|missing. */
 function scheduleAssets(backend, docRef, items, key = docKey(docRef)) {
   const session = sessionFor(backend);
@@ -301,12 +359,12 @@ function scheduleAssets(backend, docRef, items, key = docKey(docRef)) {
     for (let i = 0; i < fresh.length; i += 4) {
       results.push(...await Promise.all(fresh.slice(i, i + 4).map(async item => ({ ...item, result: await Promise.resolve(fetchImage(item.url)).catch(error => ({ ok: false, error: error?.message || String(error) })) }))));
     }
-    await backend.transact(docRef, document => {
+    await retryAssetTransaction(backend, docRef, document => {
       let changed = 0;
       for (const { pageId, nodeId, url, result } of results) {
         const node = document.pages.find(p => p.id === pageId)?.nodes.find(n => n.id === nodeId);
         if (!node || node.srcRemote !== url || node.assetStatus !== 'pending') continue;
-        if (result?.ok && result.dataUrl) { node.src = result.dataUrl; node.assetStatus = 'ready'; delete node.assetError; }
+        if (result?.ok && result.dataUrl) { if (node.type === 'image') node.src = result.dataUrl; else node.fills = [{ type: 'image', src: result.dataUrl, fit: 'cover' }]; node.assetStatus = 'ready'; delete node.assetError; }
         else { node.assetStatus = 'missing'; node.assetError = String(result?.error || 'download failed').slice(0, 300); }
         changed++;
       }
@@ -314,7 +372,17 @@ function scheduleAssets(backend, docRef, items, key = docKey(docRef)) {
     });
     session.receipts.invalidate(key);
     for (const { url, result } of results) { const photo = session.photos.get(url); if (result?.ok && photo) trackUnsplashDownload(photo).catch(() => {}); }
-  })().catch(() => {}).finally(() => {
+  })().catch(async error => {
+    const message = `Asset completion failed: ${error.message}`;
+    session.warnings.set(key, [message]);
+    await retryAssetTransaction(backend, docRef, document => {
+      for (const item of fresh) {
+        const node = document.pages.find(p => p.id === item.pageId)?.nodes.find(n => n.id === item.nodeId);
+        if (node?.srcRemote === item.url && node.assetStatus === 'pending') { node.assetStatus = 'missing'; node.assetError = message.slice(0, 300); }
+      }
+      return { document, result: null };
+    }).catch(failure => session.warnings.set(key, [message, `Could not persist asset error: ${failure.message}`]));
+  }).finally(() => {
     for (const item of fresh) session.inflight.delete(item.nodeId + '\u0000' + item.url);
     session.pending.get(key)?.delete(job);
   });
@@ -333,23 +401,77 @@ async function waitForAssets(backend, key) {
   return done;
 }
 
+/** The shared component sync (web/component-core.js) for an agent edit; an edit may not make a main contain an
+ * instance of itself. `before` (a copy owned by the caller) is the document before the edit; reconciled skips the
+ * override marking. */
+function syncInstances(before, after, { reconciled = false } = {}) {
+  if (!hasComponents(after)) return after;
+  const was = new Map();
+  for (const page of after.pages) for (const n of page.nodes) if (n.sourceId || n.instanceOf) was.set(n, layoutKey(n));
+  syncComponents(before && !reconciled ? ignoreLayout(before, after) : null, after);
+  // The sync copies the main's values, flow positions included; lay the instances it changed out again (the headless
+  // estimate) so they fit their own content. The live canvas measures them itself.
+  for (const page of after.pages) {
+    const changed = page.nodes.filter(n => (n.sourceId || n.instanceOf) && was.get(n) !== layoutKey(n));
+    if (changed.length) reflow(page, changed, [], after);
+  }
+  const had = new Set(before ? componentProblems(before).map(p => p.id) : []);
+  const added = componentProblems(after).filter(p => !had.has(p.id));
+  if (added.length) throw new Error(added[0].message);
+  return after;
+}
+
+const layoutKey = node => JSON.stringify(node, (key, value) => (key === 'src' && typeof value === 'string' ? value.length : value));
+
+/** The headless reflow positions flow children and flags its estimates; on instance layers that is layout output,
+ * not an edit, so `before` takes those values and the sync does not mark them as overrides. */
+function ignoreLayout(before, after) {
+  const now = new Map();
+  for (const page of after.pages) for (const n of page.nodes) now.set(n.id, n);
+  for (const page of before.pages) for (const p of page.nodes) {
+    const n = typeof p.sourceId === 'string' && p.sourceId ? now.get(p.id) : null;
+    if (!n) continue;
+    if (n.measured === undefined) delete p.measured; else p.measured = n.measured;
+    const parent = now.get(n.parentId);
+    if (parent && parent.layout && parent.layout !== 'free' && n.position !== 'absolute') { p.x = n.x; p.y = n.y; }
+  }
+  return before;
+}
+
 /**
  * Run a write through the backend; ensures ids are persisted and token colors stay in sync,
  * invalidates verification receipts for the document and queues pending remote images.
+ * fn returns {document, result, reconciled?}: reconciled means fn already re-synced instances itself (component
+ * commands), so nothing it changed is marked as an override.
  */
-async function write(backend, ref, fn) {
-  let pending = [];
-  const out = await backend.transact(ref, (document, meta) => {
+async function writeAs(backend, ref, fn, options) {
+  let pending = [], committed = null;
+  const out = await boundsTransaction(backend, ref, (document, meta) => {
     ensureShortIds(document);
+    const before = hasComponents(document) ? clone(document) : null;
     const result = fn(document, meta);
+    syncInstances(before, result.document, { reconciled: result.reconciled });
     ensureShortIds(result.document); syncTokenColors(result.document);
+    result.guard?.(result.document);
     pending = pendingAssets(result.document);
+    committed = result.document;
     return result;
-  });
+  }, options);
+  sessionFor(backend).last = { ref, state: { name: out.name, revision: out.revision, document: committed } };
   const key = docKey(out.name, ref);
   sessionFor(backend).receipts.invalidate(key);
   if (pending.length) scheduleAssets(backend, ref ?? out.name ?? undefined, pending, key);
   return { ...out, pendingAssets: pending.length };
+}
+
+/** A main component by short id (on the page, else unique on another page), long id or exact name. */
+function findMain(document, page, ref) {
+  const main = resolveMain(document, page, ref);
+  if (main) return main;
+  const elsewhere = document.pages.filter(p => p !== page).map(p => indexPage(p).resolve(ref)).filter(n => n?.type === 'frame' && n.component === true);
+  if (elsewhere.length === 1) return elsewhere[0];
+  const mains = document.pages.flatMap(p => p.nodes.filter(n => n.type === 'frame' && n.component === true));
+  throw new Error(`No main component ${JSON.stringify(ref)}${mains.length ? `; mains: ${mains.slice(0, 20).map(n => `"${n.name}"`).join(', ')} (list_components shows their ids)` : '; create one with create_component'}`);
 }
 
 /** Codec warnings pulled out of a directive report ("warnings: a; b" lines). */
@@ -365,8 +487,20 @@ const WARNING_NOTE = 'These classes or elements were not applied. Rewrite the af
 // Tool table
 
 /** The tool table for a backend: {name: {description, inputSchema (zod shape), annotations, raw?, run}}. */
+/**
+ * The agent a tool call edits as, for version history: named after the MCP client when known
+ * (backends name an unnamed agent themselves).
+ */
+function agentActor(context) {
+  const client = String(context?.clientName?.() || '').trim();
+  const name = /claude/i.test(client) ? 'Claude' : /codex/i.test(client) ? 'Codex' : client.slice(0, 40);
+  return name ? { kind: 'agent', name } : { kind: 'agent' };
+}
+
 export function toolTable(backend, context = {}) {
   const t = {};
+  // Every edit of this table is an agent edit (version history, docs/version-history.md).
+  const write = (target, ref, fn, options) => writeAs(target, ref, fn, { actor: agentActor(context), ...options });
   t.get_design_context = {
     description: 'Start here. Summarizes the document: pages, active page, current selection (live editor only), open/saved documents, design tokens, artboards on the page, the user\'s saved design preferences, and the design fundamentals that apply to every design (guidelines:"none" leaves the fundamentals out when you already have them).',
     inputSchema: { document: documentArg, pageId: pageArg, guidelines: z.enum(['fundamentals', 'none']).optional().describe('fundamentals (default) appends the design fundamentals; none omits them') }, annotations: { readOnlyHint: true },
@@ -395,13 +529,13 @@ export function toolTable(backend, context = {}) {
     run: async ({ document: ref, pageId }) => { const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); return { pageId: page.id, artboards: artboardSummary(page) }; },
   };
   t.get_element_tree = {
-    description: 'Structure only: one line per element with tag, id and label, indented by depth. Omit ids for the whole page.',
+    description: 'Structure only: one line per element with tag, id and label (plus data-component, data-instance-of and data-slot on component layers), indented by depth. Omit ids for the whole page.',
     inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).max(50).optional(), depth: z.number().int().min(0).max(50).optional() }, annotations: { readOnlyHint: true },
     run: async ({ document: ref, pageId, ids, depth = 50 }) => {
       const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
       const lines = [];
       const walk = (node, level) => {
-        lines.push(`${'  '.repeat(level)}<${tagOf(node)} data-node-id="${index.shortId(node)}" data-node-label="${node.name.replace(/"/g, '&quot;')}">`);
+        lines.push(`${'  '.repeat(level)}<${[tagOf(node), `data-node-id="${index.shortId(node)}"`, `data-node-label="${node.name.replace(/"/g, '&quot;')}"`, ...componentAttrs(node, index)].join(' ')}>`);
         const kids = index.children(node.id);
         if (level < depth) for (const child of kids) walk(child, level + 1);
         else if (kids.length) lines.push(`${'  '.repeat(level + 1)}… ${kids.length} more`);
@@ -415,7 +549,7 @@ export function toolTable(backend, context = {}) {
     inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).min(1).max(50), depth: z.number().int().min(0).max(50).optional() }, annotations: { readOnlyHint: true },
     run: async ({ document: ref, pageId, ids, depth }) => {
       const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
-      return { pageId: page.id, results: ids.map(id => ({ id, code: capCode(elementCode(state.document, page, index.require(id), depth ?? Infinity)) })) };
+      return { pageId: page.id, revision: state.revision, results: ids.map(id => ({ id, code: capCode(elementCode(state.document, page, index.require(id), depth ?? Infinity)) })) };
     },
   };
   t.find_elements = {
@@ -475,7 +609,7 @@ export function toolTable(backend, context = {}) {
       ].filter(Boolean).join('\n\n');
       return { content: [
         { type: 'image', data: shot.data, mimeType: shot.mimeType || 'image/png' },
-        { type: 'text', text: JSON.stringify({ id, artboardId: root.shortId, width: shot.width, height: shot.height, source, geometry: bounds ? 'measured' : 'estimated', receipt: receipt.id, lint: lint ? { critical: lint.stats.critical, major: lint.stats.major, minor: lint.stats.minor } : null, missingFonts: fontLines.length }) },
+        { type: 'text', text: JSON.stringify({ id, artboardId: root.shortId, width: shot.width, height: shot.height, scale: shot.scale, requestedScale: shot.requestedScale, source, geometry: bounds ? 'measured' : 'estimated', receipt: receipt.id, lint: lint ? { critical: lint.stats.critical, major: lint.stats.major, minor: lint.stats.minor } : null, missingFonts: fontLines.length }) },
         { type: 'text', text: notes },
       ] };
     },
@@ -491,8 +625,19 @@ export function toolTable(backend, context = {}) {
       return { ...(warnings.length ? { WARNINGS: warnings, warningNote: WARNING_NOTE } : { warnings: [] }), ...rest, ...(out.pendingAssets ? { pendingImages: `${out.pendingAssets} remote image(s) are downloading; take_screenshot waits for them.` } : {}), live: out.live, revision: out.revision };
     },
   };
+  t.replace_in_element = {
+    description: 'Preferred for small text or class edits. Read get_element_code, then replace old with new in exactly one occurrence of the full serialized JSX of id. Preserves untouched descendant ids. Pass the revision get_element_code returned to reject the edit if the document changed since. Invalid JSX, ambiguous matches, revision conflicts or changes outside the element abort the transaction. Returns the resulting JSX.',
+    inputSchema: { document: documentArg, pageId: pageArg, id: elementId, old: z.string().min(1).max(2_000_000), new: z.string().max(2_000_000), revision: z.string().min(1).optional() },
+    run: async ({ document: ref, pageId, id, old, new: replacement, revision }) => {
+      const out = await write(backend, ref, (document, meta) => {
+        if (revision !== undefined && meta.revision !== revision) throw new Error('Revision conflict; call get_element_code again before replacing');
+        return replaceInElement(document, pageId, id, old, replacement);
+      });
+      return { ...out.result, revision: out.revision, live: out.live };
+    },
+  };
   t.update_elements = {
-    description: 'Edit elements with a directive script. Each directive is a JSX comment followed by JSX: {/* edit ID */}, {/* replace ID */}, {/* insert as first child of ID */}, {/* insert as last child of ID */}, {/* insert before ID */}, {/* insert after ID */}, {/* delete ID */}. Directives apply independently; the report shows OK/FAIL per directive, codec warnings (must be addressed) and the resulting JSX.',
+    description: 'Prefer replace_in_element for small text/class edits. Edit elements with a directive script. Each directive is a JSX comment followed by JSX: {/* edit ID */}, {/* replace ID */}, {/* insert as first child of ID */}, {/* insert as last child of ID */}, {/* insert before ID */}, {/* insert after ID */}, {/* delete ID */}. Directives apply independently; the report shows OK/FAIL per directive, codec warnings (must be addressed) and the resulting JSX.',
     inputSchema: { document: documentArg, pageId: pageArg, edit: z.string().min(1).max(2_000_000) },
     run: async ({ document: ref, pageId, edit }) => {
       let report = '', warnings = [];
@@ -528,6 +673,121 @@ export function toolTable(backend, context = {}) {
       return { ...out.result, live: out.live, revision: out.revision };
     },
   };
+  // Components (web/component-core.js): mains, instances and slots. Each tool is one transaction (one undo step in
+  // the live editor) and the shared sync keeps every instance in step with its main.
+  t.list_components = {
+    description: 'Components of the document: every main component with its slots and instances (on every page), each instance with its override count and slot states (default = shows the main\'s content, modified = holds its own). With id: the component role of one element (main, instance, inherited layer, slot or local layer), its main and its overrides.',
+    inputSchema: { document: documentArg, pageId: pageArg, id: elementId.optional().describe('Describe this element instead of listing') }, annotations: { readOnlyHint: true },
+    run: async ({ document: ref, pageId, id }) => {
+      const state = await readPrepared(backend, ref); const doc = state.document;
+      const where = nodeId => { for (const p of doc.pages) { const n = p.nodes.find(x => x.id === nodeId); if (n) return { page: p, node: n }; } return null; };
+      const short = nodeId => { const at = where(nodeId); return at ? indexPage(at.page).shortId(at.node) : nodeId; };
+      const slotsOut = slots => slots.map(s => ({ id: short(s.id), name: s.name, ...(s.state ? { state: s.state } : {}) }));
+      if (id) {
+        const page = getPage(doc, pageId); const node = indexPage(page).require(id);
+        const info = componentInfo(doc, node.id);
+        if (!info?.role) return { id, role: null, note: 'Not part of a component. create_component turns it into a main component.' };
+        return { id: short(info.id), role: info.role, ...(info.mainId ? { main: { id: short(info.mainId), pageId: where(info.mainId)?.page.id ?? null, name: info.mainName, missing: info.missingMain } } : {}), ...(info.instanceId ? { instance: short(info.instanceId) } : {}), ...(info.cyclic ? { cyclic: true } : {}), overrides: info.overrides, ...(info.role === 'instance' ? { overrideCount: info.overrideCount } : {}), ...(info.role === 'main' ? { instanceCount: info.instanceCount } : {}), slots: slotsOut(info.slots), ...(info.slot ? { slot: slotsOut([info.slot])[0] } : {}) };
+      }
+      const all = doc.pages.flatMap(page => page.nodes.map(node => ({ page, node })));
+      const instances = all.filter(({ node }) => typeof node.instanceOf === 'string' && node.instanceOf && (!node.sourceId || node.sourceId === node.instanceOf));
+      const problems = componentProblems(doc);
+      const components = all.filter(({ node }) => node.type === 'frame' && node.component === true).map(({ page, node }) => {
+        const info = componentInfo(doc, node.id);
+        return {
+          id: indexPage(page).shortId(node), pageId: page.id, name: node.name, slots: slotsOut(info.slots), ...(info.cyclic ? { cyclic: true } : {}),
+          instances: instances.filter(i => i.node.instanceOf === node.id).map(i => { const ii = componentInfo(doc, i.node.id); return { id: indexPage(i.page).shortId(i.node), pageId: i.page.id, name: i.node.name, overrideCount: ii.overrideCount, slots: slotsOut(ii.slots) }; }),
+        };
+      });
+      const orphans = instances.filter(i => where(i.node.instanceOf)?.node.component !== true).map(i => ({ id: indexPage(i.page).shortId(i.node), pageId: i.page.id, name: i.node.name, missingMain: i.node.instanceOf }));
+      return { components, ...(orphans.length ? { instancesWithoutMain: orphans } : {}), ...(problems.length ? { problems: problems.map(p => p.message) } : {}), ...(components.length ? {} : { note: 'No main components yet. create_component turns a frame (or several layers) into one; get_skills {skill:"components"} explains the workflow.' }) };
+    },
+  };
+  t.create_component = {
+    description: 'Make a main component. One frame becomes the main in place; several sibling layers (or one non-frame layer) are first wrapped in a new frame. Then place copies that follow it with create_instance, mark content regions with set_slot, and edit the main to change every instance.',
+    inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).min(1).max(100).describe('One frame, or sibling layers to wrap'), label: z.string().trim().min(1).max(200).optional().describe('Name of the main (default: the frame\'s name, or "Component" for a wrapper)') },
+    run: async ({ document: ref, pageId, ids, label }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page);
+        const nodes = ids.map(id => index.require(id));
+        const single = new Set(nodes).size === 1 && nodes[0].type === 'frame';
+        const frame = single ? nodes[0] : wrapElements(document, page.id, ids, { label: label || 'Component' });
+        createComponent(document, page.id, frame.id);
+        if (label) frame.name = label;
+        ensureShortIds(document);
+        return { document, result: { id: indexPage(page).shortId(frame), pageId: page.id, name: frame.name, wrapped: !single } };
+      });
+      return { ...out.result, next: 'Mark content regions of the main with set_slot, then place copies with create_instance.', live: out.live, revision: out.revision };
+    },
+  };
+  t.create_instance = {
+    description: 'Place an instance of a main component: a linked copy that follows the main, keeps its own overrides and holds its own slot content. Returns the instance id and its slot ids; fill a slot with update_elements {/* insert as last child of SLOT_ID */}. Without parent it becomes an artboard (placed right of the others unless x/y are given).',
+    inputSchema: { document: documentArg, pageId: pageArg, component: z.string().min(1).max(200).describe('The main: its short id ("bok" or "bok.tem"), long id or exact name'), parent: elementId.optional().describe('Frame on pageId to place the instance in'), position: z.enum(['first', 'last']).optional().describe('Child position inside parent (default last)'), x: z.number().finite().optional(), y: z.number().finite().optional(), label: z.string().trim().min(1).max(200).optional().describe('Layer name of the instance (an override)') },
+    run: async ({ document: ref, pageId, component, parent, position = 'last', x, y, label }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page);
+        const main = findMain(document, page, component);
+        const parentNode = parent ? index.require(parent) : null;
+        if (parentNode && parentNode.type !== 'frame') throw new Error(`${parent} is a ${parentNode.type}; an instance goes inside a frame`);
+        const roots = page.nodes.filter(n => !n.parentId);
+        const at = parentNode ? { x: x ?? 0, y: y ?? 0 } : { x: x ?? (roots.length ? Math.ceil(Math.max(...roots.map(n => (n.x || 0) + (n.w || 0))) + 80) : 0), y: y ?? (page.nodes.includes(main) ? main.y || 0 : 0) };
+        const { id } = createInstance(document, main.id, { pageId: page.id, parentId: parentNode?.id || null, ...at });
+        const root = page.nodes.find(n => n.id === id);
+        if (position === 'first' && parentNode) { page.nodes.splice(page.nodes.indexOf(root), 1); const first = page.nodes.findIndex(n => n.parentId === parentNode.id); page.nodes.splice(first < 0 ? page.nodes.length : first, 0, root); }
+        if (label && label !== root.name) { root.name = label; root.overrides = [...new Set([...(root.overrides || []), 'name'])].sort(); }
+        reflow(page, [root], [], document);
+        ensureShortIds(document);
+        const fresh = indexPage(page); const short = node => fresh.shortId(node);
+        const info = componentInfo(document, id);
+        return { document, result: { id: short(root), pageId: page.id, component: { id: indexPage(document.pages.find(p => p.nodes.includes(main))).shortId(main), name: main.name }, slots: info.slots.map(s => ({ id: short(fresh.byId.get(s.id)), name: s.name, state: s.state })), code: capCode(elementCode(document, page, root, 2)) } };
+      });
+      return { ...out.result, live: out.live, revision: out.revision };
+    },
+  };
+  t.detach_instance = {
+    description: 'Detach instances: their layers become ordinary layers that no longer follow the main; slot frames become plain frames and keep their content. Nested instances inside stay instances of their own mains.',
+    inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).min(1).max(50).describe('Instance roots') }, annotations: { destructiveHint: true },
+    run: async ({ document: ref, pageId, ids }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page);
+        for (const id of ids) {
+          const node = index.require(id); const info = componentInfo(document, node.id);
+          if (info?.role !== 'instance') throw new Error(info?.instanceId ? `${id} is inside instance ${index.shortId(index.byId.get(info.instanceId))}; detach that instance` : `${id} is not an instance`);
+          detachInstance(document, node.id);
+        }
+        return { document, result: { detached: ids }, reconciled: true };
+      });
+      return { ...out.result, live: out.live, revision: out.revision };
+    },
+  };
+  t.reset_overrides = {
+    description: 'Reset overrides inside instances: the given layers (or, with all, their whole instances) take the main\'s values again. Resetting a slot frame returns the slot to its default content (its own content is removed).',
+    inputSchema: { document: documentArg, pageId: pageArg, ids: z.array(elementId).min(1).max(200).describe('Instance roots or layers inside instances'), all: z.boolean().optional().describe('Reset every layer of each instance') },
+    run: async ({ document: ref, pageId, ids, all = false }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page);
+        const nodes = ids.map(id => index.require(id));
+        for (const [i, node] of nodes.entries()) { const role = componentInfo(document, node.id)?.role; if (!['instance', 'inherited', 'slot'].includes(role) || (role === 'slot' && !node.sourceId)) throw new Error(`${ids[i]} is not part of an instance`); }
+        const count = all ? [...new Set(nodes.map(n => componentInfo(document, n.id).instanceId))].reduce((sum, rootId) => sum + componentInfo(document, rootId).overrideCount, 0) : nodes.reduce((sum, n) => sum + (n.overrides || []).length, 0);
+        resetOverrides(document, nodes.map(n => n.id), { all });
+        return { document, result: { reset: ids, clearedOverrides: count }, reconciled: true };
+      });
+      return { ...out.result, live: out.live, revision: out.revision };
+    },
+  };
+  t.set_slot = {
+    description: 'Mark a frame inside a main component as a slot (a content region each instance fills on its own), rename it, or turn it back into a plain frame (slot:false). Instances show the slot\'s default content until something is inserted into their copy of it.',
+    inputSchema: { document: documentArg, pageId: pageArg, id: elementId.describe('Frame inside a main component'), slot: z.boolean().optional().describe('false removes the slot (default true)'), name: z.string().trim().max(100).optional().describe('Slot name, e.g. "Content" (default: the frame\'s name)') },
+    run: async ({ document: ref, pageId, id, slot = true, name }) => {
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const node = indexPage(page).require(id);
+        setSlot(document, node.id, slot, name);
+        const info = componentInfo(document, node.id);
+        return { document, result: { id, slot: !!node.slot, name: node.slot ? node.slotName || node.name : null, ...(info?.mainId ? { main: info.mainName } : {}) }, reconciled: true };
+      });
+      return { ...out.result, live: out.live, revision: out.revision };
+    },
+  };
   t.finish_artboard = {
     description: 'Finish an artboard after the design review. Requires reviewNote: what the design-review pass checked and what you fixed. Runs the finish gate: refused (isError, nothing focused) while critical lint problems remain; otherwise reports status "verified" (a real screenshot of this artboard at the current revision plus a review note) or "unverified" with reasons. Report the status honestly. On success selects and reveals the artboard in the live editor and returns a verynize:// link.',
     inputSchema: { document: documentArg, pageId: pageArg, id: elementId, reviewNote: z.string().trim().min(1, 'reviewNote is required: describe the design-review pass').max(4000).describe('What the design review checked (hierarchy, spacing, contrast, clipping, placeholders, assets…) and what you fixed') },
@@ -549,6 +809,8 @@ export function toolTable(backend, context = {}) {
         return { isError: true, content: [{ type: 'text', text: `Finish blocked for artboard ${artboardId} (status: blocked).\nReasons:\n${gate.reasons.map(r => `- ${r}`).join('\n')}\n\nFix these critical problems with update_elements, take_screenshot of ${artboardId} again, then call finish_artboard again:\n${fixes.join('\n')}\n\nRepair round ${budget.used} of ${budget.max}.${budget.exhausted ? ' The repair budget is now exhausted: the next finish_artboard will be accepted as "unverified".' : ''}` }] };
       }
       if (stored) session.receipts.record(key, createReceipt({ documentRevision: stored.documentRevision, pageId: stored.pageId, artboardId, screenshot: stored.screenshot, reviewNote }));
+      // Version history milestone (docs/version-history.md); never blocks finishing.
+      await backend.versions?.capture?.(ref, node.id, { reason: 'finish', label: 'Finished by agent' }).catch(() => {});
       const focus = state.live && backend.focus ? await backend.focus(ref, page.id, node.id).catch(error => ({ focused: false, error: error.message })) : { focused: false };
       return text({
         status: gate.status, verified: gate.status === 'verified', reasons: gate.reasons, artboardId,
@@ -556,6 +818,51 @@ export function toolTable(backend, context = {}) {
         headless: !state.live, focused: !!focus.focused, designLink: { name: node.name, url: linkFor(state, page.id, artboardId), markdown: `[${String(node.name || 'Artboard').replace(/[[\]]/g, '')}](${linkFor(state, page.id, artboardId)})` },
         note: `${gate.status === 'verified' ? 'Verified: screenshot at the current revision plus design review.' : 'Unverified: tell the user which checks did not happen (see reasons).'} ${state.live ? 'The artboard is selected in the editor.' : 'Saved on disk. Open the document in Verynize to view it.'} Include designLink.markdown (or the url) verbatim in your final reply so the user can open the artboard.`,
       });
+    },
+  };
+  // Version history (docs/version-history.md): per-artboard snapshots captured by the backends.
+  const versionRow = meta => ({ version: meta.id, at: new Date(meta.at).toISOString(), author: `${meta.author?.name || 'Unknown'} (${meta.author?.kind || 'unknown'})`, reason: meta.reason, summary: meta.summary, ...(meta.label ? { label: meta.label } : {}) });
+  const versionsOf = () => { if (!backend.versions) throw new Error('Version history is unavailable for this document'); return backend.versions; };
+  t.list_versions = {
+    description: 'Version history of an artboard, newest first: snapshots captured when its editor changes (you, the user, another collaborator), after 2 minutes without edits, before every restore and at finish_artboard. Each row: version id, time, author, reason, summary. Without artboard: the artboards of the page (and deleted ones) that have versions. Restore one with restore_version.',
+    inputSchema: { document: documentArg, pageId: pageArg, artboard: z.string().min(1).max(200).optional().describe('Artboard short id (or the long id of a deleted artboard from the listing without artboard)'), limit: z.number().int().min(1).max(50).optional() }, annotations: { readOnlyHint: true },
+    run: async ({ document: ref, pageId, artboard, limit = 20 }) => {
+      const store = versionsOf();
+      const state = await readPrepared(backend, ref); const page = getPage(state.document, pageId); const index = indexPage(page);
+      if (artboard) {
+        const node = index.resolve(artboard);
+        const id = node ? index.rootOf(node).id : artboard;
+        const list = await store.list(ref, id);
+        if (!node && !list.length) throw new Error(`Artboard ${JSON.stringify(artboard)} not found on page ${page.id} and has no versions`);
+        const root = node ? index.rootOf(node) : null;
+        return { artboard: root ? root.shortId : id, name: root ? root.name : list[0].name, deleted: !root, total: list.length, versions: list.slice(0, limit).map(versionRow) };
+      }
+      const all = await store.list(ref, null);
+      const byBoard = new Map();
+      for (const meta of all) { if (!byBoard.has(meta.artboardId)) byBoard.set(meta.artboardId, []); byBoard.get(meta.artboardId).push(meta); }
+      const onPage = new Set(page.nodes.map(n => n.id));
+      const exists = new Set(state.document.pages.flatMap(p => p.nodes.map(n => n.id)));
+      const artboards = [...byBoard].filter(([id, list]) => onPage.has(id) || (!exists.has(id) && list[0].pageId === page.id)).map(([id, list]) => { const node = index.byId.get(id); return { artboard: node ? node.shortId : id, name: node ? node.name : list[0].name, deleted: !node, versions: list.length, latest: versionRow(list[0]) }; });
+      return { pageId: page.id, artboards, note: artboards.length ? 'Pass artboard to list its versions.' : 'No versions yet: they are captured as the artboards are edited.' };
+    },
+  };
+  t.restore_version = {
+    description: 'Restore an artboard to a version from list_versions. The artboard\'s subtree is replaced in one undoable edit (re-created when it was deleted; ids used elsewhere are renamed), and the state it replaces is stored as a new version first, so a restore can itself be undone with restore_version. asCopy places the version as a new artboard next to the current one instead.',
+    inputSchema: { document: documentArg, pageId: pageArg, artboard: z.string().min(1).max(200).describe('Artboard short id, or the long id of a deleted artboard'), version: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).describe('Version id from list_versions'), asCopy: z.boolean().optional() },
+    run: async ({ document: ref, pageId, artboard, version, asCopy = false }) => {
+      const store = versionsOf();
+      const found = await store.get(ref, version);
+      if (!found) throw new Error(`Version ${version} not found; call list_versions`);
+      const out = await write(backend, ref, document => {
+        const page = getPage(document, pageId); const index = indexPage(page); const node = index.resolve(artboard);
+        const id = node ? index.rootOf(node).id : artboard;
+        if (id !== found.meta.artboardId) throw new Error(`Version ${version} belongs to another artboard (${found.meta.name}); call list_versions with artboard ${JSON.stringify(artboard)}`);
+        const r = restoreVersion(document, found.snapshot, { asCopy });
+        return { document: r.document, result: { artboardId: r.artboardId, pageId: r.pageId, renamedIds: r.remapped } };
+      }, { actor: { ...agentActor(context), restore: version }, force: asCopy ? undefined : 'restore', artboardId: found.meta.artboardId, label: `Before restoring ${new Date(found.meta.at).toISOString()}` });
+      const page = getPage((await readPrepared(backend, ref)).document, out.result.pageId); const node = indexPage(page).byId.get(out.result.artboardId);
+      if (node) sessionFor(backend).receipts.reset(docKey(out.name, ref), node.shortId);
+      return { restored: version, artboard: node?.shortId || out.result.artboardId, asCopy, renamedIds: out.result.renamedIds, note: asCopy ? 'The version was placed as a new artboard.' : 'The replaced state was saved as a version; restore it to undo.', live: out.live, revision: out.revision };
     },
   };
   t.get_design_guidelines = {
@@ -757,7 +1064,7 @@ export function toolTable(backend, context = {}) {
     },
   };
   t.read_document = {
-    description: 'Low-level: the complete version 2 document JSON and its revision (needed by apply_operations).',
+    description: 'Low-level: the complete version 2 document JSON and its revision (needed by replace_in_element and apply_operations).',
     inputSchema: { name: documentArg }, annotations: { readOnlyHint: true },
     run: async ({ name }) => { const state = await readPrepared(backend, name); return { document: state.document, revision: state.revision, live: !!state.live }; },
   };
@@ -765,7 +1072,7 @@ export function toolTable(backend, context = {}) {
     description: 'Low-level fallback: atomically apply page/node/token operations to the raw document. Requires the revision from read_document; a failed batch changes nothing. Node ids here are the long internal ids. Nodes accept the full codec model: per-side padding (paddingTop/Right/Bottom/Left), gapX/gapY, cornerRadii, strokeWidths, wMode/hMode (fixed|hug|fill|auto|calc, calc with wCalc/hCalc expressions), wPct/hPct, min/max sizes, margin, position + inset + translate, flex item fields and text fields; legacy numeric padding/gap/radius still work. Prefer create_artboard/update_elements.',
     inputSchema: { name: documentArg, revision: z.string().regex(/^[a-f0-9]{64}$/), operations },
     run: async ({ name, revision, operations: ops }) => {
-      const out = await backend.transact(name, (document, meta) => { if (meta.revision !== revision) throw new Error('Revision conflict; read the document again before editing'); const next = applyOperations(document, ops); ensureShortIds(next); return { document: next, result: null }; });
+      const out = await boundsTransaction(backend, name, (document, meta) => { if (meta.revision !== revision) throw new Error('Revision conflict; read the document again before editing'); const next = applyOperations(document, ops); ensureShortIds(next); return { document: next, result: null }; });
       sessionFor(backend).receipts.invalidate(docKey(out.name, name));
       const state = await backend.read(name);
       return { document: state.document, revision: out.revision, live: out.live };
@@ -790,6 +1097,76 @@ export function toolTable(backend, context = {}) {
     description: 'Delete a saved design preference by id, only when the user explicitly says it no longer applies. The write waits for the user\'s approval and may be refused.',
     inputSchema: { id: z.string().trim().min(1).max(64) }, annotations: { destructiveHint: true },
     run: async ({ id }) => preferencesFor(backend).remove(id),
+  };
+  t.generate_image = {
+    description:
+      "Generate an image using the desktop image provider. Replace a frame or rectangle fill, or insert an image on the active page. Uses the configured image provider (Codex ChatGPT plan by default when connected); limited to five MCP attempts per hour. Sign in to Codex on this computer or configure an API key in Settings → Import & generation.",
+    inputSchema: {
+      document: documentArg,
+      element: z.string().optional(),
+      prompt: z.string().trim().min(1).max(4000),
+      provider: z.enum(IMAGE_PROVIDERS.map(p => p.id)).optional(),
+      x: z.number().finite().optional(),
+      y: z.number().finite().optional(),
+      parent: z.string().optional(),
+    },
+    annotations: { openWorldHint: true },
+    run: async ({ document: ref, element, prompt, provider, x, y, parent }) => {
+      if (typeof backend.generateImage !== "function")
+        throw new Error("Image generation needs the Verynize desktop app");
+      const state = await readPrepared(backend, ref);
+      const pageId = getPage(state.document).id;
+      const targetId = element
+        ? indexPage(getPage(state.document, pageId)).require(element).id
+        : null;
+      const pageBefore = getPage(state.document, pageId);
+      const targetBefore = targetId ? indexPage(pageBefore).require(targetId) : null;
+      if (targetBefore && targetBefore.type !== "image" && !IMAGE_FILL_TYPES.includes(targetBefore.type))
+        throw new Error("Target must be an image, frame or rectangle");
+      const parentNode = parent ? indexPage(pageBefore).require(parent) : null;
+      if (parentNode && parentNode.type !== "frame") throw new Error("Parent must be a frame");
+      const image = await backend.generateImage({ prompt, provider });
+      const out = await write(backend, ref, (document) => {
+        const page = getPage(document, pageId);
+        const target = targetId ? indexPage(page).require(targetId) : null;
+        let node;
+        if (target && IMAGE_FILL_TYPES.includes(target.type)) {
+          target.fills = [
+            {
+              type: "image",
+              src: image.src,
+              fit: "cover",
+              imageWidth: image.width,
+              imageHeight: image.height,
+            },
+          ];
+          node = target;
+        } else if (target?.type === "image") {
+          target.src = image.src;
+          node = target;
+        } else {
+          const scale = Math.min(1, 512 / Math.max(image.width, image.height));
+          node = {
+            id: randomUUID(),
+            type: "image",
+            name: "Generated image",
+            parentId: parentNode?.id ?? null,
+            x: x ?? (parentNode ? 0 : Math.max(0, ...page.nodes.filter(n => !n.parentId).map(n => (n.x || 0) + (n.w || 0))) + 40),
+            y: y ?? 0,
+            w: image.width * scale,
+            h: image.height * scale,
+            src: image.src,
+          };
+          page.nodes.push(node);
+        }
+        ensureShortIds(document);
+        return {
+          document,
+          result: { element: indexPage(page).shortId(node), pageId, filled: node === target },
+        };
+      });
+      return { ...out.result, revision: out.revision, live: out.live };
+    },
   };
   t.ask_agent = {
     description: 'Get a second opinion or design review from another agent (Claude or Codex) running in the Verynize desktop app. Read-only: the other agent answers in text and cannot edit the canvas. Put everything it needs in task (the brief, what you built, element code or ids, the question). Use it sparingly, e.g. to critique a finished artboard before finish_artboard. Unavailable in headless mode.',
@@ -820,10 +1197,15 @@ export function toolTable(backend, context = {}) {
     run: async ({ name, pageId }) => { const state = await backend.read(name); return { code: documentToJsx(state.document, pageId), revision: state.revision }; },
   };
   const viewportArg = z.object({ width: z.number().int().min(200).max(8000), height: z.number().int().min(200).max(8000), colorScheme: z.enum(['light', 'dark']).optional() }).strict().optional().describe('Viewport for @media, vw/vh and responsive Tailwind variants (default 1440x900, light)');
+  const importOptions = {
+    split: z.enum(['pages', 'none']).optional().describe('pages (default) distributes whole artboards across pages; none fails atomically on page overflow'),
+    name: z.string().min(1).max(200).optional().describe('Artboard name; defaults to title, file basename, or a unique Imported page N'),
+    placement: z.enum(['auto', 'preserve']).optional().describe('auto (default) places new roots beside existing roots; preserve keeps source coordinates'),
+  };
   t.import_html = {
-    description: 'Import HTML as new artboards: inline html, a local .html file path (its <link>/@import stylesheets and images resolve relative to it, inside its folder), or an http(s) url (needs allowRemote). Computes the CSS cascade for the viewport, turns :root custom properties into colour tokens and typed variables, keeps Tailwind classes. Also reads export_css output losslessly. Returns warnings for CSS that has no canvas equivalent.',
-    inputSchema: { document: documentArg, pageId: pageArg, html: z.string().min(1).max(5_000_000).optional(), path: z.string().min(1).max(4096).optional(), url: z.string().url().max(4096).optional(), viewport: viewportArg, allowRemote: z.boolean().optional().describe('Fetch http(s) stylesheets and images (default false)') },
-    run: async ({ document: ref, pageId, html, path: file, url, viewport, allowRemote = false }) => {
+    description: 'Import HTML as new artboards: inline html, a local .html file path (its <link>/@import stylesheets and images resolve relative to it, inside its folder), or an http(s) url (needs allowRemote). Computes the CSS cascade for the viewport, turns :root custom properties into colour tokens and typed variables, keeps Tailwind classes. Also reads export_css output losslessly. Supports sanitized inline SVG and URL backgrounds. allowRemote explicitly permits local HTTP images for this local HTML import. Returns warnings for unavailable images and CSS that has no canvas equivalent.',
+    inputSchema: { ...importOptions, document: documentArg, pageId: pageArg, html: z.string().min(1).max(5_000_000).optional(), path: z.string().min(1).max(4096).optional(), url: z.string().url().max(4096).optional(), viewport: viewportArg, allowRemote: z.boolean().optional().describe('Fetch http(s) stylesheets and images (default false)') },
+    run: async ({ document: ref, pageId, html, path: file, url, viewport, allowRemote = false, name, placement = 'auto', split = 'pages' }) => {
       if ([html, file, url].filter(v => v !== undefined).length !== 1) throw new Error('Pass exactly one of html, path or url');
       const { readFile, stat } = await import('node:fs/promises');
       const nodePath = await import('node:path');
@@ -845,23 +1227,25 @@ export function toolTable(backend, context = {}) {
       }
       const state = await backend.read(ref);
       const page = getPage(state.document, pageId);
-      const prepared = await prepareHtmlImport(source, state.document, page.id, { baseUrl, root, allowFiles: file !== undefined, allowRemote, viewport });
-      let created = [];
-      const out = await write(backend, ref, document => { const r = prepared.apply(document); created = r.roots.map(root => indexPage(r.page).shortId(root)); return { document: r.document, result: null }; });
-      const warnings = warningText([...prepared.warnings]);
-      return { artboards: created, stats: { elements: prepared.stats.elements, stylesheets: prepared.stats.stylesheets, rules: prepared.stats.rules, tokens: prepared.stats.tokens, variables: prepared.stats.variables, bindings: prepared.stats.bindings, restored: prepared.stats.restored }, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
+      const prepared = await prepareHtmlImport(source, state.document, page.id, { baseUrl, root, allowFiles: file !== undefined, allowRemote, viewport, name, fallbackName: file ? nodePath.basename(file, nodePath.extname(file)) : undefined, placement, split });
+      let created = [], appliedWarnings = [], pages = [];
+      const out = await write(backend, ref, document => { const r = prepared.apply(document); appliedWarnings = r.warnings; pages = r.pages; created = pages.flatMap(p => p.artboards.map(a => a.id)); return { document: r.document, result: null }; });
+      const warnings = warningText([...new Set([...prepared.warnings.filter(w => !w.startsWith('Image pending:')), ...appliedWarnings, ...(await imageWarnings(backend, ref, out))])]);
+      return { artboards: created, pages, stats: { elements: prepared.stats.elements, stylesheets: prepared.stats.stylesheets, rules: prepared.stats.rules, prunedRules: prepared.stats.prunedRules, tokens: prepared.stats.tokens, variables: prepared.stats.variables, bindings: prepared.stats.bindings, restored: prepared.stats.restored }, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
     },
   };
   t.import_jsx = {
     description: 'Import Tailwind JSX with any number of root elements as new artboards: export_jsx output, an exported React component (Code export), or create_artboard JSX. Variables in the @verynize header are added when missing.',
-    inputSchema: { document: documentArg, pageId: pageArg, code: z.string().min(1).max(5_000_000), viewport: viewportArg },
-    run: async ({ document: ref, pageId, code, viewport }) => {
-      let created = [], warnings = [];
-      const out = await write(backend, ref, document => { const r = importJsxInto(document, getPage(document, pageId).id, code, { viewport: viewport || null }); created = r.roots.map(root => indexPage(r.page).shortId(root)); warnings = warningText(r.warnings || []); return { document: r.document, result: null }; });
-      return { artboards: created, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
+    inputSchema: { ...importOptions, document: documentArg, pageId: pageArg, code: z.string().min(1).max(5_000_000), viewport: viewportArg },
+    run: async ({ document: ref, pageId, code, viewport, name, placement = 'auto', split = 'pages' }) => {
+      let created = [], warnings = [], pages = [];
+      const out = await write(backend, ref, document => { const r = importJsxInto(document, getPage(document, pageId).id, code, { viewport: viewport || null, name, placement, split }); pages = r.pages; created = pages.flatMap(p => p.artboards.map(a => a.id)); warnings = warningText(r.warnings || []); return { document: r.document, result: null }; });
+      warnings.push(...(await imageWarnings(backend, ref, out)));
+      return { artboards: created, pages, ...(warnings.length ? { WARNINGS: warnings } : { warnings: [] }), live: out.live, revision: out.revision };
     },
   };
   Object.assign(t, shellToolTable(backend, context, { readPrepared, write, getPage, indexPage, invalidate: name => sessionFor(backend).receipts.invalidate(docKey(name)) }));
+  attachToolHints(t, { read: ref => readPrepared(backend, ref), session: sessionFor(backend), keyOf: docKey });
   return t;
 }
 
@@ -872,7 +1256,7 @@ export const TOOL_NAMES = Object.keys(toolTable({}));
  * each validated call to another server (the stdio proxy uses this).
  */
 export function registerDesignTools(server, { backend, forward, context }) {
-  const table = toolTable(backend || {}, context);
+  const table = toolTable(backend || {}, { ...context, clientName: () => server.server?.getClientVersion?.()?.name });
   for (const [name, tool] of Object.entries(table)) {
     server.registerTool(name, { description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations }, async args => {
       try { return forward ? await forward(name, args || {}) : await execute(tool, args || {}); } catch (error) { return failure(error); }
@@ -906,7 +1290,7 @@ export function createDesignServer(options, { instructions = INSTRUCTIONS } = {}
 // ---------------------------------------------------------------------------------------------
 // Store (on-disk) backend
 
-export function createStoreBackend(store, { screenshot, defaultName, fetchImage, searchImages, preferences, askAgent } = {}) {
+export function createStoreBackend(store, { screenshot, defaultName, fetchImage, searchImages, preferences, askAgent, generateImage, agentName = 'Agent' } = {}) {
   const resolveName = async ref => {
     if (ref) return ref;
     if (defaultName) return defaultName;
@@ -923,14 +1307,34 @@ export function createStoreBackend(store, { screenshot, defaultName, fetchImage,
       return { documents, editor: null, headless: true };
     },
     async read(ref) { const name = await resolveName(ref); const state = await store.read(name); return { ...state, name, live: false, selection: [] }; },
-    async transact(ref, fn) {
+    async transact(ref, fn, options = {}) {
       const name = await resolveName(ref); let result;
-      const saved = await store.mutate(name, async () => { const current = await store.read(name); const out = fn(clone(current.document), { revision: current.revision }); result = out.result; return out.document; });
+      let saved, before;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          saved = await store.mutate(name, async () => { const current = await store.read(name); before = current.document; const out = fn(clone(current.document), { revision: current.revision }); validateWorldBoundsChange(before, out.document); result = out.result; return out.document; });
+          break;
+        } catch (error) {
+          if (!/Document is locked/.test(error.message) || attempt >= 40) throw error;
+          await new Promise(resolve => setTimeout(resolve, 25 + attempt * 5));
+        }
+      }
+      // Version history sidecar (integrations/version-store.mjs); history problems never fail an edit.
+      await sidecarFor(store.file(name)).observe(before, saved.document, { kind: 'agent', name: agentName, ...options.actor }, { force: options.force, artboardId: options.artboardId, label: options.label }).catch(() => {});
       return { result, revision: saved.revision, live: false, name };
+    },
+    versions: {
+      list: async (ref, artboardId) => sidecarFor(store.file(await resolveName(ref))).list(artboardId),
+      get: async (ref, id) => sidecarFor(store.file(await resolveName(ref))).get(id),
+      async capture(ref, artboardId, { reason = 'manual', label, actor } = {}) {
+        const name = await resolveName(ref); const { document } = await store.read(name);
+        return sidecarFor(store.file(name)).observe(document, document, { kind: 'agent', name: agentName, ...actor }, { force: reason === 'finish' ? 'finish' : 'manual', artboardId, label });
+      },
     },
     async create(name, title) { const state = await store.create(name, title); return { name, title, pageId: state.document.pages[0].id, revision: state.revision, live: false, opened: false }; },
     screenshot: screenshot ? async (ref, pageId, nodeId, scale, state) => screenshot(state.document, pageId, nodeId, scale) : undefined,
     ...(fetchImage ? { fetchImage } : {}), ...(searchImages ? { searchImages } : {}),
     ...(preferences ? { preferences } : {}), ...(askAgent ? { askAgent } : {}),
+    ...(generateImage ? { generateImage } : {}),
   };
 }

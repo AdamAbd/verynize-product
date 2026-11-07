@@ -47,6 +47,8 @@ export type DesignApi = {
   setThumbnail(id: string): boolean;
   setActivePage(id: string): void;
   canUndo(): boolean;
+  /** Undo history writes made by edits since launch (loading a document is not counted). */
+  editCount(): number;
   canRedo(): boolean;
   getCamera(): { x: number; y: number; zoom: number };
   setCamera(x: number, y: number, zoom: number): void;

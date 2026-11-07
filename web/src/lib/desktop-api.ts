@@ -18,6 +18,7 @@ import type {
   ToolServer,
 } from "@/islands/settings/workspace-ipc";
 import type { AppPreferencesApi } from "@/islands/settings/preference-runtime";
+import type { TelemetryIpc } from "./telemetry/types.js";
 import type { BehaviorIpc } from "@/islands/settings/behavior-store";
 import type { AgentToolsIpc } from "@/islands/settings/agents-tools";
 import type { AllowRule, PreferencesIpc } from "@/islands/settings/agent-memory";
@@ -59,7 +60,13 @@ export type AuthEvent = {
   type: string;
   message: string;
 };
-export type RenderResult = { dataURL: string; width: number; height: number };
+export type RenderResult = {
+  dataURL: string;
+  width: number;
+  height: number;
+  scale?: number;
+  requestedScale?: number;
+};
 export type PreviewTarget = { target?: string };
 export type CapturedPreview = {
   document?: { pages: { nodes: { id: string; parentId: string | null }[] }[] };
@@ -76,6 +83,7 @@ export interface DesktopApi {
   /** Share panel server default (desktop/cloud-defaults.cjs): production, or VERYNIZE_CLOUD_SERVER. */
   cloudDefaults(): Promise<{ server: string }>;
   onAuthEvent(callback: (event: AuthEvent) => void): Unsubscribe;
+  writeClipboardImage(dataURL: string): Promise<void>;
   notifyTask(options: { title: string; body: string }): Promise<boolean>;
   // Share › Publish app and passkeys (desktop/app-publish.cjs, desktop/cloud-passkey.cjs).
   cloudAppDetect: Untyped;
@@ -83,6 +91,8 @@ export interface DesktopApi {
   cloudPasskeyOpen: Untyped;
   cloudPasskeyClose: Untyped;
   appPreferences: AppPreferencesApi;
+  /** Crash reports, opt-in (desktop/telemetry.cjs). */
+  telemetry: TelemetryIpc;
   agentUsage: UsageIpc;
   agentProfiles: {
     list(): Promise<ProfileList>;
@@ -145,9 +155,18 @@ export interface DesktopApi {
   onTerminalExit(callback: (event: TerminalExitEvent) => void): Unsubscribe;
   reviewAgent: Untyped;
   agentTools: AgentToolsIpc;
-  agentBridge: { onCall: Untyped; reply: Untyped };
+  agentBridge: {
+    onCall(
+      callback: (request: { requestId: string; op: string; args: unknown }) => void,
+    ): Unsubscribe;
+    reply(
+      requestId: string,
+      payload: { ok: true; result: unknown } | { ok: false; error: string },
+    ): void;
+  };
   // Rendering, fonts and export (desktop/render.cjs).
   renderDesign(options: {
+    screenshot?: boolean;
     html: string;
     width: number;
     height: number;
@@ -183,14 +202,16 @@ export interface DesktopApi {
     cancel: Untyped;
     disconnect: Untyped;
   };
-  generateVector: Untyped;
-  cancelGeneration: Untyped;
   // Native design files (desktop/design-files.cjs).
   designDetach: Untyped;
   designOpen: Untyped;
   designSave: Untyped;
   designReload: Untyped;
   onDesignFileChanged: Untyped;
+  // Version history sidecar of the open native file (desktop/design-files.cjs).
+  versionsList: Untyped;
+  versionsGet: Untyped;
+  versionsAdd: Untyped;
   // Running-app preview frames, Preview Edit and web capture (desktop/preview*.cjs, desktop/capture-remote.cjs).
   previewInput: Untyped;
   previewOpenBrowser(options?: PreviewTarget): Promise<unknown>;
@@ -213,7 +234,10 @@ export interface DesktopApi {
   previewApp(options: { url: string }): Promise<unknown>;
   exportPDF: Untyped;
   // Projects, repositories, dev server and git (desktop/projects.cjs, repositories.cjs, dev-server.cjs, git-changes.cjs).
-  createProject: Untyped;
+  createProject(options: {
+    name: string;
+    repository?: string;
+  }): Promise<{ root: string; name: string; repoId: string }>;
   repositories: {
     list(): Promise<{ repositories: Repository[]; active: { root: string } | null }>;
     addLocal(): Promise<Repository | null>;
@@ -237,7 +261,7 @@ export interface DesktopApi {
     start(options?: { root?: string }): Promise<DevServerStatus>;
     stop(options?: { root?: string }): Promise<DevServerStatus>;
   };
-  openProject: Untyped;
+  openProject(): Promise<{ root: string; name: string; repoId: string } | null>;
   listFiles(): Promise<ProjectFile[]>;
   readFile(path: string): Promise<string>;
   writeFile(path: string, text: string): Promise<boolean>;
@@ -251,7 +275,7 @@ export interface DesktopApi {
   respondAgentQuestion: Untyped;
   steerAgent: Untyped;
   listAgentRuns: Untyped;
-  listAllowRules(): Promise<AllowRule[]>;
+  listAllowRules(options?: { projectKey?: string }): Promise<AllowRule[]>;
   removeAllowRule(rule: unknown): Promise<unknown>;
   agentToolsVersion: Untyped;
   agentTitle: Untyped;
@@ -320,6 +344,7 @@ export const DESKTOP_API_SHAPE = {
     worktreeLineStats: true,
     onOpenLink: true,
   },
+  telemetry: { config: true, get: true, set: true },
   agentUsage: { read: true, layers: true },
   agentProfiles: {
     list: true,
@@ -359,6 +384,7 @@ export const DESKTOP_API_SHAPE = {
     getAccess: true,
     setAccess: true,
   },
+  writeClipboardImage: true,
   agentBridge: { onCall: true, reply: true },
   renderDesign: true,
   fontFaces: true,
@@ -373,13 +399,14 @@ export const DESKTOP_API_SHAPE = {
   figmaFile: true,
   figmaFileOpen: true,
   figmaOAuth: { status: true, configure: true, connect: true, cancel: true, disconnect: true },
-  generateVector: true,
-  cancelGeneration: true,
   designDetach: true,
   designOpen: true,
   designSave: true,
   designReload: true,
   onDesignFileChanged: true,
+  versionsList: true,
+  versionsGet: true,
+  versionsAdd: true,
   previewInput: true,
   previewOpenBrowser: true,
   previewLocation: true,

@@ -235,9 +235,9 @@ function Chip({
   return (
     <span className={cn(hook.mention, "group/chip flex h-6 max-w-full items-center gap-1.5 rounded-md border border-chat-chip-border bg-chat-chip-bg px-2 text-base leading-5.25 text-foreground-2")}>
       <span className="relative flex size-3.5 shrink-0 items-center justify-center">
-        <span className={cn("flex transition-opacity", removable && "group-hover/chip:opacity-0 group-has-focus-visible/chip:opacity-0")}>{icon}</span>
+        <span className={cn("flex transition-opacity", removable && "group-hover/chip:opacity-0 group-focus-within/chip:opacity-0")}>{icon}</span>
         {removable && (
-          <span className="absolute inset-0 flex opacity-0 group-hover/chip:opacity-100 has-focus-visible:opacity-100">
+          <span className="absolute inset-0 flex opacity-0 group-hover/chip:opacity-100 focus-within:opacity-100">
             <ChatIconButton size="xs" aria-label={`Remove ${label}`} onClick={onRemove} className="size-full">
               <XIcon className="size-3.5" />
             </ChatIconButton>

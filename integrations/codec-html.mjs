@@ -1,3 +1,5 @@
+import { pruneImportRules } from "./import-css-prune.mjs";
+import { NODE_LIMITS } from "./document-core.mjs";
 // HTML + CSS import. A page (string, local file or http(s) URL) is parsed, its stylesheets resolved
 // (<style>, <link rel=stylesheet>, @import; local files and http(s) with size/time limits), and the
 // cascade computed for a chosen viewport (specificity, !important, @layer, inline styles, @media,
@@ -38,6 +40,7 @@ import { validateDocument, VARIABLE_NAME } from "./design-store.mjs";
 import { sniffImageType, imageSize } from "./images.mjs";
 import { sanitizeSvg } from "./assets.mjs";
 import { RESIDUAL_ATTR } from "./codec-residual.mjs";
+import { svgElementJsx } from "./vector-jsx.mjs";
 
 export const IMPORT_LIMITS = Object.freeze({
   maxBytes: 2 * 1024 * 1024,
@@ -45,7 +48,7 @@ export const IMPORT_LIMITS = Object.freeze({
   timeoutMs: 8000,
   maxSheets: 48,
   maxDepth: 8,
-  maxElements: 4000,
+  maxElements: NODE_LIMITS.perDocument,
   maxImageBytes: 4 * 1024 * 1024,
 });
 
@@ -177,9 +180,11 @@ function makeElement(tag, attrs, parent) {
 
 /** Parse HTML into a tree of {tag, attrs, children, parent} elements and {text} nodes. */
 export function parseHtml(source) {
+  if (String(source).length > 5_000_000) throw new Error("HTML parse stage exceeds 5000000 characters");
   const s = String(source || "").replace(/^﻿/, "");
   const root = makeElement("#document", {}, null);
   const stack = [root];
+  let elementTotal = 0;
   const top = () => stack[stack.length - 1];
   const close = (tag) => {
     for (let i = stack.length - 1; i > 0; i--)
@@ -215,6 +220,7 @@ export function parseHtml(source) {
       }
       const m = /^<([a-zA-Z][\w:-]*)/.exec(s.slice(i));
       if (m) {
+        const openingStart = i;
         const tag = m[1].toLowerCase();
         let j = i + m[0].length;
         const attrs = {};
@@ -277,6 +283,7 @@ export function parseHtml(source) {
             if (["ul", "ol", "table", "dl", "select", "div"].includes(stack[k].tag)) break;
           }
         }
+        if (++elementTotal > NODE_LIMITS.perDocument + 256) throw new Error("HTML parse stage exceeds document element budget");
         const el = makeElement(tag, attrs, top());
         top().children.push(el);
         i = j;
@@ -296,11 +303,12 @@ export function parseHtml(source) {
         if (tag === "svg") {
           // Keep inline SVG as markup: it becomes an image layer.
           const end = findSvgEnd(s, i);
-          el.svg = s.slice(i, end);
+          el.svg = s.slice(openingStart, end);
           const close = s.indexOf(">", end);
           i = close < 0 ? s.length : close + 1;
           continue;
         }
+        if (stack.length >= 256) throw new Error("HTML parse stage exceeds nesting limit 256");
         stack.push(el);
         continue;
       }
@@ -1022,8 +1030,13 @@ export async function importHtml(html, options = {}) {
     if (classes.length >= 10 && known / classes.length >= 0.6) tailwindPage = true;
   }
 
+  const expandImport = declaration => {
+    if (declaration.property === "border-radius" && declaration.value.includes("/"))
+      warnings.push("elliptical border radius is approximated by horizontal radii");
+    return expand(declaration);
+  };
   // --- rules (media evaluated once for the viewport)
-  const rules = [];
+  let rules = [];
   const referenced = new Set();
   let order = 0;
   const layerRank = (name) =>
@@ -1038,7 +1051,7 @@ export async function importHtml(html, options = {}) {
       for (const m of item.selector.matchAll(/\.((?:\\.|[\w-])+)/g))
         referenced.add(m[1].replace(/\\(.)/g, "$1"));
       const selectors = parseSelectorList(item.selector);
-      const decls = item.decls.flatMap(expand);
+      const decls = item.decls.flatMap(expandImport);
       rules.push({
         selectors,
         decls,
@@ -1048,6 +1061,9 @@ export async function importHtml(html, options = {}) {
       });
       stats.rules++;
     }
+  const beforePruning = rules.length;
+  if (options.pruneCss !== false) rules = pruneImportRules(rules, [htmlEl, ...all(htmlEl, () => true)]);
+  stats.prunedRules = beforePruning - rules.length;
   if (!preflightRules)
     preflightRules = parseStylesheet(PREFLIGHT_CSS)
       .items.filter((it) => it.type === "rule")
@@ -1082,7 +1098,7 @@ export async function importHtml(html, options = {}) {
           out.push({
             cls,
             rank: rank.get(cls),
-            decls: compiled.decls.flatMap(expand),
+            decls: compiled.decls.flatMap(expandImport),
             children:
               compiled.childDecls.length && !/^-?space-[xy]-/.test(cls)
                 ? compiled.childDecls.flatMap(expand)
@@ -1096,7 +1112,7 @@ export async function importHtml(html, options = {}) {
           out.push({
             cls,
             rank: rank.get(cls),
-            decls: applies ? compiled.decls.flatMap(expand) : [],
+            decls: applies ? compiled.decls.flatMap(expandImport) : [],
           });
         }
       }
@@ -1116,7 +1132,9 @@ export async function importHtml(html, options = {}) {
   const computedOf = new Map();
   const usedVars = new Map(); // name -> {type, value}
   const rootFsBox = { value: 16 };
+  const cascadeDeadline = performance.now() + 60_000;
   const computeElement = (el, parent) => {
+    if (performance.now() > cascadeDeadline) throw new Error("HTML cascade exceeds 60000ms budget; simplify the stylesheet or import fewer boards");
     const entries = [];
     const sigEntries = [];
     for (const rule of uaRules)
@@ -1197,7 +1215,7 @@ export async function importHtml(html, options = {}) {
           layerRank: -1,
         });
     if (el.attrs.style)
-      for (const [i, d] of parseDeclarations(el.attrs.style).flatMap(expand).entries()) {
+      for (const [i, d] of parseDeclarations(el.attrs.style).flatMap(expandImport).entries()) {
         const entry = { ...d, origin: "inline", spec: [1, 0, 0], order: 2e6 + i };
         entries.push(entry);
         sigEntries.push(entry);
@@ -1396,7 +1414,11 @@ export async function importHtml(html, options = {}) {
       let v = value;
       // Tailwind utilities (author origin, @layer utilities) beat UA defaults and lose to unlayered author CSS.
       const origin = info.origins?.get(property);
-      if (origin === "tw" || (origin === "ua" && twProps.has(property))) continue;
+      if (
+        (origin === "tw" || (origin === "ua" && twProps.has(property))) &&
+        !(property === "background-image" && /url\(/i.test(v))
+      )
+        continue;
       // Preflight resets that equal the canvas defaults add nothing.
       if (
         origin === "preflight" &&
@@ -1411,6 +1433,11 @@ export async function importHtml(html, options = {}) {
         if (text && (v === "inline" || v === "inline-block")) continue;
       }
       if (property === "background-image" && /url\(/i.test(v)) {
+        for (const p of ["background-position", "background-repeat"])
+          if (info.style.has(p) && !((p === "background-position" && /^(center|50% 50%)$/.test(info.style.get(p))) || (p === "background-repeat" && info.style.get(p) === "no-repeat")))
+            warnings.push(
+              `${p}:${info.style.get(p)} is approximated by a centered cover/contain image fill`,
+            );
         const urls = [...v.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)];
         for (const [, , ref] of urls) {
           const target = (() => {
@@ -1429,7 +1456,7 @@ export async function importHtml(html, options = {}) {
                 ? "cover"
                 : /contain/.test(info.style.get("background-size") || "")
                   ? "contain"
-                  : "cover",
+                  : info.style.get("background-size") === "100% 100%" ? "fill" : info.style.get("background-size") === "auto" ? "none" : "cover",
             });
         }
         v =
@@ -1448,7 +1475,15 @@ export async function importHtml(html, options = {}) {
         `[${property}:${toArbitrary(v)}]${origin !== "ua" && twProps.has(property) ? "!" : ""}`,
       );
     }
-    return { classes: [...tw, ...out], fills };
+    return {
+      classes: [
+        ...tw.filter(
+          (cls) => !/\[background(?:-image)?:.*url\(/i.test(cls) && !/^bg-\[url\(/i.test(cls),
+        ),
+        ...out,
+      ],
+      fills,
+    };
   };
 
   const bindingsFor = (info, { text = false } = {}) => {
@@ -1653,8 +1688,13 @@ export async function importHtml(html, options = {}) {
     { root = false, artboardAttrs = "", artboard = false } = {},
   ) => {
     if (++elementCount.n > opts.maxElements) {
-      if (elementCount.n === opts.maxElements + 1)
+      if (elementCount.n === opts.maxElements + 1) {
+        if (!options.allowPartial)
+          throw new Error(
+            `HTML parse stage exceeds ${opts.maxElements} elements; no import committed`,
+          );
         warnings.push(`More than ${opts.maxElements} elements; the rest were skipped`);
+      }
       return;
     }
     if (SKIP.has(el.tag)) return;
@@ -1698,7 +1738,14 @@ export async function importHtml(html, options = {}) {
         info.style.delete(p);
     }
     if (info.display === "contents") {
-      for (const c of el.children || []) if (c.tag) await emit(c, info, indent);
+      for (const c of el.children || []) {
+        if (c.tag) await emit(c, info, indent);
+        else if (c.text?.trim()) {
+          const span = makeElement("span", {}, el);
+          span.children = [c];
+          await emit(span, info, indent);
+        }
+      }
       return;
     }
     stats.elements++;
@@ -1757,8 +1804,16 @@ export async function importHtml(html, options = {}) {
     }
     const designType = el.attrs["data-design-type"];
     let residual = null;
-    const name = label(el);
-    const tag =
+    const name =
+      artboard &&
+      options.placement === "auto" &&
+      !el.attrs["data-name"] &&
+      !el.attrs.id &&
+      !el.attrs["aria-label"] &&
+      label(el) === el.tag[0].toUpperCase() + el.tag.slice(1)
+        ? options.name || options.fallbackName || "Imported page"
+        : label(el);
+    let tag =
       el.tag === "svg"
         ? "img"
         : TAG_MAP[el.tag] || (isSafeTag(el.tag) || el.tag === "img" ? el.tag : "div");
@@ -1771,15 +1826,19 @@ export async function importHtml(html, options = {}) {
       `${extra}${classes.length ? ` className="${escAttr(classes.join(" "))}"` : ""}${residual ? ` ${RESIDUAL_ATTR}='${escSingle(JSON.stringify(residual))}'` : ""}`;
     // Images: <img>, inline <svg>
     if (el.tag === "img" || el.tag === "svg" || (el.tag === "input" && el.attrs.type === "image")) {
-      const { classes } = await classesFor(el, info);
+      const { classes, fills } = await classesFor(el, info);
       let src = "",
-        size = null;
+        assetError = "",
+        size = null,
+        vectorMarkup = "";
       if (el.tag === "svg") {
         const markup = (el.svg || "").replace(/currentColor/g, info.color);
         const withNs = /xmlns=/.test(markup.slice(0, 200))
           ? markup
           : markup.replace(/^<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
         const clean = sanitizeSvg(`${withNs}</svg>`);
+        if (!clean) warnings.push("Inline SVG was rejected by the sanitizer");
+        vectorMarkup = clean;
         if (clean) {
           const buf = Buffer.from(clean);
           src = `data:image/svg+xml;base64,${buf.toString("base64")}`;
@@ -1790,13 +1849,25 @@ export async function importHtml(html, options = {}) {
         if (/^data:image\//i.test(ref)) src = ref;
         else if (ref) {
           const target = resolveUrl(ref);
-          if (target?.protocol === "file:" || target?.protocol === "data:") {
+          if (
+            target?.protocol === "file:" ||
+            target?.protocol === "data:" ||
+            (options.allowRemote && /^https?:$/.test(target?.protocol))
+          ) {
             const image = await embedImage(target, "Image");
             if (image) {
               src = image.src;
               size = image.size;
-            }
-          } else if (target) src = target.href;
+            } else assetError = warnings.at(-1) || `Image ${target.href} unavailable`;
+          } else if (target) {
+            src = target.href;
+            warnings.push(
+              `Image pending: ${target.href} (remote fetching requires asset resolution)`,
+            );
+          } else {
+            assetError = `Unresolved relative image: ${ref} (no base URL)`;
+            warnings.push(assetError);
+          }
         }
       }
       const sized = [];
@@ -1812,10 +1883,51 @@ export async function importHtml(html, options = {}) {
         else if (w > 0 && size?.width)
           sized.push(`[height:${r2((w * size.height) / size.width)}px]`);
       }
+      // Inline SVG becomes vector layers when it can (web/vector-svg.js); otherwise an SVG image.
+      if (vectorMarkup) {
+        const px = (prop, attr) => {
+          const v = String(info.style.get(prop) || "");
+          return /^[\d.]+px$/.test(v) ? parseFloat(v) : Number(attr) > 0 ? Number(attr) : undefined;
+        };
+        const out = svgElementJsx(vectorMarkup, {
+          color: info.color,
+          attrs: [
+            `data-node-label="${escAttr(name)}"`,
+            ...(residual ? [`${RESIDUAL_ATTR}='${escSingle(JSON.stringify(residual))}'`] : []),
+          ],
+          className: [...classes, ...sized].join(" "),
+          label: name,
+          indent,
+          w: px("width", el.attrs.width),
+          h: px("height", el.attrs.height),
+        });
+        if (out.ok) {
+          lines.push(out.jsx);
+          for (const w of out.warnings.slice(0, 6)) warnings.push(`Inline SVG: ${w}`);
+          return;
+        }
+        warnings.push(`${out.reason}; kept it as an SVG image`);
+      }
       lines.push(
-        `${indent}<img data-node-label="${escAttr(name)}" src="${escAttr(src)}"${common([...classes, ...sized])} />`,
+        `${indent}<img data-node-label="${escAttr(name)}" src="${escAttr(src)}"${assetError ? ` data-asset-error="${escAttr(assetError)}"` : ""}${common([...classes, ...sized])}${fills.length ? ` data-fills="${escAttr(JSON.stringify(fills))}"` : ""} />`,
       );
       return;
+    }
+    if (["input", "textarea", "select"].includes(el.tag)) {
+      const selected =
+        el.tag === "select"
+          ? el.children.find((c) => c.tag === "option" && "selected" in c.attrs) ||
+            el.children.find((c) => c.tag === "option")
+          : null;
+      const visible =
+        el.tag === "input"
+          ? el.attrs.value || el.attrs.placeholder || ""
+          : el.tag === "textarea"
+            ? el.children.map((c) => c.text || "").join("")
+            : textContent(selected || el);
+      el.children = [{ text: visible }];
+      el.tag = "button";
+      tag = "button";
     }
     if (
       ["hr", "input", "progress", "meter"].includes(el.tag) ||
@@ -1907,7 +2019,7 @@ export async function importHtml(html, options = {}) {
         el.parent && el.parent !== bodyEl ? computeElement(el.parent, bodyInfo) : bodyInfo;
       await emit(el, parentInfo, "", { root: true });
     }
-  } else if (options.fragment ?? !/<(?:html|head|body)[\s>]/i.test(String(html))) {
+  } else if ((options.fragment ?? !/<(?:html|head|body)[\s>]/i.test(String(html))) || (options.split !== "none" && all(bodyEl, () => true).length > NODE_LIMITS.perPage)) {
     // A fragment (pasted markup without <html>/<body>): each top-level element is an artboard, styled
     // with the page's own <style> rules and inheriting from the implied <html>/<body>.
     const bodyInfo = computeElement(bodyEl, htmlComputed);
@@ -1917,11 +2029,13 @@ export async function importHtml(html, options = {}) {
     // A web page: the artboard is the viewport (<html>), with <body> inside it.
     const titleEl = find(htmlEl, "title");
     const title =
+      options.name ||
+      htmlEl.attrs?.["data-name"] ||
       (titleEl ? titleEl.children.map((c) => c.text || "").join("") : "")
         .replace(/\s+/g, " ")
         .trim()
         .slice(0, 200) ||
-      options.name ||
+      options.fallbackName ||
       "Imported page";
     const bodyInfo = computeElement(bodyEl, htmlComputed);
     const canvasBg = htmlComputed.style.get("background-color");
@@ -1949,7 +2063,7 @@ export async function importHtml(html, options = {}) {
       "position",
     ])
       htmlComputed.style.delete(p);
-    const { classes } = await classesFor(
+    const { classes, fills } = await classesFor(
       htmlEl === tree ? makeElement("html", {}, null) : htmlEl,
       htmlComputed,
     );
@@ -1959,7 +2073,7 @@ export async function importHtml(html, options = {}) {
         options.document && options.x === undefined
           ? ""
           : ` data-component-x="${Number(options.x) || 0}" data-component-y="${Number(options.y) || 0}"`
-      } className="${escAttr(classes.join(" "))}">`,
+      } className="${escAttr(classes.join(" "))}"${fills.length ? ` data-fills="${escAttr(JSON.stringify(fills))}"` : ""}>`,
     );
     if (bodyEl !== htmlEl) await emit(bodyEl, htmlComputed, "  ");
     else
@@ -1990,7 +2104,7 @@ export async function importHtml(html, options = {}) {
   validateDocument(target);
   const pageId = options.pageId || target.activePage || target.pages[0].id;
   if (!lines.length) throw new Error("No importable elements were found in the HTML");
-  const result = createArtboards(target, pageId, jsx, { viewport: view });
+  const result = createArtboards(target, pageId, jsx, { viewport: view, split: options.split || "pages" });
   const unsupported = [...stats.unsupported].sort((a, b) => b[1] - a[1]);
   if (unsupported.length)
     warnings.push(

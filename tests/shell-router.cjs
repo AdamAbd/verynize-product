@@ -19,13 +19,15 @@ const os = require("node:os");
       page.evaluate(() => window.desktop.onboardingState().then((s) => s.skip === true));
     const documentBefore = await page.evaluate(() => window.design.getDocument());
     const expectView = async (path) => {
-      await page.waitForFunction(
-        (path) =>
+      await page.waitForFunction((path) => {
+        if (path === "/editor")
+          path = "/editor/" + encodeURIComponent(window.fileLibrary.currentId);
+        return (
           window.shellRouter.state.location.pathname === path &&
           location.pathname === path &&
-          document.body.classList.contains("files-view") === (path === "/"),
-        path,
-      );
+          document.body.classList.contains("files-view") === (path === "/")
+        );
+      }, path);
     };
     await expectView("/editor");
     await page.locator("#files-home").click();
@@ -55,7 +57,10 @@ const os = require("node:os");
     await expectView("/editor");
     await page.waitForTimeout(300);
     await expectView("/editor");
-    assert.equal(new URL(page.url()).pathname, "/editor");
+    assert.equal(
+      new URL(page.url()).pathname,
+      await page.evaluate(() => "/editor/" + encodeURIComponent(window.fileLibrary.currentId)),
+    );
     assert.ok(await ipcWorks(), "IPC after route changes");
     assert.deepEqual(await page.evaluate(() => window.design.getDocument()), documentBefore);
     // Cloud fragments: every navigation path keeps #room=/#public= by construction.

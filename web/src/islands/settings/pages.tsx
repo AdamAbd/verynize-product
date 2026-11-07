@@ -1,3 +1,4 @@
+import { ImportGenerationSection } from "./import-generation";
 import { useCodexConnection } from "./codex-connection";
 // One component per settings section. Element ids and data attributes are test contracts (tests/settings.cjs).
 import { useEffect, useState, type ReactNode } from "react";
@@ -11,6 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import { FigmaIcon } from "@/components/icons";
 import { AdvancedSection, ChatSoundRow } from "./preferences-extra";
+import { TelemetrySection } from "./telemetry";
 import { useToolsInfo } from "./agent-memory";
 import { AgentAccessSection, AgentToolsSection, ProviderAccountList } from "./agents-tools";
 import { AgentBehaviorSections } from "./agents-behavior";
@@ -263,7 +265,11 @@ export function PreferencesPage({ preferences, setPreference }: PageProps) {
           </Card>
         </Section>
 
+        <ImportGenerationSection />
+
         <AdvancedSection preferences={preferences} setPreference={setPreference} />
+
+        <TelemetrySection />
       </Pages>
     </>
   );

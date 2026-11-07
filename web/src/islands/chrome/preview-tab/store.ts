@@ -272,7 +272,7 @@ export async function showOnCanvas(frameId: string) {
   const node = page.nodes.find((candidate) => candidate.id === frameId)!;
   const wrap = document.getElementById("canvas-wrap")?.getBoundingClientRect();
   if (wrap) {
-    const zoom = Math.max(0.05, Math.min((wrap.width - 100) / node.w, (wrap.height - 140) / node.h, 1));
+    const zoom = Math.max(0.02, Math.min((wrap.width - 100) / node.w, (wrap.height - 140) / node.h, 1));
     window.design.setCamera(50 - node.x * zoom, 60 - node.y * zoom, zoom);
   }
 }

@@ -101,7 +101,7 @@ const LayerRow = memo(function LayerRow({
 }: RowProps) {
   const { node, depth, hasChildren, expanded } = row;
   const action = cn(
-    "hidden size-6 shrink-0 items-center justify-center rounded-md bg-transparent group-hover:flex group-has-focus-visible:flex hover:bg-foreground/10 hover:text-foreground",
+    "hidden size-6 shrink-0 items-center justify-center rounded-md bg-transparent group-hover:flex group-focus-within:flex hover:bg-foreground/10 hover:text-foreground",
     selected ? "text-foreground-2/85" : "text-foreground-3",
   );
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -136,6 +136,7 @@ const LayerRow = memo(function LayerRow({
           aria-expanded={hasChildren ? expanded : undefined}
           tabIndex={focusable ? 0 : -1}
           data-id={node.id}
+          data-role={node.role}
           className={cn(
             contract("layer-row", selected && "active", node.hidden && "is-hidden", node.locked && "is-locked"),
             "group relative m-0 flex h-7.5 w-full shrink-0 items-center rounded-md border-0 bg-transparent py-0 pr-2 text-xs text-foreground-2 hover:bg-muted",
@@ -179,10 +180,20 @@ const LayerRow = memo(function LayerRow({
             className={cn(
               "ml-1 size-4 shrink-0",
               selected ? "text-foreground" : "text-muted-foreground",
+              (node.role === "main" || node.role === "instance") && "text-component",
+              node.role === "slot" && "text-slot",
               node.hidden && "opacity-50",
             )}
           />
-          <div className={cn("ml-2.25 flex min-w-0 flex-1 items-center", node.hidden && "opacity-50")}>
+          <div
+            className={cn(
+              "ml-2.25 flex min-w-0 flex-1 items-center",
+              (node.role === "main" || node.role === "instance") && "text-component-foreground",
+              node.role === "slot" && "text-slot-foreground",
+              node.role === "inherited" && "text-component-muted",
+              node.hidden && "opacity-50",
+            )}
+          >
             {renaming ? (
               <InlineRename
                 value={node.name}

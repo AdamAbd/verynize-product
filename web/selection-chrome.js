@@ -10,7 +10,7 @@
 //   and nothing else (CM6-hidden); a selected nested layer gets dashed guides to the parent edges it is constrained
 //   to and no name label (S2-classic, CM3-text-menu: #c468f7 at 75%, 1px, 2.5/2 dashes); a text layer being edited
 //   shows only its caret, plus the ⊕ chip for a fixed-size box (TX1-click, TX1-selection, TX1-drag).
-// - While a layer is dragged (`.moving`) it shows no outline, handles, size badge or chip, only its name label
+// - While a layer is dragged (`#canvas-overlay[data-moving]`, `.layer[data-dragging]`) it shows no outline, handles, size badge or chip, only its name label
 //   (R1-row-drag-slot, R1-row-drag-far, TR4-guide). Multi-selection drags keep their union box (not captured).
 // Everything here is screen-space DOM in #canvas-overlay; the canvas itself stays imperative.
 (() => {
@@ -78,19 +78,19 @@
 #workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle[data-corner=ne],#workspace[data-tool=scale] #canvas-overlay .selection-union>.union-handle[data-corner=sw]{cursor:nesw-resize}
 #canvas[data-multi-select] .layer>.handle,#canvas-overlay[data-multi-select] .clipped-selection .handle{display:none!important}
 #canvas-overlay .frame-label.selected{color:${SELECT}}
-.transforming #canvas-overlay #selection-chat-chip,.moving #canvas-overlay #selection-chat-chip{visibility:hidden}
+.transforming #canvas-overlay #selection-chat-chip,#canvas-overlay[data-moving] #selection-chat-chip{visibility:hidden}
 .panning #canvas-overlay .resize-edge,.panning #canvas-overlay .rotate-zone,.space-pan #canvas-overlay .resize-edge,.space-pan #canvas-overlay .rotate-zone{pointer-events:none}
 #canvas-overlay #selection-chat-chip[hidden],#canvas-overlay #selection-name[hidden],#canvas-overlay #selection-measure[hidden]{display:none!important}
 #canvas-overlay .hidden-outline{position:absolute;box-sizing:border-box;outline:1px solid ${SELECT};outline-offset:-.5px;transform-origin:50% 50%}
 #canvas-overlay .constraint-guides{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 #canvas-overlay .constraint-guide{stroke:${SELECT};stroke-opacity:.75;stroke-width:1;stroke-dasharray:2.5 2;shape-rendering:crispEdges}
-.moving #canvas-overlay .constraint-guides,.transforming #canvas-overlay .constraint-guides{display:none}
-.moving #canvas:not([data-multi-select]) .layer.selected{outline:none!important}
-.moving #canvas:not([data-multi-select]) .layer.selected::after,.moving #canvas:not([data-multi-select]) .layer>.handle{display:none!important}
-.moving #canvas-overlay:not([data-multi-select]) #selection-measure{visibility:hidden!important}
+.transforming #canvas-overlay .constraint-guides,#canvas-overlay[data-moving] .constraint-guides{display:none}
+#canvas:not([data-multi-select]) .layer.selected[data-dragging]{outline:none!important}
+#canvas:not([data-multi-select]) .layer.selected[data-dragging]::after,#canvas:not([data-multi-select]) .layer[data-dragging]>.handle{display:none!important}
+#canvas-overlay[data-moving]:not([data-multi-select]) #selection-measure{visibility:hidden!important}
 #canvas .layer.selected[data-text-editing]{outline:none!important}
 #canvas .layer.selected[data-text-editing]::after,#canvas .layer[data-text-editing]>.handle{display:none!important}
-#canvas-wrap:has(#canvas .layer[data-text-editing]) #canvas-overlay .clipped-selection{display:none}
+#canvas-overlay .clipped-selection[data-text-editing]{display:none}
 #canvas .layer.selected[data-clip-ring]:not([data-outline]){outline:none!important}
 #canvas .layer.selected[data-clip-ring]::after,#canvas .layer[data-clip-ring]>.handle{display:none!important}`;
 
@@ -122,8 +122,8 @@
     const screenFrame = n => frameOf(elementOf(n.id), n, find, cam.zoom, viewport());
     const place = (el, cx, cy, w, h, angle) => placeFrame(el, {cx, cy, w, h, angle});
     function topSelected() {
-      const list = ed.nodes().filter(n => sel().has(n.id));
-      return list.filter(n => !list.some(o => o.id !== n.id && ed.descendants(o.id).has(n.id)));
+      const list = ed.nodes();
+      return window.VerynizeNodeIndex.of(list).topmost(list.filter(n => sel().has(n.id)));
     }
 
     // A hidden layer renders as display:none: lay it out for one synchronous measurement (never painted).
@@ -167,6 +167,9 @@
       const ids = [...sel()], multi = ids.length > 1;
       const name = document.getElementById('selection-name'), badge = document.getElementById('selection-measure');
       if (multi) { ed.canvas.dataset.multiSelect = ''; overlay.dataset.multiSelect = ''; } else { delete ed.canvas.dataset.multiSelect; delete overlay.dataset.multiSelect; }
+      // A selected live preview hides the name label and chip (live-preview.css, preview-frame-chrome.css). An attribute
+      // set here, not `#workspace:has(.canvas-preview.selected)`: such a rule makes every canvas mutation walk the canvas.
+      overlay.toggleAttribute('data-preview-selected', ids.some(id => elementOf(id)?.classList.contains('canvas-preview')));
       union.hidden = box.hidden = textBox.hidden = hiddenOutline.hidden = true;
       guides.replaceChildren();
       for (const el of ed.canvas.querySelectorAll('[data-clip-ring]')) delete el.dataset.clipRing;
@@ -224,7 +227,11 @@
       // Wonder S2 / CM3: no label on nested or text layers. A drag previewing a new parent labels by that parent
       // (R1-row-drag-far: a stack child dragged onto the page shows its name, R1-row-return-during: one entering a stack not).
       const preview = ctx.previewParent?.(n.id), parentId = preview === undefined ? n.parentId : preview;
-      if (name) { textBox.append(name); if (parentId || n.type === 'text' || editing) name.hidden = true; }
+      if (name) {
+        textBox.append(name); if (parentId || n.type === 'text' || editing) name.hidden = true;
+        const role = n.component === true ? 'main' : n.instanceOf ? 'instance' : ''; // canvas.css colours the label
+        if (role) name.dataset.component = role; else delete name.dataset.component;
+      }
       textBox.append(chip);
       chip.hidden = editing && n.wMode !== 'fixed'; // TX1: a hugging text being typed shows only its caret
       if (badge) { textBox.append(badge); if (editing) badge.hidden = true; }

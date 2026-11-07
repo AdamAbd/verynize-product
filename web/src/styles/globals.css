@@ -10,6 +10,9 @@
 @import "tailwindcss/utilities.css" layer(utilities) important;
 @import "tw-animate-css";
 
+/* Research quotes old utility names; never emit executable CSS from documentation. */
+@source not "../../../docs";
+
 @custom-variant dark (&:where(html:not([data-ui-theme="light"]) *));
 @custom-variant light (&:where(html[data-ui-theme="light"] *));
 
@@ -236,6 +239,8 @@ html[data-platform="web"] {
  */
 @theme inline {
   /* <chrome-tokens> */
+  --color-find-active: #4e81ee;
+  --color-find-scrim: rgb(0 0 0 / 0.2); /* finder dim, only when the result fits the view */
   /* Measured from design/wonder 03/19/22/29 (dark values in comments; mixes follow the light theme too). */
   --color-tab-edge: color-mix(in srgb, var(--foreground) 3%, var(--input)); /* #313131 active tab ring */
   --color-toolbar-edge: color-mix(in srgb, var(--foreground) 11%, var(--background)); /* #333333 toolbar + pill outline */
@@ -319,6 +324,15 @@ html[data-platform="web"] {
   --color-warning: #e3b341; /* Agents › Commit author: email not linked on GitHub (Wonder 71 warning glyph) */
   --color-avatar: #c4612b; /* Agents › Commit author initials tile */
   --color-avatar-foreground: #ffffff;
+  /* Preview / Import HTML dialog (settings/preview-import.tsx): the exported page's own white surface, frame height
+     and widths (Phone 390, Tablet 768, Desktop 1000). */
+  --color-preview-page: #ffffff;
+  --spacing-preview-frame: 70vh;
+  --spacing-preview-phone: 390px;
+  --spacing-preview-tablet: 768px;
+  --spacing-preview-desktop: 1000px;
+  --spacing-templates: 880px; /* Templates dialog width */
+  --spacing-dialog-max: calc(100vh - 48px); /* tall dialogs keep a margin from the window edges */
   /* </settings-tokens> */
   /* <code-tokens> */
   /* Code workspace, measured from /tmp/wonder-code-mode.png and design/wonder 80/81 (1440×870). */
@@ -615,3 +629,43 @@ html[data-ui-theme="light"] {
     0 0 0 0.5px color-mix(in srgb, var(--foreground) 10%, var(--background)), 0 12px 32px rgb(0 0 0 / 0.4);
 }
 /* </share-tokens> */
+
+/* <component-tokens> (main components, instances and slots: canvas chrome, layer rows, inspector, Components panel;
+ * design/component-audit/figma 25-instance-variant.png, dark: canvas outline rgb(128,61,236), labels rgb(203,170,249),
+ * slot outline rgb(223,55,172), slot row label rgb(239,160,220)). --component / --slot draw outlines and icons,
+ * the -foreground pair colours text, -muted is an inherited (instance) layer's label. */
+:root {
+  --component: #8f4ff0;
+  --component-foreground: #cbaaf9;
+  --component-muted: #9a8ab4;
+  --slot: #df37ac;
+  --slot-foreground: #efa0dc;
+}
+html[data-ui-theme="light"] {
+  --component: #7c3aed;
+  --component-foreground: #6d28d9;
+  --component-muted: #8a79a8;
+  --slot: #cf2a9c;
+  --slot-foreground: #b51f87;
+}
+@theme inline {
+  --color-component: var(--component);
+  --color-component-foreground: var(--component-foreground);
+  --color-component-muted: var(--component-muted);
+  --color-component-tint: color-mix(in srgb, var(--component) 16%, transparent);
+  --color-slot: var(--slot);
+  --color-slot-foreground: var(--slot-foreground);
+  --color-slot-tint: color-mix(in srgb, var(--slot) 16%, transparent);
+}
+/* </component-tokens> */
+
+/* <history-tokens> (version history panel, web/src/islands/history; docs/version-history.md)
+ * A floating panel over the canvas, 12px below the window chrome and 12px left of the inspector, 320 wide like a
+ * Wonder side panel; it never grows past the canvas height. */
+@theme inline {
+  --spacing-history-panel: 320px;
+  --spacing-history-top: calc(var(--spacing-chrome) + 12px);
+  --spacing-history-inset: calc(var(--panel-right-width) + 12px);
+  --spacing-history-height: calc(100vh - var(--spacing-chrome) - 72px);
+}
+/* </history-tokens> */

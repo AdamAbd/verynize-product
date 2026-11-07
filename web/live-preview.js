@@ -186,7 +186,7 @@
     chrome?.update(entry);
     return entry;
   }
-  function focus(entry){const rect=document.getElementById('canvas-wrap').getBoundingClientRect(),zoom=Math.max(.05,Math.min((rect.width-100)/entry.node.w,(rect.height-140)/entry.node.h,1));window.design.setCamera(50-entry.node.x*zoom,60-entry.node.y*zoom,zoom);}
+  function focus(entry){const rect=document.getElementById('canvas-wrap').getBoundingClientRect(),zoom=Math.max(.02,Math.min((rect.width-100)/entry.node.w,(rect.height-140)/entry.node.h,1));window.design.setCamera(50-entry.node.x*zoom,60-entry.node.y*zoom,zoom);}
   // The worktree's branch (last segment) when the chat has one, else its title once renamed, else the app name.
   function layerName(info, preview) {
     const s = window.agentWorkspace?.getState?.() || {};

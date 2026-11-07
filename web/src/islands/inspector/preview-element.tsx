@@ -123,7 +123,7 @@ const unitChevron = (unit?: string) => (
     <ChevronDown aria-hidden className="size-3 shrink-0" />
   </>
 );
-const READ_ONLY = "has-disabled:bg-field-disabled";
+const READ_ONLY = "bg-field-disabled";
 const noop = () => null;
 
 /** Fonts for the family picker: the catalog, plus installed fonts once the picker opens. */

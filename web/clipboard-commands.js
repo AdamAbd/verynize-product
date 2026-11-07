@@ -71,6 +71,7 @@
         const subtree = ed.descendants(top.id), mapping = new Map([...subtree].map(id => [id, ed.uid()]));
         const dx = c.inStack(top) ? 0 : offsets.get(top.parentId || null) || 0;
         const copies = list.filter(n => subtree.has(n.id)).map(n => ({...structuredClone(n), id: mapping.get(n.id), parentId: mapping.get(n.parentId) || n.parentId || null}));
+        window.VerynizeComponents?.adoptCopies(ed.design, copies, mapping); // a copy of a main is an instance of it
         const root = copies.find(n => n.id === mapping.get(top.id));
         root.x = r2((Number(top.x) || 0) + dx);
         list.splice(subtreeEnd(list, top.id), 0, ...copies);
@@ -88,6 +89,7 @@
     function materialize(data) {
       const ids = new Map(data.nodes.map(n => [n.id, ed.uid()])), roots = data.roots.filter(id => ids.has(id)), rootSet = new Set(roots);
       const copies = data.nodes.map(n => ({...structuredClone(n), id: ids.get(n.id), parentId: rootSet.has(n.id) ? null : ids.get(n.parentId) || null}));
+      window.VerynizeComponents?.adoptCopies(ed.design, copies, ids);
       const source = new Map(data.nodes.map(n => [n.id, n]));
       const boxes = roots.map(id => { const n = source.get(id), w = data.world?.[id]; return {x: w ? w.x : Number(n.x) || 0, y: w ? w.y : Number(n.y) || 0, w: Number(n.w) || 0, h: Number(n.h) || 0}; });
       const bounds = c.union(boxes) || {x: 0, y: 0, w: 0, h: 0};
@@ -101,6 +103,13 @@
       for (const [k, v] of Object.entries(data.tokens || {})) if (!candidate.tokens[k]) candidate.tokens[k] = v;
       edit(page.nodes, n => structuredClone(n));
       try { ed.validate(candidate); } catch (error) { c.footer('Unable to paste: ' + error.message); return false; }
+      // A paste never makes a main contain an instance of itself (design/component-audit/README.md "Nested instances").
+      const cycles = d => window.VerynizeComponents?.componentProblems(d).length || 0;
+      if (cycles(candidate) > cycles(ed.design)) {
+        const message = 'A main component cannot contain an instance of itself';
+        c.footer(message); window.dispatchEvent(new CustomEvent('bd:notice', {detail: {message}}));
+        return false;
+      }
       ed.checkpoint();
       for (const [k, v] of Object.entries(data.tokens || {})) if (!ed.design.tokens[k]) ed.design.tokens[k] = v;
       edit(ed.nodes(), n => ({...ed.defaults, ...structuredClone(n)}));
