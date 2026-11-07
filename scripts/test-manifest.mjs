@@ -631,7 +631,11 @@ export const CLOUD_SCENARIOS = [
   "tests/cloud-assets.mjs",
   "tests/cloud-pages-assets.mjs",
 ];
-const cloud = CLOUD_SCENARIOS.map((file) => ({
+const cloud = [
+  ...CLOUD_SCENARIOS,
+  "tests/cloud-room-poison.mjs",
+  "tests/cloud-ops-indexed.mjs",
+].map((file) => ({
   file,
   group: "cloud",
   lane: "cloud",

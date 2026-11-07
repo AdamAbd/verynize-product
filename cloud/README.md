@@ -36,6 +36,14 @@ The room broadcasts only accepted, resolved operations (`{type:'ops',revision,cl
 
 Size-rejected batches remain transport-acknowledged. Snapshots include additive `rejectedBatches` receipts persisted in SQLite; old clients ignore this field. Updated clients keep rejected intent in the IndexedDB outbox for anonymous and authenticated rooms, render it over confirmed state, and retry a fresh byte/count-bounded diff after corrections or reconnect. For older servers without receipts, ambiguous acknowledged pending work is conservatively retained on reconnect. Only one batch is in flight.
 
+Before expensive batch processing, the room persists a `pending_batches` marker and awaits
+`storage.sync()`. Document writes, stamps, the transport acknowledgement and marker removal
+then commit in one synchronous transaction. A marker surviving a reset causes the next attempt
+of that client/batch to be rejected with a persisted receipt (`tooLarge`/`retained` for existing
+clients), keeping the edits on the device instead of repeatedly resetting the room. Requests
+for the same batch during a live flush wait for its outcome. Node and Vercel adapters implement
+the same explicit durability boundary. No CPU limit or client batch limit is raised.
+
 While collaborating, undo and redo step through this client's own changes only (`window.cloudHistory`, which `web/app.js` consults). Each step stores the documents around the local change, and consecutive changes within 600 ms with no remote edit between them form one step. Undo replays the inverse operations rebased over the remote operations received since that step:
 
 - Properties, page and node orders, and nodes that a collaborator changed later are left alone.
