@@ -280,6 +280,7 @@ const canvas = [
   electron("tests/canvas-transform.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-interactions.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-incremental-render.cjs", "canvas", AREA.canvas),
+  electron("tests/canvas-loose-culling.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-drag-scale.cjs", "canvas", [
     ...AREA.canvas,
     "eval/canvas-perf/bench-verynize.cjs",

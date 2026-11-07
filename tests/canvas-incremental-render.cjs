@@ -772,10 +772,7 @@ const fs = require("node:fs/promises"),
         return window.design
           .getDocument()
           .pages[0].nodes.filter(
-            (n) =>
-              !n.parentId &&
-              n.clipContent &&
-              !(n.x + n.w >= x0 && n.x <= x1 && n.y + n.h >= y0 && n.y <= y1),
+            (n) => !n.parentId && !(n.x + n.w >= x0 && n.x <= x1 && n.y + n.h >= y0 && n.y <= y1),
           )
           .map((n) => n.id)
           .sort();
@@ -793,8 +790,8 @@ const fs = require("node:fs/promises"),
     );
     assert.equal(
       await page.locator("#canvas [data-id=U]").evaluate((e) => e.hasAttribute("data-culled")),
-      false,
-      "a frame that does not clip is never culled",
+      true,
+      "an empty non-clipping frame is safely culled",
     );
     assert.equal(
       await page
@@ -827,7 +824,8 @@ const fs = require("node:fs/promises"),
       return [r.width, r.height];
     });
     assert.deepEqual(exported, [200, 120], "a layer in a culled board exports at its size");
-    assert.ok((await culledNow()).includes("A7"), "selecting it does not reveal the board");
+    assert.ok(!(await culledNow()).includes("A7"), "selection reveals its ancestor");
+    await page.evaluate(() => window.design.setSelection([]));
     await matchesFullRender("culled boards");
     // A camera jump reveals the board it lands on and culls the ones it leaves.
     await page.evaluate(() => window.design.setCamera(-7 * 1500 + 100, 100, 1));
