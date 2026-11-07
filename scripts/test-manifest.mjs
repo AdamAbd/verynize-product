@@ -689,6 +689,7 @@ const web = [
 ];
 
 const e2eCloud = [
+  electron("tests/account-store-network.mjs", "e2e-cloud", ["web/account-store.js"]),
   electron("tests/cloud-switch-cache.mjs", "e2e-cloud", [
     ...AREA.cloudRenderer,
     "web/switch-*.js",

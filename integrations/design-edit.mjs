@@ -3,7 +3,7 @@ import { distributeImport, importPageReport } from "./import-pages.mjs";
 // JSX -> node construction (Tailwind v4 classes, CSS-like flow layout with hug/fill sizing and
 // text inheritance), and the update_elements directive script. Everything here operates on plain
 // version-2 document objects.
-import { NODE_LIMITS } from './document-core.mjs';
+import { NODE_LIMITS, nodeLimitMessage } from './document-core.mjs';
 import { randomUUID } from 'node:crypto';
 import { NODE_DEFAULTS, parseJsx, parseClasses, collectText, isTextOnly, isSafeTag, serializeNode, cssVarForToken, normalizeColor, JsxSyntaxError, defaultSizing, isFlexRow } from './jsx-codec.mjs';
 import { layoutPage, measureText } from './codec-layout.mjs';
@@ -925,11 +925,12 @@ export function runDirectives(document, pageId, script) {
 // Higher-level operations shared by the tools
 
 export function preflightImportNodes(document, pageId, incoming) {
-  const existing = getPage(document, pageId).nodes.length;
+  const page = getPage(document, pageId);
+  const existing = page.nodes.length;
   const total = document.pages.reduce((sum, p) => sum + p.nodes.length, 0);
   const { perPage: pageLimit, perDocument: documentLimit } = NODE_LIMITS;
   if (existing + incoming > pageLimit || total + incoming > documentLimit)
-    throw new Error(`Import node preflight: page existing=${existing}, incoming=${incoming}, limit=${pageLimit}; document existing=${total}, incoming=${incoming}, limit=${documentLimit}. Nothing was imported; import into another page or split the source into smaller artboards.`);
+    throw new Error(`${existing + incoming > pageLimit ? nodeLimitMessage(existing + incoming, pageLimit, page.name ?? page.id) : nodeLimitMessage(total + incoming, documentLimit)} Import node preflight: page existing=${existing}, incoming=${incoming}, limit=${pageLimit}; document existing=${total}, incoming=${incoming}, limit=${documentLimit}. Nothing was imported; import into another page or split the source into smaller artboards.`);
 }
 
 export function createArtboards(document, pageId, code, { viewport = null, name, placement = 'preserve', importNames = false, split = 'none' } = {}) {

@@ -134,3 +134,13 @@ An exported variable beats `.env`, so `SENTRY_DSN_WEB= npm run deploy` deploys w
     `verynize-server`
 - `scripts/package-macos.cjs` also never copies a `.map` into the app, because `app://verynize` would serve it.
 - The legacy `web/*.js` scripts and the desktop `.cjs` files ship unminified, so their frames need no maps.
+
+### Local Worker verification
+
+Start the verification Worker with `npm run dev` (or `vp dev`). The dev-only
+`verynize-local-d1-migrations` hook applies `cloud/migrations` before serving, using
+the same `.cloudflare/state` directory as the Worker. Set `VERYNIZE_CF_STATE` to
+isolate a verification run; both the hook and Worker use that directory. This
+avoids `no such table: migration_state` on a fresh local database. Direct
+Miniflare verification should use `cloudOptions` from `tests/cloud-harness.mjs`,
+which applies the migrations too. Production builds do not run this hook.

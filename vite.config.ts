@@ -1,3 +1,4 @@
+import { localD1Migrations, localStatePath } from "./scripts/local-d1.mjs";
 import { defineConfig } from "vite-plus";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
@@ -13,10 +14,11 @@ export default defineConfig({
   // allowlist that leaves out web/src and web/index.html.
   publicDir: false,
   plugins: [
+    localD1Migrations(),
     cloudflare({
       viteEnvironment: { name: "ssr" },
       // Local Durable Object, D1 and R2 state for `npm run dev` (tests point it at a temp dir).
-      persistState: process.env.VERYNIZE_CF_STATE ? { path: process.env.VERYNIZE_CF_STATE } : true,
+      persistState: { path: localStatePath },
     }),
     tanstackStart({ srcDirectory, server: { entry: "server.cloudflare.ts" } }),
     react(),
