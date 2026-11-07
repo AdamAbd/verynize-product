@@ -8,6 +8,7 @@
 // settings overlay (settings.tsx), the Files home (index.tsx) and the Code workspace (code.tsx),
 // plus the view under settings.
 import assert from "node:assert/strict";
+import { openStarterFile } from "./web-app.mjs";
 
 const ROOM = "11111111-1111-4111-8111-111111111111";
 const INVITE = `#room=${ROOM}&token=${"ab".repeat(32)}`;
@@ -94,6 +95,8 @@ export async function checkWebRouter(browser, origin, context = browser) {
 
   await page.goto(origin + "/editor");
   await ready();
+  if (!(await page.evaluate(() => window.fileLibrary.currentId)))
+    await openStarterFile(page, { detached: true });
 
   // File URLs restore documents through Start's parameter route without remounting the editor.
   const original = await page.evaluate(() => window.fileLibrary.currentId);

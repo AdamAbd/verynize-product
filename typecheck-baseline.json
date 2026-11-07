@@ -132,7 +132,7 @@
     }
   },
   "legacy-web": {
-    "total": 879,
+    "total": 868,
     "files": {
       "web/account-store.js TS2322": 1,
       "web/account-store.js TS2339": 2,
@@ -181,9 +181,6 @@
       "web/figma-panel.js TS2349": 1,
       "web/figma-panel.js TS2551": 1,
       "web/figma-panel.js TS2700": 1,
-      "web/html-import.js TS2339": 6,
-      "web/html-import.js TS2349": 1,
-      "web/html-import.js TS2551": 1,
       "web/image-drop.js TS2339": 3,
       "web/image-upload.js TS2322": 1,
       "web/image-upload.js TS2339": 3,
@@ -218,8 +215,6 @@
       "web/switch-coordinator.js TS2339": 1,
       "web/text-caret.js TS2339": 5,
       "web/trace-bitmap.js TS2339": 3,
-      "web/ui.js TS2339": 2,
-      "web/ui.js TS2551": 1,
       "web/vector-edit.js TS2339": 12,
       "web/vector-geometry.js TS2339": 1,
       "web/vector-geometry.js TS2345": 2,

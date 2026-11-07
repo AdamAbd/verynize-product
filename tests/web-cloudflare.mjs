@@ -32,6 +32,7 @@ import {
   signedInContext,
   startProcess,
   freePort,
+  openStarterFile,
 } from "./helpers/web-app.mjs";
 import { checkWebRouter } from "./helpers/web-router.mjs";
 
@@ -329,6 +330,9 @@ async function checkApp(origin, mode) {
     timeout: 20000,
   });
   await page.waitForFunction(() => window.shellRouter?.state.status === "idle");
+  // No file of its own: a fresh profile lands on Files until the user opens or makes one.
+  await page.waitForFunction(() => location.pathname === "/" && !window.fileLibrary.currentId);
+  await openStarterFile(page);
   assert.equal(
     await page.evaluate(() => window.shellRouter.state.location.pathname),
     await page.evaluate(() => "/editor/" + encodeURIComponent(window.fileLibrary.currentId)),

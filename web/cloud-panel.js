@@ -1333,15 +1333,32 @@
       if (library()?.currentId === id) status(e.message);
     });
   }
+  let reconnectPending = false;
   window.addEventListener("library-file-opened", (event) => {
     const detail = event.detail || {};
+    reconnectPending = false;
     if (detail.cloudJoinEpoch === undefined) reconnectFile(detail.id, detail.cloud);
   });
-  window.addEventListener("DOMContentLoaded", () => {
+  // The open file's room connects when the user works on it: at launch anywhere but the Files home, else once the
+  // user leaves the Files home (the Code workspace counts: agents edit the open file there). Opening another file
+  // connects through `library-file-opened`.
+  const editorHidden = () =>
+    location.pathname === "/" || document.body.classList.contains("files-view");
+  const reconnectOpenFile = () => {
     const lib = library(),
       id = lib?.currentId;
-    if (id && !new URLSearchParams(location.hash.slice(1)).has("room"))
-      reconnectFile(id, lib.cloudOf?.(id));
+    if (id) reconnectFile(id, lib.cloudOf?.(id));
+  };
+  new MutationObserver(() => {
+    if (!reconnectPending || editorHidden()) return;
+    reconnectPending = false;
+    reconnectOpenFile();
+  }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  window.addEventListener("DOMContentLoaded", () => {
+    if (new URLSearchParams(location.hash.slice(1)).has("room")) return;
+    // At launch the shell router has not applied the URL yet, so the Files home path counts too.
+    if (editorHidden()) reconnectPending = true;
+    else reconnectOpenFile();
   });
   window.cloudWorkspace = {
     flush: flushBeforeSwitch,

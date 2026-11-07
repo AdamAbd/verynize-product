@@ -10,7 +10,7 @@ import fs from "node:fs";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { createWebServer } from "../web-start/node/server.mjs";
-import { launchBrowser, signedInContext } from "./helpers/web-app.mjs";
+import { launchBrowser, openStarterFile, signedInContext } from "./helpers/web-app.mjs";
 import { checkWebRouter } from "./helpers/web-router.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -156,6 +156,9 @@ try {
   await page.waitForFunction(() => document.documentElement.dataset.uiReady === "true", null, {
     timeout: 20000,
   });
+  // No file of its own: a fresh profile lands on Files until the user opens or makes one.
+  await page.waitForFunction(() => location.pathname === "/" && !window.fileLibrary.currentId);
+  await openStarterFile(page, { detached: true });
   assert.equal(
     await page.evaluate(() => window.shellRouter.state.location.pathname),
     await page.evaluate(() => "/editor/" + encodeURIComponent(window.fileLibrary.currentId)),
