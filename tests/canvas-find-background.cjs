@@ -1,4 +1,5 @@
-// Finding large imported-style sections must not change the apparent page background.
+// Finding large imported-style sections must not change the apparent page background. A result that fits the
+// view gets a uniform light dim (no edge); a result larger than the view gets the outline only.
 const { _electron, expect } = require("@playwright/test");
 const { waitForUiReady } = require("./helpers/ui-ready.cjs");
 const assert = require("node:assert/strict");
@@ -64,7 +65,7 @@ const path = require("node:path");
     });
     const input = page.locator("#find-layers-input");
     const spotlight = page.locator("#find-layers-spotlight");
-    async function background(name, points) {
+    async function background(name, points, expected = [43, 43, 43]) {
       // Wait for camera/spotlight animation frames, then read actual composited pixels.
       await page.evaluate(
         () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -84,9 +85,12 @@ const path = require("node:path");
         { file, points },
       );
       for (let i = 0; i < points.length; i++) {
-        assert.deepEqual(pixels[i], [43, 43, 43], `${name} at ${points[i]} (${file})`);
+        assert.ok(
+          pixels[i].every((v, c) => Math.abs(v - expected[c]) <= 1),
+          `${name} at ${points[i]}: rgb(${pixels[i]}) != rgb(${expected}) (${file})`,
+        );
       }
-      console.log(`${name}: ${points.length} background samples = rgb(43,43,43); ${file}`);
+      console.log(`${name}: ${points.length} background samples = rgb(${expected}); ${file}`);
     }
     await page.locator("#find-layers-button").click();
     await input.fill("Section 0");
@@ -96,6 +100,11 @@ const path = require("node:path");
       .poll(() => spotlight.evaluate((el) => el.getBoundingClientRect().bottom))
       .toBe(676);
     const acrossEdge = [350, 700, 1050].flatMap((x) => [500, 670, 680, 750].map((y) => [x, y]));
+    assert.equal(
+      await spotlight.getAttribute("data-fits"),
+      null,
+      "no dim around a result larger than the view",
+    );
     await background("large-section", acrossEdge);
     assert.equal(await spotlight.evaluate((el) => getComputedStyle(el).outlineWidth), "2px");
     await input.fill("Focus screen");
@@ -104,9 +113,12 @@ const path = require("node:path");
       "data-find-focus",
       "",
     );
+    await expect(spotlight).toHaveAttribute("data-fits", "");
+    // 20% black over #2b2b2b, uniform across the whole view.
     await background(
       "screen-jump",
-      [350, 1050].flatMap((x) => [500, 670, 750].map((y) => [x, y])),
+      [[350, 60], ...[350, 1050].flatMap((x) => [500, 670, 750].map((y) => [x, y]))],
+      [34, 34, 34],
     );
     await input.press("Enter");
     await expect(spotlight).toHaveCount(0);
