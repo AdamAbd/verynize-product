@@ -30,8 +30,9 @@ const path = require("node:path");
           id,
           type: "frame",
           name: `Section ${i}`,
-          x: (i % 3) * 50000,
-          y: Math.floor(i / 3) * 40000,
+          // Stay within ±100,000 so the far-from-origin advisory does not cover sampled pixels.
+          x: [0, 45000, -45000][i % 3],
+          y: [0, 35000, -35000][Math.floor(i / 3)],
           w: 40000,
           h: 30000,
           color: "transparent",
