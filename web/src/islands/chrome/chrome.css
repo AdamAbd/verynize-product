@@ -163,7 +163,7 @@ body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) #file-home {
 }
 
 /* Finder focus is above the artwork, below chrome, and never intercepts canvas input.
- * The transparent window leaves the result untouched; its shadow dims the surroundings. */
+ * Use an outline only: dimming outside a large section creates a false page-background edge. */
 #find-layers-spotlight {
   position: absolute;
   z-index: 6;
@@ -171,5 +171,4 @@ body.bd-chrome.chat-sidebar-open.agent-chat-open:not(.code-mode) #file-home {
   border-radius: 2px;
   outline: 2px solid var(--color-find-active);
   outline-offset: 1px;
-  box-shadow: 0 0 0 100vmax var(--command-palette-scrim);
 }
