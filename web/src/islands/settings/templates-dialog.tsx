@@ -207,6 +207,9 @@ export function TemplatesDialog() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         id="templates-dialog"
+        // Opened from menus: the menu returning focus to its trigger must not dismiss it (a click outside or
+        // Escape still does).
+        onFocusOutside={(event) => event.preventDefault()}
         showCloseButton={false}
         className="max-h-(--spacing-dialog-max) max-w-(--spacing-templates) overflow-y-auto sm:max-w-(--spacing-templates)"
         onOpenAutoFocus={(event) => {

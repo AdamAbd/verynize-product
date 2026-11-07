@@ -169,6 +169,9 @@ export function PreviewImportDialog() {
     <Dialog open={open} onOpenChange={(next) => !next && close()}>
       <DialogContent
         id="modal"
+        // Opened from menus: the menu returning focus to its trigger must not dismiss it (a click outside or
+        // Escape still does).
+        onFocusOutside={(event) => event.preventDefault()}
         className="max-h-(--spacing-dialog-max) max-w-6xl overflow-y-auto sm:max-w-6xl"
         showCloseButton={false}
         onOpenAutoFocus={(event) => {

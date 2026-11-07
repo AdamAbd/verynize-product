@@ -13,9 +13,15 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
-type Request = { title: string; value: string; resolve: (value: string | null) => void };
+type Request = {
+  id: number;
+  title: string;
+  value: string;
+  resolve: (value: string | null) => void;
+};
 
 let current: Request | null = null;
+let asked = 0;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
 const subscribe = (listener: () => void) => {
@@ -26,7 +32,7 @@ const subscribe = (listener: () => void) => {
 function askText(title: string, value = ""): Promise<string | null> {
   if (current) return Promise.resolve(null);
   return new Promise((resolve) => {
-    current = { title: String(title), value: String(value ?? ""), resolve };
+    current = { id: ++asked, title: String(title), value: String(value ?? ""), resolve };
     emit();
   });
 }
@@ -51,9 +57,14 @@ export function TextPrompt() {
   const input = useRef<HTMLInputElement>(null);
 
   return (
-    <Dialog open={!!request} onOpenChange={(open) => !open && settle(null)}>
+    // One Dialog per prompt: a prompt asked while the previous one is still animating closed gets a fresh dialog
+    // instead of reopening (and being closed by) the exiting one.
+    <Dialog key={request?.id ?? 0} open={!!request} onOpenChange={(open) => !open && settle(null)}>
       <DialogContent
         id="text-prompt"
+        // Opened from menus: the menu returning focus to its trigger must not dismiss it (a click outside or
+        // Escape still does).
+        onFocusOutside={(event) => event.preventDefault()}
         className="max-w-sm sm:max-w-sm"
         showCloseButton={false}
         onOpenAutoFocus={(event) => {
@@ -82,7 +93,6 @@ export function TextPrompt() {
             ref={input}
             autoComplete="off"
             defaultValue={request?.value}
-            key={request?.title + "\0" + request?.value}
           />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => settle(null)}>

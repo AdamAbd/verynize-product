@@ -183,6 +183,9 @@ export function FigmaDialog() {
     <Dialog open={open} onOpenChange={(next) => !next && close()}>
       <DialogContent
         id="figma-dialog"
+        // Opened from menus: the menu returning focus to its trigger must not dismiss it (a click outside or
+        // Escape still does).
+        onFocusOutside={(event) => event.preventDefault()}
         className="max-h-(--spacing-dialog-max) overflow-y-auto"
         onOpenAutoFocus={(event) => {
           event.preventDefault();

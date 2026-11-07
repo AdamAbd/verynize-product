@@ -46,6 +46,9 @@ export function ViewsDialog() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         id="views-dialog"
+        // Opened from menus: the menu returning focus to its trigger must not dismiss it (a click outside or
+        // Escape still does).
+        onFocusOutside={(event) => event.preventDefault()}
         showCloseButton={false}
         className="max-w-md sm:max-w-md"
         onOpenAutoFocus={(event) => {
