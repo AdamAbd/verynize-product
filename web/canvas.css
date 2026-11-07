@@ -96,8 +96,11 @@
 html>body>main>#workspace.page-transparent{background-color:var(--page-checker-a);background-image:repeating-conic-gradient(var(--page-checker-b) 0% 25%,var(--page-checker-a) 0% 50%);background-size:12px 12px}
 /* A new empty text layer (Text tool, Wonder TX1) hugs nothing: keep one caret-wide line so the caret shows. */
 #canvas .layer[data-text-editing]:empty{min-width:1px;min-height:1lh}
-/* Offscreen artboards (web/canvas-render.js): the board's box stays, its contents skip style, layout and paint. */
-#canvas>.layer[data-culled]{content-visibility:hidden}
+/* Offscreen visual bounds (web/canvas-render.js): retain geometry, skip contents and the box's own paint. */
+#canvas > .layer[data-culled] {
+  content-visibility: hidden;
+  visibility: hidden;
+}
 /* Components (design/component-audit/README.md "Canvas"; Figma 02/09/25): a selected main or instance gets the
    component purple outline and handles (dashed for an instance), a selected slot the slot pink; their name labels
    take the same colour with a ❖ (main) or ◇ (instance) mark. An empty slot shows a "+" in its centre. --iz keeps

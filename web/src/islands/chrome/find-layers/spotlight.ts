@@ -19,6 +19,13 @@ export function spotlightResult(id: string) {
       return;
     }
     spotlight.hidden = false;
+    spotlight.toggleAttribute(
+      "data-fits",
+      bounds.left >= viewport.left &&
+        bounds.top >= viewport.top &&
+        bounds.right <= viewport.right &&
+        bounds.bottom <= viewport.bottom,
+    );
     spotlight.style.left = `${bounds.left - viewport.left}px`;
     spotlight.style.top = `${bounds.top - viewport.top}px`;
     spotlight.style.width = `${bounds.width}px`;

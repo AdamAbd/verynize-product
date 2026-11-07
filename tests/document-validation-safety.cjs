@@ -124,7 +124,9 @@ async function asyncWaits(dir) {
     await assert.rejects(
       // Keep the pending Promise reachable: an unreferenced one can be garbage collected before the
       // timeout, which Playwright reports as a different error.
-      waitForAsync(page, () => (window.__pendingWait = new Promise(() => {})), null, { timeout: 100 }),
+      waitForAsync(page, () => (window.__pendingWait = new Promise(() => {})), null, {
+        timeout: 100,
+      }),
       /timed out after 100ms/,
     );
     await assert.rejects(
@@ -164,8 +166,22 @@ async function repairable(dir) {
       saved.repairs.map((r) => r.path),
       ["pages[0].nodes[0].x", "pages[0].nodes[1].name"],
     );
-    await page.click("#document-notices .document-notice-dismiss");
-    assert.equal((await notices(page)).length, 0, "the notice is dismissable");
+    await page.click('#document-notices [data-kind="repaired"] .document-notice-dismiss');
+    assert.equal(
+      (await notices(page)).filter((n) => n.kind === "repaired").length,
+      0,
+      "the repair notice is dismissable",
+    );
+    await waitNotice(page, "advisory");
+    await page.evaluate(() =>
+      window.design.updateNodes(["kept"], { name: "Saved alongside overflow" }),
+    );
+    await settle(page);
+    assert.equal(
+      JSON.parse(await stored(page, "verynize-v2")).pages[0].nodes[2].name,
+      "Saved alongside overflow",
+      "out-of-range documents still save",
+    );
     assert.deepEqual(errors, []);
   } finally {
     await app.close();
@@ -353,7 +369,9 @@ async function native(dir, work) {
   try {
     const dir = (name) => path.join(root, name);
     await asyncWaits(dir("async"));
-    console.log("ok async wait retries false, awaits Promise, supports Frame, times out and propagates errors");
+    console.log(
+      "ok async wait retries false, awaits Promise, supports Frame, times out and propagates errors",
+    );
     await repairable(dir("a"));
     console.log("ok repairable legacy document loads repaired, announced and backed up");
     await unrepairable(dir("b"));

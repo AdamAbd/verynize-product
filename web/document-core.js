@@ -27,6 +27,124 @@
     pageName === undefined
       ? `Document has ${count} nodes; limit is ${limit}. Split the design into multiple documents.`
       : `Page "${pageName}" has ${count} nodes; limit is ${limit}. Split the page into multiple pages or documents.`;
+  const WORLD_COORDINATE_LIMIT = 1e6;
+  // Product policy, not a browser canvas-size limit.
+  const WORLD_ADVISORY_LIMIT = 100000;
+  /** Stored layout boxes in world space, including ancestor rotations/flips. Hidden and clipped
+   * descendants count too: hiding content must not bypass the guardrail. CSS effects are not geometry.
+   * Iterative traversal handles deep trees without exhausting the JS stack. */
+  function pageWorldBounds(page, measuredRects) {
+    const byId = new Map(page.nodes.map((n) => [n.id, n]));
+    const transforms = new Map(),
+      rects = new Map();
+    let bounds = null;
+    for (const node of page.nodes) {
+      const chain = [],
+        seen = new Set();
+      let current = node;
+      while (current && !transforms.has(current.id)) {
+        if (seen.has(current.id)) throw new Error("Parent cycle");
+        seen.add(current.id);
+        chain.push(current);
+        if (current.parentId && !byId.has(current.parentId))
+          throw new Error("Parent must reference a frame on the same page");
+        current = current.parentId ? byId.get(current.parentId) : null;
+      }
+      while (chain.length) {
+        const n = chain.pop();
+        const p = transforms.get(n.parentId) || [1, 0, 0, 1, 0, 0];
+        const angle = ((n.rotation || 0) * Math.PI) / 180;
+        const cos = Math.cos(angle),
+          sin = Math.sin(angle);
+        const sx = n.flipX ? -1 : 1,
+          sy = n.flipY ? -1 : 1;
+        const a = cos * sx,
+          b = sin * sx,
+          c = -sin * sy,
+          d = cos * sy;
+        const parent = byId.get(n.parentId);
+        const borders = [0, 1, 2, 3].map((side) =>
+          parent?.layout !== "free" || parent?.strokeHidden || parent?.strokeHiddenSides?.[side]
+            ? 0
+            : (parent?.strokeWidths?.[side] ?? parent?.strokeWidth ?? 0),
+        );
+        const tx = n.x + borders[3] + n.w / 2 - (a * n.w) / 2 - (c * n.h) / 2;
+        const ty = n.y + borders[0] + n.h / 2 - (b * n.w) / 2 - (d * n.h) / 2;
+        const t = [
+          p[0] * a + p[2] * b,
+          p[1] * a + p[3] * b,
+          p[0] * c + p[2] * d,
+          p[1] * c + p[3] * d,
+          p[0] * tx + p[2] * ty + p[4],
+          p[1] * tx + p[3] * ty + p[5],
+        ];
+        transforms.set(n.id, t);
+        const points = [
+          [0, 0],
+          [n.w, 0],
+          [0, n.h],
+          [n.w, n.h],
+        ].map(([x, y]) => [t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5]]);
+        const measured = measuredRects?.get(n.id);
+        const x = measured?.x ?? Math.min(...points.map((p) => p[0])),
+          y = measured?.y ?? Math.min(...points.map((p) => p[1]));
+        const right = measured ? measured.x + measured.w : Math.max(...points.map((p) => p[0])),
+          bottom = measured ? measured.y + measured.h : Math.max(...points.map((p) => p[1]));
+        const rect = { x, y, w: right - x, h: bottom - y };
+        rects.set(n.id, rect);
+        bounds = bounds
+          ? {
+              x: Math.min(bounds.x, x),
+              y: Math.min(bounds.y, y),
+              right: Math.max(bounds.right, right),
+              bottom: Math.max(bounds.bottom, bottom),
+            }
+          : { x, y, right, bottom };
+      }
+    }
+    const exceeds = (limit) =>
+      bounds !== null &&
+      [bounds.x, bounds.y, bounds.right, bounds.bottom].some(
+        (v) => !Number.isFinite(v) || Math.abs(v) > limit + 1e-7,
+      );
+    return {
+      rects,
+      bounds: bounds && {
+        x: bounds.x,
+        y: bounds.y,
+        w: bounds.right - bounds.x,
+        h: bounds.bottom - bounds.y,
+      },
+      outOfRange: exceeds(WORLD_COORDINATE_LIMIT),
+      advisory: exceeds(WORLD_ADVISORY_LIMIT),
+    };
+  }
+  function validateWorldBounds(page, measuredRects) {
+    if (pageWorldBounds(page, measuredRects).outOfRange)
+      throw new Error(
+        `Page "${page.name}" exceeds world bounds ±${WORLD_COORDINATE_LIMIT}. Move content closer to the origin.`,
+      );
+  }
+  // Compare the farthest world edge, so existing overflow can shrink (including recentering).
+  // Loading/validating a document is deliberately independent of this edit policy.
+  function validateWorldBoundsChange(before, after) {
+    const previous = new Map(before.pages.map((p) => [p.id, p]));
+    const extent = (page) => {
+      const b = page && pageWorldBounds(page).bounds;
+      return b
+        ? Math.max(WORLD_COORDINATE_LIMIT, -b.x, -b.y, b.x + b.w, b.y + b.h)
+        : WORLD_COORDINATE_LIMIT;
+    };
+    for (const page of after.pages) {
+      const old = extent(previous.get(page.id));
+      const next = extent(page);
+      if (!Number.isFinite(next) || next > old + 1e-7)
+        throw new Error(
+          `Page "${page.name}" exceeds world bounds ±${WORLD_COORDINATE_LIMIT}. Move content closer to the origin.`,
+        );
+    }
+    return after;
+  }
   const IMAGE_FILL_TYPES = Object.freeze(["frame", "rectangle"]);
   const NODE_TYPES = ["rectangle", "text", "frame", "image", "shader", "vector"];
   const LAYOUTS = ["free", "flex", "grid", "block", "inline"];
@@ -548,7 +666,7 @@
         ids.has(view.id) ||
         !document.pages.some((p) => p.id === view.page) ||
         !Number.isFinite(view.zoom) ||
-        view.zoom < 0.05 ||
+        view.zoom < 0.02 ||
         view.zoom > 32 ||
         !["scrollLeft", "scrollTop"].every(
           (k) => Number.isFinite(view[k]) && view[k] >= 0 && view[k] <= 1e7,
@@ -649,8 +767,7 @@
   // Load-time repairs (normalizeDocument with a `repairs` array): documents saved before the shared schema may
   // break limits the canvas did not enforce. These repairs keep everything else intact and are each recorded as
   // {path, before, after}; ids and token names are never rewritten (other files, rooms and chats refer to them).
-  const MAX_COORDINATE = 1e6,
-    MAX_NAME = 200,
+  const MAX_NAME = 200,
     MAX_STRING = 4000;
   /** At most `max` UTF-16 units, without splitting a surrogate pair. */
   function truncate(value, max) {
@@ -673,8 +790,8 @@
     if (lossy) {
       for (const key of ["x", "y", "w", "h"]) {
         const value = n[key];
-        if (Number.isFinite(value) && Math.abs(value) > MAX_COORDINATE) {
-          n[key] = Math.sign(value) * MAX_COORDINATE;
+        if (Number.isFinite(value) && Math.abs(value) > WORLD_COORDINATE_LIMIT) {
+          n[key] = Math.sign(value) * WORLD_COORDINATE_LIMIT;
           record(`${path}.${key}`, value, n[key]);
         }
       }
@@ -819,6 +936,11 @@
 
   root.VerynizeDocument = {
     NODE_LIMITS,
+    WORLD_COORDINATE_LIMIT,
+    WORLD_ADVISORY_LIMIT,
+    pageWorldBounds,
+    validateWorldBounds,
+    validateWorldBoundsChange,
     nodeLimitMessage,
     validateDocument,
     normalizeDocument,

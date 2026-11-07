@@ -113,7 +113,17 @@
     document.body.append(stack);
     return stack;
   }
-  function notify({ key, kind, title, detail, items = [], text, name, onExport }) {
+  function notify({
+    key,
+    kind,
+    title,
+    detail,
+    items = [],
+    text = undefined,
+    name = undefined,
+    onExport = undefined,
+    action = undefined,
+  }) {
     if (dismissed.has(key)) return null;
     const add = () => {
       const stack = host();
@@ -152,6 +162,13 @@
       }
       const actions = document.createElement("div");
       actions.style.cssText = "display:flex;gap:8px;justify-content:flex-end";
+      if (action) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = action.label;
+        button.onclick = action.run;
+        actions.append(button);
+      }
       if (text) {
         const save = document.createElement("button");
         save.type = "button";
@@ -230,7 +247,8 @@
   function load(d) {
     const ctx = sources[sources.length - 1] || {},
       repairs = [];
-    if (ctx.source === "library" && window.switchCache?.isTrustedLocal(d)) return structuredClone(d);
+    if (ctx.source === "library" && window.switchCache?.isTrustedLocal(d))
+      return structuredClone(d);
     let prepared;
     try {
       prepared = core.prepareDocument(structuredClone(d), defaults, repairs);
@@ -307,6 +325,29 @@
   }
 
   window.documentSafety = {
+    editRejected(detail) {
+      notify({
+        key: "world-bounds-edit",
+        kind: "advisory",
+        title: "Edit exceeds world bounds",
+        detail,
+      });
+    },
+    worldBounds(page, recenter) {
+      const key = "world-bounds";
+      if (!core.pageWorldBounds(page).advisory) {
+        document.querySelector(`[data-key="${key}"]`)?.remove();
+        dismissed.delete(key);
+        return;
+      }
+      notify({
+        key,
+        kind: "advisory",
+        title: "Content is far from the origin",
+        detail: "This page extends beyond ±100,000 world px. Recenter it to keep editing precise.",
+        action: { label: "Recenter page", run: recenter },
+      });
+    },
     configure(canvasDefaults) {
       defaults = canvasDefaults;
     },

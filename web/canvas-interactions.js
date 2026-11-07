@@ -3,7 +3,7 @@
 // command/shortcut registry. Independent implementation; app.js passes its editor state in
 // through BetterCanvas.install(editor) so this file never reaches into private globals.
 (() => {
-  const ZOOM_STOPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32];
+  const ZOOM_STOPS = [0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32];
   const MIN_ZOOM = ZOOM_STOPS[0], MAX_ZOOM = ZOOM_STOPS.at(-1);
   const SAFE = {top: 48, right: 40, bottom: 96, left: 40};
   // Zoom to selection (⇧2) margins, measured in Wonder V3-selection (120×120 → 538 %: 64 px above and below inside the
@@ -513,6 +513,7 @@
 
     // ---------- Pointer: pan / move / resize / marquee / draw ----------
     function track(e, move, end) {
+      ed.beginGesture?.();
       const pointerId = e.pointerId, buttonMask = e.button === 1 ? 4 : e.button === 2 ? 2 : 1;
       let finished = false;
       const up = ev => {
@@ -521,7 +522,7 @@
         window.removeEventListener('pointermove', moving); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
         window.removeEventListener('blur', up); wrap.removeEventListener('lostpointercapture', up);
         try { if (wrap.hasPointerCapture(pointerId)) wrap.releasePointerCapture(pointerId); } catch {}
-        end?.(ev);
+        try { end?.(ev); } finally { ed.endGesture?.(); }
       };
       const moving = ev => { if (ev.pointerId !== pointerId) return; if (!(ev.buttons & buttonMask)) { up(ev); return; }
         if (Math.hypot(ev.clientX-e.clientX,ev.clientY-e.clientY)>3) { try { if(!wrap.hasPointerCapture(pointerId))wrap.setPointerCapture(pointerId); } catch {} }

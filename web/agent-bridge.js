@@ -109,7 +109,10 @@
       // Version history (web/version-history.js): the commit is an agent edit; a restore_version
       // commit stores the state it replaces first.
       const history = window.versionHistory;
-      const run = () => editor().setDocument(document);
+      const run = () => {
+        window.VerynizeDocument.validateWorldBoundsChange(editor().getDocument(), document);
+        editor().setDocument(document);
+      };
       if (history) history.as(actor?.kind === 'agent' ? actor : { kind: 'agent', name: actor?.name || 'Agent', restore: actor?.restore }, run, force === 'restore' && typeof artboardId === 'string' ? { force, artboardId, label } : null);
       else run();
       const after = editor().getDocument();

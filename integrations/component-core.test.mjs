@@ -831,5 +831,5 @@ test("the canvas loads the engine after the schema and before the editor scripts
     order,
   );
   const app = readFileSync(new URL("../web/app.js", import.meta.url), "utf8");
-  assert.match(app, /function render\(\)\{componentSync\.sync\(design\);/, "render() syncs first");
+  assert.match(app, /function render\(\)\{[^\n]*?componentSync\.sync\(design\);[^\n]*?canvasRender\.render\(\)/, "render() syncs components before drawing the canvas");
 });

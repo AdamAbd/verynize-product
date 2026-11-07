@@ -280,6 +280,7 @@ const canvas = [
   electron("tests/canvas-transform.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-interactions.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-incremental-render.cjs", "canvas", AREA.canvas),
+  electron("tests/canvas-loose-culling.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-drag-scale.cjs", "canvas", [
     ...AREA.canvas,
     "eval/canvas-perf/bench-verynize.cjs",
@@ -344,12 +345,14 @@ const canvas = [
   ]),
   electron("tests/canvas-layers-dnd.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-find-layers.cjs", "canvas", AREA.canvas),
+  electron("tests/canvas-find-background.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-help-shortcuts.cjs", "canvas", AREA.canvas, CLIP),
   electron("tests/canvas-wonder-marks.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-selection-marks.cjs", "canvas", AREA.canvas),
   electron("tests/canvas-frame-labels.cjs", "canvas", AREA.canvas),
   unit("tests/node-index.cjs", "canvas", ["web/node-index.js"]),
   electron("tests/canvas-text-caret.cjs", "canvas", AREA.canvas),
+  electron("tests/canvas-world-bounds.cjs", "canvas", [...AREA.canvas, "web/document-safety.js"]),
   electron("tests/canvas-page.cjs", "canvas", AREA.canvas),
   electron("tests/inspector-parity.cjs", "canvas", AREA.inspector, CLIP),
   electron(

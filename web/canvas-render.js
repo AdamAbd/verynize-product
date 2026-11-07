@@ -22,10 +22,8 @@
     "data-dragging",
     "data-culled",
   ]);
-  // Culling: grid cell size (world px), boards revealed per camera step during a gesture, settle delay (ms).
-  const CELL = 2048,
-    REVEAL = 6,
-    SETTLE_MS = 150;
+  // Culling grid cell size (world px).
+  const CELL = 2048;
   const PREVIEW = Symbol("preview");
 
   // Deep equality for the JSON-like values a node holds.
@@ -103,8 +101,8 @@
       boardOf = new Map(),
       redrawn = new Set();
     let view = null,
-      lastMove = 0,
-      settleTimer = 0,
+      cullFrame = 0,
+      active = new Set(),
       cameraMoved = false;
 
     // ---------- One layer (shared with export) ----------
@@ -365,20 +363,16 @@
           memos.delete(id);
           dirty.delete(id);
         }
-      index(topNodes);
+      index(topNodes, kids);
       cull();
       for (const el of starting) if (el.isConnected) stops.set(el, window.BetterShaders.mount(el));
       starting = [];
       observer.takeRecords(); // this render's own writes
     }
 
-    // ---------- Culling: offscreen artboards skip style, layout and paint ----------
-    // A top-level frame with a fixed size that clips its content, more than half a viewport outside the view, gets
-    // data-culled (content-visibility: hidden, web/canvas.css). Its own box stays laid out and painted (frame labels,
-    // fit, marquee); its subtree costs nothing, and layout queries inside it still answer (laid out on demand).
-    // Boards are hidden at once. During a camera gesture at most REVEAL boards come back per camera step, nearest
-    // first (the board's own fill shows meanwhile), and all of them once the camera settles or the document renders.
-    // localStorage 'verynize.canvas-cull' = 'off' turns culling off.
+    // ---------- Culling: retained top-level DOM, conservative visual bounds ----------
+    // Bounds are rebuilt at render, never measured during a camera gesture. Unknown layout/effects
+    // stay visible. Export builds fresh trees without data-culled; geometry and model indexes remain.
     function culling() {
       try {
         return localStorage.getItem("verynize.canvas-cull") !== "off";
@@ -389,8 +383,7 @@
     function cullable(n) {
       const S = NS();
       return (
-        n.type === "frame" &&
-        n.clipContent === true &&
+        ["rectangle", "text", "image", "shader", "frame"].includes(n.type) &&
         !n.preview &&
         !n.hidden &&
         S.sizingMode(n, "w", null) === "fixed" &&
@@ -399,41 +392,124 @@
         n.hPct === undefined &&
         n.minW == null &&
         n.minH == null &&
+        n.maxW == null &&
+        n.maxH == null &&
+        !n.shadow &&
+        !n.constraints &&
+        !n.inset?.some((v) => v != null) &&
+        !n.translate?.some((v) => v) &&
+        !n.filters?.some((f) => f.hidden !== true) &&
         !(Number(n.aspectRatio) > 0)
       );
     }
-    // World bounds of a top-level box (rotated about its centre).
-    function bounds(n) {
+    // Return a box in parent coordinates, including free children and effects. Flow/constraint
+    // overflow and legacy CSS shadows are deliberately unbounded, rather than guessed.
+    function bounds(n, kids) {
+      if (!cullable(n)) return null;
       const w = Number(n.w) || 0,
-        h = Number(n.h) || 0,
-        a = ((Number(n.rotation) || 0) * Math.PI) / 180,
-        c = Math.abs(Math.cos(a)),
-        s = Math.abs(Math.sin(a));
-      const rw = w * c + h * s,
-        rh = w * s + h * c,
-        cx = (Number(n.x) || 0) + w / 2,
-        cy = (Number(n.y) || 0) + h / 2;
-      return { x0: cx - rw / 2, y0: cy - rh / 2, x1: cx + rw / 2, y1: cy + rh / 2 };
+        h = Number(n.h) || 0;
+      let x0 = 0,
+        y0 = 0,
+        x1 = w,
+        y1 = h;
+      if (!n.clipContent) {
+        if (n.type === "text" && !n.truncate && !n.lineClamp) {
+          const el = els.get(n.id);
+          // Batched render-time reads; scroll dimensions include wrapping/overlong runs. Extra
+          // ems cover glyph overhang on each side (including italic and decorated runs).
+          const em = Math.max(
+            Number(n.fontSize) || 16,
+            ...(n.textRuns || []).map((r) => Number(r.fontSize) || 0),
+          );
+          const tw = Math.max(w, el.scrollWidth),
+            th = Math.max(h, el.scrollHeight);
+          const overhang =
+            em * 2 +
+            Math.abs(Number(n.textIndent) || 0) +
+            Math.max(0, -(Number(n.letterSpacing) || 0)) * String(n.text || "").length;
+          x0 = Math.min(0, w - tw) - overhang;
+          y0 = Math.min(0, h - th) - em * 2;
+          x1 = tw + overhang;
+          y1 = th + em * 2;
+        }
+        const children = kids.get(n.id) || [];
+        if (children.length && n.layout !== "free") return null;
+        for (const child of children) {
+          if (child.hidden) continue;
+          const b = bounds(child, kids);
+          if (!b) return null;
+          // Borders alter the child origin; free-layout CSS ignores model padding.
+          if (n.strokeWidth && !n.strokeHidden) return null;
+          x0 = Math.min(x0, b.x0);
+          y0 = Math.min(y0, b.y0);
+          x1 = Math.max(x1, b.x1);
+          y1 = Math.max(y1, b.y1);
+        }
+      }
+      let pad =
+        Math.max(0, Number(n.outlineWidth) || 0) + Math.max(0, Number(n.outlineOffset) || 0);
+      for (const shadow of n.shadows || []) {
+        if (shadow.hidden || shadow.inset) continue;
+        // Sum, rather than max: sequential drop-shadows can expand previous shadows.
+        pad +=
+          Math.abs(Number(shadow.x) || 0) +
+          Math.abs(Number(shadow.y) || 0) +
+          4 * Math.max(0, Number(shadow.blur) || 0) +
+          Math.abs(Number(shadow.spread) || 0);
+      }
+      pad += Math.max(0, Number(n.strokeWidth) || 0);
+      x0 -= pad;
+      y0 -= pad;
+      x1 += pad;
+      y1 += pad;
+      const a = ((Number(n.rotation) || 0) * Math.PI) / 180,
+        c = Math.cos(a),
+        s = Math.sin(a),
+        fx = n.flipX ? -1 : 1,
+        fy = n.flipY ? -1 : 1;
+      const points = [
+        [x0, y0],
+        [x1, y0],
+        [x0, y1],
+        [x1, y1],
+      ].map(([x, y]) => {
+        x = (x - w / 2) * fx;
+        y = (y - h / 2) * fy;
+        return [n.x + w / 2 + x * c - y * s, n.y + h / 2 + x * s + y * c];
+      });
+      return {
+        x0: Math.min(...points.map((p) => p[0])),
+        y0: Math.min(...points.map((p) => p[1])),
+        x1: Math.max(...points.map((p) => p[0])),
+        y1: Math.max(...points.map((p) => p[1])),
+      };
     }
     const cells = (b, fn) => {
       for (let gx = Math.floor(b.x0 / CELL); gx <= Math.floor(b.x1 / CELL); gx++)
         for (let gy = Math.floor(b.y0 / CELL); gy <= Math.floor(b.y1 / CELL); gy++)
           fn(gx + "," + gy);
     };
-    function index(topNodes) {
+    function index(topNodes, kids) {
       boards = new Map();
       grid = new Map();
       wide = [];
+      const unbounded = [];
       for (const n of topNodes) {
         const el = els.get(n.id);
         if (!el) continue;
-        if (!cullable(n)) {
-          if (el.hasAttribute("data-culled")) el.removeAttribute("data-culled");
+        const box = bounds(n, kids);
+        if (!box) {
+          unbounded.push(el);
           continue;
         }
-        const b = { el, ...bounds(n) };
+        const b = { ...box, el };
         boards.set(n.id, b);
-        if ((b.x1 - b.x0) * (b.y1 - b.y0) > 64 * CELL * CELL) wide.push(n.id);
+        if (
+          (Math.floor(b.x1 / CELL) - Math.floor(b.x0 / CELL) + 1) *
+            (Math.floor(b.y1 / CELL) - Math.floor(b.y0 / CELL) + 1) >
+          64
+        )
+          wide.push(n.id);
         else
           cells(b, (key) => {
             const list = grid.get(key);
@@ -441,12 +517,14 @@
             else grid.set(key, [n.id]);
           });
       }
+      for (const el of unbounded) el.removeAttribute("data-culled");
       shown = new Set(
         [...boards].filter(([, b]) => !b.el.hasAttribute("data-culled")).map(([id]) => id),
       );
     }
-    function cull(budget = Infinity) {
-      clearTimeout(settleTimer);
+    function cull() {
+      cancelAnimationFrame(cullFrame);
+      cullFrame = 0;
       cameraMoved = false;
       if (!view) {
         const r = canvas.parentElement?.getBoundingClientRect();
@@ -468,36 +546,39 @@
           const b = boards.get(id);
           if (b.x1 >= v.x0 && b.x0 <= v.x1 && b.y1 >= v.y0 && b.y0 <= v.y1) near.add(id);
         };
-        cells(v, (key) => grid.get(key)?.forEach(test));
+        // At overview zoom, scanning occupied candidates beats enumerating an enormous empty grid.
+        if (((v.x1 - v.x0) * (v.y1 - v.y0)) / (CELL * CELL) > grid.size)
+          boards.forEach((_, id) => test(id));
+        else cells(v, (key) => grid.get(key)?.forEach(test));
         wide.forEach(test);
+      }
+      for (const id of active) {
+        const el = els.get(id);
+        if (
+          !el?.hasAttribute("data-dragging") &&
+          !el?.hasAttribute("data-text-editing") &&
+          !el?.isContentEditable
+        )
+          active.delete(id);
+      }
+      for (const id of [...ed.getSelection(), ...active, ...dirty]) {
+        const top = boardOf.get(id);
+        if (boards.has(top)) near.add(top);
       }
       for (const id of shown)
         if (!near.has(id)) {
           boards.get(id).el.setAttribute("data-culled", "");
           shown.delete(id);
         }
-      let reveal = [...near].filter((id) => !shown.has(id));
-      if (reveal.length > budget) {
-        const cx = -cam.x / z + view.w / z / 2,
-          cy = -cam.y / z + view.h / z / 2;
-        const d = (id) => {
-          const b = boards.get(id);
-          return Math.hypot((b.x0 + b.x1) / 2 - cx, (b.y0 + b.y1) / 2 - cy);
-        };
-        reveal = reveal.sort((a, b) => d(a) - d(b)).slice(0, budget);
-        settleTimer = setTimeout(() => cull(), SETTLE_MS);
-      }
+      const reveal = [...near].filter((id) => !shown.has(id));
       for (const id of reveal) {
         boards.get(id).el.removeAttribute("data-culled");
         shown.add(id);
       }
     }
-    // A camera step (the transform written on #canvas): steps closer than 100 ms apart are a gesture.
+    // Coalesce all camera/interaction mutations into one read-free write batch before paint.
     function moved() {
-      const now = performance.now(),
-        gesture = now - lastMove < 100;
-      lastMove = now;
-      cull(gesture ? REVEAL : Infinity);
+      if (!cullFrame) cullFrame = requestAnimationFrame(() => cull());
     }
     if (typeof ResizeObserver === "function" && canvas.parentElement)
       new ResizeObserver(([entry]) => {
@@ -520,11 +601,30 @@
         }
         if (
           r.type === "attributes" &&
+          ["data-dragging", "data-text-editing", "contenteditable"].includes(r.attributeName)
+        ) {
+          const id = layerOf(r.target);
+          if (id !== undefined) {
+            if (
+              r.target.hasAttribute("data-dragging") ||
+              r.target.hasAttribute("data-text-editing") ||
+              r.target.isContentEditable
+            )
+              active.add(id);
+            else active.delete(id);
+            cameraMoved = true;
+          }
+        }
+        if (
+          r.type === "attributes" &&
           (KEPT_ATTRIBUTES.has(r.attributeName) || r.target.classList.contains("shader-surface"))
         )
           continue;
         const id = layerOf(r.target);
-        if (id !== undefined) dirty.add(id);
+        if (id !== undefined) {
+          dirty.add(id);
+          cameraMoved = true;
+        }
       }
     }
     const observer = new MutationObserver((records) => {
@@ -548,6 +648,8 @@
     window.addEventListener("app-preferences-changed", () => {
       for (const id of memos.keys()) dirty.add(id);
     });
+
+    document.fonts?.addEventListener("loadingdone", () => render());
 
     return {
       render,

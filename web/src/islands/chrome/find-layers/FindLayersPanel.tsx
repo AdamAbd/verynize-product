@@ -26,7 +26,7 @@ function frameResult(id: string, panel: HTMLDivElement | null) {
   const availableWidth = Math.max(40, right - viewport.left - 64);
   const availableHeight = Math.max(40, viewport.height - 128);
   const zoom = Math.max(
-    0.05,
+    0.02,
     Math.min(1, availableWidth / Math.max(1, width), availableHeight / Math.max(1, height)),
   );
   design().setCamera(

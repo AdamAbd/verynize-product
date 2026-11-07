@@ -40,7 +40,8 @@ export function applyOperations(document, operations) {
   }
   for(const page of d.pages)for(const node of page.nodes)if(node.fontWeight!==undefined)node.fontWeight=String(node.fontWeight);
   syncComponents(document,d); // instances follow their mains (web/component-core.js)
-  return validateDocument(d);
+  validateDocument(d);
+  return core.validateWorldBoundsChange(document,d);
 }
 const revision = bytes => createHash('sha256').update(bytes).digest('hex');
 export class DesignStore {

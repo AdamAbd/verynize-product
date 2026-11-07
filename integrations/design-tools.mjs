@@ -1,7 +1,7 @@
 import { attachToolHints } from './tool-hints.mjs';
 import { replaceInElement } from './replace-in-element.mjs';
 import { IMAGE_PROVIDERS } from "./image-provider.mjs";
-import { IMAGE_FILL_TYPES } from "./document-core.mjs";
+import { IMAGE_FILL_TYPES, validateWorldBoundsChange } from "./document-core.mjs";
 // One definition of the Verynize MCP tool set, shared by the stdio server
 // (integrations/mcp-server.mjs) and the desktop app's loopback HTTP bridge
 // (desktop/mcp-bridge.cjs), so both expose identical names, schemas and behavior.
@@ -319,9 +319,19 @@ function pendingAssets(document) {
   return out;
 }
 
+// Preserve backend identity: image jobs and verification receipts are keyed by it.
+function boundsTransaction(backend, ref, fn, options) {
+  return backend.transact(ref, (document, meta) => {
+    const before = clone(document);
+    const out = fn(document, meta);
+    validateWorldBoundsChange(before, out.document);
+    return out;
+  }, options);
+}
+
 async function retryAssetTransaction(backend, ref, fn) {
   for (let attempt = 0; ; attempt++) {
-    try { return await backend.transact(ref, fn); }
+    try { return await boundsTransaction(backend, ref, fn); }
     catch (error) {
       if (!/locked|conflict/i.test(error.message) || attempt >= 8) throw error;
       await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
@@ -436,7 +446,7 @@ function ignoreLayout(before, after) {
  */
 async function writeAs(backend, ref, fn, options) {
   let pending = [], committed = null;
-  const out = await backend.transact(ref, (document, meta) => {
+  const out = await boundsTransaction(backend, ref, (document, meta) => {
     ensureShortIds(document);
     const before = hasComponents(document) ? clone(document) : null;
     const result = fn(document, meta);
@@ -1062,7 +1072,7 @@ export function toolTable(backend, context = {}) {
     description: 'Low-level fallback: atomically apply page/node/token operations to the raw document. Requires the revision from read_document; a failed batch changes nothing. Node ids here are the long internal ids. Nodes accept the full codec model: per-side padding (paddingTop/Right/Bottom/Left), gapX/gapY, cornerRadii, strokeWidths, wMode/hMode (fixed|hug|fill|auto|calc, calc with wCalc/hCalc expressions), wPct/hPct, min/max sizes, margin, position + inset + translate, flex item fields and text fields; legacy numeric padding/gap/radius still work. Prefer create_artboard/update_elements.',
     inputSchema: { name: documentArg, revision: z.string().regex(/^[a-f0-9]{64}$/), operations },
     run: async ({ name, revision, operations: ops }) => {
-      const out = await backend.transact(name, (document, meta) => { if (meta.revision !== revision) throw new Error('Revision conflict; read the document again before editing'); const next = applyOperations(document, ops); ensureShortIds(next); return { document: next, result: null }; });
+      const out = await boundsTransaction(backend, name, (document, meta) => { if (meta.revision !== revision) throw new Error('Revision conflict; read the document again before editing'); const next = applyOperations(document, ops); ensureShortIds(next); return { document: next, result: null }; });
       sessionFor(backend).receipts.invalidate(docKey(out.name, name));
       const state = await backend.read(name);
       return { document: state.document, revision: out.revision, live: out.live };
@@ -1302,7 +1312,7 @@ export function createStoreBackend(store, { screenshot, defaultName, fetchImage,
       let saved, before;
       for (let attempt = 0; ; attempt++) {
         try {
-          saved = await store.mutate(name, async () => { const current = await store.read(name); before = current.document; const out = fn(clone(current.document), { revision: current.revision }); result = out.result; return out.document; });
+          saved = await store.mutate(name, async () => { const current = await store.read(name); before = current.document; const out = fn(clone(current.document), { revision: current.revision }); validateWorldBoundsChange(before, out.document); result = out.result; return out.document; });
           break;
         } catch (error) {
           if (!/Document is locked/.test(error.message) || attempt >= 40) throw error;
