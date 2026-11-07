@@ -8,6 +8,8 @@ import { startPreferenceRuntime } from "./settings/preference-runtime";
 import { SettingsScreen } from "./settings/SettingsScreen";
 import { GlobalSearchDialog } from "./settings/projects";
 import { DialogEnhancer, ExportToasts } from "./settings/dialogs";
+import { TextPrompt } from "./settings/text-prompt";
+import { PreviewImportDialog } from "./settings/preview-import";
 import "./settings/settings.css";
 
 function Island() {
@@ -16,6 +18,8 @@ function Island() {
       {/* On the web, Start's settings route renders the screen (settings/route-area.tsx). */}
       {!hosted && <SettingsScreen />}
       <GlobalSearchDialog />
+      <TextPrompt />
+      <PreviewImportDialog />
       <DialogEnhancer />
       <ExportToasts />
       <Toaster position="bottom-right" offset={16} visibleToasts={3} />

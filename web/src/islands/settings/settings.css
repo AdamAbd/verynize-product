@@ -44,7 +44,15 @@ html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-p
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)::backdrop {
+html
+  :is(
+    #cloud-dialog,
+    #templates-dialog,
+    #views-dialog,
+    #figma-dialog,
+    #text-prompt,
+    #modal
+  )::backdrop {
   background: rgb(0 0 0 / 0.5);
 }
 html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) * {
@@ -53,7 +61,7 @@ html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-p
 
 /* Header: 13px title + 24px icon close button. */
 html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog) > header,
-html #modal > .dialog-head {
+html #modal > header {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -92,7 +100,9 @@ html #templates-dialog h2 {
   line-height: 24px;
 }
 
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close {
+html
+  :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
+  button.bd-dialog-close {
   flex: none;
   display: inline-grid;
   place-items: center;
@@ -109,7 +119,9 @@ html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-p
   overflow: hidden;
   cursor: default;
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close::before {
+html
+  :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
+  button.bd-dialog-close::before {
   content: "";
   width: 14px;
   height: 14px;
@@ -119,10 +131,14 @@ html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-p
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M18 6 6 18M6 6l12 12'/%3E%3C/svg%3E")
     center / contain no-repeat;
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close:hover {
+html
+  :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
+  button.bd-dialog-close:hover {
   background: var(--muted);
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal) button.bd-dialog-close:hover::before {
+html
+  :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
+  button.bd-dialog-close:hover::before {
   background: var(--foreground);
 }
 
@@ -143,7 +159,8 @@ html :is(#cloud-dialog, #figma-dialog, #text-prompt) label {
   font-size: 12px;
   line-height: 16px;
 }
-html :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal)
+html
+  :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal)
   :is(input:not([type="checkbox"], [type="file"]), select, textarea):not(.project-agent *) {
   display: block;
   width: 100%;
@@ -170,18 +187,21 @@ html :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal) select:not(.project
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8a8a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
     right 6px center / 14px no-repeat;
 }
-html :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal)
+html
+  :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal)
   :is(input, select, textarea)::placeholder {
   color: var(--subtle-foreground);
 }
-html :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal)
+html
+  :is(#cloud-dialog, #figma-dialog, #text-prompt, #modal)
   :is(input, select, textarea):not(.project-agent *):focus-visible {
   border-color: var(--primary);
   outline: none;
 }
 
 /* Buttons: 28px secondary, purple primary. */
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
+html
+  :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   button:not(.bd-dialog-close, .template-card, .view-name, .project-agent *) {
   display: inline-flex;
   align-items: center;
@@ -198,25 +218,30 @@ html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-p
   white-space: nowrap;
   cursor: default;
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
+html
+  :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   button:not(.bd-dialog-close, .template-card, .view-name, .project-agent *):hover {
   background: var(--accent);
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
+html
+  :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   button.bd-primary:not(.project-agent *) {
   background: var(--primary);
   color: var(--primary-foreground);
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
+html
+  :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   button.bd-primary:not(.project-agent *):hover {
   background: var(--primary-hover);
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
+html
+  :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   button:not(.project-agent *):disabled {
   opacity: 0.4;
   pointer-events: none;
 }
-html :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
+html
+  :is(#cloud-dialog, #templates-dialog, #views-dialog, #figma-dialog, #text-prompt, #modal)
   :is(button, a, input, select, textarea):not(.project-agent *):focus-visible {
   outline: 1px solid var(--ring);
   outline-offset: 1px;
@@ -444,21 +469,26 @@ html #saved-view-list button:not(.view-name):hover {
 html #modal {
   width: min(1100px, calc(100vw - 48px));
 }
-html #modal > .dialog-head select#preview-width {
+html #modal > header select#preview-width {
   width: auto;
   min-width: 160px;
   margin-left: auto;
 }
-html #modal > .dialog-head #modal-title {
+html #modal > header #modal-title {
   flex: none;
 }
 html #modal #source {
   height: 340px;
   margin: 0 0 12px;
-  font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    12px/18px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
 }
 html #modal #frame {
   display: block;
+  width: var(--preview-width, 100%);
   margin: 0 auto;
   max-width: 100%;
   border: 1px solid var(--card-border);

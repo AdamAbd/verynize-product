@@ -30,6 +30,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   launchBrowser,
+  openStarterFile,
   screenshot,
   signedInContext as signedInBrowserContext,
 } from "./helpers/web-app.mjs";
@@ -187,10 +188,8 @@ try {
       );
     };
     await signInWithPassword(page);
-    assert.equal(
-      new URL(page.url()).pathname,
-      await page.evaluate(() => "/editor/" + encodeURIComponent(window.fileLibrary.currentId)),
-    );
+    // A new account has no file and none is made for it: the editor URL lands on Files.
+    await page.waitForFunction(() => location.pathname === "/" && !window.fileLibrary.currentId);
 
     // First sign-in of the account: the AI setup steps, OpenRouter not connected yet, Claude Code / Codex desktop-only.
     const setup = page.locator("#onboarding[data-step='ai']");
@@ -290,6 +289,8 @@ try {
   page.on("dialog", (dialog) => dialog.accept());
   await page.goto(origin + "/editor");
   await ready(page);
+  // A design to chat about: the user makes one (stored as a database room); none is made on its own.
+  await openStarterFile(page);
   const gateState = (state) =>
     page.waitForFunction(
       (wanted) => document.getElementById("chat-web-gate")?.dataset.state === wanted,

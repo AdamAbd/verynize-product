@@ -27,6 +27,12 @@
 
   const projectToggle=$('project-toggle');if(projectToggle){setIcon('project-toggle','folder-open','Project workspace');document.querySelector('.chrome-divider').after(projectToggle);}
   const stateKey='verynize-library-v1';let library={files:[],folders:[],active:null};try{const data=JSON.parse(localStorage.getItem(stateKey));if(data&&Array.isArray(data.files)&&Array.isArray(data.folders))library=data;}catch{}
+  // A profile gets its starter file once: the first run's document, signed out. Profiles that already had files count as seeded.
+  if(library.files.length)library.seeded=true;
+  // The edit count (window.design.editCount) when the document shown was last a library file, or was reset (launch, the
+  // account reset below). A document that is no file (startup placeholder, deleted or unavailable open file) becomes
+  // one only after a later edit, never on its own (signed in, that would also create a cloud room).
+  let filedEdits=window.design.editCount?.()??0;
   const legacyIds=new Set(library.files.map(file=>file.id));
   const lastSerialized=new Map();library.files.forEach(file=>delete file.serialized);
   // Entries whose stored document does not load (web/document-safety.js): kept and marked, never overwritten by sync.
@@ -43,7 +49,10 @@
   const refs={files:home.querySelector('#library-files'),search:home.querySelector('#library-search'),crumb:home.querySelector('#folder-breadcrumb'),profile:home.querySelector('#workspace-profile'),filters:[...home.querySelectorAll('[data-filter]')]};
   const canSee=file=>!file.cloud?.accountId||window.cloudAccount?.get()?.account.id===file.cloud.accountId;
   const current=()=>library.files.find(f=>f.id===library.active);
-  function sync(document){const selectedId=window.document.querySelector('#canvas .layer.selected')?.dataset.id,selected=document.pages.find(p=>p.id===document.activePage)?.nodes.find(n=>n.id===selectedId);inspector.dataset.kind=selected?.type||'';if(typography)typography.open=selected?.type==='text';title.textContent=document.name||'Untitled';if(saving||window.documentSafety.startupPending(window.design.canUndo()))return;let file=current();if(file?.remoteOnly){if(!window.cloudWorkspace?.isConnected())return;delete file.remoteOnly;}if(file&&blocked.has(file.id))file=null;if(!file){file={id:uid(),name:document.name,document,updated:Date.now(),folder:null,archived:false};library.files.push(file);library.active=file.id;}const serialized=JSON.stringify(document);if(lastSerialized.get(file.id)===serialized)return;file.name=document.name;file.document=structuredClone(document);window.switchCache.trustLocal(file.document);lastSerialized.set(file.id,serialized);file.updated=Date.now();persist();if(!file.cloud&&window.cloudAccount?.get())queueMicrotask(()=>window.cloudWorkspace?.storeFile?.(file.id).catch(error=>notify(error.message)));if(homeOpen)renderFiles();}
+  // Whether the document the editor shows, which is no library file, becomes one now: after a user edit in the editor, or
+  // as a signed-out profile's first starter file (not when the page opens a shared room link).
+  function mayFile(){const edits=window.design.editCount?.()??0;if(homeOpen||window.document.body.classList.contains('files-view'))return false;if(!library.seeded&&!library.files.length&&!window.cloudAccount?.get()&&!/^#(?:room|public)=/.test(location.hash))return true;return edits>filedEdits;}
+  function sync(document){const selectedId=window.document.querySelector('#canvas .layer.selected')?.dataset.id,selected=document.pages.find(p=>p.id===document.activePage)?.nodes.find(n=>n.id===selectedId);inspector.dataset.kind=selected?.type||'';if(typography)typography.open=selected?.type==='text';title.textContent=document.name||'Untitled';if(saving||window.documentSafety.startupPending(window.design.canUndo()))return;let file=current();if(file?.remoteOnly){if(!window.cloudWorkspace?.isConnected())return;delete file.remoteOnly;}if(file&&blocked.has(file.id))file=null;if(!file){if(!mayFile())return;file={id:uid(),name:document.name,document,updated:Date.now(),folder:null,archived:false};library.files.push(file);library.active=file.id;library.seeded=true;}filedEdits=window.design.editCount?.()??0;const serialized=JSON.stringify(document);if(lastSerialized.get(file.id)===serialized)return;file.name=document.name;file.document=structuredClone(document);window.switchCache.trustLocal(file.document);lastSerialized.set(file.id,serialized);file.updated=Date.now();persist();if(!file.cloud&&window.cloudAccount?.get())queueMicrotask(()=>window.cloudWorkspace?.storeFile?.(file.id).catch(error=>notify(error.message)));if(homeOpen)renderFiles();}
   // showHome/showEditor request a route (web/shell-request.js); the shell router applies it with applyHome/applyEditor.
   function showHome(){window.shellRequest({view:'/'},applyHome);}
   function showEditor(){window.shellRequest({view:'/editor'},applyEditor);}
@@ -66,7 +75,7 @@
     library.files.push(file);return file;
   }
   function saveMetadata(file){if(file.cloud&&window.accountStore?.signedIn())window.accountStore.put('file:'+file.cloud.roomId,{folder:file.folder,archived:!!file.archived});}
-  window.addEventListener('cloud-account-changed',()=>{const file=current();if(file&&!canSee(file)){saving=true;try{library.active=null;window.design.setDocument({version:2,name:'Untitled',activePage:'empty',pages:[{id:'empty',name:'Page 1',nodes:[]}],tokens:{}});}finally{saving=false;}if(!window.appSettings?.getState().open)showHome();emit();}});
+  window.addEventListener('cloud-account-changed',()=>{const file=current();if(file&&!canSee(file)){saving=true;try{library.active=null;window.design.setDocument({version:2,name:'Untitled',activePage:'empty',pages:[{id:'empty',name:'Page 1',nodes:[]}],tokens:{}});filedEdits=window.design.editCount?.()??0;}finally{saving=false;}if(!window.appSettings?.getState().open)showHome();emit();}});
   window.addEventListener('account-store-changed',()=>{
     if(window.accountStore?.ready()){
       const saved=Object.fromEntries(window.accountStore.entries('file:'));
