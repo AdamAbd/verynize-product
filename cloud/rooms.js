@@ -52,11 +52,14 @@ export class DesignRoom extends DurableObject {
       CREATE TABLE IF NOT EXISTS members (account_id TEXT PRIMARY KEY, email TEXT NOT NULL, handle TEXT, role TEXT NOT NULL, added_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS stamps (path TEXT PRIMARY KEY, stamp TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS rejected_batches (client_id TEXT, batch INTEGER, reason TEXT NOT NULL, PRIMARY KEY(client_id,batch));
+      CREATE TABLE IF NOT EXISTS pending_batches (client_id TEXT, batch INTEGER, started_at INTEGER NOT NULL, PRIMARY KEY(client_id,batch));
       CREATE TABLE IF NOT EXISTS clients (client_id TEXT PRIMARY KEY, last_batch INTEGER NOT NULL, seen_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS comments (id TEXT PRIMARY KEY, author TEXT NOT NULL, account_id TEXT, page_id TEXT, node_id TEXT, text TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     this.clock = Ops.createClock("server");
+    // Batches being applied right now, so a live duplicate waits for the first attempt.
+    this.applyingBatches = new Map();
     this.store = new RoomStore(this.sql);
     // Per-artboard version history (cloud/room-history.js, docs/version-history.md).
     this.history = new RoomHistory(this.sql, { idleMs: Number(env?.VERSION_IDLE_MS) || undefined });
@@ -297,13 +300,96 @@ export class DesignRoom extends DurableObject {
    * Apply one client batch of operations. Returns the message describing the outcome. `who`
    * ({id, name}) is the editor the version history records (with the batch's optional `actor`).
    */
-  applyBatch(data, role, who = null) {
+  async applyBatch(data, role, who = null, baseRevision = null) {
     const client = data?.client,
       batch = data?.batch,
       ops = data?.ops;
     if (typeof client !== "string" || !CLIENT.test(client)) fail(400, "Invalid client id");
     if (!Number.isSafeInteger(batch) || batch < 1) fail(400, "Invalid batch number");
     if (!Array.isArray(ops) || ops.length > 5000) fail(400, "A batch holds 1–5000 operations");
+    // A live duplicate waits for its first request; only a marker from an interrupted
+    // invocation is poison. sync() is a durability boundary, not an acknowledgement.
+    const key = `${client}/${batch}`;
+    const running = this.applyingBatches.get(key);
+    if (running) {
+      await running;
+      return this.applyBatch(data, role, who, baseRevision);
+    }
+    let release;
+    const pending = new Promise((resolve) => {
+      release = resolve;
+    });
+    this.applyingBatches.set(key, pending);
+    try {
+      const last = () =>
+        this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
+          ?.last_batch ?? 0;
+      if (baseRevision !== null && this.row().revision !== baseRevision)
+        return { conflict: true, revision: this.row().revision };
+      if (batch <= last()) return this.applyBatchNow(data, role, who);
+      const poisoned =
+        this.sql
+          .exec("SELECT batch FROM pending_batches WHERE client_id=? AND batch=?", client, batch)
+          .toArray().length > 0;
+      if (!poisoned && atLeast(role, "editor")) {
+        this.sql.exec("INSERT INTO pending_batches VALUES (?,?,?)", client, batch, Date.now());
+        // SQLite implicit transactions/output gates alone don't persist a marker before
+        // synchronous CPU work. https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#sync
+        await this.ctx.storage.sync();
+      }
+      // sync can yield: reload the revision and duplicate state before making any edits.
+      const finish = () => {
+        if (batch <= last()) {
+          this.sql.exec("DELETE FROM pending_batches WHERE client_id=? AND batch=?", client, batch);
+          return this.applyBatchNow(data, role, who);
+        }
+        if (baseRevision !== null && this.row().revision !== baseRevision) {
+          this.sql.exec("DELETE FROM pending_batches WHERE client_id=? AND batch=?", client, batch);
+          return { conflict: true, revision: this.row().revision };
+        }
+        let result;
+        if (poisoned) {
+          const reason =
+            "This batch interrupted room processing. Edits are retained on this device; retry a smaller import.";
+          this.sql.exec(
+            "INSERT OR REPLACE INTO rejected_batches VALUES (?,?,?)",
+            client,
+            batch,
+            reason,
+          );
+          result = {
+            type: "ops",
+            client,
+            batch,
+            revision: this.row().revision,
+            ops: [],
+            rejected: ops.length,
+            tooLarge: true,
+            retained: true,
+            error: reason,
+          };
+        } else result = this.applyBatchNow(data, role, who);
+        // These writes share the document/stamp transaction. Never ack the durable marker.
+        this.sql.exec(
+          "INSERT OR REPLACE INTO clients (client_id,last_batch,seen_at) VALUES (?,?,?)",
+          client,
+          batch,
+          Date.now(),
+        );
+        this.sql.exec("DELETE FROM rejected_batches WHERE client_id=? AND batch<?", client, batch);
+        this.sql.exec("DELETE FROM pending_batches WHERE client_id=? AND batch<=?", client, batch);
+        return result;
+      };
+      return this.ctx.storage.transactionSync(finish);
+    } finally {
+      this.applyingBatches.delete(key);
+      release();
+    }
+  }
+
+  /** Synchronous apply: the caller commits the outcome and acknowledgement atomically. */
+  applyBatchNow(data, role, who) {
+    const { client, batch, ops } = data;
     const revision = this.row().revision;
     const last =
       this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
@@ -323,14 +409,6 @@ export class DesignRoom extends DurableObject {
         ...(reason ? { tooLarge: true, retained: true, error: reason } : {}),
       };
     }
-    // Clients send one batch at a time, so every earlier outcome has been received.
-    this.sql.exec("DELETE FROM rejected_batches WHERE client_id=? AND batch<?", client, batch);
-    this.sql.exec(
-      "INSERT OR REPLACE INTO clients (client_id,last_batch,seen_at) VALUES (?,?,?)",
-      client,
-      batch,
-      Date.now(),
-    );
     if (!atLeast(role, "editor"))
       return {
         type: "ops",
@@ -552,7 +630,7 @@ export class DesignRoom extends DurableObject {
    * from `baseRevision`, applied with the caller's role and broadcast to live sockets as `ops`.
    * A newer revision returns {conflict:true} so the caller recomputes its edit.
    */
-  agentApply({ accountId, orgRole, baseRevision, ops, actor } = {}) {
+  async agentApply({ accountId, orgRole, baseRevision, ops, actor } = {}) {
     const row = this.row();
     const role = row ? this.memberRole(accountId, orgRole) : null;
     if (!role) rpcFail(404, "Room not found, or you have no access to it");
@@ -565,11 +643,13 @@ export class DesignRoom extends DurableObject {
     const last =
       this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
         ?.last_batch ?? 0;
-    const message = this.applyBatch(
+    const message = await this.applyBatch(
       { client, batch: last + 1, ops, actor: { ...actor, kind: "agent" } },
       role,
       { id: client, name: "Agent" },
+      baseRevision,
     );
+    if (message.conflict) return message;
     if (message.error) rpcFail(403, message.error);
     if (message.ops.length) this.broadcast(message);
     return {
@@ -621,7 +701,7 @@ export class DesignRoom extends DurableObject {
     return { document: this.store.load(dirty).doc, revision: row.revision };
   }
   /** Apply the asset URL swap of a migration as a server batch; a newer revision is a conflict. */
-  migrateInline({ baseRevision, ops } = {}) {
+  async migrateInline({ baseRevision, ops } = {}) {
     const row = this.row();
     if (!row) rpcFail(404, "Room not found");
     if (row.revision !== baseRevision) return { conflict: true, revision: row.revision };
@@ -629,7 +709,13 @@ export class DesignRoom extends DurableObject {
     const last =
       this.sql.exec("SELECT last_batch FROM clients WHERE client_id=?", client).toArray()[0]
         ?.last_batch ?? 0;
-    const message = this.applyBatch({ client, batch: last + 1, ops }, "owner");
+    const message = await this.applyBatch(
+      { client, batch: last + 1, ops },
+      "owner",
+      null,
+      baseRevision,
+    );
+    if (message.conflict) return message;
     if (message.ops.length) this.broadcast(message);
     return { applied: message.ops.length, rejected: message.rejected, revision: message.revision };
   }
@@ -803,7 +889,7 @@ export class DesignRoom extends DurableObject {
         return this.update(data.document, data.baseRevision);
       }
       if (action === "/ops" && method === "POST") {
-        const message = this.applyBatch(await readJson(request, MESSAGE_BYTES), role, {
+        const message = await this.applyBatch(await readJson(request, MESSAGE_BYTES), role, {
           id: account?.id || capability,
           name: account?.displayName || account?.handle,
         });
@@ -1051,7 +1137,7 @@ export class DesignRoom extends DurableObject {
         if (response.status !== 200)
           ws.send(JSON.stringify({ type: "conflict", ...(await response.json()) }));
       } else if (data.type === "ops") {
-        const result = this.applyBatch(
+        const result = await this.applyBatch(
           { ...data, client: state.client || data.client },
           state.role,
           { id: state.accountId || state.client || state.id, name: state.name },
